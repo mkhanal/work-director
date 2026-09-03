@@ -1,0 +1,1 @@
+{ "name": "@wd/wd", "private": true, "type": "module", "bin": { "wd": "./src/cli.ts" } }

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.14/schema.json",
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "suspicious": { "noExplicitAny": "error", "noImplicitAnyLet": "error", "noEvolvingTypes": "error", "noTsIgnore": "error" },
+      "style": { "noNonNullAssertion": "error", "noEnum": "error", "noNamespace": "error", "noNestedTernary": "error", "noUselessElse": "error", "noParameterAssign": "error" },
+      "nursery": { "noUnsafeTypeAssertion": "error", "useExhaustiveSwitchCases": "error" },
+      "performance": { "noBarrelFile": "error" },
+      "correctness": { "noUnusedVariables": "error", "noUnusedImports": "error" }
+    }
+  }
+}

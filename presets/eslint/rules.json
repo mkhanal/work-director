@@ -1,0 +1,11 @@
+{
+  "@typescript-eslint/no-explicit-any": "error",
+  "@typescript-eslint/no-non-null-assertion": "error",
+  "@typescript-eslint/consistent-type-assertions": ["error", { "assertionStyle": "never" }],
+  "@typescript-eslint/ban-ts-comment": ["error", { "ts-expect-error": "allow-with-description" }],
+  "@typescript-eslint/switch-exhaustiveness-check": "error",
+  "no-restricted-syntax": ["error", { "selector": "TSEnumDeclaration", "message": "Use an as-const object and a union type." }, { "selector": "TSModuleDeclaration", "message": "Use modules, not namespaces." }],
+  "no-else-return": ["error", { "allowElseIf": false }],
+  "no-nested-ternary": "error",
+  "no-param-reassign": "error"
+}

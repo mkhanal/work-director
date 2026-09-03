@@ -1,0 +1,9 @@
+{
+  "name": "taste",
+  "version": "0.1.0",
+  "description": "Engineering taste as always-on constitution plus per-category skills. Generated from taste/cards.",
+  "author": { "name": "Mridul Khanal" },
+  "repository": "https://github.com/mkhanal/work-director",
+  "license": "MIT",
+  "keywords": ["taste", "typescript", "schemas", "judgment", "skills"]
+}

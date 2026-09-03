@@ -1,0 +1,18 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: bun install --frozen-lockfile
+      - run: bunx tsc --noEmit -p tsconfig.json
+      - run: bun test
+      - run: bun run build
+      - name: generated plugin is committed
+        run: git diff --exit-code -- plugin dist || { echo "run 'bun run build' and commit"; exit 1; }
+      - run: scripts/lazyspec-check.sh
+      - name: plugin manifest validates
+        run: npx --yes @anthropic-ai/claude-code@latest plugin validate ./plugin

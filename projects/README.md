@@ -1,0 +1,1 @@
+Real project files live outside the repo in `~/.work-director/projects/<name>.md` (override with `WD_PROJECTS`). `example.md` shows the shape: frontmatter path, runner (claude|opencode|ao), agent, mode (ask|auto), stack, workflows, verify, instructions_file, default_branch; body is the roadmap.

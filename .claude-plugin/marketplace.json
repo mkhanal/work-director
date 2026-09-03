@@ -1,0 +1,8 @@
+{
+  "name": "mkhanal",
+  "owner": { "name": "Mridul Khanal" },
+  "metadata": { "description": "Mridul's engineering taste and director tooling.", "version": "0.1.0" },
+  "plugins": [
+    { "name": "taste", "source": "./plugin", "description": "Engineering taste: always-on constitution plus per-category skills.", "version": "0.1.0" }
+  ]
+}

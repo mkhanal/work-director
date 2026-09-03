@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Injects plugin/constitution.md (generated from taste/cards) as session context.
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+text="$(cat "$root/constitution.md")"
+text="${text//\\/\\\\}"; text="${text//\"/\\\"}"; text="${text//$'\n'/\\n}"; text="${text//$'\t'/\\t}"
+printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$text"
