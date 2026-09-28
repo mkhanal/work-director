@@ -36,3 +36,9 @@ For an epic, `SoftDone` additionally requires every task done or dropped.
 
 ## The Ledger Persists Across Reopen
 Work added to a file-backed ledger is still there after closing and reopening it.
+
+## Old Ledgers Stay Readable
+`New` on a ledger written before epics — a `work` table without parent, heading, claim or impact, and no concern or worktree tables — reads every existing row, adds the missing columns and tables in place, and leaves all stored values untouched.
+
+## Migration Is Additive Only
+Migration adds nullable columns and creates missing tables; it never drops, renames or rewrites a column or table, so a ledger migrated by the Go wd stays readable by the TypeScript wd, and opening an already-migrated ledger changes nothing.
