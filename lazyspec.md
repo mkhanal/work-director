@@ -14,4 +14,6 @@
   `internal/<pkg>/<stem>_lazyspec_test.go` (`t.Run` per requirement).
   The Go port of the director CLI: same schema, DDL and semantics as the TypeScript
   code it ports. So far: `ledger.lazyspec.md` (internal/ledger), `runner.lazyspec.md`
-  (internal/runner), `taste.lazyspec.md` (internal/taste).
+  (internal/runner), `taste.lazyspec.md` (internal/taste),
+  `project.lazyspec.md` (internal/project), `coordinator.lazyspec.md`
+  (internal/coordinator).

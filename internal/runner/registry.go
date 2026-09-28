@@ -65,9 +65,9 @@ func allRunnerNames() ([]string, error) {
 	return out, nil
 }
 
-// runnerNamed resolves a built-in or spec-file runner; unknown names fail
+// RunnerNamed resolves a built-in or spec-file runner; unknown names fail
 // loudly with guidance.
-func runnerNamed(name string) (Runner, error) {
+func RunnerNamed(name string) (Runner, error) {
 	if b, ok := builtin[name]; ok {
 		return b, nil
 	}

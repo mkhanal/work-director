@@ -292,9 +292,9 @@ attach = "myagent attach {session}"
 			if !slices.Equal(known, []string{"ao", "claude", "codex", "myagent", "opencode"}) {
 				t.Fatalf("runners = %v, want [ao claude codex myagent opencode]", known)
 			}
-			r, err := runnerNamed("myagent")
+			r, err := RunnerNamed("myagent")
 			if err != nil {
-				t.Fatalf("runnerNamed: %v", err)
+				t.Fatalf("RunnerNamed: %v", err)
 			}
 			h, err := r.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-8 t", Brief: "B"})
 			if err != nil {
@@ -338,7 +338,7 @@ attach = "myagent attach {session}"
 			}
 		})
 		t.Run("an unknown runner name fails loudly with guidance", func(t *testing.T) {
-			_, err := runnerNamed("cursor")
+			_, err := RunnerNamed("cursor")
 			if err == nil || !strings.Contains(err.Error(), "cursor") {
 				t.Fatalf("err = %v, want a loud unknown-runner failure", err)
 			}
