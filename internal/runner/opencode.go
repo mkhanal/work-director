@@ -12,7 +12,7 @@ import (
 
 // logDir is where detached opencode sessions write their jsonl stream.
 func logDir() string {
-	return filepath.Join(wdHome(), "opencode")
+	return filepath.Join(WDHome(), "opencode")
 }
 
 // detach starts args with stdout/stderr in log files under dir and returns its
@@ -107,7 +107,7 @@ func (opencodeRunner) Status(h Handle) (RunnerStatus, error) {
 }
 
 func (opencodeRunner) Transcript(h Handle) ([]string, error) {
-	r, err := run([]string{"opencode", "session", "export", h.Session}, h.Cwd)
+	r, err := Run([]string{"opencode", "session", "export", h.Session}, h.Cwd)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +141,7 @@ func (opencodeRunner) Transcript(h Handle) ([]string, error) {
 }
 
 func (opencodeRunner) Models() ([]string, error) {
-	r, err := run([]string{"opencode", "models"}, "")
+	r, err := Run([]string{"opencode", "models"}, "")
 	if err != nil {
 		return nil, err
 	}

@@ -21,7 +21,7 @@ type agentRow struct {
 }
 
 func agents(cwd string) ([]agentRow, error) {
-	r, err := run([]string{"claude", "agents", "--json", "--all"}, cwd)
+	r, err := Run([]string{"claude", "agents", "--json", "--all"}, cwd)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func (claudeRunner) Spawn(o SpawnOptions) (Handle, error) {
 		args = append(args, "--worktree", worktreeSlug(o.Name))
 	}
 	args = append(args, o.Brief)
-	r, err := run(args, o.Cwd)
+	r, err := Run(args, o.Cwd)
 	if err != nil {
 		return Handle{}, err
 	}
@@ -88,7 +88,7 @@ func (claudeRunner) Spawn(o SpawnOptions) (Handle, error) {
 }
 
 func (claudeRunner) Send(h *Handle, text string) error {
-	r, err := run([]string{"claude", "--bg", "--resume", h.Session, text}, h.Cwd)
+	r, err := Run([]string{"claude", "--bg", "--resume", h.Session, text}, h.Cwd)
 	if err != nil {
 		return err
 	}

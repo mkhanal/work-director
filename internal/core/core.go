@@ -77,71 +77,71 @@ const (
 func IsEpic(kind WorkKind) bool { return kind == WorkGoal || kind == WorkEpic }
 
 type Work struct {
-	ID      string
-	Project string
-	Title   string
-	Detail  string
-	Kind    WorkKind
-	State   State
-	Runner  *string
-	Session *string
-	Ref     *string
-	Cwd     *string
-	Created string
-	Updated string
-	Parent  *string
-	Heading *string
-	Claim   *string
-	Impact  *string
+	ID      string   `json:"id"`
+	Project string   `json:"project"`
+	Title   string   `json:"title"`
+	Detail  string   `json:"detail"`
+	Kind    WorkKind `json:"kind"`
+	State   State    `json:"state"`
+	Runner  *string  `json:"runner"`
+	Session *string  `json:"session"`
+	Ref     *string  `json:"ref"`
+	Cwd     *string  `json:"cwd"`
+	Created string   `json:"created"`
+	Updated string   `json:"updated"`
+	Parent  *string  `json:"parent"`
+	Heading *string  `json:"heading"`
+	Claim   *string  `json:"claim"`
+	Impact  *string  `json:"impact"`
 }
 
 type Event struct {
-	ID   int
-	Work string
-	Kind EventKind
-	Body string
-	At   string
+	ID   int       `json:"id"`
+	Work string    `json:"work"`
+	Kind EventKind `json:"kind"`
+	Body string    `json:"body"`
+	At   string    `json:"at"`
 }
 
 type Feedback struct {
-	ID      int
-	Text    string
-	Project *string
-	Card    *string
-	Source  FeedbackSource
-	At      string
+	ID      int            `json:"id"`
+	Text    string         `json:"text"`
+	Project *string        `json:"project"`
+	Card    *string        `json:"card"`
+	Source  FeedbackSource `json:"source"`
+	At      string         `json:"at"`
 }
 
 type Candidate struct {
-	Key   string
-	Count int
-	Texts []string
+	Key   string   `json:"key"`
+	Count int      `json:"count"`
+	Texts []string `json:"texts"`
 }
 
 type Concern struct {
-	ID         int
-	Work       string
-	Text       string
-	Resolved   int
-	Decision   *string
-	At         string
-	ResolvedAt *string
+	ID         int     `json:"id"`
+	Work       string  `json:"work"`
+	Text       string  `json:"text"`
+	Resolved   int     `json:"resolved"`
+	Decision   *string `json:"decision"`
+	At         string  `json:"at"`
+	ResolvedAt *string `json:"resolved_at"`
 }
 
 type Worktree struct {
-	ID      int
-	Work    string
-	Path    string
-	Branch  *string
-	Kind    WorktreeKind
-	State   WorktreeState
-	Created string
+	ID      int           `json:"id"`
+	Work    string        `json:"work"`
+	Path    string        `json:"path"`
+	Branch  *string       `json:"branch"`
+	Kind    WorktreeKind  `json:"kind"`
+	State   WorktreeState `json:"state"`
+	Created string        `json:"created"`
 }
 
 type Conflict struct {
-	A     string
-	B     string
-	Paths []string
+	A     string   `json:"a"`
+	B     string   `json:"b"`
+	Paths []string `json:"paths"`
 }
 
 var Transitions = map[State][]State{

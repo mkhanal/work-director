@@ -12,7 +12,7 @@ import (
 
 // codexLogDir is where detached codex sessions write their jsonl stream.
 func codexLogDir() string {
-	return filepath.Join(wdHome(), "codex")
+	return filepath.Join(WDHome(), "codex")
 }
 
 // codexSessionIDRe captures the session id from codex's json stream.
@@ -116,7 +116,7 @@ func (r *codexRunner) Transcript(h Handle) ([]string, error) {
 }
 
 func (r *codexRunner) Models() ([]string, error) {
-	res, err := run([]string{"codex", "debug", "models"}, "")
+	res, err := Run([]string{"codex", "debug", "models"}, "")
 	if err != nil {
 		return nil, err
 	}

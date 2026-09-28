@@ -37,7 +37,7 @@ func (aoRunner) Spawn(o SpawnOptions) (Handle, error) {
 	if projectID := os.Getenv("AO_PROJECT_ID"); projectID != "" {
 		args = append(args, "--project", projectID)
 	}
-	r, err := run(args, o.Cwd)
+	r, err := Run(args, o.Cwd)
 	if err != nil {
 		return Handle{}, err
 	}
@@ -54,7 +54,7 @@ func (aoRunner) Spawn(o SpawnOptions) (Handle, error) {
 }
 
 func (aoRunner) Send(h *Handle, text string) error {
-	r, err := run([]string{"ao", "send", "--session", h.Session, "--message", text}, h.Cwd)
+	r, err := Run([]string{"ao", "send", "--session", h.Session, "--message", text}, h.Cwd)
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func (aoRunner) Send(h *Handle, text string) error {
 }
 
 func (aoRunner) Status(h Handle) (RunnerStatus, error) {
-	r, err := run([]string{"ao", "session", "get", h.Session, "--json"}, h.Cwd)
+	r, err := Run([]string{"ao", "session", "get", h.Session, "--json"}, h.Cwd)
 	if err != nil {
 		return "", err
 	}
