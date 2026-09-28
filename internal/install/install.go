@@ -65,7 +65,9 @@ func InstallCommand(name string) string {
 }
 
 // gitInstallCommand names git's installer per platform: Homebrew on macOS,
-// the system package manager on Linux.
+// the system package manager on Linux. A missing dependency always carries
+// its command, so a host with no known package manager falls back to apt-get
+// (the most common) rather than returning "".
 func gitInstallCommand() string {
 	if runtime.GOOS == "darwin" {
 		return "brew install git"
@@ -79,7 +81,7 @@ func gitInstallCommand() string {
 			return pm.cmd
 		}
 	}
-	return ""
+	return "sudo apt-get install -y git"
 }
 
 // Install runs the install command for every missing dependency, using run
