@@ -10,7 +10,8 @@
   worktrees), promotion candidates, what each runner adapter records. Not how a runner
   works internally.
 
-- **Go module (repo root)** — `ledger.lazyspec.md` at the root, married tests in
-  `internal/ledger/ledger_lazyspec_test.go` (`t.Run` per requirement).
+- **Go module (repo root)** — `*.lazyspec.md` at the root, married tests in
+  `internal/<pkg>/<stem>_lazyspec_test.go` (`t.Run` per requirement).
   The Go port of the director CLI: same schema, DDL and semantics as the TypeScript
-  ledger it ports.
+  code it ports. So far: `ledger.lazyspec.md` (internal/ledger), `runner.lazyspec.md`
+  (internal/runner), `taste.lazyspec.md` (internal/taste).
