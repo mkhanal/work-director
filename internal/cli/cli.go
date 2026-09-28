@@ -195,7 +195,7 @@ func mustGetwd() string {
 func (c *Cli) dispatch() error {
 	a := c.Args
 	if len(a.Positional) == 0 {
-		return fail("wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|pr|soft-done|set|done|status|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve> [--json]")
+		return fail("wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|pr|soft-done|set|done|status|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve|setup> [--json]")
 	}
 	cmd, rest := a.Positional[0], a.Positional[1:]
 	switch cmd {
@@ -261,8 +261,10 @@ func (c *Cli) dispatch() error {
 		return c.tui(rest)
 	case "serve":
 		return c.serve(rest)
+	case "setup":
+		return c.setup(rest)
 	}
-	return fail("wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|pr|soft-done|set|done|status|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve> [--json]")
+	return fail("wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|pr|soft-done|set|done|status|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve|setup> [--json]")
 }
 
 // out prints the command's result: indented JSON on the --json rail, else text.

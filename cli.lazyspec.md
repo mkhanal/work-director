@@ -24,6 +24,14 @@ and key values: states transition through the same machine, claims and impacts
 record per task, conflicts pair overlapping claims, concerns resolve with a
 decision.
 
+## Setup Reports The Runtime Dependencies
+`wd setup` prints the probed dependencies — present with their path, missing
+with their install command — and emits them on the --json rail.
+
+## Setup Fails When A Dependency Is Missing
+`wd setup` exits 0 when every dependency is present and 1 when any is
+missing; `wd setup --install` installs the missing ones first.
+
 ## Errors And Exit Codes Match
 Usage errors, illegal transitions, not-ready refusals and unknown runners
 print the same message and exit 1; a failing verify exits 1 after recording.
