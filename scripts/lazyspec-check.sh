@@ -7,7 +7,8 @@ for spec in packages/*/specs/*.lazyspec.md; do
   test="packages/$pkg/test/$stem.lazyspec.test.ts"
   [ -f "$test" ] || { echo "orphan spec: $spec (no $test)"; fail=1; continue; }
   while IFS= read -r h; do
-    grep -qF "describe('$h'" "$test" || { echo "unmarried: $spec :: $h"; fail=1; }
+    norm=$(printf '%s' "$h" | sed "s/'/\\\\'/g")
+    grep -qF "describe('$norm'" "$test" || { echo "unmarried: $spec :: $h"; fail=1; }
   done < <(grep '^## ' "$spec" | sed 's/^## //; s/ *<!--.*//')
 done
 for t in packages/*/test/*.lazyspec.test.ts; do

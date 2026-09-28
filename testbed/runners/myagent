@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -u
+case "$1" in
+  run)
+    n=$(( $(cat "$WD_FAKE_STATE/myagent-n" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" > "$WD_FAKE_STATE/myagent-n"
+    echo "session=myagent-s$(printf '%05x' "$n")"
+    ;;
+  send) echo ok;;
+  status) echo 'state: idle';;
+  export) echo 'I handled the task.';;
+  models) echo 'victory/1';;
+  *) echo "unhandled myagent $*" >&2; exit 1;;
+esac

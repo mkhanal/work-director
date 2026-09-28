@@ -23,7 +23,8 @@ export const opencode: Runner = {
   name: 'opencode',
   async spawn(o: SpawnOptions): Promise<Handle> {
     const log = join(logDir(), `${o.name.replace(/[^A-Za-z0-9-]+/g, '-')}-${Date.now()}.jsonl`);
-    const args = ['opencode', 'run', '--dir', o.cwd, '--format', 'json', '--title', o.name];
+    const args = ['opencode', 'run', '--format', 'json', '--auto', '--title', o.name];
+    if (o.model) args.push('--model', o.model);
     if (o.agent) args.push('--agent', o.agent);
     const pid = await detach([...args, o.brief], o.cwd, log);
     const session = await waitFor(() => firstSessionId(log), 60_000);
@@ -32,19 +33,24 @@ export const opencode: Runner = {
   },
   async send(h, text) {
     const log = join(logDir(), `${h.session}-${Date.now()}.jsonl`);
-    const pid = await detach(['opencode', 'run', '--dir', h.cwd, '--format', 'json', '-s', h.session, text], h.cwd, log);
+    const pid = await detach(['opencode', 'run', '--format', 'json', '--auto', '-s', h.session, text], h.cwd, log);
     h.ref = String(pid);
   },
   async status(h) {
     return h.ref !== null && alive(Number(h.ref)) ? 'running' : 'idle';
   },
   async transcript(h) {
-    const r = await run(['opencode', 'export', h.session], h.cwd);
+    const r = await run(['opencode', 'session', 'export', h.session], h.cwd);
     if (r.code !== 0) throw new RunnerError('opencode', `export failed: ${r.stderr}`);
-    const data = JSON.parse(r.stdout) as { messages?: { info?: { role?: string }; parts?: { type?: string; text?: string }[] }[] };
+    const data = JSON.parse(r.stdout) as { messages?: { type?: string; content?: { type?: string; text?: string }[] }[] };
     const out: string[] = [];
-    for (const m of data.messages ?? []) if (m.info?.role === 'assistant') for (const p of m.parts ?? []) if (p.type === 'text' && p.text) out.push(p.text);
+    for (const m of data.messages ?? []) if (m.type === 'assistant') for (const p of m.content ?? []) if (p.type === 'text' && p.text) out.push(p.text);
     return out;
+  },
+  async models() {
+    const r = await run(['opencode', 'models'], process.cwd());
+    if (r.code !== 0) throw new RunnerError('opencode', `models failed: ${r.stderr}`);
+    return r.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
   },
   attachHint: (h) => `cd ${h.cwd} && opencode -s ${h.session}`,
 };

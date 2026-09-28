@@ -6,4 +6,6 @@
 
 - **packages/wd** — `packages/wd/specs/*.lazyspec.md`
   What the director CLI guarantees at its boundary: ledger states and transitions,
-  brief contents, what each runner adapter records. Not how a runner works internally.
+  brief contents, epic tasks and coordination (claims, impacts, conflicts, concerns,
+  worktrees), promotion candidates, what each runner adapter records. Not how a runner
+  works internally.

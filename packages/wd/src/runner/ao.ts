@@ -8,6 +8,7 @@ const sessionIdFrom = (text: string): string | undefined => text.match(/spawned 
 export const ao: Runner = {
   name: 'ao',
   async spawn(o: SpawnOptions): Promise<Handle> {
+    if (o.model !== undefined) throw new RunnerError('ao', `model ${o.model}: ao spawn has no --model flag; set the model on the ao project`);
     const args = ['ao', 'spawn', '--name', o.name.slice(0, 20), '--prompt', o.brief];
     if (o.agent) args.push('--harness', harness[o.agent] ?? o.agent);
     if (process.env.AO_PROJECT_ID) args.push('--project', process.env.AO_PROJECT_ID);
@@ -30,5 +31,6 @@ export const ao: Runner = {
     return a === 'active' ? 'running' : a === 'idle' ? 'idle' : a === 'waiting_input' || a === 'blocked' ? 'waiting' : 'unknown';
   },
   async transcript() { return []; },
+  async models() { return []; },
   attachHint: (h) => `Agent Orchestrator app → session ${h.session} (ao session get ${h.session} --json)`,
 };

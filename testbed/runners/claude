@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -u
+mkdir -p "$WD_FAKE_STATE"
+case "$1 $2" in
+  "--bg -n")
+    n=$(( $(cat "$WD_FAKE_STATE/n" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" > "$WD_FAKE_STATE/n"
+    bgid=$(printf 'ab%06x' "$n")
+    sid=$(printf 'ses_%06x' "$n")
+    echo "$bgid" > "$WD_FAKE_STATE/bgid"
+    echo "$sid" > "$WD_FAKE_STATE/sid"
+    slug=$(echo "$PWD" | sed 's/[^A-Za-z0-9-]/-/g')
+    sdir="$HOME/.claude/projects/$slug"
+    mkdir -p "$sdir"
+    printf '%s\n' \
+      '{"type":"user","message":{"content":"go"}}' \
+      '{"type":"assistant","message":{"content":[{"type":"text","text":"PLAN: claimed and scoped"}]}}' \
+      '{"type":"assistant","message":{"content":[{"type":"text","text":"STATUS: DONE\\nFILES: none\\nVERIFY: bun test -> 0\\nPR: none\\nNOTES: done in testbed"}]}}' \
+      > "$sdir/$sid.jsonl"
+    echo "backgrounded · $bgid · $3";;
+  "--bg --resume") echo "backgrounded · $(cat "$WD_FAKE_STATE/bgid")";;
+  "agents --json")
+    row="[{\"id\":\"$(cat "$WD_FAKE_STATE/bgid")\",\"sessionId\":\"$(cat "$WD_FAKE_STATE/sid")\",\"cwd\":\"$PWD\",\"kind\":\"background\",\"status\":\"idle\",\"state\":\"done\"}]"
+    echo "$row";;
+  *) echo "unhandled claude $*" >&2; exit 1;;
+esac

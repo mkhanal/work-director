@@ -1,0 +1,10 @@
+name = "advisor"
+spawn = "advisor run {brief}"
+session_id = 'session=([A-Za-z0-9-]+)'
+send = "advisor send {session} {text}"
+status = "advisor status {session}"
+running = 'state: *waiting'
+waiting = 'state: *waiting'
+exited = 'state: *exited'
+transcript = "advisor export {session}"
+attach = "cd {cwd} && advisor attach {session}"

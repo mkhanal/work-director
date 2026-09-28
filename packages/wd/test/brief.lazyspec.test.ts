@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { parseCard } from '../../taste/src/card.ts';
-import { HumanHoursRejected, REPORT_FORMAT, cardsFor, compose } from '../src/brief.ts';
+import { HumanHoursRejected, REPORT_FORMAT, cardsFor, compose, composeEpic, composeSlice } from '../src/brief.ts';
 import type { Work } from '../src/ledger.ts';
 import { parseProject } from '../src/project.ts';
 
 const project = parseProject(`---\npath: /tmp/x\nrunner: claude\nmode: ask\nstack: [ts, biome]\nworkflows: [/lazyspec, /review]\nverify: [bun test, bunx tsc --noEmit]\n---\nRoadmap.`, 'projects/x.md');
 const card = (id: string, scope: string, status = 'adopted') => parseCard(`---\nid: ${id}\ntitle: T ${id}\ncategory: judgment\nscope: [${scope}]\nkind: principle\nstatus: ${status}\nalways: false\nenforce: []\nevidence: []\n---\nS ${id}.`, id);
-const work = (title: string, detail = ''): Work => ({ id: 'ab12cd', project: 'x', title, detail, kind: 'task', state: 'queued', runner: null, session: null, ref: null, cwd: null, created: '', updated: '' });
+const work = (title: string, detail = '', o: Partial<Work> = {}): Work => ({ id: o.id ?? 'ab12cd', project: 'x', title, detail, kind: 'task', state: 'queued', runner: null, session: null, ref: null, cwd: null, created: '', updated: '', parent: null, heading: null, claim: null, impact: null, ...o });
 
 describe('A Brief Carries Only Cards Whose Scope Matches The Project', () => {
   test('project:x, lang:ts, stack:biome in; global, lang:py, project:y, candidate out', () => {
@@ -49,5 +49,45 @@ describe('A Brief Carries Context And A Default For Ambiguity', () => {
     expect(text).toContain('- ab12cd blocked on flaky CI 2026-09-01');
     expect(text).toContain('Decide ambiguities yourself');
     expect(text).toContain('Checkpoint: after your plan (before code) and at DONE');
+  });
+});
+
+describe('A Task Brief Names Its Epic And Co-Workers\' Claims', () => {
+  test('slice brief carries the epic goal, heading, active claims to avoid, and the coordination contract, but no roadmap', () => {
+    const epic = work('Move Metabase → Superset', 'little detail', { id: 'e1', kind: 'epic', parent: null });
+    const task = work('Port dashboards', '', { id: 't1', parent: 'e1', heading: 'Dashboards' });
+    const other = work('Rewrite ingestion', '', { id: 't2', parent: 'e1', heading: 'Data', claim: 'ses_aaa', impact: 'src/ingest\nsrc/api' });
+    const text = composeSlice(task, epic, [other], project, []);
+    expect(text).toContain('Move Metabase → Superset');
+    expect(text).toContain('Dashboards');
+    expect(text).toContain('t2 Rewrite ingestion (ses_aaa) — src/ingest, src/api');
+    expect(text).toContain('wd conflict e1');
+    expect(text).toContain('wd concern add t1 "');
+    expect(text).not.toContain('Where this project is heading');
+    expect(text.trimEnd().endsWith(REPORT_FORMAT)).toBe(true);
+  });
+});
+
+describe('An Epic Brief Lists The Open Tasks Grouped By Heading', () => {
+  test('composeEpic groups tasks under headings and names how to claim', () => {
+    const epic = work('Move Metabase → Superset', '', { id: 'e1', kind: 'epic' });
+    const taskBlock = `## Dashboards\n- t1 queued Port dashboards\n## Data\n- t2 running Rewrite ingestion (claim: ses_aaa) — src/ingest`;
+    const text = composeEpic(epic, taskBlock, project, []);
+    expect(text).toContain('## Dashboards');
+    expect(text).toContain('## Data');
+    expect(text).toContain('t2 running Rewrite ingestion (claim: ses_aaa)');
+    expect(text.trimEnd().endsWith(REPORT_FORMAT)).toBe(true);
+  });
+});
+
+describe('A Brief Does Not Claim Lazyspec', () => {
+  test('no contract verdict in any brief shape; the repo\'s own workflows carry it', () => {
+    const epic = work('Move Metabase → Superset', '', { id: 'e1', kind: 'epic' });
+    for (const text of [compose(work('Goal'), project, []), composeSlice(work('Port', '', { parent: 'e1' }), epic, [], project, []), composeEpic(epic, '- t1 queued Port', project, [])]) {
+      expect(text).not.toContain('Lazyspec applies here');
+      expect(text).not.toContain('Lazyspec is a preferred skill, not a contract');
+      expect(text).toContain('/lazyspec');
+      expect(text).toContain('AGENTS.md');
+    }
   });
 });
