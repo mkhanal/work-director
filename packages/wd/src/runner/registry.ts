@@ -2,7 +2,7 @@ import { ao } from './ao.ts';
 import { claude } from './claude.ts';
 import { codex } from './codex.ts';
 import { opencode } from './opencode.ts';
-import { loadSpecs, specRunner, type RunnerSpec } from './spec.ts';
+import { loadSpecs, specDir, specRunner, type RunnerSpec } from './spec.ts';
 import type { Runner } from './types.ts';
 
 export { specDir, specTemplate, writeSpec } from './spec.ts';
@@ -13,10 +13,14 @@ export { specDir, specTemplate, writeSpec } from './spec.ts';
 const builtin: Record<string, Runner> = { claude, opencode, codex, ao };
 export const builtinNames = Object.keys(builtin);
 
-let specsCache: RunnerSpec[] | undefined;
+let specsCache: { at: string; list: RunnerSpec[] } | undefined;
 const specs = async (): Promise<RunnerSpec[]> => {
-  if (specsCache === undefined) specsCache = await loadSpecs();
-  return specsCache;
+  const dir = specDir();
+  if (specsCache === undefined || specsCache.at !== dir) {
+    const list = await loadSpecs(dir);
+    specsCache = { at: dir, list };
+  }
+  return specsCache.list;
 };
 
 export async function allRunnerNames(): Promise<string[]> {
