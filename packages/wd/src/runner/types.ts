@@ -1,7 +1,7 @@
 import type { RunnerName } from '../project.ts';
 
 export type Handle = { runner: RunnerName; session: string; ref: string | null; cwd: string };
-export type SpawnOptions = { cwd: string; name: string; brief: string; agent?: string | undefined; permissionMode?: string | undefined; worktree?: boolean | undefined };
+export type SpawnOptions = { cwd: string; name: string; brief: string; agent?: string | undefined; permissionMode?: string | undefined; worktree?: boolean | undefined; model?: string | undefined };
 export type RunnerStatus = 'running' | 'idle' | 'waiting' | 'exited' | 'unknown';
 
 export type Runner = {
@@ -11,6 +11,8 @@ export type Runner = {
   status(h: Handle): Promise<RunnerStatus>;
   /** Assistant text of the session, oldest first. */
   transcript(h: Handle): Promise<string[]>;
+  /** Model ids from the provider's own CLI, whatever it prints; nothing is hardcoded here. */
+  models?(): Promise<string[]>;
   attachHint(h: Handle): string;
 };
 
@@ -25,7 +27,9 @@ export function exe(name: string): string {
   return found;
 }
 
-export async function run(cmd: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
+export type RunResult = { code: number; stdout: string; stderr: string };
+
+export async function run(cmd: string[], cwd: string): Promise<RunResult> {
   const [name, ...args] = cmd;
   const p = Bun.spawn([exe(name ?? ''), ...args], { cwd, stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', env: process.env });
   const [stdout, stderr, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);

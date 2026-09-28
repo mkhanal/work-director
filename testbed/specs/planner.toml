@@ -1,0 +1,11 @@
+name = "planner"
+spawn = "planner run {brief}"
+session_id = 'session=([A-Za-z0-9-]+)'
+send = "planner send {session} {text}"
+status = "planner status {session}"
+running = 'state: *waiting'
+waiting = 'state: *waiting'
+exited = 'state: *exited'
+transcript = "planner export {session}"
+models = "planner models"
+attach = "cd {cwd} && planner attach {session}"

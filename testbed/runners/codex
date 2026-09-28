@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -u
+case "$1 $2" in
+  "exec --cd")
+    n=$(( $(cat "$WD_FAKE_STATE/codex-n" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" > "$WD_FAKE_STATE/codex-n"
+    sid="codex-s$(printf '%05x' "$n")"
+    echo "$sid" > "$WD_FAKE_STATE/codex-last"
+    echo "{\"type\":\"thread\",\"session_id\":\"$sid\",\"thread\":{\"messages\":[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"I handled the task.\"}]}]}}"
+    echo "{\"type\":\"rollup\",\"session_id\":\"$sid\",\"rollup\":{\"summary\":\"Done.\"}}"
+    ;;
+  "debug models")
+    echo 'codex/opus-5'
+    echo 'codex/sonnet-4-5'
+    ;;
+  *) echo "unhandled codex $*" >&2; exit 1;;
+esac

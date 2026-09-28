@@ -6,6 +6,7 @@
   "scripts": {
     "build": "bun run packages/taste/src/cli.ts build",
     "test": "bun test",
+    "testbed": "bun testbed/eval.ts",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {

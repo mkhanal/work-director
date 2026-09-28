@@ -1,0 +1,48 @@
+## Objective
+- Build `work-director`: a "head of engineering" agent — taste plugin (rules that travel) + director (`wd` CLI orchestrating many repos) — chat-first, parallel executors from **any inference provider driven through its command line, never its API**, on one shared branch, verify-gated merges, worktrees, learning loops.
+- **Goals are epics** (user's settled framing): no separate `goal` kind; a goal *is* work broken into headed tasks; simple goals run in one go, complex ones partially (`wd epic run --only`/`--heading`), the rest left open for another conversation.
+- **UI is required**: goals are first-class entry points with goal-level status; `wd ui` board lists goals and wraps every action through the real CLI.
+- **Any outside conversation is identifiable and resumable**: `wd attach <id> <session>` binds a provider session started outside the director; the coordinator drives that same conversation (its own LLM) to the goal.
+
+## Important Details
+- Ground rules (AGENTS.md): TypeScript + Bun + `bun test`, zero runtime deps; director never opens project code, nothing written into managed repos except by executors as PRs; lazyspec married to tests in the same edit; `wd conflict` before spawn/merge.
+- **WorkKinds = task/evolution/workflow/epic**; `isEpicLike` → `isEpic`. `wd add --kind epic` creates a goal; `wd epic plan|run|review|status|spawn` replaced the deleted `wd goal *`.
+- **Coordinator is the /goal drive**: `coordinateOnce` answers `ASK:` questions from recorded decisions (resolved concerns / decision events, ≥2 significant words, containment wins), escalates unknown ones to `needs-input`, harvests `STATUS: DONE|BLOCKED`. Briefs carry a Goal block. No provider `/goal` feature needed.
+- **Partial slices**: `wd epic run <id> --only <id,id>|--heading <label> [--wait]` spawns only that slice on the epic's shared worktree; leftovers stay queued for a later conversation.
+- **`wd attach <id> <session> [--runner r] [--ref x] [--cwd d]`** sets runner+session+ref+cwd, records an `attach` event, and moves queued/briefed → running; `queued → running` was added to the ledger transitions, reserved for this path (spec text + married test updated).
+- **`wd ui [--port n] [--open]`**: zero-dep `Bun.serve` on 127.0.0.1 (default 8787). `/` = embedded goals board (dark, vanilla JS); `/api/goals` = every epic + rolled-up per-state counts + done/total + standalone items; `/api/goal/<id>` = epic + children + rollup + events (404 on unknown/non-epic); `POST /api/action` = argv through the real CLI (default runner spawns `bun cli.ts` with same env); board's "new goal" form posts `add <project> <title> --kind epic`.
+- **Free-flow gist is tracked work**: AGENTS.md chat contract — todos and the gist of a conversation land as an epic/task, never only in chat; `wd attach` identifies outside conversations.
+- Editor/context (earlier turn, still shipped): `wd context` (cwd/worktree/branch + OSC-8 link), `wd open` (VS Code `code --reuse-window --goto`, `$VISUAL`/`$EDITOR` fallback). Runner-as-files engine (`wd runner list|add|init`, spec TOML) and `wd models` still live.
+- Lazyspec = repo's own fact; `wd projects add` asks, "yes" files an evolution work item. Nothing committed (user hasn't asked; commit/PR available on request).
+
+## Work State
+### Completed (this turn: goal→epic fold, partial slices, attach, UI)
+- **ledger.ts**: WorkKinds without `goal`; `isEpicLike`→`isEpic` everywhere; `EventKinds` + `attach`; transitions allow `queued → running` (attach path only intent); add/softDone/conflict messages de-goaled.
+- **coordinator.ts**: `epicPlanBrief`, `parsePlan`, `knownAnswer`, `coordinateOnce` (goal-prefixed names gone; dead `spawnGoalChildren` deleted; `isEpicLike` re-export dropped).
+- **context.ts**: `effectiveCwd` uses isEpic.
+- **cli.ts**: `goal` case deleted; `epic` case = plan/spawn/run/review/status; `run` gained `--only`/`--heading` partial slices and `--wait`/`--timeout` coordination loop; new `attach` case; new `ui` case (`--port`, `--open`); parse() declares `only/timeout/port/wait/open`; usage strings de-goaled.
+- **ui.ts (new)**: `startUi` + `goalRollup` + `makeCliRunner` + embedded goals-board HTML.
+- **Specs/tests**: `specs/goal.lazyspec.md` + `test/goal.lazyspec.test.ts` deleted; `specs/epic.lazyspec.md` + test gain planner/coordinator/run/partial-slice/attach requirements (14 describes, all married); `specs/ui.lazyspec.md` + `test/ui.lazyspec.test.ts` new (3 married); `specs/ledger.lazyspec.md` + test updated for the attach transition.
+- **testbed/eval.ts**: +12 checks — epic plan via fake planner, `run --only` slice (other task stays queued), attach + coordinator answer/harvest of the same session, `wd ui` board (ephemeral ports), /api/goals rollup, /api/goal detail, /api/action through the real CLI. Eval = 52 checks.
+- **Docs**: README (epic plan/run/review, attach, ui, context/open lines; goals-first paragraphs); AGENTS.md chat contract (gist→work item, attach); design doc command surface + out-of-scope (UI is a wrapper) + 5 decision rows (fold goal, partial slices, coordinator-as-/goal, attach transition, board-as-wrapper, gist tracking).
+- **Verified green this turn**: `bun test` **91 pass / 0 fail (245 expect)**, `bunx tsc --noEmit` clean, `bun testbed/eval.ts` **52 passed / 0 failed**. `bun run build` not re-run in this turn (no taste changes).
+
+### Active
+- (none)
+
+### Blocked
+- (none)
+
+## Next Move
+1. Report the full turn green (91 tests, 52 eval checks, tsc clean): goal→epic fold complete, partial runs, `wd attach`, `wd ui` board, gist tracking documented.
+2. Commit/PR available on request; otherwise wait on the user.
+
+## Relevant Files
+- `packages/wd/src/ledger.ts`: WorkKinds/isEpic, `attach` event kind, `queued → running` transition.
+- `packages/wd/src/coordinator.ts`: epicPlanBrief/parsePlan/knownAnswer/coordinateOnce.
+- `packages/wd/src/cli.ts`: epic case (plan/run/--only/--heading/--wait/review/status/spawn), attach case, ui case.
+- `packages/wd/src/ui.ts` (new): goals board + /api/goals + /api/goal/<id> + /api/action wrapper.
+- `packages/wd/src/context.ts`: effectiveCwd; `packages/wd/src/open.ts` + editor/context specs from the earlier editor turn.
+- `packages/wd/specs/{epic,ui,ledger}.lazyspec.md` + `packages/wd/test/{epic,ui,ledger}.lazyspec.test.ts`.
+- `testbed/{eval.ts,lib.ts,runners/{planner,advisor},specs/{planner,advisor}.toml}`.
+- Docs: `docs/superpowers/specs/2026-09-25-…-orchestration.md` (+ decision rows), `README.md`, `AGENTS.md`.

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -u
+state=${WD_FAKE_STATE:?WD_FAKE_STATE needed}
+case "$1" in
+  run)
+    n=$(cat "$state/advisor-n" 2>/dev/null || echo 0)
+    n=$((n + 1))
+    echo "$n" > "$state/advisor-n"
+    printf 'session=advisor-s%05x\n' "$n"
+    ;;
+  export)
+    if [ -f "$state/advisor-answer-$2" ]; then
+      echo 'DONE'
+      echo 'STATUS: DONE'
+    else
+      echo 'ASK: which port number should the server listen on?'
+    fi
+    ;;
+  status) echo 'state: waiting';;
+  send) echo "$3" > "$state/advisor-answer-$2"; echo ok;;
+  *) echo "unhandled advisor $*" >&2; exit 1;;
+esac

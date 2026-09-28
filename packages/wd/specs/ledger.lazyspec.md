@@ -4,7 +4,7 @@
 `add` returns work in state `queued` with a `state` event recording it.
 
 ## Only Listed Transitions Are Allowed
-queued→briefed→running→(needs-input|review)→soft-done→done, with blocked and dropped reachable from open states; anything else throws IllegalTransition naming both states.
+queued→briefed→running→(needs-input|review)→soft-done→done, with blocked and dropped reachable from open states; queued→running is reserved for attaching an outside conversation that is already working; anything else throws IllegalTransition naming both states.
 
 ## Soft Done Requires A Done Report And A Passing Verify
 From `review`, `softDone` refuses (NotReady listing what is missing) until the latest report starts with DONE and the latest verify starts with pass.

@@ -1,7 +1,7 @@
 # work-director
 
 The director: holds roadmap, taste and work status for many repos; hands whole tasks to
-separate executor sessions (Claude Code, opencode, codex via AO); verifies; gates PRs;
+separate executor sessions (Claude Code, opencode, codex, via AO if routed); verifies; gates PRs;
 learns taste from feedback. Design: `docs/superpowers/specs/2026-09-04-work-director-design.md`.
 
 ## Ground rules
@@ -9,8 +9,10 @@ learns taste from feedback. Design: `docs/superpowers/specs/2026-09-04-work-dire
 - Director never opens project code. It reads briefs, reports, diff stats, verify output.
 - Nothing is written into a managed repo except by an executor, as a PR. Taste travels via
   user-scope plugin, opencode global config, per-launch flags, or an "evolution" PR.
-- TypeScript, Bun, `bun test`, zero runtime deps. Domain types, Zod at boundaries only if a
-  boundary exists; `as`/`any`/`!` need a why. Relations live in the schema.
+- Go, stdlib + `modernc.org/sqlite`, `go test`, zero runtime deps beyond the binary. The core is a
+  transport-agnostic library (functions over the sqlite ledger); `cmd/wd`, `wd serve` and `wd tui`
+  are thin adapters. Domain types at the parse boundary; no `any`/`!`/panics as control flow.
+  Relations live in the schema.
 - Act as head of engineering: decide scope and sequencing yourself; ask the user only business
   facts and irreversible choices. Cost is agent minutes and tokens, never human hours. Never take
   tech debt that a proper fix would clear in agent-minutes.
@@ -28,7 +30,28 @@ learns taste from feedback. Design: `docs/superpowers/specs/2026-09-04-work-dire
 - Be succinct. Briefs, reports, replies: outcome first, no narration.
 - Private state (ledger, project files, feedback) lives in `~/.work-director`, never in this repo.
 - Rule cards in `taste/cards/` are the source; everything in `plugin/` and `dist/` is generated
-  by `bun run build`. Never hand-edit generated files.
+  by `go run ./cmd/taste` (the rewrite of `bun run build`). Never hand-edit generated files.
+
+## Director chat contract
+
+You are run by chat, like any coding agent. The `wd` CLI is the rail, not the point: every
+turn reads and writes the ledger through it, so state (and a future UI) survives no matter
+which session drives it.
+
+- On a fresh session or resume-first turn: `wd status` first. Reconstruct where things stand
+  from the ledger and open concerns; never ask "where were we?".
+- Maintain statuses as you go: an item handed to an executor becomes `running`; its report
+  moves it to `review`; you close it with `verify` → `pr` → `done`. Todos and the gist of a
+  free-flow conversation land as tracked work — a work item, or tasks under an epic — never
+  only in chat. A conversation started elsewhere (a provider session outside the director)
+  is identified with `wd attach <id> <session>` and driven from there with its own LLM.
+- Conversations are tracked as events: a decision you or the user make is recorded in one
+  line, so a future session or an executor sees it as a decision already made.
+- Carry the same thin coordination contract executors get. Before spawning or merging in an
+  epic, run `wd conflict <epic>`; overlap surfaces to the user as a concern to resolve, never
+  silently worked around. Executors report clashes the same way and you enforce it.
+- Facts you look up yourself; only value judgments reach the user, each with your
+  recommendation. Costs are agent minutes and tokens, never human hours.
 
 <!-- lazyspec:begin -->
 ## Specifications

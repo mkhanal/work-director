@@ -1,0 +1,11 @@
+name = "myagent"
+spawn = "myagent run {brief}"
+session_id = 'session=([A-Za-z0-9-]+)'
+send = "myagent send {session} {text}"
+status = "myagent status {session}"
+running = 'state: *running'
+waiting = 'state: *waiting'
+exited = 'state: *exited'
+transcript = "myagent export {session}"
+models = "myagent models"
+attach = "cd {cwd} && myagent attach {session}"

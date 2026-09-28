@@ -23,6 +23,13 @@ describe('Only Listed Transitions Are Allowed', () => {
     const l = fresh(), { id } = l.add('p', 't');
     expect(() => l.transition(id, 'done')).toThrow(new IllegalTransition('queued', 'done'));
   });
+  test('queued → running is the attached-outside-conversation path, briefed → queued is not', () => {
+    const l = fresh(), { id } = l.add('p', 't');
+    expect(l.transition(id, 'running').state).toBe('running');
+    const l2 = fresh(), { id: id2 } = l2.add('p', 't');
+    for (const s of ['briefed', 'running', 'review'] as const) l2.transition(id2, s);
+    expect(() => l2.transition(id2, 'queued')).toThrow(new IllegalTransition('review', 'queued'));
+  });
   test('done is terminal', () => {
     const l = fresh(), { id } = l.add('p', 't');
     l.transition(id, 'dropped');

@@ -15,6 +15,7 @@ export const claude: Runner = {
   name: 'claude',
   async spawn(o: SpawnOptions): Promise<Handle> {
     const args = ['claude', '--bg', '-n', o.name, '--permission-mode', o.permissionMode ?? 'bypassPermissions'];
+    if (o.model) args.push('--model', o.model);
     if (o.worktree) args.push('--worktree', o.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
     args.push(o.brief);
     const r = await run(args, o.cwd);
@@ -48,5 +49,7 @@ export const claude: Runner = {
     }
     return out;
   },
+  // claude's CLI has no non-interactive model list; its own /model picker is the list.
+  async models() { return []; },
   attachHint: (h) => `claude attach ${h.ref ?? h.session}`,
 };

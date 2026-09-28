@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+case "$1" in
+  run)
+    echo '{"type":"step_start","sessionID":"ses_opabc"}'
+    echo '{"type":"text","sessionID":"ses_opabc","part":{"type":"text","text":"READY"}}'
+    ;;
+  models)
+    echo 'anthropic/claude-opus-5'
+    echo 'openai/gpt-5.2'
+    ;;
+esac

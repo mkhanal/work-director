@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -u
+state=${WD_FAKE_STATE:?WD_FAKE_STATE needed}
+case "$1" in
+  run)
+    n=$(cat "$state/planner-n" 2>/dev/null || echo 0)
+    n=$((n + 1))
+    echo "$n" > "$state/planner-n"
+    printf 'session=planner-s%05x\n' "$n"
+    ;;
+  export)
+    echo '## Analysis'
+    echo '- [ ] parse the config into a domain type'
+    echo '- [ ] wire the decision into the schema'
+    ;;
+  status) echo 'state: waiting';;
+  send) echo ok;;
+  models) echo 'planner/m1';;
+  *) echo "unhandled planner $*" >&2; exit 1;;
+esac
