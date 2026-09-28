@@ -256,16 +256,39 @@ func (f *cliFixture) build(t *testing.T) {
 // run runs the Go CLI with args and returns exit code, stdout, stderr.
 func (f *cliFixture) run(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
-	env := []string{
+	return f.runEnv(t, f.env(t, f.bin), args...)
+}
+
+// runBare runs the Go CLI with the system PATH — no fake runners — for
+// commands that probe the environment itself, like setup.
+func (f *cliFixture) runBare(t *testing.T, args ...string) (int, string, string) {
+	t.Helper()
+	return f.runEnv(t, f.env(t, ""), args...)
+}
+
+// env builds the command environment; binDir is prepended to PATH when set.
+func (f *cliFixture) env(t *testing.T, binDir string) []string {
+	t.Helper()
+	path := os.Getenv("PATH")
+	if binDir != "" {
+		path = binDir + string(os.PathListSeparator) + path
+	}
+	return []string{
 		"HOME=" + f.home,
 		"WD_HOME=" + f.wdHome,
 		"WD_PROJECTS=" + filepath.Join(f.wdHome, "projects"),
 		"WD_FAKE_STATE=" + filepath.Join(f.dir, "fake-state"),
 		"WD_ROOT=" + repoRoot(t),
-		"PATH=" + f.bin + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"PATH=" + path,
 		"VISUAL=",
 		"EDITOR=",
 	}
+}
+
+// runEnv runs the Go CLI with args under env and returns exit code, stdout,
+// stderr.
+func (f *cliFixture) runEnv(t *testing.T, env []string, args ...string) (int, string, string) {
+	t.Helper()
 	c := exec.Command(f.goBin, args...)
 	c.Env = env
 	c.Dir = f.dir

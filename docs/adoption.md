@@ -77,10 +77,13 @@ wd scan --adopt <candidate>     # writes a global *candidate* card; adopt it, th
 ## 2. Director — orchestrate many repos from the terminal
 
 ```
-bun install
-ln -s "$PWD/packages/wd/src/cli.ts" ~/.local/bin/wd
+curl -fsSL https://raw.githubusercontent.com/mkhanal/work-director/main/scripts/install.sh | sh
+wd setup                          # probe git + your runner CLIs (claude, opencode, codex, ao)
 cp projects/example.md ~/.work-director/projects/my-app.md   # edit path, runner, mode, stack, verify
 ```
+
+`wd` is one static binary — no runtime dependencies. `wd setup` probes the external commands
+it shells out to and `--install` fills the gaps.
 
 A project file is one markdown with frontmatter and a roadmap body:
 

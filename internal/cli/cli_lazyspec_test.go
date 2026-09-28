@@ -173,6 +173,44 @@ func TestCommandsComputeTheSameStatesAndValues(t *testing.T) {
 	assertHasKey(t, out, `"anthropic/claude-opus-5"`)
 }
 
+func TestSetupReportsTheRuntimeDependencies(t *testing.T) {
+	f := newCLIFixture(t)
+	// With the fixture's fake runners on PATH, every dependency is present.
+	out := f.runOK(t, "setup", "--json")
+	for _, name := range []string{"git", "claude", "opencode", "codex", "ao"} {
+		assertHasKey(t, out, `"`+name+`"`)
+		assertHasKey(t, out, `"status": "present"`)
+	}
+	// The text report is a table: name, status, then path or install command.
+	out = f.runOK(t, "setup")
+	if !strings.Contains(out, "git") || !strings.Contains(out, "present") {
+		t.Fatalf("setup text report = %q", out)
+	}
+}
+
+func TestSetupFailsWhenADependencyIsMissing(t *testing.T) {
+	f := newCLIFixture(t)
+	// Bare PATH: the exit code matches the report — 1 when any dependency
+	// is missing, 0 when all are present.
+	code, out, errStr := f.runBare(t, "setup", "--json")
+	if !strings.Contains(out, `"git"`) {
+		t.Fatalf("setup --json = %q, want the git dependency", out)
+	}
+	missing := strings.Count(out, `"status": "missing"`)
+	if missing > 0 {
+		if code != 1 {
+			t.Fatalf("setup exited %d with %d missing, want 1", code, missing)
+		}
+		if !strings.Contains(errStr, "missing") {
+			t.Fatalf("stderr %q does not name the missing dependencies", errStr)
+		}
+		return
+	}
+	if code != 0 {
+		t.Fatalf("setup exited %d with every dependency present, want 0", code)
+	}
+}
+
 func TestErrorsAndExitCodesMatch(t *testing.T) {
 	f := newCLIFixture(t)
 	epic, t1 := f.ids["epic"], f.ids["t1"]
