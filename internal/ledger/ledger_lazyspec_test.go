@@ -1,11 +1,16 @@
 package ledger
 
 import (
+	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
+
+	_ "modernc.org/sqlite"
 
 	"wd/internal/core"
 )
@@ -365,6 +370,226 @@ func TestLedger(t *testing.T) {
 		wantNoErr(t, err)
 		if got.Title != "t" {
 			t.Fatalf("title = %q, want t", got.Title)
+		}
+	})
+
+	// The schema as the first TypeScript wd wrote it: a 12-column work table,
+	// event and feedback only. Every ledger of this generation must stay readable.
+	const oldSchema = `
+CREATE TABLE work (id TEXT PRIMARY KEY, project TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL, state TEXT NOT NULL, runner TEXT, session TEXT, ref TEXT, cwd TEXT, created TEXT NOT NULL, updated TEXT NOT NULL);
+CREATE TABLE event (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), kind TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL);
+CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT, card TEXT, source TEXT NOT NULL, at TEXT NOT NULL);`
+
+	// writeOldLedger creates a pre-epic ledger with the rows the TypeScript wd
+	// would have stored, and returns the path.
+	writeOldLedger := func(t *testing.T) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "ledger.db")
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatalf("open old ledger: %v", err)
+		}
+		defer db.Close()
+		if _, err := db.Exec(oldSchema); err != nil {
+			t.Fatalf("write old schema: %v", err)
+		}
+		t0 := "2026-09-01T10:00:00.000Z"
+		if _, err := db.Exec(`INSERT INTO work (id, project, title, detail, kind, state, runner, session, ref, cwd, created, updated)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			"oldaaaa1", "proj", "First task", "d1", "task", "running", "claude", "ses_old1", "ref1", "/tmp/wd", t0, t0); err != nil {
+			t.Fatalf("seed work 1: %v", err)
+		}
+		if _, err := db.Exec(`INSERT INTO work (id, project, title, detail, kind, state, created, updated)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			"oldbbbb2", "proj", "Second task", "", "evolution", "done", t0, t0); err != nil {
+			t.Fatalf("seed work 2: %v", err)
+		}
+		if _, err := db.Exec(`INSERT INTO event (work, kind, body, at) VALUES (?, ?, ?, ?)`,
+			"oldaaaa1", "state", "running", t0); err != nil {
+			t.Fatalf("seed event: %v", err)
+		}
+		if _, err := db.Exec(`INSERT INTO feedback (text, project, card, source, at) VALUES (?, ?, ?, ?, ?)`,
+			"be succinct", "proj", nil, "director", t0); err != nil {
+			t.Fatalf("seed feedback: %v", err)
+		}
+		return path
+	}
+
+	// workColumns returns name -> (notNull, pk) per column of the work table.
+	workColumns := func(t *testing.T, db *sql.DB) map[string][2]int {
+		t.Helper()
+		rows, err := db.Query("PRAGMA table_info(work)")
+		if err != nil {
+			t.Fatalf("table_info: %v", err)
+		}
+		defer rows.Close()
+		out := map[string][2]int{}
+		for rows.Next() {
+			var cid, notNull, pk int
+			var name, typ string
+			var dflt sql.NullString
+			if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+				t.Fatalf("scan table_info: %v", err)
+			}
+			out[name] = [2]int{notNull, pk}
+		}
+		return out
+	}
+
+	// dump every row of every table, deterministically ordered.
+	dump := func(t *testing.T, db *sql.DB) string {
+		t.Helper()
+		var b strings.Builder
+		for _, tbl := range []string{"work", "event", "feedback", "concern", "worktree"} {
+			rows, err := db.Query(fmt.Sprintf("SELECT * FROM %s ORDER BY 1", tbl))
+			if err != nil {
+				t.Fatalf("dump %s: %v", tbl, err)
+			}
+			cols, err := rows.Columns()
+			if err != nil {
+				t.Fatalf("columns %s: %v", tbl, err)
+			}
+			b.WriteString(tbl + " " + strings.Join(cols, ",") + "\n")
+			for rows.Next() {
+				vals := make([]any, len(cols))
+				ptrs := make([]any, len(cols))
+				for i := range vals {
+					ptrs[i] = &vals[i]
+				}
+				if err := rows.Scan(ptrs...); err != nil {
+					t.Fatalf("scan %s: %v", tbl, err)
+				}
+				parts := make([]string, len(cols))
+				for i, v := range vals {
+					parts[i] = fmt.Sprintf("%v", v)
+				}
+				b.WriteString(strings.Join(parts, ",") + "\n")
+			}
+			rows.Close()
+		}
+		return b.String()
+	}
+
+	openDirect := func(t *testing.T, path string) *sql.DB {
+		t.Helper()
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatalf("reopen direct: %v", err)
+		}
+		t.Cleanup(func() { db.Close() })
+		return db
+	}
+
+	t.Run("Old Ledgers Stay Readable", func(t *testing.T) {
+		path := writeOldLedger(t)
+		before := workColumns(t, openDirect(t, path))
+		if len(before) != 12 {
+			t.Fatalf("old schema has %d work columns, want 12", len(before))
+		}
+
+		l, err := New(path)
+		wantNoErr(t, err)
+
+		// Every stored row reads back with its values untouched.
+		w1, err := l.Get("oldaaaa1")
+		wantNoErr(t, err)
+		if w1.Project != "proj" || w1.Title != "First task" || w1.Detail != "d1" ||
+			w1.Kind != core.WorkTask || w1.State != core.StateRunning ||
+			w1.Runner == nil || *w1.Runner != "claude" || w1.Session == nil || *w1.Session != "ses_old1" ||
+			w1.Ref == nil || *w1.Ref != "ref1" || w1.Cwd == nil || *w1.Cwd != "/tmp/wd" ||
+			w1.Created != "2026-09-01T10:00:00.000Z" || w1.Updated != "2026-09-01T10:00:00.000Z" {
+			t.Fatalf("work 1 = %+v, want the seeded row", w1)
+		}
+		w2, err := l.Get("oldbbbb2")
+		wantNoErr(t, err)
+		if w2.Title != "Second task" || w2.Kind != core.WorkEvolution || w2.State != core.StateDone || w2.Runner != nil {
+			t.Fatalf("work 2 = %+v, want the seeded row", w2)
+		}
+		stateKind := core.EventState
+		evs, err := l.Events("oldaaaa1", &stateKind)
+		wantNoErr(t, err)
+		if len(evs) != 1 || evs[0].Body != "running" {
+			t.Fatalf("events = %v, want the seeded state event", evs)
+		}
+		fb, err := l.Feedback()
+		wantNoErr(t, err)
+		if len(fb) != 1 || fb[0].Text != "be succinct" || fb[0].Project == nil || *fb[0].Project != "proj" {
+			t.Fatalf("feedback = %v, want the seeded row", fb)
+		}
+
+		// The schema grew in place: four nullable columns, two new tables.
+		after := workColumns(t, openDirect(t, path))
+		if len(after) != 16 {
+			t.Fatalf("migrated schema has %d work columns, want 16", len(after))
+		}
+		for _, col := range []string{"parent", "heading", "claim", "impact"} {
+			if _, ok := after[col]; !ok {
+				t.Fatalf("column %s missing after migration", col)
+			}
+		}
+		for name, want := range before {
+			got := after[name]
+			if got != want {
+				t.Fatalf("column %s changed: %v -> %v", name, want, got)
+			}
+		}
+		for _, tbl := range []string{"concern", "worktree"} {
+			if _, err := openDirect(t, path).Query("SELECT COUNT(*) FROM " + tbl); err != nil {
+				t.Fatalf("table %s missing after migration: %v", tbl, err)
+			}
+		}
+
+		// New features write into the migrated ledger.
+		epic, err := l.Add("proj", "Epic", AddOptions{Kind: core.WorkEpic})
+		wantNoErr(t, err)
+		if _, err := l.Add("proj", "T", AddOptions{Parent: &epic.ID}); err != nil {
+			t.Fatalf("add task under epic: %v", err)
+		}
+		if _, err := l.AddConcern(epic.ID, "risk"); err != nil {
+			t.Fatalf("add concern: %v", err)
+		}
+		if _, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/tmp/wt", Kind: core.WorktreePrivate}); err != nil {
+			t.Fatalf("add worktree: %v", err)
+		}
+		wantNoErr(t, l.Close())
+
+		// And the whole thing, old rows and new, survives a reopen.
+		l, err = New(path)
+		wantNoErr(t, err)
+		defer l.Close()
+		if got := allTasks(t, l, epic.ID); len(got) != 1 {
+			t.Fatalf("tasks after reopen = %v, want 1", got)
+		}
+		if got := allOpenConcerns(t, l, epic.ID); len(got) != 1 {
+			t.Fatalf("concerns after reopen = %v, want 1", got)
+		}
+		if got := allWorktrees(t, l, epic.ID); len(got) != 1 {
+			t.Fatalf("worktrees after reopen = %v, want 1", got)
+		}
+	})
+
+	t.Run("Migration Is Additive Only", func(t *testing.T) {
+		path := writeOldLedger(t)
+		l, err := New(path)
+		wantNoErr(t, err)
+		wantNoErr(t, l.Close())
+
+		db := openDirect(t, path)
+		migrated := dump(t, db)
+		cols := workColumns(t, db)
+		for _, col := range []string{"parent", "heading", "claim", "impact"} {
+			if cols[col][0] != 0 {
+				t.Fatalf("added column %s is NOT NULL; TypeScript wd inserts would break", col)
+			}
+		}
+
+		// Opening an already-migrated ledger changes nothing.
+		l, err = New(path)
+		wantNoErr(t, err)
+		wantNoErr(t, l.Close())
+		if again := dump(t, openDirect(t, path)); again != migrated {
+			t.Fatalf("second open changed the ledger:\n%s\nvs\n%s", again, migrated)
 		}
 	})
 }
