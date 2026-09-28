@@ -1,0 +1,653 @@
+// Package ledger is the sqlite-backed store of the director's truth: work
+// items, their events, feedback, concerns and worktrees. It is a port of
+// packages/wd/src/ledger.ts with the same schema, the same DDL and the same
+// semantics; rows are parsed into core domain types at this boundary and never
+// cast afterwards.
+package ledger
+
+import (
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"fmt"
+	"slices"
+	"strings"
+	"time"
+
+	_ "modernc.org/sqlite"
+
+	"wd/internal/core"
+)
+
+const schema = `
+CREATE TABLE IF NOT EXISTS work (id TEXT PRIMARY KEY, project TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL, state TEXT NOT NULL, runner TEXT, session TEXT, ref TEXT, cwd TEXT, created TEXT NOT NULL, updated TEXT NOT NULL,
+  parent TEXT, heading TEXT, claim TEXT, impact TEXT);
+CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), kind TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT, card TEXT, source TEXT NOT NULL, at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS concern (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), text TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, decision TEXT, at TEXT NOT NULL, resolved_at TEXT);
+CREATE TABLE IF NOT EXISTS worktree (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), path TEXT NOT NULL, branch TEXT, kind TEXT NOT NULL, state TEXT NOT NULL, created TEXT NOT NULL);
+`
+
+// Additive migration for ledgers created before epics existed.
+var addedColumns = []struct{ col, decl string }{
+	{"parent", "TEXT"}, {"heading", "TEXT"}, {"claim", "TEXT"}, {"impact", "TEXT"},
+}
+
+type Ledger struct {
+	db *sql.DB
+}
+
+func New(path string) (*Ledger, error) {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA journal_mode = WAL;"); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(schema); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Ledger{db: db}, nil
+}
+
+func migrate(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(work)")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var cols []string
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		cols = append(cols, name)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, c := range addedColumns {
+		if !slices.Contains(cols, c.col) {
+			if _, err := db.Exec(fmt.Sprintf("ALTER TABLE work ADD COLUMN %s %s", c.col, c.decl)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (l *Ledger) Close() error { return l.db.Close() }
+
+// now matches new Date().toISOString(): UTC with millisecond precision.
+func now() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00") }
+
+// newId matches randomUUID().slice(0, 8): eight hex characters.
+func newId() (string, error) {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+type rowScanner interface{ Scan(dest ...any) error }
+
+func nullStr(ns sql.NullString) *string {
+	if !ns.Valid {
+		return nil
+	}
+	s := ns.String
+	return &s
+}
+
+func scanWork(s rowScanner) (core.Work, error) {
+	var w core.Work
+	var kind, state string
+	var runner, session, ref, cwd, parent, heading, claim, impact sql.NullString
+	err := s.Scan(&w.ID, &w.Project, &w.Title, &w.Detail, &kind, &state,
+		&runner, &session, &ref, &cwd, &w.Created, &w.Updated,
+		&parent, &heading, &claim, &impact)
+	if err != nil {
+		return core.Work{}, err
+	}
+	w.Kind = core.WorkKind(kind)
+	w.State = core.State(state)
+	w.Runner = nullStr(runner)
+	w.Session = nullStr(session)
+	w.Ref = nullStr(ref)
+	w.Cwd = nullStr(cwd)
+	w.Parent = nullStr(parent)
+	w.Heading = nullStr(heading)
+	w.Claim = nullStr(claim)
+	w.Impact = nullStr(impact)
+	return w, nil
+}
+
+func scanEvent(s rowScanner) (core.Event, error) {
+	var e core.Event
+	var kind string
+	if err := s.Scan(&e.ID, &e.Work, &kind, &e.Body, &e.At); err != nil {
+		return core.Event{}, err
+	}
+	e.Kind = core.EventKind(kind)
+	return e, nil
+}
+
+func scanFeedback(s rowScanner) (core.Feedback, error) {
+	var f core.Feedback
+	var source string
+	var project, card sql.NullString
+	if err := s.Scan(&f.ID, &f.Text, &project, &card, &source, &f.At); err != nil {
+		return core.Feedback{}, err
+	}
+	f.Project = nullStr(project)
+	f.Card = nullStr(card)
+	f.Source = core.FeedbackSource(source)
+	return f, nil
+}
+
+func scanConcern(s rowScanner) (core.Concern, error) {
+	var c core.Concern
+	var decision, resolvedAt sql.NullString
+	if err := s.Scan(&c.ID, &c.Work, &c.Text, &c.Resolved, &decision, &c.At, &resolvedAt); err != nil {
+		return core.Concern{}, err
+	}
+	c.Decision = nullStr(decision)
+	c.ResolvedAt = nullStr(resolvedAt)
+	return c, nil
+}
+
+func scanWorktree(s rowScanner) (core.Worktree, error) {
+	var w core.Worktree
+	var kind, state string
+	var branch sql.NullString
+	if err := s.Scan(&w.ID, &w.Work, &w.Path, &branch, &kind, &state, &w.Created); err != nil {
+		return core.Worktree{}, err
+	}
+	w.Branch = nullStr(branch)
+	w.Kind = core.WorktreeKind(kind)
+	w.State = core.WorktreeState(state)
+	return w, nil
+}
+
+type AddOptions struct {
+	Kind    core.WorkKind
+	Detail  string
+	Parent  *string
+	Heading *string
+}
+
+func (l *Ledger) Add(project, title string, opts AddOptions) (core.Work, error) {
+	kind := opts.Kind
+	if kind == "" {
+		kind = core.WorkTask
+	}
+	var parent *string
+	if opts.Parent != nil {
+		p := *opts.Parent
+		if core.IsEpic(kind) {
+			return core.Work{}, fmt.Errorf("an epic cannot sit under another work item")
+		}
+		pw, err := l.Get(p)
+		if err != nil {
+			return core.Work{}, err
+		}
+		if !core.IsEpic(pw.Kind) {
+			return core.Work{}, fmt.Errorf("parent %s is not an epic", p)
+		}
+		parent = &p
+	}
+	id, err := newId()
+	if err != nil {
+		return core.Work{}, err
+	}
+	t := now()
+	_, err = l.db.Exec(
+		`INSERT INTO work (id, project, title, detail, kind, state, parent, heading, created, updated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, project, title, opts.Detail, string(kind), string(core.StateQueued), parent, opts.Heading, t, t)
+	if err != nil {
+		return core.Work{}, err
+	}
+	if err := l.addEvent(id, core.EventState, string(core.StateQueued)); err != nil {
+		return core.Work{}, err
+	}
+	return l.Get(id)
+}
+
+func (l *Ledger) Get(id string) (core.Work, error) {
+	w, err := scanWork(l.db.QueryRow(`SELECT id, project, title, detail, kind, state, runner, session, ref, cwd,
+		created, updated, parent, heading, claim, impact FROM work WHERE id = ?`, id))
+	if err == sql.ErrNoRows {
+		return core.Work{}, fmt.Errorf("no work %s; wd status for known work items", id)
+	}
+	if err != nil {
+		return core.Work{}, err
+	}
+	return w, nil
+}
+
+func (l *Ledger) Has(id string) (bool, error) {
+	var n int
+	if err := l.db.QueryRow(`SELECT COUNT(*) FROM work WHERE id = ?`, id).Scan(&n); err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
+type ListFilter struct {
+	Project *string
+	States  []core.State
+}
+
+func (l *Ledger) List(filter ListFilter) ([]core.Work, error) {
+	rows, err := l.db.Query(`SELECT id, project, title, detail, kind, state, runner, session, ref, cwd,
+		created, updated, parent, heading, claim, impact FROM work ORDER BY created`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []core.Work
+	for rows.Next() {
+		w, err := scanWork(rows)
+		if err != nil {
+			return nil, err
+		}
+		if filter.Project != nil && w.Project != *filter.Project {
+			continue
+		}
+		if filter.States != nil && !slices.Contains(filter.States, w.State) {
+			continue
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// Children of an epic, oldest first.
+func (l *Ledger) Tasks(epicID string) ([]core.Work, error) {
+	rows, err := l.db.Query(`SELECT id, project, title, detail, kind, state, runner, session, ref, cwd,
+		created, updated, parent, heading, claim, impact FROM work WHERE parent = ? ORDER BY created`, epicID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []core.Work
+	for rows.Next() {
+		w, err := scanWork(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+func (l *Ledger) Transition(id string, to core.State) (core.Work, error) {
+	w, err := l.Get(id)
+	if err != nil {
+		return core.Work{}, err
+	}
+	if !slices.Contains(core.Transitions[w.State], to) {
+		return core.Work{}, core.IllegalTransition{From: w.State, To: to}
+	}
+	if _, err := l.db.Exec(`UPDATE work SET state = ?, updated = ? WHERE id = ?`, string(to), now(), id); err != nil {
+		return core.Work{}, err
+	}
+	if err := l.addEvent(id, core.EventState, string(to)); err != nil {
+		return core.Work{}, err
+	}
+	return l.Get(id)
+}
+
+type SessionInfo struct {
+	Runner  string
+	Session string
+	Ref     *string
+	Cwd     string
+}
+
+func (l *Ledger) SetSession(id string, s SessionInfo) error {
+	_, err := l.db.Exec(`UPDATE work SET runner = ?, session = ?, ref = ?, cwd = ?, updated = ? WHERE id = ?`,
+		s.Runner, s.Session, s.Ref, s.Cwd, now(), id)
+	return err
+}
+
+func (l *Ledger) SetCwd(id, cwd string) error {
+	_, err := l.db.Exec(`UPDATE work SET cwd = ?, updated = ? WHERE id = ?`, cwd, now(), id)
+	return err
+}
+
+func (l *Ledger) SetClaim(id string, claim *string) (core.Work, error) {
+	if _, err := l.db.Exec(`UPDATE work SET claim = ?, updated = ? WHERE id = ?`, claim, now(), id); err != nil {
+		return core.Work{}, err
+	}
+	return l.Get(id)
+}
+
+func (l *Ledger) SetImpact(id string, paths []string) (core.Work, error) {
+	impact := strings.Join(paths, "\n")
+	if _, err := l.db.Exec(`UPDATE work SET impact = ?, updated = ? WHERE id = ?`, impact, now(), id); err != nil {
+		return core.Work{}, err
+	}
+	return l.Get(id)
+}
+
+func (l *Ledger) addEvent(work string, kind core.EventKind, body string) error {
+	_, err := l.db.Exec(`INSERT INTO event (work, kind, body, at) VALUES (?, ?, ?, ?)`, work, string(kind), body, now())
+	return err
+}
+
+func (l *Ledger) AddEvent(work string, kind core.EventKind, body string) error {
+	return l.addEvent(work, kind, body)
+}
+
+func (l *Ledger) Events(work string, kind *core.EventKind) ([]core.Event, error) {
+	rows, err := l.db.Query(`SELECT id, work, kind, body, at FROM event WHERE work = ? ORDER BY id`, work)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []core.Event
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		if kind != nil && e.Kind != *kind {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (l *Ledger) AddConcern(work, text string) (core.Concern, error) {
+	c, err := scanConcern(l.db.QueryRow(
+		`INSERT INTO concern (work, text, at) VALUES (?, ?, ?)
+		 RETURNING id, work, text, resolved, decision, at, resolved_at`, work, text, now()))
+	if err != nil {
+		return core.Concern{}, fmt.Errorf("concern insert failed: %w", err)
+	}
+	return c, nil
+}
+
+func (l *Ledger) ResolveConcern(id int, decision string) (core.Concern, error) {
+	c, err := scanConcern(l.db.QueryRow(
+		`UPDATE concern SET resolved = 1, decision = ?, resolved_at = ? WHERE id = ?
+		 RETURNING id, work, text, resolved, decision, at, resolved_at`, decision, now(), id))
+	if err != nil {
+		return core.Concern{}, fmt.Errorf("no concern %d", id)
+	}
+	if err := l.addEvent(c.Work, core.EventNote, fmt.Sprintf("concern %d resolved: %s", id, decision)); err != nil {
+		return core.Concern{}, err
+	}
+	return c, nil
+}
+
+func (l *Ledger) Concerns(work *string) ([]core.Concern, error) {
+	var rows *sql.Rows
+	var err error
+	if work == nil {
+		rows, err = l.db.Query(`SELECT id, work, text, resolved, decision, at, resolved_at FROM concern ORDER BY id`)
+	} else {
+		rows, err = l.db.Query(`SELECT id, work, text, resolved, decision, at, resolved_at FROM concern WHERE work = ? ORDER BY id`, *work)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []core.Concern
+	for rows.Next() {
+		c, err := scanConcern(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (l *Ledger) OpenConcerns(epicID string) ([]core.Concern, error) {
+	tasks, err := l.Tasks(epicID)
+	if err != nil {
+		return nil, err
+	}
+	works := map[string]bool{epicID: true}
+	for _, t := range tasks {
+		works[t.ID] = true
+	}
+	all, err := l.Concerns(nil)
+	if err != nil {
+		return nil, err
+	}
+	var out []core.Concern
+	for _, c := range all {
+		if c.Resolved == 0 && works[c.Work] {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+type WorktreeInfo struct {
+	Path   string
+	Branch *string
+	Kind   core.WorktreeKind
+}
+
+func (l *Ledger) AddWorktree(work string, w WorktreeInfo) (core.Worktree, error) {
+	wt, err := scanWorktree(l.db.QueryRow(
+		`INSERT INTO worktree (work, path, branch, kind, state, created) VALUES (?, ?, ?, ?, ?, ?)
+		 RETURNING id, work, path, branch, kind, state, created`,
+		work, w.Path, w.Branch, string(w.Kind), string(core.WorktreeActive), now()))
+	if err != nil {
+		return core.Worktree{}, fmt.Errorf("worktree insert failed: %w", err)
+	}
+	return wt, nil
+}
+
+func (l *Ledger) Worktrees(work string) ([]core.Worktree, error) {
+	rows, err := l.db.Query(`SELECT id, work, path, branch, kind, state, created FROM worktree WHERE work = ? ORDER BY id`, work)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []core.Worktree
+	for rows.Next() {
+		w, err := scanWorktree(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+func (l *Ledger) SetWorktreeState(id int, state core.WorktreeState) (core.Worktree, error) {
+	wt, err := scanWorktree(l.db.QueryRow(
+		`UPDATE worktree SET state = ? WHERE id = ?
+		 RETURNING id, work, path, branch, kind, state, created`, string(state), id))
+	if err != nil {
+		return core.Worktree{}, fmt.Errorf("no worktree %d", id)
+	}
+	return wt, nil
+}
+
+// Concurrently claimed tasks of an epic whose impact paths overlap.
+func (l *Ledger) Conflicts(epicID string) ([]core.Conflict, error) {
+	tasks, err := l.Tasks(epicID)
+	if err != nil {
+		return nil, err
+	}
+	var claimed []core.Work
+	for _, t := range tasks {
+		if t.Claim != nil && t.State != core.StateDone && t.State != core.StateDropped {
+			claimed = append(claimed, t)
+		}
+	}
+	var out []core.Conflict
+	for i := 0; i < len(claimed); i++ {
+		a := claimed[i]
+		pa := core.SplitImpact(a.Impact)
+		for j := i + 1; j < len(claimed); j++ {
+			b := claimed[j]
+			var overlapping []string
+			for _, x := range pa {
+				for _, y := range core.SplitImpact(b.Impact) {
+					if core.PathsOverlap(x, y) {
+						overlapping = append(overlapping, x)
+						break
+					}
+				}
+			}
+			if len(overlapping) > 0 {
+				out = append(out, core.Conflict{A: a.ID, B: b.ID, Paths: overlapping})
+			}
+		}
+	}
+	return out, nil
+}
+
+// review → soft-done. Epic: needs every task done/dropped, DONE report, passing
+// verify, PR. Task: needs only the DONE report. Standalone: DONE + verify, and
+// PR when code changed.
+func (l *Ledger) SoftDone(id string, codeChanged bool) (core.Work, error) {
+	w, err := l.Get(id)
+	if err != nil {
+		return core.Work{}, err
+	}
+	last := func(k core.EventKind) *core.Event {
+		evs, err := l.Events(id, &k)
+		if err != nil || len(evs) == 0 {
+			return nil
+		}
+		return &evs[len(evs)-1]
+	}
+	var missing []string
+	if core.IsEpic(w.Kind) {
+		open, err := l.Tasks(id)
+		if err != nil {
+			return core.Work{}, err
+		}
+		var n int
+		for _, t := range open {
+			if t.State != core.StateDone && t.State != core.StateDropped {
+				n++
+			}
+		}
+		if n > 0 {
+			missing = append(missing, fmt.Sprintf("%d task(s) not done", n))
+		}
+		if r := last(core.EventReport); r == nil || !strings.HasPrefix(r.Body, "DONE") {
+			missing = append(missing, "DONE report")
+		}
+		if v := last(core.EventVerify); v == nil || !strings.HasPrefix(v.Body, "pass") {
+			missing = append(missing, "passing verify")
+		}
+		if last(core.EventPr) == nil {
+			missing = append(missing, "pull request")
+		}
+	} else if w.Parent != nil {
+		if r := last(core.EventReport); r == nil || !strings.HasPrefix(r.Body, "DONE") {
+			missing = append(missing, "DONE report")
+		}
+	} else {
+		if r := last(core.EventReport); r == nil || !strings.HasPrefix(r.Body, "DONE") {
+			missing = append(missing, "DONE report")
+		}
+		if v := last(core.EventVerify); v == nil || !strings.HasPrefix(v.Body, "pass") {
+			missing = append(missing, "passing verify")
+		}
+		if codeChanged && last(core.EventPr) == nil {
+			missing = append(missing, "pull request")
+		}
+	}
+	if len(missing) > 0 {
+		return core.Work{}, core.NotReady{Missing: missing}
+	}
+	return l.Transition(id, core.StateSoftDone)
+}
+
+type FeedbackOptions struct {
+	Project *string
+	Card    *string
+	Source  core.FeedbackSource
+}
+
+func (l *Ledger) AddFeedback(text string, o FeedbackOptions) (core.Feedback, error) {
+	source := o.Source
+	if source == "" {
+		source = core.FeedbackDirector
+	}
+	f, err := scanFeedback(l.db.QueryRow(
+		`INSERT INTO feedback (text, project, card, source, at) VALUES (?, ?, ?, ?, ?)
+		 RETURNING id, text, project, card, source, at`,
+		text, o.Project, o.Card, string(source), now()))
+	if err != nil {
+		return core.Feedback{}, fmt.Errorf("feedback insert failed: %w", err)
+	}
+	return f, nil
+}
+
+func (l *Ledger) Feedback() ([]core.Feedback, error) {
+	rows, err := l.db.Query(`SELECT id, text, project, card, source, at FROM feedback ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []core.Feedback
+	for rows.Next() {
+		f, err := scanFeedback(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// Feedback grouped by card (or project when no card) with two or more occurrences.
+func (l *Ledger) Distill() ([]core.Candidate, error) {
+	all, err := l.Feedback()
+	if err != nil {
+		return nil, err
+	}
+	groups := map[string][]string{}
+	var order []string
+	for _, f := range all {
+		var key string
+		switch {
+		case f.Card != nil:
+			key = "card:" + *f.Card
+		case f.Project != nil:
+			key = "project:" + *f.Project
+		default:
+			key = "global"
+		}
+		if _, ok := groups[key]; !ok {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], f.Text)
+	}
+	var out []core.Candidate
+	for _, key := range order {
+		if texts := groups[key]; len(texts) >= 2 {
+			out = append(out, core.Candidate{Key: key, Count: len(texts), Texts: texts})
+		}
+	}
+	return out, nil
+}
