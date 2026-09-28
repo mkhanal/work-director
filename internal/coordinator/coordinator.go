@@ -147,11 +147,11 @@ func KnownAnswer(question string, epic core.Work, children []core.Work, l *ledge
 // PassResult is one coordination pass: the children answered, escalated,
 // harvested for review or blocked, and the ones still waiting.
 type PassResult struct {
-	Answered  []string
-	Escalated []string
-	Reviewed  []string
-	Blocked   []string
-	Waiting   []string
+	Answered  []string `json:"answered"`
+	Escalated []string `json:"escalated"`
+	Reviewed  []string `json:"reviewed"`
+	Blocked   []string `json:"blocked"`
+	Waiting   []string `json:"waiting"`
 }
 
 var askRe = regexp.MustCompile(`ASK:\s*(.+)`)
@@ -169,7 +169,13 @@ func CoordinateOnce(epic core.Work, l *ledger.Ledger, resolve func(name string) 
 	if err != nil {
 		return PassResult{}, err
 	}
-	var res PassResult
+	res := PassResult{
+		Answered:  []string{},
+		Escalated: []string{},
+		Reviewed:  []string{},
+		Blocked:   []string{},
+		Waiting:   []string{},
+	}
 	for _, w := range children {
 		if w.State != core.StateRunning && w.State != core.StateNeedsInput {
 			continue

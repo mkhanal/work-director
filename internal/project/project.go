@@ -25,18 +25,18 @@ const (
 // Project is one managed repo: where it is, which runner drives it, and how
 // it is verified.
 type Project struct {
-	Name             string
-	Path             string
-	Runner           string
-	Agent            *string
-	Model            *string
-	Mode             Mode
-	Stack            []string
-	Workflows        []string
-	Verify           []string
-	InstructionsFile string
-	DefaultBranch    string
-	Roadmap          string
+	Name             string   `json:"name"`
+	Path             string   `json:"path"`
+	Runner           string   `json:"runner"`
+	Agent            *string  `json:"agent,omitempty"`
+	Model            *string  `json:"model,omitempty"`
+	Mode             Mode     `json:"mode"`
+	Stack            []string `json:"stack"`
+	Workflows        []string `json:"workflows"`
+	Verify           []string `json:"verify"`
+	InstructionsFile string   `json:"instructionsFile"`
+	DefaultBranch    string   `json:"defaultBranch"`
+	Roadmap          string   `json:"roadmap"`
 }
 
 // ProjectError names the file and what is wrong with it.

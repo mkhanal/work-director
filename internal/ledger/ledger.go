@@ -260,7 +260,7 @@ func (l *Ledger) List(filter ListFilter) ([]core.Work, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []core.Work
+	out := []core.Work{}
 	for rows.Next() {
 		w, err := scanWork(rows)
 		if err != nil {
@@ -285,7 +285,7 @@ func (l *Ledger) Tasks(epicID string) ([]core.Work, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []core.Work
+	out := []core.Work{}
 	for rows.Next() {
 		w, err := scanWork(rows)
 		if err != nil {
@@ -361,7 +361,7 @@ func (l *Ledger) Events(work string, kind *core.EventKind) ([]core.Event, error)
 		return nil, err
 	}
 	defer rows.Close()
-	var out []core.Event
+	out := []core.Event{}
 	for rows.Next() {
 		e, err := scanEvent(rows)
 		if err != nil {
@@ -410,7 +410,7 @@ func (l *Ledger) Concerns(work *string) ([]core.Concern, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []core.Concern
+	out := []core.Concern{}
 	for rows.Next() {
 		c, err := scanConcern(rows)
 		if err != nil {
@@ -434,7 +434,7 @@ func (l *Ledger) OpenConcerns(epicID string) ([]core.Concern, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []core.Concern
+	out := []core.Concern{}
 	for _, c := range all {
 		if c.Resolved == 0 && works[c.Work] {
 			out = append(out, c)
@@ -466,7 +466,7 @@ func (l *Ledger) Worktrees(work string) ([]core.Worktree, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []core.Worktree
+	out := []core.Worktree{}
 	for rows.Next() {
 		w, err := scanWorktree(rows)
 		if err != nil {
@@ -499,7 +499,7 @@ func (l *Ledger) Conflicts(epicID string) ([]core.Conflict, error) {
 			claimed = append(claimed, t)
 		}
 	}
-	var out []core.Conflict
+	out := []core.Conflict{}
 	for i := 0; i < len(claimed); i++ {
 		a := claimed[i]
 		pa := core.SplitImpact(a.Impact)
@@ -609,7 +609,7 @@ func (l *Ledger) Feedback() ([]core.Feedback, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []core.Feedback
+	out := []core.Feedback{}
 	for rows.Next() {
 		f, err := scanFeedback(rows)
 		if err != nil {
@@ -643,7 +643,7 @@ func (l *Ledger) Distill() ([]core.Candidate, error) {
 		}
 		groups[key] = append(groups[key], f.Text)
 	}
-	var out []core.Candidate
+	out := []core.Candidate{}
 	for _, key := range order {
 		if texts := groups[key]; len(texts) >= 2 {
 			out = append(out, core.Candidate{Key: key, Count: len(texts), Texts: texts})

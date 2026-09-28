@@ -39,7 +39,7 @@ var (
 )
 
 func specs() ([]RunnerSpec, error) {
-	dir := specDir()
+	dir := SpecDir()
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
 	if cache == nil || cache.at != dir {
@@ -53,7 +53,8 @@ func specs() ([]RunnerSpec, error) {
 }
 
 // allRunnerNames lists the built-ins then every spec file's runner.
-func allRunnerNames() ([]string, error) {
+// AllRunnerNames lists the built-ins then every spec file's runner.
+func AllRunnerNames() ([]string, error) {
 	ss, err := specs()
 	if err != nil {
 		return nil, err

@@ -11,8 +11,8 @@ func home() string {
 	return h
 }
 
-// wdHome is $WD_HOME when set, else ~/.work-director.
-func wdHome() string {
+// WDHome is $WD_HOME when set, else ~/.work-director.
+func WDHome() string {
 	if h, ok := os.LookupEnv("WD_HOME"); ok {
 		return h
 	}

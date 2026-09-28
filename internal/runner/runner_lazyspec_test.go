@@ -284,7 +284,7 @@ attach = "myagent attach {session}"
 
 	t.Run("A Runner Can Be Defined By A File Of Commands", func(t *testing.T) {
 		t.Run("a ~/.work-director/runners/*.toml drives spawn, send, status, transcript, models", func(t *testing.T) {
-			known, err := allRunnerNames()
+			known, err := AllRunnerNames()
 			if err != nil {
 				t.Fatalf("allRunnerNames: %v", err)
 			}

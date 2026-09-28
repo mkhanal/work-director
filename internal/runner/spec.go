@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// specDir is where runner spec files live: ~/.work-director/runners.
-func specDir() string {
-	return filepath.Join(wdHome(), "runners")
+// SpecDir is where runner spec files live: ~/.work-director/runners.
+func SpecDir() string {
+	return filepath.Join(WDHome(), "runners")
 }
 
 // RunnerSpec is one runner file: the commands that drive a provider's CLI.
@@ -60,9 +60,9 @@ func loadSpecs(dir string) ([]RunnerSpec, error) {
 	return out, nil
 }
 
-// writeSpec validates a spec file's text and writes it under specDir as
+// WriteSpec validates a spec file's text and writes it under SpecDir as
 // <name>.toml, forcing the name field to the file's name.
-func writeSpec(name, text string) (string, error) {
+func WriteSpec(name, text string) (string, error) {
 	spec, err := parseSpecTOML(text)
 	if err != nil {
 		return "", err
@@ -73,10 +73,10 @@ func writeSpec(name, text string) (string, error) {
 	if spec.SessionID == "" {
 		return "", &RunnerError{Runner: name, Detail: "session_id regex is required (capture the session id in spawn output)"}
 	}
-	if err := os.MkdirAll(specDir(), 0o755); err != nil {
+	if err := os.MkdirAll(SpecDir(), 0o755); err != nil {
 		return "", err
 	}
-	file := filepath.Join(specDir(), name+".toml")
+	file := filepath.Join(SpecDir(), name+".toml")
 	replaced := regexp.MustCompile(`(?m)^name\s*=.*$`).ReplaceAllString(text, `name = "`+name+`"`)
 	if err := os.WriteFile(file, []byte(replaced), 0o644); err != nil {
 		return "", err
@@ -84,8 +84,8 @@ func writeSpec(name, text string) (string, error) {
 	return file, nil
 }
 
-// specTemplate is the starter file `wd runner init` writes.
-func specTemplate(name string) string {
+// SpecTemplate is the starter file `wd runner init` writes.
+func SpecTemplate(name string) string {
 	return `# ` + name + ` — a runner is one file of commands against a provider's CLI.
 # Placeholders are shell-quoted automatically: {cwd} {name} {brief} {model} {agent}
 # {session} {text} {home} {slug_cwd} {log} {name20}. Write commands exactly as you
@@ -154,7 +154,7 @@ func readFileOrEmpty(path string) string {
 
 // shell runs a spec command line through bash -lc in cwd.
 func shell(cmd, cwd string) (RunResult, error) {
-	return run([]string{"bash", "-lc", cmd}, cwd)
+	return Run([]string{"bash", "-lc", cmd}, cwd)
 }
 
 // specRunner adapts a RunnerSpec to the Runner interface.
@@ -188,8 +188,8 @@ func (r *specRunnerAdapter) Spawn(o SpawnOptions) (Handle, error) {
 	}
 	cmd := fill(r.spec.Spawn, common)
 	if r.spec.Detach {
-		log := filepath.Join(specDir(), fmt.Sprintf("%s-%d.log", r.spec.Name, time.Now().UnixMilli()))
-		pid, err := detach([]string{"bash", "-lc", cmd}, o.Cwd, log, specDir())
+		log := filepath.Join(SpecDir(), fmt.Sprintf("%s-%d.log", r.spec.Name, time.Now().UnixMilli()))
+		pid, err := detach([]string{"bash", "-lc", cmd}, o.Cwd, log, SpecDir())
 		if err != nil {
 			return Handle{}, err
 		}

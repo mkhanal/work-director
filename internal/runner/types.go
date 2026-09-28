@@ -19,10 +19,10 @@ import (
 // Handle is a live executor session: which runner, which session id, an
 // optional process ref for liveness, and the working directory.
 type Handle struct {
-	Runner  string
-	Session string
-	Ref     *string
-	Cwd     string
+	Runner  string  `json:"runner"`
+	Session string  `json:"session"`
+	Ref     *string `json:"ref"`
+	Cwd     string  `json:"cwd"`
 }
 
 // SpawnOptions is everything a runner needs to start a session. Optional
@@ -84,9 +84,9 @@ func exe(name string) (string, error) {
 	return found, nil
 }
 
-// run executes cmd in cwd, capturing stdout and stderr. A non-zero exit is a
+// Run executes cmd in cwd, capturing stdout and stderr. A non-zero exit is a
 // result, not an error; only spawn failures of the process itself error.
-func run(cmd []string, cwd string) (RunResult, error) {
+func Run(cmd []string, cwd string) (RunResult, error) {
 	path, err := exe(cmd[0])
 	if err != nil {
 		return RunResult{}, err

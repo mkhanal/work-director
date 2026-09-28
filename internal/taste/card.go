@@ -58,18 +58,18 @@ var Statuses = []Status{StatusCandidate, StatusAdopted, StatusRetired}
 type Scope string
 
 type Card struct {
-	ID        string
-	Title     string
-	Category  Category
-	Scope     []Scope
-	Kind      Kind
-	Status    Status
-	Always    bool
-	Enforce   []string
-	Evidence  []string
-	Statement string
-	Body      string
-	Path      string
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Category  Category `json:"category"`
+	Scope     []Scope  `json:"scope"`
+	Kind      Kind     `json:"kind"`
+	Status    Status   `json:"status"`
+	Always    bool     `json:"always"`
+	Enforce   []string `json:"enforce"`
+	Evidence  []string `json:"evidence"`
+	Statement string   `json:"statement"`
+	Body      string   `json:"body"`
+	Path      string   `json:"path"`
 }
 
 type CardError struct {
