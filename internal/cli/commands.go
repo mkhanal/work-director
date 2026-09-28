@@ -18,6 +18,7 @@ import (
 	"wd/internal/project"
 	"wd/internal/promotion"
 	"wd/internal/runner"
+	"wd/internal/serve"
 	"wd/internal/taste"
 )
 
@@ -1850,4 +1851,22 @@ func (c *Cli) distill(rest []string) error {
 	}
 	c.out(candidates, text)
 	return nil
+}
+
+func (c *Cli) serve(rest []string) error {
+	port := serve.DefaultPort
+	if p := str(c.Args, "port"); p != nil {
+		var n int
+		if _, err := fmt.Sscanf(*p, "%d", &n); err == nil && n > 0 {
+			port = n
+		}
+	}
+	cliPath := filepath.Join(executableDir(), "wd")
+	srv := serve.New(c.Ledger, c.Root, cliPath)
+	addr, err := srv.Start(port)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(c.Stdout, "serve: http://%s\n", addr)
+	select {}
 }
