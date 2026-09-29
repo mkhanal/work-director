@@ -39,6 +39,26 @@ func TestCommandsFailLoud(t *testing.T) {
 		}
 	})
 
+	t.Run("a tilde path with no home directory fails", func(t *testing.T) {
+		env := f.env(t, f.bin)
+		for i, kv := range env {
+			if strings.HasPrefix(kv, "HOME=") {
+				env[i] = "HOME="
+			}
+		}
+		for _, args := range [][]string{
+			{"worktree", "attach", t3, "~/wt"},
+			{"projects", "add", "homeless", "~/app", "--lazyspec", "n"},
+		} {
+			if code, out, errStr := f.runEnv(t, env, args...); code != 1 || !strings.Contains(errStr, "~/") {
+				t.Errorf("wd %s: exit %d, stdout %q, stderr %q; want 1 naming the path", strings.Join(args, " "), code, out, errStr)
+			}
+		}
+		if out := f.runOK(t, "worktree", "list", t3, "--json"); strings.Contains(out, "~") {
+			t.Fatalf("a worktree was recorded at an unexpanded path: %s", out)
+		}
+	})
+
 	t.Run("an unknown feedback subcommand fails", func(t *testing.T) {
 		if errStr := f.runFail(t, "feedback", "ad", "x"); !strings.Contains(errStr, "usage: wd feedback") {
 			t.Fatalf("stderr = %q, want feedback usage", errStr)

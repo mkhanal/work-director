@@ -36,7 +36,10 @@ func (c *Cli) projects(rest []string) error {
 		if _, ok := c.Projects[name]; ok {
 			return fail("project %s already exists", name)
 		}
-		path = expandHome(path)
+		path, err := project.ExpandHome(path)
+		if err != nil {
+			return err
+		}
 		csv := func(k string) []string {
 			if v := str(a, k); v != nil {
 				var out []string
@@ -99,18 +102,6 @@ func (c *Cli) projects(rest []string) error {
 		table = append(table, fmt.Sprintf("%s\t%s\t%s\t%s", p.Name, p.Runner, p.Mode, p.Path))
 	}
 	return c.out(list, strings.Join(table, "\n"))
-}
-
-// expandHome expands a leading ~ or ~/ to $HOME; ~user paths stay as given.
-func expandHome(path string) string {
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		home := os.Getenv("HOME")
-		if home == "" {
-			home = "~"
-		}
-		return home + path[1:]
-	}
-	return path
 }
 
 func (c *Cli) models(rest []string) error {
@@ -1533,7 +1524,11 @@ func (c *Cli) worktree(rest []string) error {
 		if len(rest) < 3 {
 			return fail("usage: wd worktree attach <id> <path> [--branch <b>]")
 		}
-		id, path := rest[1], expandHome(rest[2])
+		id := rest[1]
+		path, err := project.ExpandHome(rest[2])
+		if err != nil {
+			return err
+		}
 		wt, err := c.Ledger.AddWorktree(id, ledger.WorktreeInfo{
 			Path:   path,
 			Branch: str(a, "branch"),
