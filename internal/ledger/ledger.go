@@ -25,14 +25,17 @@ CREATE TABLE IF NOT EXISTS work (id TEXT PRIMARY KEY, project TEXT NOT NULL, tit
 CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), kind TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT, card TEXT, source TEXT NOT NULL, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS concern (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), text TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, decision TEXT, at TEXT NOT NULL, resolved_at TEXT);
-CREATE TABLE IF NOT EXISTS worktree (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), path TEXT NOT NULL, branch TEXT, kind TEXT NOT NULL, state TEXT NOT NULL, created TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS worktree (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), path TEXT NOT NULL, branch TEXT, kind TEXT NOT NULL, state TEXT NOT NULL, created TEXT NOT NULL, origin TEXT NOT NULL DEFAULT 'attached');
 CREATE TABLE IF NOT EXISTS filed (work TEXT PRIMARY KEY REFERENCES work(id), session TEXT NOT NULL, entries INTEGER NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS worktree_one_active_shared ON worktree(work) WHERE kind = 'shared' AND state = 'active';
 `
 
-// Additive migration for ledgers created before epics existed.
-var addedColumns = []struct{ col, decl string }{
-	{"parent", "TEXT"}, {"heading", "TEXT"}, {"claim", "TEXT"}, {"impact", "TEXT"},
+// Additive migration for ledgers created before epics and worktree origins
+// existed. A worktree row with no recorded origin reads as attached, so wd
+// never removes a directory it cannot prove it made.
+var addedColumns = []struct{ table, col, decl string }{
+	{"work", "parent", "TEXT"}, {"work", "heading", "TEXT"}, {"work", "claim", "TEXT"}, {"work", "impact", "TEXT"},
+	{"worktree", "origin", "TEXT NOT NULL DEFAULT 'attached'"},
 }
 
 type Ledger struct {
@@ -67,9 +70,24 @@ func New(path string) (*Ledger, error) {
 }
 
 func migrate(db *sql.DB) error {
-	rows, err := db.Query("PRAGMA table_info(work)")
+	for _, c := range addedColumns {
+		cols, err := columns(db, c.table)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains(cols, c.col) {
+			if _, err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", c.table, c.col, c.decl)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func columns(db *sql.DB, table string) ([]string, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 	var cols []string
@@ -79,21 +97,11 @@ func migrate(db *sql.DB) error {
 		var notNull, pk int
 		var dflt sql.NullString
 		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
-			return err
+			return nil, err
 		}
 		cols = append(cols, name)
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, c := range addedColumns {
-		if !slices.Contains(cols, c.col) {
-			if _, err := db.Exec(fmt.Sprintf("ALTER TABLE work ADD COLUMN %s %s", c.col, c.decl)); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return cols, rows.Err()
 }
 
 func (l *Ledger) Close() error { return l.db.Close() }
@@ -232,9 +240,9 @@ func scanConcern(s rowScanner) (core.Concern, error) {
 
 func scanWorktree(s rowScanner) (core.Worktree, error) {
 	var w core.Worktree
-	var kind, state string
+	var kind, state, origin string
 	var branch sql.NullString
-	err := s.Scan(&w.ID, &w.Work, &w.Path, &branch, &kind, &state, &w.Created)
+	err := s.Scan(&w.ID, &w.Work, &w.Path, &branch, &kind, &state, &origin, &w.Created)
 	if err != nil {
 		return core.Worktree{}, err
 	}
@@ -243,6 +251,9 @@ func scanWorktree(s rowScanner) (core.Worktree, error) {
 		return core.Worktree{}, fmt.Errorf("worktree %d: %w", w.ID, err)
 	}
 	if w.State, err = core.ParseWorktreeState(state); err != nil {
+		return core.Worktree{}, fmt.Errorf("worktree %d: %w", w.ID, err)
+	}
+	if w.Origin, err = core.ParseWorktreeOrigin(origin); err != nil {
 		return core.Worktree{}, fmt.Errorf("worktree %d: %w", w.ID, err)
 	}
 	return w, nil
@@ -631,6 +642,7 @@ type WorktreeInfo struct {
 	Path   string
 	Branch *string
 	Kind   core.WorktreeKind
+	Origin core.WorktreeOrigin
 }
 
 func (l *Ledger) AddWorktree(work string, w WorktreeInfo) (core.Worktree, error) {
@@ -641,9 +653,9 @@ func (l *Ledger) AddWorktree(work string, w WorktreeInfo) (core.Worktree, error)
 		}
 		var err error
 		wt, err = scanWorktree(tx.QueryRow(
-			`INSERT INTO worktree (work, path, branch, kind, state, created) VALUES (?, ?, ?, ?, ?, ?)
-			 RETURNING id, work, path, branch, kind, state, created`,
-			work, w.Path, w.Branch, string(w.Kind), string(core.WorktreeActive), now()))
+			`INSERT INTO worktree (work, path, branch, kind, state, origin, created) VALUES (?, ?, ?, ?, ?, ?, ?)
+			 RETURNING id, work, path, branch, kind, state, origin, created`,
+			work, w.Path, w.Branch, string(w.Kind), string(core.WorktreeActive), string(w.Origin), now()))
 		return err
 	})
 	if err != nil {
@@ -653,7 +665,7 @@ func (l *Ledger) AddWorktree(work string, w WorktreeInfo) (core.Worktree, error)
 }
 
 func (l *Ledger) Worktrees(work string) ([]core.Worktree, error) {
-	rows, err := l.db.Query(`SELECT id, work, path, branch, kind, state, created FROM worktree WHERE work = ? ORDER BY id`, work)
+	rows, err := l.db.Query(`SELECT id, work, path, branch, kind, state, origin, created FROM worktree WHERE work = ? ORDER BY id`, work)
 	if err != nil {
 		return nil, err
 	}
@@ -672,7 +684,7 @@ func (l *Ledger) Worktrees(work string) ([]core.Worktree, error) {
 func (l *Ledger) SetWorktreeState(id int, state core.WorktreeState) (core.Worktree, error) {
 	wt, err := scanWorktree(l.db.QueryRow(
 		`UPDATE worktree SET state = ? WHERE id = ?
-		 RETURNING id, work, path, branch, kind, state, created`, string(state), id))
+		 RETURNING id, work, path, branch, kind, state, origin, created`, string(state), id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return core.Worktree{}, fmt.Errorf("no worktree %d", id)
 	}

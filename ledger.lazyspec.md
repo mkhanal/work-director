@@ -40,6 +40,10 @@ With `codeChanged` true, `SoftDone` also requires a `pr` event.
 ## Worktrees Track Path Branch And State
 `AddWorktree` records an active worktree; `SetWorktreeState` moves it to merged or abandoned.
 
+## A Worktree Records Whether The Director Made It
+`AddWorktree` stores its origin, director or attached; `SetWorktreeState` can move it to removed.
+A worktree stored without an origin reads as attached.
+
 ## An Epic Has At Most One Active Shared Worktree
 `AddWorktree` and `SetWorktreeState` refuse a second active shared worktree
 for the same work; a merged or abandoned one no longer counts.
@@ -57,7 +61,7 @@ Work added to a file-backed ledger is still there after closing and reopening it
 `New` on a ledger written before epics — a `work` table without parent, heading, claim or impact, and no concern or worktree tables — reads every existing row, adds the missing columns and tables in place, and leaves all stored values untouched.
 
 ## Migration Is Additive Only
-Migration adds nullable columns and creates missing tables; it never drops, renames or rewrites a column or table, so a ledger migrated by the Go wd stays readable by the TypeScript wd, and opening an already-migrated ledger changes nothing.
+Migration adds columns that are nullable or carry a default and creates missing tables; it never drops, renames or rewrites a column or table, so a ledger migrated by the Go wd stays readable by the TypeScript wd, and opening an already-migrated ledger changes nothing.
 
 ## Events Concerns And Worktrees Belong To Existing Work
 `AddEvent`, `AddConcern` and `AddWorktree` for a work id that does not exist

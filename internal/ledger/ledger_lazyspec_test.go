@@ -371,7 +371,7 @@ func TestLedger(t *testing.T) {
 		wantErr(t, err, noWork)
 		_, err = l.AddConcern("nope", "x")
 		wantErr(t, err, noWork)
-		_, err = l.AddWorktree("nope", WorktreeInfo{Path: "/tmp/wt", Kind: core.WorktreePrivate})
+		_, err = l.AddWorktree("nope", WorktreeInfo{Path: "/tmp/wt", Kind: core.WorktreePrivate, Origin: core.OriginAttached})
 		wantErr(t, err, noWork)
 		var rows int
 		wantNoErr(t, l.db.QueryRow(`SELECT (SELECT COUNT(*) FROM event) + (SELECT COUNT(*) FROM concern) + (SELECT COUNT(*) FROM worktree)`).Scan(&rows))
@@ -384,7 +384,7 @@ func TestLedger(t *testing.T) {
 		l := newTestLedger(t)
 		w := add(t, l, "p", "t", AddOptions{})
 		branch := "feature/x"
-		wt, err := l.AddWorktree(w.ID, WorktreeInfo{Path: "/tmp/wt", Branch: &branch, Kind: core.WorktreePrivate})
+		wt, err := l.AddWorktree(w.ID, WorktreeInfo{Path: "/tmp/wt", Branch: &branch, Kind: core.WorktreePrivate, Origin: core.OriginAttached})
 		wantNoErr(t, err)
 		if wt.State != core.WorktreeActive || wt.Kind != core.WorktreePrivate || wt.Branch == nil || *wt.Branch != branch {
 			t.Fatalf("worktree = %+v, want active private with branch", wt)
@@ -401,20 +401,20 @@ func TestLedger(t *testing.T) {
 		l := newTestLedger(t)
 		epic := add(t, l, "p", "epic", AddOptions{Kind: core.WorkEpic})
 		other := add(t, l, "p", "other", AddOptions{Kind: core.WorkEpic})
-		first, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/first", Kind: core.WorktreeShared})
+		first, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/first", Kind: core.WorktreeShared, Origin: core.OriginDirector})
 		wantNoErr(t, err)
-		if _, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/second", Kind: core.WorktreeShared}); err == nil {
+		if _, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/second", Kind: core.WorktreeShared, Origin: core.OriginDirector}); err == nil {
 			t.Fatal("a second active shared worktree was stored")
 		}
-		if _, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/private", Kind: core.WorktreePrivate}); err != nil {
+		if _, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/private", Kind: core.WorktreePrivate, Origin: core.OriginAttached}); err != nil {
 			t.Fatalf("private worktree beside the shared one: %v", err)
 		}
-		if _, err := l.AddWorktree(other.ID, WorktreeInfo{Path: "/wt/other", Kind: core.WorktreeShared}); err != nil {
+		if _, err := l.AddWorktree(other.ID, WorktreeInfo{Path: "/wt/other", Kind: core.WorktreeShared, Origin: core.OriginDirector}); err != nil {
 			t.Fatalf("another epic's shared worktree: %v", err)
 		}
 		_, err = l.SetWorktreeState(first.ID, core.WorktreeMerged)
 		wantNoErr(t, err)
-		second, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/second", Kind: core.WorktreeShared})
+		second, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/second", Kind: core.WorktreeShared, Origin: core.OriginDirector})
 		if err != nil {
 			t.Fatalf("shared worktree after the first merged: %v", err)
 		}
@@ -669,7 +669,7 @@ CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT,
 		if _, err := l.AddConcern(epic.ID, "risk"); err != nil {
 			t.Fatalf("add concern: %v", err)
 		}
-		if _, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/tmp/wt", Kind: core.WorktreePrivate}); err != nil {
+		if _, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/tmp/wt", Kind: core.WorktreePrivate, Origin: core.OriginAttached}); err != nil {
 			t.Fatalf("add worktree: %v", err)
 		}
 		wantNoErr(t, l.Close())
@@ -703,6 +703,12 @@ CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT,
 				t.Fatalf("added column %s is NOT NULL; TypeScript wd inserts would break", col)
 			}
 		}
+		// A worktree insert that names no origin, as the TypeScript wd writes it.
+		if _, err := db.Exec(`INSERT INTO worktree (work, path, branch, kind, state, created) VALUES (?, ?, ?, ?, ?, ?)`,
+			"oldaaaa1", "/wt/ts", nil, "private", "active", "2026-09-01T10:00:00.000Z"); err != nil {
+			t.Fatalf("TypeScript-shaped worktree insert: %v", err)
+		}
+		migrated = dump(t, db)
 
 		// Opening an already-migrated ledger changes nothing.
 		l, err = New(path)
@@ -710,6 +716,44 @@ CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT,
 		wantNoErr(t, l.Close())
 		if again := dump(t, openDirect(t, path)); again != migrated {
 			t.Fatalf("second open changed the ledger:\n%s\nvs\n%s", again, migrated)
+		}
+	})
+
+	t.Run("A Worktree Records Whether The Director Made It", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "ledger.db")
+		l, err := New(path)
+		wantNoErr(t, err)
+		w := add(t, l, "p", "t", AddOptions{})
+		made, err := l.AddWorktree(w.ID, WorktreeInfo{Path: "/wt/made", Kind: core.WorktreePrivate, Origin: core.OriginDirector})
+		wantNoErr(t, err)
+		attached, err := l.AddWorktree(w.ID, WorktreeInfo{Path: "/wt/attached", Kind: core.WorktreePrivate, Origin: core.OriginAttached})
+		wantNoErr(t, err)
+		if made.Origin != core.OriginDirector || attached.Origin != core.OriginAttached {
+			t.Fatalf("origins = %q/%q, want director/attached", made.Origin, attached.Origin)
+		}
+		if got, err := l.SetWorktreeState(made.ID, core.WorktreeRemoved); err != nil || got.State != core.WorktreeRemoved || got.Origin != core.OriginDirector {
+			t.Fatalf("removed = %+v, %v, want removed director worktree", got, err)
+		}
+		wantNoErr(t, l.Close())
+
+		// A worktree table from before origins were recorded.
+		db := openDirect(t, path)
+		for _, stmt := range []string{
+			`ALTER TABLE worktree DROP COLUMN origin`,
+			`INSERT INTO worktree (work, path, branch, kind, state, created) VALUES ('` + w.ID + `', '/wt/old', 'wd-old', 'shared', 'active', '2026-09-01T10:00:00.000Z')`,
+		} {
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatalf("%s: %v", stmt, err)
+			}
+		}
+		wantNoErr(t, db.Close())
+		l, err = New(path)
+		wantNoErr(t, err)
+		t.Cleanup(func() { l.Close() })
+		for _, wt := range allWorktrees(t, l, w.ID) {
+			if wt.Origin != core.OriginAttached {
+				t.Fatalf("worktree %s origin = %q after migration, want attached", wt.Path, wt.Origin)
+			}
 		}
 	})
 }

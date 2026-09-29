@@ -158,3 +158,26 @@ and exits 1. A task whose latest report is not DONE is refused by
 STATUS report as `wd epic review` files a child's: DONE moves it to review,
 BLOCKED to blocked, NEEDS-INPUT to needs-input. A report already filed is not
 filed again.
+
+## Done Removes A Worktree Wd Made Once Its Branch Has Landed
+`wd done` and `wd set <id> done` remove each worktree wd made for the work,
+and its branch, when it is unlocked, has no local changes and its branch's
+content is already where it lands: the epic's shared branch for a task's
+private worktree; for an epic's shared worktree the project's default branch,
+or that branch's upstream, fetched first, when it has one. A squash-merged
+branch has landed. The worktree then lists as removed.
+
+## Done Keeps A Worktree That Would Lose Work
+A worktree wd made that is locked, has local changes or whose branch holds
+work not landed stays on disk with its branch and state. `wd done` still
+closes the work and exits 0, and raises a concern naming the worktree, each
+reason and `wd worktree remove <id>`.
+
+## Done Leaves Worktrees Wd Did Not Make
+A worktree registered with `wd worktree attach`, or stored without an origin,
+is never removed.
+
+## Worktree Remove Retries The Worktrees Done Work Kept
+`wd worktree remove <id>` applies the same rule to done work: it exits 0 once
+nothing stays and 1 naming each worktree that still does. On work not done it
+exits 1 and removes nothing.

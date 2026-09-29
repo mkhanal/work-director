@@ -76,7 +76,7 @@ func TestNewEnforcesForeignKeysAndWaitsOnLocks(t *testing.T) {
 	if _, err := l.AddConcern("nope", "x"); err == nil {
 		t.Fatal("concern for unknown work was stored")
 	}
-	if _, err := l.AddWorktree("nope", WorktreeInfo{Path: "/tmp/wt", Kind: core.WorktreePrivate}); err == nil {
+	if _, err := l.AddWorktree("nope", WorktreeInfo{Path: "/tmp/wt", Kind: core.WorktreePrivate, Origin: core.OriginAttached}); err == nil {
 		t.Fatal("worktree for unknown work was stored")
 	}
 	if err := l.File("nope", core.EventQuestion, "x", core.TranscriptMark{Session: "s", Entries: 1}); err == nil {
@@ -220,7 +220,7 @@ func TestStoredValuesOutsideTheDomainFailNamingTheValue(t *testing.T) {
 			w := add(t, l, "p", "t", AddOptions{})
 			_, err := l.AddFeedback("f", FeedbackOptions{})
 			wantNoErr(t, err)
-			_, err = l.AddWorktree(w.ID, WorktreeInfo{Path: "/tmp/wt", Kind: core.WorktreePrivate})
+			_, err = l.AddWorktree(w.ID, WorktreeInfo{Path: "/tmp/wt", Kind: core.WorktreePrivate, Origin: core.OriginAttached})
 			wantNoErr(t, err)
 			if _, err := l.db.Exec(c.corrupt); err != nil {
 				t.Fatalf("corrupt: %v", err)

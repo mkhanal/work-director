@@ -84,6 +84,7 @@ wd add my-app "Port dashboards"   --epic <e> --heading Dashboards
 wd epic spawn <e> --count 3       # N parallel sessions on one shared worktree (branch wd-<epic>)
 wd claim <task> <session> ; wd impact <task> <+path> ; wd conflict <e>   # who touches what, spot overlap
 wd worktree attach <task> <path> ; wd merge <task>  # on-demand workspaces; merge folds back after passing verify + clean conflicts
+wd worktree remove <id>           # retry: wd done removes the worktrees wd made once their branch landed; kept ones raise a concern
 wd concern add <task> "..." ; wd concern resolve <n> "<decision>"        # the decision queue
 wd decide <id> "<decision>"       # record a decision in one line; briefs and ASK: answers read it
 wd scan --adopt <candidate>       # promote a project rule to a global candidate card

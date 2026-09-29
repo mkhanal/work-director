@@ -715,7 +715,7 @@ func TestCoordinator(t *testing.T) {
 			t.Fatalf("epic session: %v", err)
 		}
 		reaches("epic runner, no worktree", "epic-runner", "ses_claim", "/repo/proj")
-		wt, err := l.AddWorktree(epic.ID, ledger.WorktreeInfo{Path: "/wt/shared", Kind: core.WorktreeShared})
+		wt, err := l.AddWorktree(epic.ID, ledger.WorktreeInfo{Path: "/wt/shared", Kind: core.WorktreeShared, Origin: core.OriginDirector})
 		if err != nil {
 			t.Fatalf("shared worktree: %v", err)
 		}
@@ -740,7 +740,7 @@ func TestCoordinator(t *testing.T) {
 		if err := l.SetSession(epic.ID, ledger.SessionInfo{Runner: "epic-runner", Session: "ses_e", Cwd: "/epic/own"}); err != nil {
 			t.Fatalf("epic session: %v", err)
 		}
-		first, err := l.AddWorktree(epic.ID, ledger.WorktreeInfo{Path: "/wt/first", Kind: core.WorktreeShared})
+		first, err := l.AddWorktree(epic.ID, ledger.WorktreeInfo{Path: "/wt/first", Kind: core.WorktreeShared, Origin: core.OriginDirector})
 		if err != nil {
 			t.Fatalf("shared worktree: %v", err)
 		}
@@ -772,7 +772,7 @@ func TestCoordinator(t *testing.T) {
 		if _, err := l.SetWorktreeState(first.ID, core.WorktreeMerged); err != nil {
 			t.Fatalf("merge worktree: %v", err)
 		}
-		if _, err := l.AddWorktree(epic.ID, ledger.WorktreeInfo{Path: "/wt/second", Kind: core.WorktreeShared}); err != nil {
+		if _, err := l.AddWorktree(epic.ID, ledger.WorktreeInfo{Path: "/wt/second", Kind: core.WorktreeShared, Origin: core.OriginDirector}); err != nil {
 			t.Fatalf("shared worktree: %v", err)
 		}
 		h, _, err = Handle(l, w, proj)

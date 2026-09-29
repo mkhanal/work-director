@@ -71,6 +71,16 @@ const (
 	WorktreeActive    WorktreeState = "active"
 	WorktreeMerged    WorktreeState = "merged"
 	WorktreeAbandoned WorktreeState = "abandoned"
+	WorktreeRemoved   WorktreeState = "removed"
+)
+
+// WorktreeOrigin says who made a worktree. Only a director-made worktree is
+// ever removed by wd: an attached one belongs to whoever created it.
+type WorktreeOrigin string
+
+const (
+	OriginDirector WorktreeOrigin = "director"
+	OriginAttached WorktreeOrigin = "attached"
 )
 
 // A goal is an epic-like: work broken into tasks under one branch. Goals stay a
@@ -131,13 +141,14 @@ type Concern struct {
 }
 
 type Worktree struct {
-	ID      int           `json:"id"`
-	Work    string        `json:"work"`
-	Path    string        `json:"path"`
-	Branch  *string       `json:"branch"`
-	Kind    WorktreeKind  `json:"kind"`
-	State   WorktreeState `json:"state"`
-	Created string        `json:"created"`
+	ID      int            `json:"id"`
+	Work    string         `json:"work"`
+	Path    string         `json:"path"`
+	Branch  *string        `json:"branch"`
+	Kind    WorktreeKind   `json:"kind"`
+	State   WorktreeState  `json:"state"`
+	Origin  WorktreeOrigin `json:"origin"`
+	Created string         `json:"created"`
 }
 
 // TranscriptMark is a point in a session's transcript: the session and how
@@ -170,7 +181,8 @@ var (
 	EventKinds      = []EventKind{EventState, EventReport, EventVerify, EventPr, EventNote, EventSent, EventSpawn, EventAttach, EventQuestion, EventAnswer, EventDecision}
 	FeedbackSources = []FeedbackSource{FeedbackDirector, FeedbackNote, FeedbackAttached}
 	WorktreeKinds   = []WorktreeKind{WorktreeShared, WorktreePrivate}
-	WorktreeStates  = []WorktreeState{WorktreeActive, WorktreeMerged, WorktreeAbandoned}
+	WorktreeStates  = []WorktreeState{WorktreeActive, WorktreeMerged, WorktreeAbandoned, WorktreeRemoved}
+	WorktreeOrigins = []WorktreeOrigin{OriginDirector, OriginAttached}
 )
 
 func parse[T ~string](what string, known []T, s string) (T, error) {
@@ -202,6 +214,10 @@ func ParseWorktreeKind(s string) (WorktreeKind, error) {
 
 func ParseWorktreeState(s string) (WorktreeState, error) {
 	return parse("worktree state", WorktreeStates, s)
+}
+
+func ParseWorktreeOrigin(s string) (WorktreeOrigin, error) {
+	return parse("worktree origin", WorktreeOrigins, s)
 }
 
 // StaleAfter is how long open work may go without a state change or event

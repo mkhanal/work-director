@@ -147,11 +147,11 @@ func (f *cliFixture) seedLedger(t *testing.T) {
 	// reuse them instead of creating new git worktrees. The directories are
 	// created as real git worktrees by seedGitRepo.
 	sharedPath := filepath.Join(f.dir, "worktrees", "sample-app-epic-"+epic.ID)
-	if _, err := l.AddWorktree(epic.ID, ledger.WorktreeInfo{Path: sharedPath, Branch: strPtr("wd-" + epic.ID), Kind: core.WorktreeShared}); err != nil {
+	if _, err := l.AddWorktree(epic.ID, ledger.WorktreeInfo{Path: sharedPath, Branch: strPtr("wd-" + epic.ID), Kind: core.WorktreeShared, Origin: core.OriginDirector}); err != nil {
 		t.Fatalf("add shared worktree: %v", err)
 	}
 	privatePath := filepath.Join(f.dir, "worktrees", "sample-app-"+t2.ID)
-	if _, err := l.AddWorktree(t2.ID, ledger.WorktreeInfo{Path: privatePath, Branch: strPtr("wd-" + t2.ID), Kind: core.WorktreePrivate}); err != nil {
+	if _, err := l.AddWorktree(t2.ID, ledger.WorktreeInfo{Path: privatePath, Branch: strPtr("wd-" + t2.ID), Kind: core.WorktreePrivate, Origin: core.OriginDirector}); err != nil {
 		t.Fatalf("add private worktree: %v", err)
 	}
 	// t1 is running with a session and a DONE report, verify and PR.
