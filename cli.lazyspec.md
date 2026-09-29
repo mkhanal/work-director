@@ -114,6 +114,12 @@ blocked or soft-done, and running children with a session or a claim, keep
 their state, session and claim. It reports how many it spawned; a run that spawns none leaves the
 epic's state as it was.
 
+## Send And Report Reach A Child Where Its Epic's Pass Does
+`wd send` and `wd report` on a child with no session of its own reach its
+claim, with its epic's runner else its project's, in its epic's active
+shared worktree else the project's path: the session `wd epic review`
+coordinates with.
+
 ## A Claim Names Someone
 `wd claim <id>` on work with no session, and `wd claim <id> ""`, exit 1
 with the claim usage and leave the claim as it was.

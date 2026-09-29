@@ -88,7 +88,7 @@ escalated again.
 ## A Child Without Its Own Runner Or Directory Uses Its Epic's Then Its Project's
 A child with no runner coordinates with its epic's runner, else its
 project's; with no cwd it works in its epic's active shared worktree, else
-the project's path — the same session `wd send` and `wd report` reach.
+the project's path.
 
 ## Sending Records The Ref The Runner Returns
 `Send` continues a child's session and records the ref the runner returns,

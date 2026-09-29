@@ -2,6 +2,7 @@ package cli
 
 import (
 	"database/sql"
+	"fmt"
 	"encoding/json"
 	"io"
 	"net"
@@ -1010,6 +1011,88 @@ func TestEpicRunSpawnsOnlyChildrenNotYetUnderWay(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+func TestSendAndReportReachAChildWhereItsEpicsPassDoes(t *testing.T) {
+	f := newCLIFixture(t)
+	bin := t.TempDir()
+	recorder := "#!/usr/bin/env bash\nmkdir -p \"$WD_FAKE_STATE\"\n" +
+		"printf '%s|%s|%s|%s\\n' \"$1\" \"$2\" \"$3\" \"$PWD\" >> \"$WD_FAKE_STATE/recorder.log\"\n" +
+		"case \"$2\" in status) echo 'state: waiting';; export) echo 'STATUS: DONE';; *) echo ok;; esac\n"
+	if err := os.WriteFile(filepath.Join(bin, "recorder"), []byte(recorder), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"rec-epic", "rec-project"} {
+		spec := fmt.Sprintf("name = %[1]q\nspawn = \"recorder %[1]s run {brief}\"\nsession_id = 'session=(\\S+)'\n"+
+			"send = \"recorder %[1]s send {session} {text}\"\nstatus = \"recorder %[1]s status {session}\"\n"+
+			"running = 'state: *running'\nwaiting = 'state: *waiting'\nexited = 'state: *exited'\n"+
+			"transcript = \"recorder %[1]s export {session}\"\nattach = \"recorder %[1]s attach {session}\"\n", name)
+		if err := os.WriteFile(filepath.Join(f.wdHome, "runners", name+".toml"), []byte(spec), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := f.env(t, bin+string(os.PathListSeparator)+f.bin)
+	run := func(args ...string) string {
+		t.Helper()
+		code, out, errStr := f.runEnv(t, env, args...)
+		if code != 0 {
+			t.Fatalf("wd %s exited %d: %s", strings.Join(args, " "), code, errStr)
+		}
+		return out
+	}
+	run("projects", "add", "recorded", f.sample, "--runner", "rec-project", "--lazyspec", "n")
+	child := func(epic, claim string) string {
+		t.Helper()
+		id := jsonString(t, run("add", "recorded", "Child of "+epic, "--epic", epic, "--json"), "id")
+		run("claim", id, claim)
+		run("set", id, "running")
+		return id
+	}
+	bare := jsonString(t, run("add", "recorded", "Epic of its project", "--kind", "epic", "--json"), "id")
+	own := jsonString(t, run("add", "recorded", "Epic with its own runner", "--kind", "epic", "--json"), "id")
+	run("attach", own, "ses_epic", "--runner", "rec-epic")
+	shared := filepath.Join(f.dir, "shared")
+	if err := os.MkdirAll(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	if _, err := l.AddWorktree(own, ledger.WorktreeInfo{Path: shared, Kind: core.WorktreeShared}); err != nil {
+		t.Fatalf("shared worktree: %v", err)
+	}
+	l.Close()
+
+	for _, c := range []struct {
+		epic, claim, runner, dir string
+	}{
+		{bare, "ses_bare", "rec-project", f.sample},
+		{own, "ses_own", "rec-epic", shared},
+	} {
+		id := child(c.epic, c.claim)
+		log := filepath.Join(f.dir, "fake-state", "recorder.log")
+		reached := func(what string, args ...string) {
+			t.Helper()
+			if err := os.Remove(log); err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			run(args...)
+			data, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatalf("%s: nothing reached a runner: %v", what, err)
+			}
+			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+				parts := strings.Split(line, "|")
+				if len(parts) != 4 || parts[0] != c.runner || parts[2] != c.claim || parts[3] != c.dir {
+					t.Errorf("%s reached %q, want %s %s in %s", what, line, c.runner, c.claim, c.dir)
+				}
+			}
+		}
+		reached("wd send", "send", id, "hello")
+		reached("wd epic review", "epic", "review", c.epic)
+		reached("wd report", "report", id)
+	}
+}
 
 func TestAClaimNamesSomeone(t *testing.T) {
 	f := newCLIFixture(t)
