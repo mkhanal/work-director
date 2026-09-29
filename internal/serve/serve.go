@@ -26,18 +26,16 @@ const DefaultPort = 8787
 type Server struct {
 	addr    string
 	ledger  *ledger.Ledger
-	root    string
 	cliPath string
 	hub     *wsHub
 	mu      sync.Mutex
 }
 
-// New creates a serve server over the given ledger. root is the repo root
-// (where taste/cards lives); cliPath is the path to the wd CLI binary.
-func New(l *ledger.Ledger, root, cliPath string) *Server {
+// New creates a serve server over the given ledger; cliPath is the path to
+// the wd CLI binary.
+func New(l *ledger.Ledger, cliPath string) *Server {
 	return &Server{
 		ledger:  l,
-		root:    root,
 		cliPath: cliPath,
 		hub:     newWSHub(),
 	}
@@ -302,7 +300,6 @@ func (s *Server) runCLI(argv []string) (int, string) {
 		cli = os.Args[0]
 	}
 	cmd := exec.Command(cli, argv...)
-	cmd.Dir = s.root
 	out, err := cmd.CombinedOutput()
 	code := 0
 	if err != nil {

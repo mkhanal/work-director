@@ -25,7 +25,7 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatalf("ledger: %v", err)
 	}
 	t.Cleanup(func() { l.Close() })
-	return New(l, dir, "")
+	return New(l, "")
 }
 
 func TestServe(t *testing.T) {
@@ -147,7 +147,7 @@ func webSocketServesLiveEvents(t *testing.T) {
 	if err := l.AddEvent(w.ID, core.EventNote, "before serve"); err != nil {
 		t.Fatalf("event before serve: %v", err)
 	}
-	addr, _, err := New(l, dir, "/bin/echo").Start(0)
+	addr, _, err := New(l, "/bin/echo").Start(0)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
