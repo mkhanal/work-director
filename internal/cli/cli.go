@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 
+	tastecards "wd/taste/cards"
+
 	"wd/internal/brief"
 	"wd/internal/coordinator"
 	"wd/internal/core"
@@ -170,10 +172,26 @@ func Run(args []string) error {
 	return c.dispatch()
 }
 
-// tasteCardsDir locates the taste cards of the work-director checkout:
+// loadTasteCards reads the rule cards of a work-director checkout when there
+// is one, so an edited card reaches the next brief without a rebuild, and
+// the cards this binary was built with otherwise. The checkout is
 // $WD_ROOT/taste/cards, else taste/cards beside the executable or in the
-// working directory.
-func tasteCardsDir() (string, error) {
+// working directory; checkout is its cards directory, empty for the
+// built-in cards.
+func loadTasteCards() (cards []taste.Card, checkout string, err error) {
+	checkout, err = tasteCheckout()
+	if err != nil {
+		return nil, "", err
+	}
+	if checkout == "" {
+		cards, err = taste.LoadCards(tastecards.Snapshot, "built-in taste/cards")
+		return cards, "", err
+	}
+	cards, err = taste.LoadCards(os.DirFS(checkout), checkout)
+	return cards, checkout, err
+}
+
+func tasteCheckout() (string, error) {
 	if r := os.Getenv("WD_ROOT"); r != "" {
 		return filepath.Join(r, "taste", "cards"), nil
 	}
@@ -185,8 +203,7 @@ func tasteCardsDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	searched := []string{filepath.Dir(exe), wd}
-	for _, base := range searched {
+	for _, base := range []string{filepath.Dir(exe), wd} {
 		dir := filepath.Join(base, "taste", "cards")
 		st, err := os.Stat(dir)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -199,7 +216,7 @@ func tasteCardsDir() (string, error) {
 			return dir, nil
 		}
 	}
-	return "", fail("taste cards not found: no taste/cards in %s; set WD_ROOT to the work-director checkout", strings.Join(searched, " or "))
+	return "", nil
 }
 
 const usage = "wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve|doctor> [--json]"
@@ -441,11 +458,7 @@ func (c *Cli) briefFor(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cardsDir, err := tasteCardsDir()
-	if err != nil {
-		return "", err
-	}
-	cards, err := taste.LoadCards(cardsDir)
+	cards, _, err := loadTasteCards()
 	if err != nil {
 		return "", err
 	}

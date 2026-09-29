@@ -21,5 +21,8 @@ Constitution lists exactly the `always: true` cards as title plus statement; ren
 ## An Enforce Id Absent From The Presets Fails The Build
 Any `enforce:` entry whose rule is not in `presets/biome/biome.json` or `presets/eslint/rules.json` aborts the build naming card and id.
 
+## A Built Binary Embeds Every Card Of Its Tree
+The cards embedded at build time are exactly the cards under `taste/cards`, field for field.
+
 ## The Agents Fragment Is Wrapped In Taste Markers
 `dist/AGENTS.fragment.md` starts with `<!-- taste:begin -->`, ends with `<!-- taste:end -->`, and carries the constitution between them.

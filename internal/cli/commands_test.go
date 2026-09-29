@@ -124,19 +124,6 @@ func TestCommandsFailLoud(t *testing.T) {
 			t.Fatalf("models = %s, want claude: []", out)
 		}
 	})
-
-	t.Run("without taste cards a brief fails naming WD_ROOT", func(t *testing.T) {
-		var env []string
-		for _, kv := range f.env(t, f.bin) {
-			if !strings.HasPrefix(kv, "WD_ROOT=") {
-				env = append(env, kv)
-			}
-		}
-		code, _, errStr := f.runEnv(t, env, "brief", t3)
-		if code != 1 || !strings.Contains(errStr, "WD_ROOT") {
-			t.Fatalf("exit %d, stderr %q; want 1 naming WD_ROOT", code, errStr)
-		}
-	})
 }
 
 func TestEpicSpawnRecordsTheRunnerOfItsLastSession(t *testing.T) {
