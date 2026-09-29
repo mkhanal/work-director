@@ -23,9 +23,9 @@ import (
 	"wd/internal/taste"
 )
 
-// stringFlags are the CLI's --key value flags. A bare --key consumes the next
-// token as its value, matching Node's parseArgs with strict: false.
-var stringFlags = map[string]bool{
+// valueFlags are the CLI's --key value flags, given as --key value or
+// --key=value; every other --key is a switch and takes no value.
+var valueFlags = map[string]bool{
 	"runner": true, "model": true, "mode": true, "agent": true, "count": true,
 	"tail": true, "stack": true, "workflow": true, "verify": true, "lazyspec": true,
 	"kind": true, "epic": true, "heading": true, "detail": true, "project": true,
@@ -33,10 +33,12 @@ var stringFlags = map[string]bool{
 	"timeout": true, "port": true, "ref": true, "cwd": true,
 }
 
-// Args is one parsed command line: positionals and flags.
+// Args is one parsed command line: positionals, value flags (never empty)
+// and switches.
 type Args struct {
 	Positional []string
-	Flags      map[string]any
+	Values     map[string]string
+	Switches   map[string]bool
 }
 
 // normalize moves single-dash tokens past --, where parseArgs keeps them
@@ -56,36 +58,44 @@ func normalize(argv []string) []string {
 	return append(rest, append([]string{"--"}, singles...)...)
 }
 
-func parse(argv []string) Args {
-	var positional []string
-	flags := map[string]any{}
+// parse splits argv into positionals, value flags and switches. A value flag
+// with no value, or an empty one, and a switch given a value both fail.
+func parse(argv []string) (Args, error) {
+	a := Args{Values: map[string]string{}, Switches: map[string]bool{}}
 	after := false
 	toks := normalize(argv)
 	for i := 0; i < len(toks); i++ {
 		t := toks[i]
 		if after {
-			positional = append(positional, t)
+			a.Positional = append(a.Positional, t)
 			continue
 		}
 		if t == "--" {
 			after = true
 			continue
 		}
-		if strings.HasPrefix(t, "--") {
-			key, val, hasVal := strings.Cut(t[2:], "=")
-			if hasVal {
-				flags[key] = val
-			} else if stringFlags[key] && i+1 < len(toks) {
-				i++
-				flags[key] = toks[i]
-			} else {
-				flags[key] = true
-			}
+		if !strings.HasPrefix(t, "--") {
+			a.Positional = append(a.Positional, t)
 			continue
 		}
-		positional = append(positional, t)
+		key, val, hasVal := strings.Cut(t[2:], "=")
+		if !valueFlags[key] {
+			if hasVal {
+				return Args{}, fail("--%s takes no value", key)
+			}
+			a.Switches[key] = true
+			continue
+		}
+		if !hasVal && i+1 < len(toks) && !strings.HasPrefix(toks[i+1], "--") {
+			i++
+			val = toks[i]
+		}
+		if val == "" {
+			return Args{}, fail("--%s needs a value", key)
+		}
+		a.Values[key] = val
 	}
-	return Args{Positional: positional, Flags: flags}
+	return a, nil
 }
 
 // failError is a user-facing failure: the message is the whole output.
@@ -113,6 +123,10 @@ type Cli struct {
 
 // Run parses args, opens the ledger and projects, and dispatches the command.
 func Run(args []string) error {
+	parsed, err := parse(args)
+	if err != nil {
+		return err
+	}
 	wdHome, err := runner.WDHome()
 	if err != nil {
 		return err
@@ -146,8 +160,8 @@ func Run(args []string) error {
 		Worktrees:   worktreesDir,
 		Ledger:      l,
 		Projects:    projects,
-		Args:        parse(args),
-		JSON:        flag(parse(args), "json"),
+		Args:        parsed,
+		JSON:        flag(parsed, "json"),
 		Stdout:      os.Stdout,
 		Stderr:      os.Stderr,
 	}
@@ -274,11 +288,10 @@ func (c *Cli) jsonOut(v any) {
 	enc.Encode(v)
 }
 
+// str is the --k value flag, nil when absent.
 func str(a Args, k string) *string {
-	if v, ok := a.Flags[k]; ok {
-		if s, ok := v.(string); ok && s != "" {
-			return &s
-		}
+	if v, ok := a.Values[k]; ok {
+		return &v
 	}
 	return nil
 }
@@ -303,10 +316,7 @@ func positiveInt(a Args, k string, def int) (int, error) {
 	return n, nil
 }
 
-func flag(a Args, k string) bool {
-	_, ok := a.Flags[k]
-	return ok
-}
+func flag(a Args, k string) bool { return a.Switches[k] }
 
 // oneOf parses x as one of values, failing with the list.
 func oneOf[T ~string](values []T, x, what string) (T, error) {

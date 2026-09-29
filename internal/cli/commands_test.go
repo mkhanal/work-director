@@ -12,7 +12,7 @@ import (
 // record exactly what the user asked for.
 func TestCommandsFailLoud(t *testing.T) {
 	f := newCLIFixture(t)
-	epic, t1, t2, t3 := f.ids["epic"], f.ids["t1"], f.ids["t2"], f.ids["t3"]
+	t1, t2, t3 := f.ids["t1"], f.ids["t2"], f.ids["t3"]
 
 	t.Run("a project file that does not parse is never written", func(t *testing.T) {
 		errStr := f.runFail(t, "projects", "add", "bogus-mode", f.sample, "--mode", "bogus", "--lazyspec", "n")
@@ -57,18 +57,6 @@ func TestCommandsFailLoud(t *testing.T) {
 		id := jsonString(t, out, "id")
 		if errStr := f.runFail(t, "claim", id); !strings.Contains(errStr, "usage: wd claim") {
 			t.Fatalf("stderr = %q, want claim usage", errStr)
-		}
-	})
-
-	t.Run("numeric flags that do not parse fail", func(t *testing.T) {
-		for _, args := range [][]string{
-			{"report", t2, "--tail", "x"},
-			{"epic", "run", epic, "--wait", "--timeout", "30m"},
-			{"serve", "--port", "http"},
-		} {
-			if errStr := f.runFail(t, args...); !strings.Contains(errStr, "must be a") {
-				t.Errorf("wd %s: stderr %q, want the flag named", strings.Join(args, " "), errStr)
-			}
 		}
 	})
 

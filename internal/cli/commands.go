@@ -66,9 +66,6 @@ func (c *Cli) projects(rest []string) error {
 			return err
 		}
 		ls := str(a, "lazyspec")
-		if ls == nil && flag(a, "lazyspec") {
-			ls = ptr("y")
-		}
 		answer := "n"
 		if ls != nil {
 			answer = *ls

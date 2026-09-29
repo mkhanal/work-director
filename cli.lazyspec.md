@@ -79,3 +79,9 @@ work's brief lists its decisions and its resolved concerns' decisions under
 ## Every Json Command Writes One Document
 With `--json`, a command writes exactly one JSON document to stdout — no
 progress lines, no document per spawned session.
+
+## Flags That Do Not Parse Fail
+A value flag with no value (`--tail=`, or `--ref` last or before another
+flag), a switch given a value (`--json=x`), and a numeric flag that is not a
+positive integer (`--tail`, `--timeout`, `--port`, `--count`) exit 1 naming
+the flag; none falls back to its default.

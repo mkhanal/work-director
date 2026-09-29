@@ -575,3 +575,26 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		}
 	}
 }
+
+func TestFlagsThatDoNotParseFail(t *testing.T) {
+	f := newCLIFixture(t)
+	epic, t2, t3 := f.ids["epic"], f.ids["t2"], f.ids["t3"]
+	for _, c := range []struct {
+		args []string
+		flag string
+	}{
+		{[]string{"report", t2, "--tail", "x"}, "--tail"},
+		{[]string{"report", t2, "--tail="}, "--tail"},
+		{[]string{"report", t2, "--tail"}, "--tail"},
+		{[]string{"attach", t3, "ses_x", "--ref"}, "--ref"},
+		{[]string{"attach", t3, "ses_x", "--cwd", "--json"}, "--cwd"},
+		{[]string{"status", "--json=x"}, "--json"},
+		{[]string{"epic", "run", epic, "--wait", "--timeout", "30m"}, "--timeout"},
+		{[]string{"epic", "spawn", f.ids["planEpic"], "--count", "0"}, "--count"},
+		{[]string{"serve", "--port", "http"}, "--port"},
+	} {
+		if errStr := f.runFail(t, c.args...); !strings.Contains(errStr, c.flag) {
+			t.Errorf("wd %s: stderr %q, want %s named", strings.Join(c.args, " "), errStr, c.flag)
+		}
+	}
+}
