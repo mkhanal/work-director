@@ -164,7 +164,7 @@ func TestCoordinator(t *testing.T) {
 		if _, err := l.ResolveConcern(c.ID, "use modernc.org/sqlite as the database driver"); err != nil {
 			t.Fatalf("resolve concern: %v", err)
 		}
-		answer, err := KnownAnswer("which database driver should we use?", epic, []core.Work{child}, l)
+		answer, err := KnownAnswer("which database driver should we use?", []core.Work{epic, child}, l)
 		if err != nil {
 			t.Fatalf("knownAnswer: %v", err)
 		}
@@ -180,7 +180,7 @@ func TestCoordinator(t *testing.T) {
 		if _, err := l.AddEvent(child.ID, core.EventDecision, "the verify command is go test ./..."); err != nil {
 			t.Fatalf("add event: %v", err)
 		}
-		answer, err := KnownAnswer("which verify command should we run?", epic, []core.Work{child}, l)
+		answer, err := KnownAnswer("which verify command should we run?", []core.Work{epic, child}, l)
 		if err != nil {
 			t.Fatalf("knownAnswer: %v", err)
 		}
@@ -205,7 +205,7 @@ func TestCoordinator(t *testing.T) {
 		if _, err := l.AddEvent(epic.ID, core.EventDecision, "use the sqlite driver for the database"); err != nil {
 			t.Fatalf("add event: %v", err)
 		}
-		answer, err := KnownAnswer("sqlite driver", epic, nil, l)
+		answer, err := KnownAnswer("sqlite driver", []core.Work{epic}, l)
 		if err != nil {
 			t.Fatalf("knownAnswer: %v", err)
 		}
@@ -224,7 +224,7 @@ func TestCoordinator(t *testing.T) {
 		if _, err := l.ResolveConcern(c.ID, "the formatter and linter are go fmt and go vet"); err != nil {
 			t.Fatalf("resolve concern: %v", err)
 		}
-		answer, err := KnownAnswer("which formatter and linter do we use?", epic, nil, l)
+		answer, err := KnownAnswer("which formatter and linter do we use?", []core.Work{epic}, l)
 		if err != nil {
 			t.Fatalf("knownAnswer: %v", err)
 		}
@@ -238,7 +238,7 @@ func TestCoordinator(t *testing.T) {
 		if _, err := l.ResolveConcern(c2.ID, "the formatter is go fmt"); err != nil {
 			t.Fatalf("resolve concern: %v", err)
 		}
-		answer, err = KnownAnswer("which formatter do we use?", epic, nil, l)
+		answer, err = KnownAnswer("which formatter do we use?", []core.Work{epic}, l)
 		if err != nil {
 			t.Fatalf("knownAnswer: %v", err)
 		}

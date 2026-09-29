@@ -145,3 +145,16 @@ the flag; none falls back to its default.
 1 saying the executor's report has not arrived yet; it records no event and
 leaves the state as it was. A STATUS line of NEEDS-INPUT files its report and
 exits 0.
+
+## A Standalone Task Closes Through The CLI Alone
+A task with no epic goes from queued to done through `wd add`, `wd spawn`,
+`wd report`, `wd verify`, `wd pr`, `wd soft-done` and `wd done`; nothing
+else writes the ledger. `wd report` on a task with no session files nothing
+and exits 1. A task whose latest report is not DONE is refused by
+`wd soft-done`, even in review with a passing verify and a PR.
+
+## Report Files What The Coordinator Would
+`wd report` on running or needs-input work, with or without an epic, files a
+STATUS report as `wd epic review` files a child's: DONE moves it to review,
+BLOCKED to blocked, NEEDS-INPUT to needs-input. A report already filed is not
+filed again.

@@ -125,7 +125,7 @@ wd models                             # detected runners only: whatever each pro
                                       # codex debug models; claude has no list → their own pickers)
 wd add my-app "Make the import idempotent"
 wd spawn <id> --model fable           # forwards --model to the provider's CLI
-wd report <id>                    # reads the DONE/BLOCKED status, moves it to review
+wd report <id>                    # files the STATUS report once, moves it to review/blocked/needs-input
 wd verify <id>                    # runs the project's verify in the executor's worktree
 wd pr <id> <url> && wd soft-done <id> && wd done <id>
 ```
