@@ -2,12 +2,14 @@ package cli
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
 	"wd/internal/core"
+	"wd/internal/ledger"
 )
 
 // Every requirement in cli.lazyspec.md is married to a test here. The schema
@@ -199,6 +201,104 @@ func TestDoctorExitsZeroWhateverItFinds(t *testing.T) {
 	}
 	if !strings.Contains(out, "not detected") || !strings.Contains(out, "no git repo") {
 		t.Fatalf("doctor report = %q", out)
+	}
+}
+
+func TestRunnerListShowsWhichRunnersAreDetected(t *testing.T) {
+	f := newCLIFixture(t)
+	_, out, _ := f.runEnv(t, f.envWithPath(t, f.pathWith(t, "claude", "myagent")), "runner", "list", "--json")
+	var list []map[string]any
+	if err := json.Unmarshal([]byte(out), &list); err != nil {
+		t.Fatalf("runner list --json: %v\n%s", err, out)
+	}
+	got := map[string]map[string]any{}
+	for _, r := range list {
+		assertKeys(t, r, []string{"builtin", "command", "detected", "path", "runner"})
+		got[r["runner"].(string)] = r
+	}
+	want := map[string][2]bool{ // runner: {builtin, detected}
+		"claude": {true, true}, "opencode": {true, false}, "codex": {true, false}, "ao": {true, false},
+		"myagent": {false, true}, "planner": {false, false}, "advisor": {false, false},
+	}
+	for name, w := range want {
+		r, ok := got[name]
+		if !ok || r["builtin"] != w[0] || r["detected"] != w[1] || (r["path"] != nil) != w[1] {
+			t.Errorf("%s = %v, want builtin %v detected %v with a path when detected", name, r, w[0], w[1])
+		}
+	}
+	_, text, _ := f.runEnv(t, f.envWithPath(t, f.pathWith(t, "claude")), "runner", "list")
+	if !strings.Contains(text, "claude") || !strings.Contains(text, "not detected") {
+		t.Fatalf("runner list = %q, want detection per runner", text)
+	}
+}
+
+func TestModelsCoversOnlyDetectedRunners(t *testing.T) {
+	f := newCLIFixture(t)
+	env := f.envWithPath(t, f.pathWith(t, "opencode"))
+	code, out, errStr := f.runEnv(t, env, "models", "--json")
+	if code != 0 {
+		t.Fatalf("models exited %d\n%s", code, errStr)
+	}
+	var rows map[string][]string
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("models --json: %v\n%s", err, out)
+	}
+	if len(rows) != 1 || len(rows["opencode"]) == 0 {
+		t.Fatalf("models = %v, want only opencode", rows)
+	}
+	code, _, errStr = f.runEnv(t, env, "models", "codex")
+	if code != 1 {
+		t.Fatalf("models codex exited %d, want 1", code)
+	}
+	assertNotDetected(t, errStr, "codex")
+}
+
+func TestSpawningToAnUndetectedRunnerFailsBeforeAnythingChanges(t *testing.T) {
+	f := newCLIFixture(t)
+	env := f.envWithPath(t, f.pathWith(t, "claude"))
+	standalone, planEpic, epic, t3 := f.ids["standalone"], f.ids["planEpic"], f.ids["epic"], f.ids["t3"]
+	for _, args := range [][]string{
+		{"spawn", standalone, "--runner", "codex"},
+		{"epic", "plan", planEpic, "--runner", "codex"},
+		{"epic", "spawn", planEpic, "--runner", "codex"},
+		{"epic", "run", epic, "--runner", "codex"},
+	} {
+		code, _, errStr := f.runEnv(t, env, args...)
+		if code != 1 {
+			t.Fatalf("wd %s exited %d, want 1\n%s", strings.Join(args, " "), code, errStr)
+		}
+		assertNotDetected(t, errStr, "codex")
+	}
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	defer l.Close()
+	for _, id := range []string{standalone, planEpic, t3} {
+		w, err := l.Get(id)
+		if err != nil {
+			t.Fatalf("get %s: %v", id, err)
+		}
+		if w.State != core.StateQueued || w.Cwd != nil || w.Session != nil {
+			t.Errorf("%s = state %s cwd %v session %v, want untouched", id, w.State, w.Cwd, w.Session)
+		}
+	}
+	wts, err := l.Worktrees(planEpic)
+	if err != nil {
+		t.Fatalf("worktrees: %v", err)
+	}
+	if len(wts) != 0 {
+		t.Errorf("worktrees for %s = %v, want none", planEpic, wts)
+	}
+}
+
+// assertNotDetected asserts errStr is the not-detected guidance for runner.
+func assertNotDetected(t *testing.T, errStr, runner string) {
+	t.Helper()
+	for _, want := range []string{runner, "not found on PATH", "wd runner init"} {
+		if !strings.Contains(errStr, want) {
+			t.Fatalf("stderr %q does not contain %q", errStr, want)
+		}
 	}
 }
 

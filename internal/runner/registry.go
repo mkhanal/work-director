@@ -18,6 +18,13 @@ var builtin = map[string]Runner{
 	"ao":       ao,
 }
 
+// IsBuiltin reports whether name is one of the foundation adapters rather
+// than a spec file.
+func IsBuiltin(name string) bool {
+	_, ok := builtin[name]
+	return ok
+}
+
 func builtinNames() []string {
 	out := make([]string, 0, len(builtin))
 	for name := range builtin {
@@ -83,6 +90,32 @@ func RunnerNamed(name string) (Runner, error) {
 	}
 	return nil, fmt.Errorf("no runner named %q; known built-ins: %s. Add ~/.work-director/runners/%s.toml (see wd runner init)",
 		name, strings.Join(builtinNames(), ", "), name)
+}
+
+// NotDetectedError is a registered runner whose command is not on PATH, so
+// nothing can be spawned to it on this host.
+type NotDetectedError struct {
+	Runner  string
+	Command string
+}
+
+func (e *NotDetectedError) Error() string {
+	return fmt.Sprintf("runner %s is not detected: %q not found on PATH. Install it, or add a provider that is not built in with wd runner init <name>; wd doctor lists what is detected",
+		e.Runner, e.Command)
+}
+
+// DetectedRunner resolves a runner to spawn to: registered and with its
+// command on PATH, else a NotDetectedError.
+func DetectedRunner(name string) (Runner, error) {
+	r, err := RunnerNamed(name)
+	if err != nil {
+		return nil, err
+	}
+	a := availability(r)
+	if !a.Detected {
+		return nil, &NotDetectedError{Runner: a.Runner, Command: a.Command}
+	}
+	return r, nil
 }
 
 // Availability is whether one registered runner can be used on this host:

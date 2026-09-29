@@ -121,7 +121,7 @@ it installs lazyspec in itself.
 Pick the mechanism, then the model — both chosen live, never from a list the director keeps:
 
 ```
-wd models                             # whatever each provider's own CLI prints (opencode models,
+wd models                             # detected runners only: whatever each provider's own CLI prints (opencode models,
                                       # codex debug models; claude/AO have no list → their own pickers)
 wd add my-app "Make the import idempotent"
 wd spawn <id> --model fable           # forwards --model to the provider's CLI
@@ -140,7 +140,7 @@ wd runner init myagent                # writes ~/.work-director/runners/myagent.
                                       # the commands, placeholders {cwd} {brief} {model} {session}
                                       # are shell-quoted for you; session_id regex names the session
 wd runner add myagent ~/.work-director/runners/myagent.toml
-wd runner list                        # built-ins + files, and where each file lives
+wd runner list                        # built-ins + files, where each lives, detected or not
 wd spawn <id> --runner myagent --model victory/1
 ```
 

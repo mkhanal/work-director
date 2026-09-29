@@ -30,3 +30,8 @@ Every runner besides the four foundation adapters is a TOML file under `~/.work-
 Each built-in and spec-file runner names the command it runs (a spec's is
 the first word of its spawn line); it is detected, with the resolved path,
 when that command is on PATH. Not detected is a fact, never an error.
+
+## Only A Detected Runner Resolves For Spawning
+Resolving a runner to spawn fails when its command is not on PATH. The
+error names the runner and its command, says it was not found on PATH, and
+points at `wd runner init` for a provider that is not built in.
