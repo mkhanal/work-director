@@ -39,26 +39,18 @@ func repoRoot(t *testing.T) string {
 	return root
 }
 
-// newCLIFixture builds a fixture under $HOME (macOS symlinks /var, which would
-// desync the fake runners' $PWD transcript slug from the CLI's logical path).
+// newCLIFixture builds a fixture in the test's own temp directory, resolved
+// through symlinks: macOS links /var to /private/var, and the fake runners'
+// $PWD transcript slug must match the CLI's path.
 func newCLIFixture(t *testing.T) *cliFixture {
 	t.Helper()
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go not on PATH")
 	}
-	home, err := os.UserHomeDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
-		t.Fatalf("user home: %v", err)
+		t.Fatalf("resolve temp dir: %v", err)
 	}
-	base := filepath.Join(home, ".wd-cli-tests")
-	if err := os.MkdirAll(base, 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", base, err)
-	}
-	dir, err := os.MkdirTemp(base, "fixture-")
-	if err != nil {
-		t.Fatalf("mktemp: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
 	f := &cliFixture{
 		dir:    dir,
 		wdHome: filepath.Join(dir, "wd-home"),
