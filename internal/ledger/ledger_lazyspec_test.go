@@ -365,15 +365,12 @@ func TestLedger(t *testing.T) {
 
 	t.Run("Events Concerns And Worktrees Belong To Existing Work", func(t *testing.T) {
 		l := newTestLedger(t)
-		if err := l.AddEvent("nope", core.EventNote, "x"); err == nil {
-			t.Fatal("event for unknown work was stored")
-		}
-		if _, err := l.AddConcern("nope", "x"); err == nil {
-			t.Fatal("concern for unknown work was stored")
-		}
-		if _, err := l.AddWorktree("nope", WorktreeInfo{Path: "/tmp/wt", Kind: core.WorktreePrivate}); err == nil {
-			t.Fatal("worktree for unknown work was stored")
-		}
+		const noWork = "no work nope; wd status for known work items"
+		wantErr(t, l.AddEvent("nope", core.EventNote, "x"), noWork)
+		_, err := l.AddConcern("nope", "x")
+		wantErr(t, err, noWork)
+		_, err = l.AddWorktree("nope", WorktreeInfo{Path: "/tmp/wt", Kind: core.WorktreePrivate})
+		wantErr(t, err, noWork)
 		var rows int
 		wantNoErr(t, l.db.QueryRow(`SELECT (SELECT COUNT(*) FROM event) + (SELECT COUNT(*) FROM concern) + (SELECT COUNT(*) FROM worktree)`).Scan(&rows))
 		if rows != 0 {

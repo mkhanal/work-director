@@ -514,11 +514,19 @@ func (l *Ledger) LastEventID() (int, error) {
 }
 
 func (l *Ledger) AddConcern(work, text string) (core.Concern, error) {
-	c, err := scanConcern(l.db.QueryRow(
-		`INSERT INTO concern (work, text, at) VALUES (?, ?, ?)
-		 RETURNING id, work, text, resolved, decision, at, resolved_at`, work, text, now()))
+	var c core.Concern
+	err := l.inTx(func(tx *sql.Tx) error {
+		if _, err := getWork(tx, work); err != nil {
+			return err
+		}
+		var err error
+		c, err = scanConcern(tx.QueryRow(
+			`INSERT INTO concern (work, text, at) VALUES (?, ?, ?)
+			 RETURNING id, work, text, resolved, decision, at, resolved_at`, work, text, now()))
+		return err
+	})
 	if err != nil {
-		return core.Concern{}, fmt.Errorf("concern insert failed: %w", err)
+		return core.Concern{}, err
 	}
 	return c, nil
 }
@@ -613,12 +621,20 @@ type WorktreeInfo struct {
 }
 
 func (l *Ledger) AddWorktree(work string, w WorktreeInfo) (core.Worktree, error) {
-	wt, err := scanWorktree(l.db.QueryRow(
-		`INSERT INTO worktree (work, path, branch, kind, state, created) VALUES (?, ?, ?, ?, ?, ?)
-		 RETURNING id, work, path, branch, kind, state, created`,
-		work, w.Path, w.Branch, string(w.Kind), string(core.WorktreeActive), now()))
+	var wt core.Worktree
+	err := l.inTx(func(tx *sql.Tx) error {
+		if _, err := getWork(tx, work); err != nil {
+			return err
+		}
+		var err error
+		wt, err = scanWorktree(tx.QueryRow(
+			`INSERT INTO worktree (work, path, branch, kind, state, created) VALUES (?, ?, ?, ?, ?, ?)
+			 RETURNING id, work, path, branch, kind, state, created`,
+			work, w.Path, w.Branch, string(w.Kind), string(core.WorktreeActive), now()))
+		return err
+	})
 	if err != nil {
-		return core.Worktree{}, fmt.Errorf("worktree insert failed: %w", err)
+		return core.Worktree{}, err
 	}
 	return wt, nil
 }

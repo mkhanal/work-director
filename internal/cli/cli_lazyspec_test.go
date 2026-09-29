@@ -416,6 +416,23 @@ func (f *cliFixture) backdate(t *testing.T, id string, age time.Duration) {
 	}
 }
 
+// rowCount is the number of work, event, concern and worktree rows in the
+// fixture's ledger.
+func (f *cliFixture) rowCount(t *testing.T) int {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	defer db.Close()
+	var n int
+	if err := db.QueryRow(`SELECT (SELECT COUNT(*) FROM work) + (SELECT COUNT(*) FROM event) +
+		(SELECT COUNT(*) FROM concern) + (SELECT COUNT(*) FROM worktree)`).Scan(&n); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	return n
+}
+
 func TestADecisionIsRecordedInOneLineAndReachesTheBrief(t *testing.T) {
 	f := newCLIFixture(t)
 	id := f.ids["standalone"]
@@ -572,6 +589,28 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 	for _, r := range rows {
 		if r["id"] == f.ids["planEpic"] && r["runner"] != "opencode" {
 			t.Fatalf("epic runner = %v with session %v, want opencode (the last spawn's)", r["runner"], r["session"])
+		}
+	}
+}
+
+func TestCommandsOnUnknownWorkFailNamingIt(t *testing.T) {
+	f := newCLIFixture(t)
+	before := f.rowCount(t)
+	defer func() {
+		if after := f.rowCount(t); after != before {
+			t.Fatalf("ledger rows %d → %d, want nothing recorded", before, after)
+		}
+	}()
+	for _, args := range [][]string{
+		{"brief", "nope"}, {"spawn", "nope"}, {"send", "nope", "x"}, {"attach", "nope", "ses_x"},
+		{"report", "nope"}, {"verify", "nope"}, {"decide", "nope", "x"}, {"pr", "nope", "http://x"},
+		{"soft-done", "nope"}, {"set", "nope", "blocked"}, {"done", "nope"}, {"claim", "nope", "me"},
+		{"impact", "nope", "+src"}, {"merge", "nope"}, {"events", "nope"}, {"tasks", "nope"},
+		{"conflict", "nope"}, {"epic", "status", "nope"}, {"concern", "add", "nope", "x"},
+		{"concern", "list", "nope"}, {"worktree", "attach", "nope", f.sample}, {"worktree", "list", "nope"},
+	} {
+		if code, _, errStr := f.run(t, args...); code != 1 || !strings.Contains(errStr, "no work nope") {
+			t.Errorf("wd %s: exit %d, stderr %q, want 1 and no work nope", strings.Join(args, " "), code, errStr)
 		}
 	}
 }

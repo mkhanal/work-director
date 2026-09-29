@@ -80,6 +80,10 @@ work's brief lists its decisions and its resolved concerns' decisions under
 With `--json`, a command writes exactly one JSON document to stdout — no
 progress lines, no document per spawned session.
 
+## Commands On Unknown Work Fail Naming It
+Every command given a work id that does not exist — reading or writing —
+exits 1 with `no work <id>` and records nothing.
+
 ## Flags That Do Not Parse Fail
 A value flag with no value (`--tail=`, or `--ref` last or before another
 flag), a switch given a value (`--json=x`), and a numeric flag that is not a

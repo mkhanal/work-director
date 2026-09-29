@@ -1157,9 +1157,6 @@ func (c *Cli) decide(rest []string) error {
 		return fail("usage: wd decide <id> <text>")
 	}
 	id, text := rest[0], rest[1]
-	if _, err := c.Ledger.Get(id); err != nil {
-		return err
-	}
 	if err := c.Ledger.AddEvent(id, core.EventDecision, text); err != nil {
 		return err
 	}
@@ -1176,9 +1173,6 @@ func (c *Cli) pr(rest []string) error {
 		return fail("usage: wd pr <id> <url>")
 	}
 	id, url := rest[0], rest[1]
-	if _, err := c.Ledger.Get(id); err != nil {
-		return err
-	}
 	if err := c.Ledger.AddEvent(id, core.EventPr, url); err != nil {
 		return err
 	}
@@ -1574,9 +1568,6 @@ func (c *Cli) worktree(rest []string) error {
 			return fail("usage: wd worktree attach <id> <path> [--branch <b>]")
 		}
 		id, path := rest[1], expandHome(rest[2])
-		if _, err := c.Ledger.Get(id); err != nil {
-			return err
-		}
 		wt, err := c.Ledger.AddWorktree(id, ledger.WorktreeInfo{
 			Path:   path,
 			Branch: str(a, "branch"),
@@ -1593,6 +1584,9 @@ func (c *Cli) worktree(rest []string) error {
 	}
 	id := rest[1]
 	if sub == "list" {
+		if _, err := c.Ledger.Get(id); err != nil {
+			return err
+		}
 		wts, err := c.Ledger.Worktrees(id)
 		if err != nil {
 			return err
@@ -1721,9 +1715,6 @@ func (c *Cli) concern(rest []string) error {
 	case "add":
 		if len(rest) < 3 {
 			return fail("usage: wd concern add <work> <text>")
-		}
-		if _, err := c.Ledger.Get(rest[1]); err != nil {
-			return err
 		}
 		cx, err := c.Ledger.AddConcern(rest[1], rest[2])
 		if err != nil {
@@ -1866,6 +1857,9 @@ func (c *Cli) events(rest []string) error {
 		return fail("usage: wd events <id>")
 	}
 	id := rest[0]
+	if _, err := c.Ledger.Get(id); err != nil {
+		return err
+	}
 	ev, err := c.Ledger.Events(id, nil)
 	if err != nil {
 		return err

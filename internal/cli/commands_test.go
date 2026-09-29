@@ -39,19 +39,6 @@ func TestCommandsFailLoud(t *testing.T) {
 		}
 	})
 
-	t.Run("commands on unknown work fail", func(t *testing.T) {
-		for _, args := range [][]string{
-			{"pr", "nope", "http://x"},
-			{"concern", "add", "nope", "x"},
-			{"concern", "list", "nope"},
-			{"worktree", "attach", "nope", f.sample},
-		} {
-			if errStr := f.runFail(t, args...); !strings.Contains(errStr, "no work nope") {
-				t.Errorf("wd %s: stderr %q, want no work nope", strings.Join(args, " "), errStr)
-			}
-		}
-	})
-
 	t.Run("claim with no one to claim for fails", func(t *testing.T) {
 		out := f.runOK(t, "add", "sample-app", "Unclaimed", "--json")
 		id := jsonString(t, out, "id")
