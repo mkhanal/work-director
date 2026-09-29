@@ -190,6 +190,24 @@ attach = "myagent attach {session}"
 		})
 	})
 
+	t.Run("A Transcript Follows Its Session Into A Worktree", func(t *testing.T) {
+		moved := "0d7a1c52-5b8e-4f0e-9c1a-2f3b4c5d6e7f"
+		dir := filepath.Join(home, ".claude", "projects", projectSlug(filepath.Join(cwd, ".claude", "worktrees", "fix")))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir worktree project: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, moved+".jsonl"), []byte(transcript), 0o644); err != nil {
+			t.Fatalf("write moved transcript: %v", err)
+		}
+		got, err := claude.Transcript(Handle{Runner: "claude", Session: moved, Cwd: cwd})
+		if err != nil {
+			t.Fatalf("claude transcript: %v", err)
+		}
+		if !slices.Equal(got, []string{"READY", "STATUS: DONE"}) {
+			t.Fatalf("transcript = %v, want [READY STATUS: DONE]", got)
+		}
+	})
+
 	t.Run("A Runner Forwards The Chosen Model", func(t *testing.T) {
 		t.Run("claude passes --model on spawn", func(t *testing.T) {
 			if _, err := claude.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-1 t", Brief: "B", Model: strPtr("fable")}); err != nil {
