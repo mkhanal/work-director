@@ -1144,3 +1144,72 @@ func TestFlagsThatDoNotParseFail(t *testing.T) {
 		}
 	}
 }
+
+func TestReportWithoutAStatusLineFilesNothingAndFails(t *testing.T) {
+	f := newCLIFixture(t)
+	bin := t.TempDir()
+	speaker := "#!/usr/bin/env bash\ncase \"$1\" in status) echo 'state: running';; export) cat \"$WD_FAKE_STATE/said-$2\";; *) echo ok;; esac\n"
+	if err := os.WriteFile(filepath.Join(bin, "speaker"), []byte(speaker), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spec := "name = \"speaker\"\nspawn = \"speaker run {brief}\"\nsession_id = 'session=(\\S+)'\n" +
+		"send = \"speaker send {session} {text}\"\nstatus = \"speaker status {session}\"\n" +
+		"running = 'state: *running'\nwaiting = 'state: *waiting'\nexited = 'state: *exited'\n" +
+		"transcript = \"speaker export {session}\"\nattach = \"speaker attach {session}\"\n"
+	if err := os.WriteFile(filepath.Join(f.wdHome, "runners", "speaker.toml"), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(f.dir, "fake-state")
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := f.env(t, bin+string(os.PathListSeparator)+f.bin)
+	attached := func(title, session, text string) string {
+		t.Helper()
+		code, out, errStr := f.runEnv(t, env, "add", "sample-app", title, "--json")
+		if code != 0 {
+			t.Fatalf("add: %s", errStr)
+		}
+		id := jsonString(t, out, "id")
+		if code, _, errStr := f.runEnv(t, env, "attach", id, session, "--runner", "speaker"); code != 0 {
+			t.Fatalf("attach: %s", errStr)
+		}
+		if err := os.WriteFile(filepath.Join(state, "said-"+session), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	quiet := attached("Still working", "ses_quiet", "PLAN: reading the code")
+	asking := attached("Needs a fact", "ses_asking", "STATUS: NEEDS-INPUT which database?")
+
+	code, _, errStr := f.runEnv(t, env, "report", quiet)
+	if code != 1 || !strings.Contains(errStr, "no STATUS line") || !strings.Contains(errStr, "executor") {
+		t.Fatalf("report without a status line: exit %d, stderr %q; want 1 saying the executor's report has not arrived", code, errStr)
+	}
+	if code, _, errStr := f.runEnv(t, env, "report", asking); code != 0 {
+		t.Fatalf("report with NEEDS-INPUT: exit %d, stderr %q; want 0", code, errStr)
+	}
+
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	defer l.Close()
+	report := core.EventReport
+	for id, want := range map[string]struct {
+		reports int
+		state   core.State
+	}{quiet: {0, core.StateRunning}, asking: {1, core.StateNeedsInput}} {
+		events, err := l.Events(id, &report)
+		if err != nil {
+			t.Fatalf("events: %v", err)
+		}
+		w, err := l.Get(id)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if len(events) != want.reports || w.State != want.state {
+			t.Errorf("%s: %d reports in state %s, want %d in %s", id, len(events), w.State, want.reports, want.state)
+		}
+	}
+}

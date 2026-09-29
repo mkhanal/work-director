@@ -133,3 +133,9 @@ A value flag with no value (`--tail=`, or `--ref` last or before another
 flag), a switch given a value (`--json=x`), and a numeric flag that is not a
 positive integer (`--tail`, `--timeout`, `--port`, `--count`) exit 1 naming
 the flag; none falls back to its default.
+
+## Report Without A Status Line Files Nothing And Fails
+`wd report` on work whose last transcript message carries no STATUS line exits
+1 saying the executor's report has not arrived yet; it records no event and
+leaves the state as it was. A STATUS line of NEEDS-INPUT files its report and
+exits 0.
