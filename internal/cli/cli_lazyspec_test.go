@@ -454,23 +454,45 @@ func TestADecisionIsRecordedInOneLineAndReachesTheBrief(t *testing.T) {
 
 	out = f.runOK(t, "concern", "add", id, "which queue?", "--json")
 	f.runOK(t, "concern", "resolve", jsonNumber(t, out, "id"), "use the outbox table")
+	f.runOK(t, "pr", id, "https://example.test/pr-leak")
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	others := map[core.EventKind]string{
+		core.EventReport: "report-leak", core.EventSent: "sent-leak", core.EventNote: "note-leak",
+		core.EventQuestion: "question-leak", core.EventAnswer: "answer-leak",
+	}
+	for kind, body := range others {
+		if _, err := l.AddEvent(id, kind, body); err != nil {
+			t.Fatalf("add %s: %v", kind, err)
+		}
+	}
+	l.Close()
 
 	brief := f.runOK(t, "brief", id)
 	start := strings.Index(brief, "Decisions already made")
 	if start < 0 {
 		t.Fatalf("brief has no decisions section:\n%s", brief)
 	}
-	section := brief[start:]
-	if end := strings.Index(section, "\n\n"); end >= 0 {
-		section = section[:end]
+	lines := strings.Split(brief[start:], "\n")
+	end := 1
+	for end < len(lines) && strings.HasPrefix(lines[end], "- ") {
+		end++
 	}
+	section := strings.Join(lines[:end], "\n")
 	for _, want := range []string{"- use sqlite everywhere", "- use the outbox table"} {
 		if !strings.Contains(section, want) {
 			t.Fatalf("decisions section missing %q:\n%s", want, section)
 		}
 	}
-	if strings.Contains(section, "resolved:") {
-		t.Fatalf("decisions section carries a ledger note:\n%s", section)
+	for _, leak := range []string{"resolved:", "pr-leak", "report-leak", "sent-leak", "note-leak", "question-leak", "answer-leak"} {
+		if strings.Contains(section, leak) {
+			t.Fatalf("decisions section carries %q, which is no decision:\n%s", leak, section)
+		}
+	}
+	if end != 3 {
+		t.Fatalf("decisions section lists %d items, want the 2 decisions:\n%s", end-1, section)
 	}
 }
 
