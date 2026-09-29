@@ -620,6 +620,32 @@ func TestCommandsOnUnknownWorkFailNamingIt(t *testing.T) {
 	}
 }
 
+func TestAClaimNamesSomeone(t *testing.T) {
+	f := newCLIFixture(t)
+	id := jsonString(t, f.runOK(t, "add", "sample-app", "Unclaimed", "--json"), "id")
+	for _, args := range [][]string{{"claim", id}, {"claim", id, ""}} {
+		if errStr := f.runFail(t, args...); !strings.Contains(errStr, "usage: wd claim") {
+			t.Errorf("wd %q: stderr %q, want claim usage", args, errStr)
+		}
+	}
+	t2 := f.ids["t2"]
+	f.runFail(t, "claim", t2, "")
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	defer l.Close()
+	for id, want := range map[string]string{id: "", t2: "ses_y"} {
+		w, err := l.Get(id)
+		if err != nil {
+			t.Fatalf("get %s: %v", id, err)
+		}
+		if strOrEmpty(w.Claim) != want || (want == "" && w.Claim != nil) {
+			t.Errorf("%s claim = %v, want it left as %q", id, w.Claim, want)
+		}
+	}
+}
+
 func TestFlagsThatDoNotParseFail(t *testing.T) {
 	f := newCLIFixture(t)
 	epic, t2, t3 := f.ids["epic"], f.ids["t2"], f.ids["t3"]

@@ -80,6 +80,10 @@ work's brief lists its decisions and its resolved concerns' decisions under
 With `--json`, a command writes exactly one JSON document to stdout — no
 progress lines, no document per spawned session.
 
+## A Claim Names Someone
+`wd claim <id>` on work with no session, and `wd claim <id> ""`, exit 1
+with the claim usage and leave the claim as it was.
+
 ## Commands On Unknown Work Fail Naming It
 Every command given a work id that does not exist — reading or writing —
 exits 1 with `no work <id>` and records nothing.

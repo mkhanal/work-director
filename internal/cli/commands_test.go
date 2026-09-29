@@ -39,14 +39,6 @@ func TestCommandsFailLoud(t *testing.T) {
 		}
 	})
 
-	t.Run("claim with no one to claim for fails", func(t *testing.T) {
-		out := f.runOK(t, "add", "sample-app", "Unclaimed", "--json")
-		id := jsonString(t, out, "id")
-		if errStr := f.runFail(t, "claim", id); !strings.Contains(errStr, "usage: wd claim") {
-			t.Fatalf("stderr = %q, want claim usage", errStr)
-		}
-	})
-
 	t.Run("an unknown feedback subcommand fails", func(t *testing.T) {
 		if errStr := f.runFail(t, "feedback", "ad", "x"); !strings.Contains(errStr, "usage: wd feedback") {
 			t.Fatalf("stderr = %q, want feedback usage", errStr)

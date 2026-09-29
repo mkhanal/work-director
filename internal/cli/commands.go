@@ -1457,6 +1457,9 @@ func (c *Cli) claim(rest []string) error {
 	if who == nil {
 		return fail("usage: wd claim <id> <who> — %s has no session to claim for", id)
 	}
+	if *who == "" {
+		return fail("usage: wd claim <id> <who> — who cannot be empty")
+	}
 	after, err := c.Ledger.SetClaim(id, who)
 	if err != nil {
 		return err
