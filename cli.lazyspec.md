@@ -81,9 +81,10 @@ With `--json`, a command writes exactly one JSON document to stdout — no
 progress lines, no document per spawned session.
 
 ## Projects Add Never Writes A File It Cannot Parse
-`wd projects add` with a value its project file cannot hold (an unknown
-mode, say) exits 1 naming it and writes no file, so every later command
-still loads the projects.
+`wd projects add` with a path or flag value its project file cannot hold —
+an unknown mode, a line break, a value that would read back changed — exits
+1 naming it and writes no file, so every later command still loads the
+projects.
 
 ## Attach Records The Ref And Cwd It Is Given
 `wd attach <id> <session> --ref <ref> --cwd <dir>` records that session,

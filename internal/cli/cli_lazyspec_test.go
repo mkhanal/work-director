@@ -696,12 +696,27 @@ func TestCommandsOnUnknownWorkFailNamingIt(t *testing.T) {
 
 func TestProjectsAddNeverWritesAFileItCannotParse(t *testing.T) {
 	f := newCLIFixture(t)
-	errStr := f.runFail(t, "projects", "add", "bogus-mode", f.sample, "--mode", "bogus", "--lazyspec", "n")
-	if !strings.Contains(errStr, "bogus") {
-		t.Fatalf("stderr = %q, want the bad mode named", errStr)
-	}
-	if _, err := os.Stat(filepath.Join(f.wdHome, "projects", "bogus-mode.md")); !os.IsNotExist(err) {
-		t.Fatalf("project file left behind: %v", err)
+	for i, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{f.sample, "--mode", "bogus"}, "unknown mode bogus"},
+		{[]string{f.sample, "--model", "m\nmode: ask"}, `--model "m\nmode: ask"`},
+		{[]string{f.sample, "--model", "m\nno key here"}, `--model "m\nno key here"`},
+		{[]string{f.sample, "--runner", " claude"}, `--runner " claude"`},
+		{[]string{f.sample, "--stack", "go\nts"}, `--stack "go\nts"`},
+		{[]string{f.sample, "--workflow", "/lazyspec\n---"}, `--workflow "/lazyspec\n---"`},
+		{[]string{f.sample, "--verify", "go test\nverify: true"}, `--verify "go test\nverify: true"`},
+		{[]string{f.sample + "\nmode: ask"}, `path "` + f.sample + `\nmode: ask"`},
+	} {
+		name := "held" + strconv.Itoa(i)
+		code, _, errStr := f.run(t, append([]string{"projects", "add", name}, append(c.args, "--lazyspec", "n")...)...)
+		if code != 1 || !strings.Contains(errStr, c.want) {
+			t.Errorf("projects add %q: exit %d, stderr %q; want 1 naming %s", c.args, code, errStr, c.want)
+		}
+		if _, err := os.Stat(filepath.Join(f.wdHome, "projects", name+".md")); !os.IsNotExist(err) {
+			t.Errorf("projects add %q: project file left behind: %v", c.args, err)
+		}
 	}
 	f.runOK(t, "status")
 }

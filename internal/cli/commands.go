@@ -52,18 +52,35 @@ func (c *Cli) projects(rest []string) error {
 			}
 			return nil
 		}
-		text := project.ProjectTemplate(name, path, project.NewProjectOptions{
+		opts := project.NewProjectOptions{
 			Runner:    strOr(a, "runner", ""),
 			Mode:      strOr(a, "mode", ""),
 			Model:     strOr(a, "model", ""),
 			Stack:     csv("stack"),
 			Workflows: csv("workflow"),
 			Verify:    csv("verify"),
-		})
+		}
+		given := projectValues(path, opts)
+		// The file is one `key: value` line per field.
+		for _, g := range given {
+			if strings.ContainsAny(g[1], "\r\n") {
+				return fail("%s %q cannot be held in a project file: it breaks the line", g[0], g[1])
+			}
+		}
+		text := project.ProjectTemplate(name, path, opts)
 		file := filepath.Join(c.ProjectsDir, name+".md")
 		p, err := project.ParseProject(text, file)
 		if err != nil {
 			return err
+		}
+		back := projectValues(p.Path, project.NewProjectOptions{
+			Runner: p.Runner, Mode: string(p.Mode), Model: strOrEmpty(p.Model),
+			Stack: p.Stack, Workflows: p.Workflows, Verify: p.Verify,
+		})
+		for i, g := range given {
+			if g[1] != "" && (i >= len(back) || back[i] != g) {
+				return fail("%s %q cannot be held in a project file: it reads back changed", g[0], g[1])
+			}
 		}
 		if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
 			return err
@@ -102,6 +119,21 @@ func (c *Cli) projects(rest []string) error {
 		table = append(table, fmt.Sprintf("%s\t%s\t%s\t%s", p.Name, p.Runner, p.Mode, p.Path))
 	}
 	return c.out(list, strings.Join(table, "\n"))
+}
+
+// projectValues lists each value a project file holds as (what sets it,
+// value), in a fixed order; an unset value is "".
+func projectValues(path string, o project.NewProjectOptions) [][2]string {
+	out := [][2]string{{"path", path}, {"--runner", o.Runner}, {"--mode", o.Mode}, {"--model", o.Model}}
+	for _, l := range []struct {
+		flag   string
+		values []string
+	}{{"--stack", o.Stack}, {"--workflow", o.Workflows}, {"--verify", o.Verify}} {
+		for _, v := range l.values {
+			out = append(out, [2]string{l.flag, v})
+		}
+	}
+	return out
 }
 
 func (c *Cli) models(rest []string) error {
