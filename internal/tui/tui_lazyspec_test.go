@@ -55,7 +55,7 @@ func softDone(t *testing.T, l *ledger.Ledger, id string) {
 		kind core.EventKind
 		body string
 	}{{core.EventReport, "DONE"}, {core.EventVerify, "pass"}} {
-		if err := l.AddEvent(id, e.kind, e.body); err != nil {
+		if _, err := l.AddEvent(id, e.kind, e.body); err != nil {
 			t.Fatalf("event %s: %v", e.kind, err)
 		}
 	}

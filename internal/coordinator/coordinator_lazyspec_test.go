@@ -175,7 +175,7 @@ func TestCoordinator(t *testing.T) {
 		l := newTestLedger(t)
 		epic := add(t, l, "proj", "epic", ledger.AddOptions{Kind: core.WorkEpic})
 		child := add(t, l, "proj", "child", ledger.AddOptions{Parent: &epic.ID})
-		if err := l.AddEvent(child.ID, core.EventDecision, "the verify command is go test ./..."); err != nil {
+		if _, err := l.AddEvent(child.ID, core.EventDecision, "the verify command is go test ./..."); err != nil {
 			t.Fatalf("add event: %v", err)
 		}
 		answer, err := KnownAnswer("which verify command should we run?", epic, []core.Work{child}, l)
@@ -200,7 +200,7 @@ func TestCoordinator(t *testing.T) {
 		if _, err := l.ResolveConcern(cs[0].ID, "the database driver uses sqlite everywhere"); err != nil {
 			t.Fatalf("resolve concern: %v", err)
 		}
-		if err := l.AddEvent(epic.ID, core.EventDecision, "use the sqlite driver for the database"); err != nil {
+		if _, err := l.AddEvent(epic.ID, core.EventDecision, "use the sqlite driver for the database"); err != nil {
 			t.Fatalf("add event: %v", err)
 		}
 		answer, err := KnownAnswer("sqlite driver", epic, nil, l)
@@ -488,7 +488,7 @@ func TestCoordinator(t *testing.T) {
 			l := newTestLedger(t)
 			epic := add(t, l, "proj", "epic", ledger.AddOptions{Kind: core.WorkEpic})
 			child := add(t, l, "proj", "child", ledger.AddOptions{Parent: &epic.ID})
-			if err := l.AddEvent(epic.ID, core.EventDecision, "use modernc.org/sqlite as the database driver"); err != nil {
+			if _, err := l.AddEvent(epic.ID, core.EventDecision, "use modernc.org/sqlite as the database driver"); err != nil {
 				t.Fatalf("decision: %v", err)
 			}
 			setSession(t, l, child.ID, "ses_1")
@@ -540,7 +540,7 @@ func TestCoordinator(t *testing.T) {
 			l := newTestLedger(t)
 			epic := add(t, l, "proj", "epic", ledger.AddOptions{Kind: core.WorkEpic})
 			child := add(t, l, "proj", "child", ledger.AddOptions{Parent: &epic.ID})
-			if err := l.AddEvent(epic.ID, core.EventDecision, "use modernc.org/sqlite as the database driver"); err != nil {
+			if _, err := l.AddEvent(epic.ID, core.EventDecision, "use modernc.org/sqlite as the database driver"); err != nil {
 				t.Fatalf("decision: %v", err)
 			}
 			setSession(t, l, child.ID, "ses_1")
@@ -604,7 +604,7 @@ func TestCoordinator(t *testing.T) {
 			l := newTestLedger(t)
 			epic := add(t, l, "proj", "epic", ledger.AddOptions{Kind: core.WorkEpic})
 			child := add(t, l, "proj", "child", ledger.AddOptions{Parent: &epic.ID})
-			if err := l.AddEvent(epic.ID, core.EventDecision, "use modernc.org/sqlite as the database driver"); err != nil {
+			if _, err := l.AddEvent(epic.ID, core.EventDecision, "use modernc.org/sqlite as the database driver"); err != nil {
 				t.Fatalf("decision: %v", err)
 			}
 			setSession(t, l, child.ID, "ses_1")

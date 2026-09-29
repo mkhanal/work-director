@@ -210,7 +210,8 @@ func TestLedger(t *testing.T) {
 		if _, err := l.db.Exec(`UPDATE work SET updated = '2026-01-01T00:00:00.000Z' WHERE id = ?`, w.ID); err != nil {
 			t.Fatalf("backdate: %v", err)
 		}
-		wantNoErr(t, l.AddEvent(w.ID, core.EventNote, "still alive"))
+		_, err := l.AddEvent(w.ID, core.EventNote, "still alive")
+		wantNoErr(t, err)
 		ev, err := l.Events(w.ID, nil)
 		wantNoErr(t, err)
 		got, err := l.Get(w.ID)
@@ -366,8 +367,9 @@ func TestLedger(t *testing.T) {
 	t.Run("Events Concerns And Worktrees Belong To Existing Work", func(t *testing.T) {
 		l := newTestLedger(t)
 		const noWork = "no work nope; wd status for known work items"
-		wantErr(t, l.AddEvent("nope", core.EventNote, "x"), noWork)
-		_, err := l.AddConcern("nope", "x")
+		_, err := l.AddEvent("nope", core.EventNote, "x")
+		wantErr(t, err, noWork)
+		_, err = l.AddConcern("nope", "x")
 		wantErr(t, err, noWork)
 		_, err = l.AddWorktree("nope", WorktreeInfo{Path: "/tmp/wt", Kind: core.WorktreePrivate})
 		wantErr(t, err, noWork)

@@ -437,9 +437,14 @@ func TestADecisionIsRecordedInOneLineAndReachesTheBrief(t *testing.T) {
 	f := newCLIFixture(t)
 	id := f.ids["standalone"]
 
-	out := f.runOK(t, "decide", id, "use sqlite everywhere", "--json")
-	assertHasKey(t, out, `"kind": "decision"`)
-	assertHasKey(t, out, `"body": "use sqlite everywhere"`)
+	out := f.runOK(t, "decide", id, "use", "sqlite", "everywhere", "--json")
+	var decided core.Event
+	if err := json.Unmarshal([]byte(out), &decided); err != nil {
+		t.Fatalf("decide --json: %v\n%s", err, out)
+	}
+	if decided.Kind != core.EventDecision || decided.Body != "use sqlite everywhere" || decided.Work != id {
+		t.Fatalf("decide recorded %+v, want the decision use sqlite everywhere on %s", decided, id)
+	}
 	if errStr := f.runFail(t, "decide", "nope", "x"); !strings.Contains(errStr, "no work nope") {
 		t.Fatalf("decide on unknown work: stderr %q", errStr)
 	}

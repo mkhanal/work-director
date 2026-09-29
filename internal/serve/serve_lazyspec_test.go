@@ -128,7 +128,7 @@ func workItemsServeOverHTTP(t *testing.T) {
 		t.Fatalf("items = %v, want [%s]", items, w.ID)
 	}
 
-	if err := s.ledger.AddEvent(w.ID, core.EventNote, "noted"); err != nil {
+	if _, err := s.ledger.AddEvent(w.ID, core.EventNote, "noted"); err != nil {
 		t.Fatalf("add event: %v", err)
 	}
 	api := httptest.NewServer(s.routes())
@@ -245,7 +245,7 @@ func webSocketServesLiveEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if err := l.AddEvent(w.ID, core.EventNote, "before serve"); err != nil {
+	if _, err := l.AddEvent(w.ID, core.EventNote, "before serve"); err != nil {
 		t.Fatalf("event before serve: %v", err)
 	}
 	addr, _, err := New(l, "/bin/echo").Start(0)
@@ -267,7 +267,7 @@ func webSocketServesLiveEvents(t *testing.T) {
 		t.Fatalf("second ledger handle: %v", err)
 	}
 	t.Cleanup(func() { other.Close() })
-	if err := other.AddEvent(w.ID, core.EventNote, "from another wd process"); err != nil {
+	if _, err := other.AddEvent(w.ID, core.EventNote, "from another wd process"); err != nil {
 		t.Fatalf("event from other process: %v", err)
 	}
 
@@ -351,7 +351,7 @@ func aClientThatStopsReadingNeverDelaysTheOthers(t *testing.T) {
 	const events = 128
 	body := strings.Repeat("x", 256<<10)
 	for i := 0; i < events; i++ {
-		if err := l.AddEvent(w.ID, core.EventNote, fmt.Sprintf("%d %s", i, body)); err != nil {
+		if _, err := l.AddEvent(w.ID, core.EventNote, fmt.Sprintf("%d %s", i, body)); err != nil {
 			t.Fatalf("event %d: %v", i, err)
 		}
 	}

@@ -70,7 +70,7 @@ func TestNewEnforcesForeignKeysAndWaitsOnLocks(t *testing.T) {
 	if fk != 1 || timeout != 5000 {
 		t.Fatalf("foreign_keys = %d, busy_timeout = %d, want 1 and 5000", fk, timeout)
 	}
-	if err := l.AddEvent("nope", core.EventNote, "x"); err == nil {
+	if _, err := l.AddEvent("nope", core.EventNote, "x"); err == nil {
 		t.Fatal("event for unknown work was stored")
 	}
 	if _, err := l.AddConcern("nope", "x"); err == nil {
@@ -244,4 +244,15 @@ func TestSessionWritesToUnknownWorkFail(t *testing.T) {
 	wantErr(t, l.SetSession("nope", SessionInfo{Runner: "claude", Session: "s", Cwd: "/tmp"}), "no work nope; wd status for known work items")
 	wantErr(t, l.SetCwd("nope", "/tmp"), "no work nope; wd status for known work items")
 	wantErr(t, l.SetRef("nope", nil), "no work nope; wd status for known work items")
+}
+
+func TestAddEventReturnsTheEventItStored(t *testing.T) {
+	l := newTestLedger(t)
+	w := add(t, l, "p", "t", AddOptions{})
+	got, err := l.AddEvent(w.ID, core.EventDecision, "use sqlite")
+	wantNoErr(t, err)
+	evs := allEvents(t, l, w.ID, nil)
+	if last := evs[len(evs)-1]; got != last {
+		t.Fatalf("AddEvent = %+v, want the stored %+v", got, last)
+	}
 }

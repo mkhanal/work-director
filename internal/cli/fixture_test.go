@@ -165,16 +165,16 @@ func (f *cliFixture) seedLedger(t *testing.T) {
 	if _, err := l.Transition(t1.ID, core.StateRunning); err != nil {
 		t.Fatalf("transition: %v", err)
 	}
-	if err := l.AddEvent(t1.ID, core.EventReport, "DONE\nSTATUS: DONE"); err != nil {
+	if _, err := l.AddEvent(t1.ID, core.EventReport, "DONE\nSTATUS: DONE"); err != nil {
 		t.Fatalf("report event: %v", err)
 	}
 	if _, err := l.Transition(t1.ID, core.StateReview); err != nil {
 		t.Fatalf("transition: %v", err)
 	}
-	if err := l.AddEvent(t1.ID, core.EventVerify, "pass\ntest -f README.md → 0"); err != nil {
+	if _, err := l.AddEvent(t1.ID, core.EventVerify, "pass\ntest -f README.md → 0"); err != nil {
 		t.Fatalf("verify event: %v", err)
 	}
-	if err := l.AddEvent(t1.ID, core.EventPr, "https://github.com/x/sample-app/pull/1"); err != nil {
+	if _, err := l.AddEvent(t1.ID, core.EventPr, "https://github.com/x/sample-app/pull/1"); err != nil {
 		t.Fatalf("pr event: %v", err)
 	}
 	if _, err := l.SoftDone(t1.ID, false); err != nil {

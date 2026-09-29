@@ -404,7 +404,7 @@ func (c *Cli) sendTo(id, text string) error {
 	if err := coordinator.Send(c.Ledger, id, r, h, text); err != nil {
 		return err
 	}
-	if err := c.Ledger.AddEvent(id, core.EventSent, text); err != nil {
+	if _, err := c.Ledger.AddEvent(id, core.EventSent, text); err != nil {
 		return err
 	}
 	if w.State != core.StateRunning {

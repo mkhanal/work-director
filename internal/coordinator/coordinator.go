@@ -295,7 +295,7 @@ func CoordinateOnce(epic core.Work, p *project.Project, l *ledger.Ledger, resolv
 			if err := Send(l, w.ID, r, h, answer); err != nil {
 				return PassResult{}, err
 			}
-			if err := l.AddEvent(w.ID, core.EventAnswer, answer); err != nil {
+			if _, err := l.AddEvent(w.ID, core.EventAnswer, answer); err != nil {
 				return PassResult{}, err
 			}
 			if w.State == core.StateNeedsInput {
@@ -330,7 +330,7 @@ func CoordinateOnce(epic core.Work, p *project.Project, l *ledger.Ledger, resolv
 				return PassResult{}, err
 			}
 		}
-		if err := l.AddEvent(w.ID, core.EventReport, report); err != nil {
+		if _, err := l.AddEvent(w.ID, core.EventReport, report); err != nil {
 			return PassResult{}, err
 		}
 		to := core.StateReview

@@ -557,7 +557,7 @@ func (c *Cli) epicPlan(cmd string, epic core.Work) error {
 		}
 		rows = append(rows, w)
 	}
-	if err := c.Ledger.AddEvent(epic.ID, core.EventNote, fmt.Sprintf("plan: %d tasks", len(rows))); err != nil {
+	if _, err := c.Ledger.AddEvent(epic.ID, core.EventNote, fmt.Sprintf("plan: %d tasks", len(rows))); err != nil {
 		return err
 	}
 	if epic.State == core.StateQueued {
@@ -645,7 +645,7 @@ func (c *Cli) epicSpawn(cmd string, epic core.Work) error {
 			return err
 		}
 		last = &h
-		if err := c.Ledger.AddEvent(epic.ID, core.EventSpawn, fmt.Sprintf("%s:%s", runnerName, h.Session)); err != nil {
+		if _, err := c.Ledger.AddEvent(epic.ID, core.EventSpawn, fmt.Sprintf("%s:%s", runnerName, h.Session)); err != nil {
 			return err
 		}
 		sessions = append(sessions, h.Session)
@@ -789,7 +789,7 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 				return err
 			}
 		}
-		if err := c.Ledger.AddEvent(epic.ID, core.EventSpawn, fmt.Sprintf("%s:%s", runnerName, h.Session)); err != nil {
+		if _, err := c.Ledger.AddEvent(epic.ID, core.EventSpawn, fmt.Sprintf("%s:%s", runnerName, h.Session)); err != nil {
 			return err
 		}
 		hint := rn.AttachHint(h)
@@ -983,7 +983,7 @@ func (c *Cli) attach(rest []string) error {
 	if ref != nil {
 		attachEvent += " ref=" + *ref
 	}
-	if err := c.Ledger.AddEvent(id, core.EventAttach, attachEvent); err != nil {
+	if _, err := c.Ledger.AddEvent(id, core.EventAttach, attachEvent); err != nil {
 		return err
 	}
 	if w.State == core.StateQueued || w.State == core.StateBriefed {
@@ -1037,7 +1037,7 @@ func (c *Cli) report(rest []string) error {
 		if status == "DONE" {
 			body = "DONE\n" + last
 		}
-		if err := c.Ledger.AddEvent(id, core.EventReport, body); err != nil {
+		if _, err := c.Ledger.AddEvent(id, core.EventReport, body); err != nil {
 			return err
 		}
 		if w.State == core.StateRunning {
@@ -1131,7 +1131,7 @@ func (c *Cli) verify(rest []string) error {
 		body = "pass\n"
 	}
 	body += strings.Join(results, "\n")
-	if err := c.Ledger.AddEvent(id, core.EventVerify, body); err != nil {
+	if _, err := c.Ledger.AddEvent(id, core.EventVerify, body); err != nil {
 		return err
 	}
 	c.out(map[string]any{"pass": pass, "results": results}, body)
@@ -1156,15 +1156,12 @@ func (c *Cli) decide(rest []string) error {
 	if len(rest) < 2 {
 		return fail("usage: wd decide <id> <text>")
 	}
-	id, text := rest[0], rest[1]
-	if err := c.Ledger.AddEvent(id, core.EventDecision, text); err != nil {
-		return err
-	}
-	decisions, err := c.Ledger.Events(id, kindPtr(core.EventDecision))
+	id, text := rest[0], strings.Join(rest[1:], " ")
+	e, err := c.Ledger.AddEvent(id, core.EventDecision, text)
 	if err != nil {
 		return err
 	}
-	c.out(decisions[len(decisions)-1], "decided: "+text)
+	c.out(e, "decided: "+e.Body)
 	return nil
 }
 
@@ -1173,7 +1170,7 @@ func (c *Cli) pr(rest []string) error {
 		return fail("usage: wd pr <id> <url>")
 	}
 	id, url := rest[0], rest[1]
-	if err := c.Ledger.AddEvent(id, core.EventPr, url); err != nil {
+	if _, err := c.Ledger.AddEvent(id, core.EventPr, url); err != nil {
 		return err
 	}
 	c.out(map[string]any{"ok": true}, "recorded")
@@ -1683,7 +1680,7 @@ func (c *Cli) merge(rest []string) error {
 		return err
 	}
 	if r.Code != 0 {
-		if err := c.Ledger.AddEvent(id, core.EventNote, fmt.Sprintf("merge of %s conflicted in %s; resolve then merge again", branch, nullStr(sharedWt.Branch))); err != nil {
+		if _, err := c.Ledger.AddEvent(id, core.EventNote, fmt.Sprintf("merge of %s conflicted in %s; resolve then merge again", branch, nullStr(sharedWt.Branch))); err != nil {
 			return err
 		}
 		return fail("merge conflicted: %s", sliceFirst500(strings.TrimSpace(r.Stdout+r.Stderr)))
@@ -1691,7 +1688,7 @@ func (c *Cli) merge(rest []string) error {
 	if _, err := c.Ledger.SetWorktreeState(wt.ID, core.WorktreeMerged); err != nil {
 		return err
 	}
-	if err := c.Ledger.AddEvent(id, core.EventNote, fmt.Sprintf("merged %s into %s", branch, nullStr(sharedWt.Branch))); err != nil {
+	if _, err := c.Ledger.AddEvent(id, core.EventNote, fmt.Sprintf("merged %s into %s", branch, nullStr(sharedWt.Branch))); err != nil {
 		return err
 	}
 	c.out(map[string]any{"merged": branch}, fmt.Sprintf("merged %s into %s", branch, nullStr(sharedWt.Branch)))

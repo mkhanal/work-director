@@ -287,7 +287,8 @@ func (l *Ledger) Add(project, title string, opts AddOptions) (core.Work, error) 
 			id, project, title, opts.Detail, string(kind), string(core.StateQueued), parent, opts.Heading, t, t); err != nil {
 			return err
 		}
-		return addEvent(tx, id, core.EventState, string(core.StateQueued), t)
+		_, err := addEvent(tx, id, core.EventState, string(core.StateQueued), t)
+		return err
 	})
 	if err != nil {
 		return core.Work{}, err
@@ -383,7 +384,8 @@ func (l *Ledger) transition(id string, to core.State) (core.Work, error) {
 		if _, err := tx.Exec(`UPDATE work SET state = ? WHERE id = ?`, string(to), id); err != nil {
 			return err
 		}
-		return addEvent(tx, id, core.EventState, string(to), now())
+		_, err = addEvent(tx, id, core.EventState, string(to), now())
+		return err
 	})
 	if err != nil {
 		return core.Work{}, err
@@ -428,23 +430,33 @@ func (l *Ledger) SetImpact(id string, paths []string) (core.Work, error) {
 
 // addEvent records the event and moves the work's updated to it: updated is
 // the work's last activity, which staleness is measured from.
-func addEvent(tx *sql.Tx, work string, kind core.EventKind, body, at string) error {
+func addEvent(tx *sql.Tx, work string, kind core.EventKind, body, at string) (core.Event, error) {
 	if err := updateWork(tx, work, `UPDATE work SET updated = ? WHERE id = ?`, at, work); err != nil {
-		return err
+		return core.Event{}, err
 	}
-	_, err := tx.Exec(`INSERT INTO event (work, kind, body, at) VALUES (?, ?, ?, ?)`, work, string(kind), body, at)
-	return err
+	return scanEvent(tx.QueryRow(`INSERT INTO event (work, kind, body, at) VALUES (?, ?, ?, ?)
+		RETURNING id, work, kind, body, at`, work, string(kind), body, at))
 }
 
-func (l *Ledger) AddEvent(work string, kind core.EventKind, body string) error {
-	return l.inTx(func(tx *sql.Tx) error { return addEvent(tx, work, kind, body, now()) })
+// AddEvent records an event on work and returns it as stored.
+func (l *Ledger) AddEvent(work string, kind core.EventKind, body string) (core.Event, error) {
+	var e core.Event
+	err := l.inTx(func(tx *sql.Tx) error {
+		var err error
+		e, err = addEvent(tx, work, kind, body, now())
+		return err
+	})
+	if err != nil {
+		return core.Event{}, err
+	}
+	return e, nil
 }
 
 // File records an event read from a transcript together with the point it
 // was read at, so the same entry is recognised as filed.
 func (l *Ledger) File(work string, kind core.EventKind, body string, at core.TranscriptMark) error {
 	return l.inTx(func(tx *sql.Tx) error {
-		if err := addEvent(tx, work, kind, body, now()); err != nil {
+		if _, err := addEvent(tx, work, kind, body, now()); err != nil {
 			return err
 		}
 		_, err := tx.Exec(`INSERT INTO filed (work, session, entries) VALUES (?, ?, ?)
@@ -545,7 +557,8 @@ func (l *Ledger) ResolveConcern(id int, decision string) (core.Concern, error) {
 		if err != nil {
 			return err
 		}
-		return addEvent(tx, c.Work, core.EventNote, fmt.Sprintf("concern %d resolved: %s", id, decision), at)
+		_, err = addEvent(tx, c.Work, core.EventNote, fmt.Sprintf("concern %d resolved: %s", id, decision), at)
+		return err
 	})
 	if err != nil {
 		return core.Concern{}, err
