@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"time"
 
@@ -97,7 +98,7 @@ func (s *tuiSource) Send(id, text string) error {
 
 // tui runs the terminal UI: `wd tui [id]` opens the board, or the work item's
 // detail view when an id is given.
-func (c *Cli) tui(rest []string) error {
+func (c *Cli) tui(rest []string) (err error) {
 	var id string
 	if len(rest) > 0 {
 		id = rest[0]
@@ -106,7 +107,7 @@ func (c *Cli) tui(rest []string) error {
 	if err != nil {
 		return err
 	}
-	defer term.Close()
+	defer func() { err = errors.Join(err, term.Close()) }()
 	app := tui.New(&tuiSource{Cli: c}, term, 2*time.Second)
 	if id != "" {
 		app.Open(id)

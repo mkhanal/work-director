@@ -19,7 +19,6 @@ import (
 	"wd/internal/promotion"
 	"wd/internal/runner"
 	"wd/internal/serve"
-	"wd/internal/taste"
 )
 
 func (c *Cli) projects(rest []string) error {
@@ -57,15 +56,12 @@ func (c *Cli) projects(rest []string) error {
 			Workflows: csv("workflow"),
 			Verify:    csv("verify"),
 		})
-		if err := os.WriteFile(filepath.Join(c.ProjectsDir, name+".md"), []byte(text), 0o644); err != nil {
-			return err
-		}
-		projects, err := project.LoadProjects(c.ProjectsDir)
+		file := filepath.Join(c.ProjectsDir, name+".md")
+		p, err := project.ParseProject(text, file)
 		if err != nil {
 			return err
 		}
-		c.Projects = projects
-		if _, err := c.project(name); err != nil {
+		if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
 			return err
 		}
 		ls := str(a, "lazyspec")
@@ -78,19 +74,21 @@ func (c *Cli) projects(rest []string) error {
 		} else if isTTY(os.Stdin) {
 			answer = c.ask(fmt.Sprintf("Use the director's preferred lazyspec for %s? [y/N] ", name))
 		}
-		if strings.HasPrefix(strings.ToLower(answer), "y") {
-			title, detail := project.InstallLazyspec("Adopt the director's preferred lazyspec")
-			w, err := c.Ledger.Add(name, title, ledger.AddOptions{Kind: core.WorkEvolution, Detail: detail})
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(c.Stdout, "project %s created (%s); lazyspec install queued as %s (evolution — wd spawn %s)\n", name, path, w.ID, w.ID)
-		} else {
-			fmt.Fprintf(c.Stdout, "project %s created (%s); no lazyspec. Install later by adding an evolution work item.\n", name, path)
+		if !strings.HasPrefix(strings.ToLower(answer), "y") {
+			c.out(map[string]any{"project": p, "evolution": nil},
+				fmt.Sprintf("project %s created (%s); no lazyspec. Install later by adding an evolution work item.", name, path))
+			return nil
 		}
+		title, detail := project.InstallLazyspec("Adopt the director's preferred lazyspec")
+		w, err := c.Ledger.Add(name, title, ledger.AddOptions{Kind: core.WorkEvolution, Detail: detail})
+		if err != nil {
+			return err
+		}
+		c.out(map[string]any{"project": p, "evolution": w},
+			fmt.Sprintf("project %s created (%s); lazyspec install queued as %s (evolution — wd spawn %s)", name, path, w.ID, w.ID))
 		return nil
 	}
-	if sub != "" {
+	if sub != "" && sub != "list" {
 		return fail("usage: wd projects (list | add <name> <path>)")
 	}
 	list := []*project.Project{}
@@ -105,8 +103,9 @@ func (c *Cli) projects(rest []string) error {
 	return nil
 }
 
+// expandHome expands a leading ~ or ~/ to $HOME; ~user paths stay as given.
 func expandHome(path string) string {
-	if strings.HasPrefix(path, "~") {
+	if path == "~" || strings.HasPrefix(path, "~/") {
 		home := os.Getenv("HOME")
 		if home == "" {
 			home = "~"
@@ -149,7 +148,7 @@ func (c *Cli) models(rest []string) error {
 		if err != nil {
 			return err
 		}
-		rows[r] = models
+		rows[r] = append([]string{}, models...)
 	}
 	var textParts []string
 	for _, r := range names {
@@ -197,7 +196,7 @@ func (c *Cli) runner(rest []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(c.Stdout, "runner %s added (%s); try wd spawn <id> --runner %s\n", name, path, name)
+		c.out(map[string]any{"runner": name, "path": path}, fmt.Sprintf("runner %s added (%s); try wd spawn <id> --runner %s", name, path, name))
 		return nil
 	case "init":
 		if len(rest) < 2 || rest[1] == "" || !matchesName(rest[1]) {
@@ -211,7 +210,7 @@ func (c *Cli) runner(rest []string) error {
 		if err := os.WriteFile(path, []byte(runner.SpecTemplate(name)), 0o644); err != nil {
 			return err
 		}
-		fmt.Fprintf(c.Stdout, "runner spec written to %s; edit the commands, then wd runner add %s %s\n", path, name, path)
+		c.out(map[string]any{"runner": name, "path": path}, fmt.Sprintf("runner spec written to %s; edit its commands — it is registered as %s", path, name))
 		return nil
 	}
 	return fail("usage: wd runner (list | add <name> <file.toml> | init <name>)")
@@ -332,7 +331,7 @@ func (c *Cli) brief(rest []string) error {
 			return err
 		}
 	}
-	fmt.Fprintln(c.Stdout, text)
+	c.out(map[string]any{"id": id, "brief": text}, text)
 	return nil
 }
 
@@ -589,9 +588,9 @@ func (c *Cli) epicSpawn(cmd string, epic core.Work) error {
 	if err != nil {
 		return err
 	}
-	count, err := strconv.Atoi(strOr(a, "count", "1"))
-	if err != nil || count < 1 {
-		return fail("--count must be a positive integer")
+	count, err := positiveInt(a, "count", 1)
+	if err != nil {
+		return err
 	}
 	cwd, err := c.ensureSharedWorktree(epic, p)
 	if err != nil {
@@ -607,6 +606,8 @@ func (c *Cli) epicSpawn(cmd string, epic core.Work) error {
 		}
 	}
 	sessions := []string{}
+	handles := []handleWithAttach{}
+	var lines []string
 	var last *runner.Handle
 	for i := 0; i < count; i++ {
 		runnerName := runners[i%len(runners)]
@@ -642,15 +643,13 @@ func (c *Cli) epicSpawn(cmd string, epic core.Work) error {
 			return err
 		}
 		sessions = append(sessions, h.Session)
-		if c.JSON {
-			c.jsonLine(h)
-		} else {
-			fmt.Fprintf(c.Stdout, "%s  %s\n", h.Session, rn.AttachHint(h))
-		}
+		hint := rn.AttachHint(h)
+		handles = append(handles, handleWithAttach{Handle: h, Attach: hint})
+		lines = append(lines, fmt.Sprintf("%s  %s", h.Session, hint))
 	}
 	if last != nil {
 		if err := c.Ledger.SetSession(epic.ID, ledger.SessionInfo{
-			Runner:  runners[0],
+			Runner:  last.Runner,
 			Session: last.Session,
 			Ref:     last.Ref,
 			Cwd:     cwd,
@@ -663,9 +662,7 @@ func (c *Cli) epicSpawn(cmd string, epic core.Work) error {
 			return err
 		}
 	}
-	if c.JSON {
-		c.out(map[string]any{"sessions": sessions}, "")
-	}
+	c.out(map[string]any{"sessions": sessions, "handles": handles}, strings.Join(lines, "\n"))
 	return nil
 }
 
@@ -722,8 +719,18 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 		}
 		return fail("no open tasks matched%s — wd %s plan <id> first", detail, cmd)
 	}
+	timeout, err := positiveInt(a, "timeout", 300)
+	if err != nil {
+		return err
+	}
+	spawned := []handleWithAttach{}
+	var lines []string
 	for i, child := range children {
-		if child.State == core.StateRunning && child.Session != nil {
+		// Work past briefed has a session of its own or is waiting on a human;
+		// spawning would orphan it.
+		spawnable := child.State == core.StateQueued || child.State == core.StateBriefed ||
+			(child.State == core.StateRunning && child.Session == nil)
+		if !spawnable {
 			continue
 		}
 		runnerName := runners[i%len(runners)]
@@ -779,7 +786,9 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 		if err := c.Ledger.AddEvent(epic.ID, core.EventSpawn, fmt.Sprintf("%s:%s", runnerName, h.Session)); err != nil {
 			return err
 		}
-		fmt.Fprintf(c.Stdout, "%s  %s\n", h.Session, rn.AttachHint(h))
+		hint := rn.AttachHint(h)
+		spawned = append(spawned, handleWithAttach{Handle: h, Attach: hint})
+		lines = append(lines, fmt.Sprintf("%s  %s", h.Session, hint))
 	}
 	if epic.State != core.StateRunning {
 		if _, err := c.Ledger.Transition(epic.ID, core.StateRunning); err != nil {
@@ -787,17 +796,16 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 		}
 	}
 	if !flag(a, "wait") {
-		c.out(map[string]any{"ok": true}, fmt.Sprintf("%d task(s) running on %s", len(children), cwd))
+		lines = append(lines, fmt.Sprintf("%d task(s) running on %s", len(children), cwd))
+		c.out(map[string]any{"ok": true, "spawned": spawned}, strings.Join(lines, "\n"))
 		return nil
 	}
-	timeout := 300
-	if v := str(a, "timeout"); v != nil {
-		if n, err := strconv.Atoi(*v); err == nil {
-			timeout = n
-		}
+	if !c.JSON && len(lines) > 0 {
+		fmt.Fprintln(c.Stdout, strings.Join(lines, "\n"))
 	}
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 	escalated := false
+	passes := []coordinator.PassResult{}
 	for time.Now().Before(deadline) {
 		res, err := coordinator.CoordinateOnce(epic, p, c.Ledger, runner.RunnerNamed)
 		if err != nil {
@@ -807,10 +815,11 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 			name string
 			ids  []string
 		}{{"answered", res.Answered}, {"escalated", res.Escalated}, {"reviewed", res.Reviewed}, {"blocked", res.Blocked}} {
-			if len(k.ids) > 0 {
+			if len(k.ids) > 0 && !c.JSON {
 				fmt.Fprintf(c.Stdout, "  %s: %s\n", k.name, strings.Join(k.ids, ", "))
 			}
 		}
+		passes = append(passes, res)
 		escalated = len(res.Escalated) > 0
 		if escalated {
 			break
@@ -840,15 +849,16 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 			openCt++
 		}
 	}
+	result := map[string]any{"open": openCt, "spawned": spawned, "passes": passes}
 	if openCt == 0 {
-		c.out(map[string]any{"open": openCt}, fmt.Sprintf("%s driven to completion — every open task closed", kindWord))
-	} else {
-		human := "needs a human"
-		if escalated {
-			human += " (a question was escalated)"
-		}
-		c.out(map[string]any{"open": openCt}, fmt.Sprintf("%s still has %d open task(s) — %s or another wd %s run --wait", kindWord, openCt, human, cmd))
+		c.out(result, fmt.Sprintf("%s driven to completion — every open task closed", kindWord))
+		return nil
 	}
+	human := "needs a human"
+	if escalated {
+		human += " (a question was escalated)"
+	}
+	c.out(result, fmt.Sprintf("%s still has %d open task(s) — %s or another wd %s run --wait", kindWord, openCt, human, cmd))
 	return nil
 }
 
@@ -990,6 +1000,10 @@ func (c *Cli) report(rest []string) error {
 	if len(rest) == 0 {
 		return fail("usage: wd report <id> [--tail n]")
 	}
+	n, err := positiveInt(a, "tail", 1)
+	if err != nil {
+		return err
+	}
 	id := rest[0]
 	h, err := c.handle(id)
 	if err != nil {
@@ -1030,12 +1044,6 @@ func (c *Cli) report(rest []string) error {
 			if _, err := c.Ledger.Transition(id, to); err != nil {
 				return err
 			}
-		}
-	}
-	n := 1
-	if v := str(a, "tail"); v != nil {
-		if parsed, err := strconv.Atoi(*v); err == nil {
-			n = parsed
 		}
 	}
 	runnerStatus, err := r.Status(h)
@@ -1097,6 +1105,9 @@ func (c *Cli) verify(rest []string) error {
 	if cwd == nil {
 		cwd = &p.Path
 	}
+	if len(p.Verify) == 0 {
+		return fail("project %s lists no verify commands; add them under verify: in its project file", p.Name)
+	}
 	results := []string{}
 	pass := true
 	for _, cmdline := range p.Verify {
@@ -1119,7 +1130,7 @@ func (c *Cli) verify(rest []string) error {
 	}
 	c.out(map[string]any{"pass": pass, "results": results}, body)
 	if !pass {
-		os.Exit(1)
+		return fail("verify failed for %s", id)
 	}
 	return nil
 }
@@ -1140,6 +1151,9 @@ func (c *Cli) pr(rest []string) error {
 		return fail("usage: wd pr <id> <url>")
 	}
 	id, url := rest[0], rest[1]
+	if _, err := c.Ledger.Get(id); err != nil {
+		return err
+	}
 	if err := c.Ledger.AddEvent(id, core.EventPr, url); err != nil {
 		return err
 	}
@@ -1181,6 +1195,9 @@ func (c *Cli) set(rest []string) error {
 	state, err := oneOf([]string{"queued", "briefed", "running", "needs-input", "review", "soft-done", "done", "blocked", "dropped"}, to, "state")
 	if err != nil {
 		return err
+	}
+	if core.State(state) == core.StateSoftDone {
+		return c.softDone(rest[:1])
 	}
 	after, err := c.Ledger.Transition(id, core.State(state))
 	if err != nil {
@@ -1257,7 +1274,11 @@ func (c *Cli) status(rest []string) error {
 		tableText = "nothing open"
 	}
 	if !c.JSON {
-		head, err := context.WorkspaceContext(mustGetwd())
+		wd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		head, err := context.WorkspaceContext(wd)
 		if err != nil {
 			return err
 		}
@@ -1323,7 +1344,11 @@ func (c *Cli) contextCmd(rest []string) error {
 			fmt.Sprintf("project %s\n%s\nrunner: %s · mode: %s", p.Name, context.ContextLine(ws), p.Runner, p.Mode))
 		return nil
 	}
-	ws, err := context.WorkspaceContext(mustGetwd())
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	ws, err := context.WorkspaceContext(wd)
 	if err != nil {
 		return err
 	}
@@ -1344,50 +1369,47 @@ func (c *Cli) contextWork(id string) error {
 	if err != nil {
 		return err
 	}
+	link := open.OpenLink(open.OpenTarget{Path: h.Cwd})
 	c.out(map[string]any{"id": id, "runner": h.Runner, "session": h.Session, "ref": h.Ref, "cwd": h.Cwd, "workspace": ws},
-		fmt.Sprintf("%s (%s)\n%s\nrunner: %s · session: %s", w.Title, w.State, context.ContextLine(ws), h.Runner, h.Session))
+		fmt.Sprintf("%s (%s)\n%s\nrunner: %s · session: %s\n%s", w.Title, w.State, context.ContextLine(ws), h.Runner, h.Session, link))
 	return nil
 }
 
 func (c *Cli) open(rest []string) error {
-	if len(rest) < 2 {
+	var base, fileArg string
+	switch len(rest) {
+	case 1:
+		wd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		base, fileArg = wd, rest[0]
+	case 2:
+		h, err := c.handle(rest[0])
+		if err != nil {
+			return err
+		}
+		base, fileArg = h.Cwd, rest[1]
+	default:
 		return fail("usage: wd open [<id>] <path>[:<line>]")
 	}
-	maybeID, fileArg := rest[0], rest[1]
-	var w *core.Work
-	if maybeID != "" {
-		work, err := c.Ledger.Get(maybeID)
-		if err != nil {
-			return err
-		}
-		w = &work
-	}
-	base := mustGetwd()
-	if w != nil {
-		h, err := c.handle(maybeID)
-		if err != nil {
-			return err
-		}
-		base = h.Cwd
-	}
 	target := open.ParseTarget(fileArg, base)
-	editor := open.DetectEditor()
 	link := open.OpenLink(target)
+	result := map[string]any{"path": target.Path, "line": target.Line, "editor": nil}
+	editor := open.DetectEditor()
 	if editor == nil {
-		fmt.Fprintln(c.Stdout, link)
-		fmt.Fprintf(c.Stdout, "no editor on this host — click the link or open %s manually\n", target.Path)
+		c.out(result, fmt.Sprintf("%s\nno editor on this host — click the link or open %s manually", link, target.Path))
 		return nil
 	}
 	ok, err := open.OpenInEditor(*editor, target)
 	if err != nil {
 		return err
 	}
-	verb := "failed to open in"
-	if ok {
-		verb = "opened in"
+	if !ok {
+		return fail("%s failed to open %s", editor.Label, target.Path)
 	}
-	fmt.Fprintf(c.Stdout, "%s %s: %s\n", verb, editor.Label, open.FileLabel(target))
-	fmt.Fprintln(c.Stdout, link)
+	result["editor"] = editor.Label
+	c.out(result, fmt.Sprintf("opened in %s: %s\n%s", editor.Label, open.FileLabel(target), link))
 	return nil
 }
 
@@ -1409,11 +1431,12 @@ func (c *Cli) claim(rest []string) error {
 		c.out(after, "dropped")
 		return nil
 	}
-	var who *string
+	who := w.Session
 	if len(rest) > 1 {
 		who = &rest[1]
-	} else {
-		who = w.Session
+	}
+	if who == nil {
+		return fail("usage: wd claim <id> <who> — %s has no session to claim for", id)
 	}
 	after, err := c.Ledger.SetClaim(id, who)
 	if err != nil {
@@ -1523,13 +1546,12 @@ func (c *Cli) worktree(rest []string) error {
 			return fail("usage: wd worktree attach <id> <path> [--branch <b>]")
 		}
 		id, path := rest[1], expandHome(rest[2])
-		var branch *string
-		if v := str(a, "branch"); v != nil {
-			branch = v
+		if _, err := c.Ledger.Get(id); err != nil {
+			return err
 		}
 		wt, err := c.Ledger.AddWorktree(id, ledger.WorktreeInfo{
 			Path:   path,
-			Branch: branch,
+			Branch: str(a, "branch"),
 			Kind:   core.WorktreePrivate,
 		})
 		if err != nil {
@@ -1672,6 +1694,9 @@ func (c *Cli) concern(rest []string) error {
 		if len(rest) < 3 {
 			return fail("usage: wd concern add <work> <text>")
 		}
+		if _, err := c.Ledger.Get(rest[1]); err != nil {
+			return err
+		}
 		cx, err := c.Ledger.AddConcern(rest[1], rest[2])
 		if err != nil {
 			return err
@@ -1732,7 +1757,7 @@ func (c *Cli) concern(rest []string) error {
 func (c *Cli) scan(rest []string) error {
 	a := c.Args
 	adopt := str(a, "adopt")
-	cards, err := taste.LoadCards(c.Root + "/taste/cards")
+	cards, cardsDir, err := c.cards()
 	if err != nil {
 		return err
 	}
@@ -1761,7 +1786,7 @@ func (c *Cli) scan(rest []string) error {
 		for _, f := range cand.Evidence {
 			evidence = append(evidence, strconv.Itoa(f.ID))
 		}
-		path, err := promotion.AdoptCard(cand.Card, evidence, c.Root+"/taste/cards")
+		path, err := promotion.AdoptCard(cand.Card, evidence, cardsDir)
 		if err != nil {
 			return err
 		}
@@ -1853,6 +1878,9 @@ func (c *Cli) feedback(rest []string) error {
 		c.out(f, strconv.Itoa(f.ID))
 		return nil
 	}
+	if sub != "" && sub != "list" {
+		return fail("usage: wd feedback (list | add <text> [--project p] [--card c] [--source director|note|attached])")
+	}
 	all, err := c.Ledger.Feedback()
 	if err != nil {
 		return err
@@ -1893,15 +1921,20 @@ func (c *Cli) distill(rest []string) error {
 }
 
 func (c *Cli) serve(rest []string) error {
-	port := serve.DefaultPort
-	if p := str(c.Args, "port"); p != nil {
-		var n int
-		if _, err := fmt.Sscanf(*p, "%d", &n); err == nil && n > 0 {
-			port = n
-		}
+	port, err := positiveInt(c.Args, "port", serve.DefaultPort)
+	if err != nil {
+		return err
 	}
-	cliPath := filepath.Join(executableDir(), "wd")
-	srv := serve.New(c.Ledger, c.Root, cliPath)
+	root, err := c.root()
+	if err != nil {
+		return err
+	}
+	// Board actions run this same binary, so they can never drift from it.
+	cliPath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	srv := serve.New(c.Ledger, root, cliPath)
 	addr, failed, err := srv.Start(port)
 	if err != nil {
 		return err

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"wd/internal/brief"
@@ -29,7 +30,7 @@ var stringFlags = map[string]bool{
 	"tail": true, "stack": true, "workflow": true, "verify": true, "lazyspec": true,
 	"kind": true, "epic": true, "heading": true, "detail": true, "project": true,
 	"branch": true, "adopt": true, "source": true, "card": true, "only": true,
-	"timeout": true, "port": true,
+	"timeout": true, "port": true, "ref": true, "cwd": true,
 }
 
 // Args is one parsed command line: positionals and flags.
@@ -99,7 +100,6 @@ func fail(format string, args ...any) error {
 // Cli holds one invocation's state: the parsed args, the ledger, the projects
 // and the directories the CLI owns.
 type Cli struct {
-	Root        string
 	Home        string
 	ProjectsDir string
 	Worktrees   string
@@ -145,7 +145,6 @@ func Run(args []string) error {
 		return err
 	}
 	c := &Cli{
-		Root:        findRoot(),
 		Home:        wdHome,
 		ProjectsDir: projectsDir,
 		Worktrees:   worktreesDir,
@@ -159,43 +158,45 @@ func Run(args []string) error {
 	return c.dispatch()
 }
 
-// findRoot locates the repo root (where taste/cards lives): $WD_ROOT, else
-// the executable's directory, else the working directory.
-func findRoot() string {
+// root locates the repo root (where taste/cards lives): $WD_ROOT, else the
+// executable's directory, else the working directory.
+func (c *Cli) root() (string, error) {
 	if r := os.Getenv("WD_ROOT"); r != "" {
-		return r
+		return r, nil
 	}
-	for _, base := range []string{executableDir(), mustGetwd()} {
-		if base == "" {
-			continue
-		}
-		if st, err := os.Stat(filepath.Join(base, "taste", "cards")); err == nil && st.IsDir() {
-			return base
-		}
-	}
-	return "."
-}
-
-func executableDir() string {
 	exe, err := os.Executable()
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return filepath.Dir(exe)
-}
-
-func mustGetwd() string {
 	wd, err := os.Getwd()
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return wd
+	for _, base := range []string{filepath.Dir(exe), wd} {
+		if st, err := os.Stat(filepath.Join(base, "taste", "cards")); err == nil && st.IsDir() {
+			return base, nil
+		}
+	}
+	return "", fail("cannot find taste/cards beside %s or in the working directory; set WD_ROOT to the work-director checkout", exe)
 }
+
+// cards loads the taste cards under the repo root.
+func (c *Cli) cards() ([]taste.Card, string, error) {
+	root, err := c.root()
+	if err != nil {
+		return nil, "", err
+	}
+	dir := filepath.Join(root, "taste", "cards")
+	cards, err := taste.LoadCards(dir)
+	return cards, dir, err
+}
+
+const usage = "wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve|doctor> [--json]"
 
 func (c *Cli) dispatch() error {
 	a := c.Args
 	if len(a.Positional) == 0 {
-		return fail("wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|pr|soft-done|set|done|status|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve|doctor> [--json]")
+		return fail("%s", usage)
 	}
 	cmd, rest := a.Positional[0], a.Positional[1:]
 	switch cmd {
@@ -264,7 +265,7 @@ func (c *Cli) dispatch() error {
 	case "doctor":
 		return c.doctor(rest)
 	}
-	return fail("wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|pr|soft-done|set|done|status|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve|doctor> [--json]")
+	return fail("%s", usage)
 }
 
 // out prints the command's result: indented JSON on the --json rail, else text.
@@ -283,12 +284,6 @@ func (c *Cli) jsonOut(v any) {
 	enc.Encode(v)
 }
 
-func (c *Cli) jsonLine(v any) {
-	enc := json.NewEncoder(c.Stdout)
-	enc.SetEscapeHTML(false)
-	enc.Encode(v)
-}
-
 func str(a Args, k string) *string {
 	if v, ok := a.Flags[k]; ok {
 		if s, ok := v.(string); ok && s != "" {
@@ -303,6 +298,19 @@ func strOr(a Args, k, def string) string {
 		return *s
 	}
 	return def
+}
+
+// positiveInt is the --k flag as a positive integer, def when absent.
+func positiveInt(a Args, k string, def int) (int, error) {
+	s := str(a, k)
+	if s == nil {
+		return def, nil
+	}
+	n, err := strconv.Atoi(*s)
+	if err != nil || n < 1 {
+		return 0, fail("--%s must be a positive integer", k)
+	}
+	return n, nil
 }
 
 func flag(a Args, k string) bool {
@@ -438,7 +446,7 @@ func (c *Cli) briefFor(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cards, err := taste.LoadCards(filepath.Join(c.Root, "taste", "cards"))
+	cards, _, err := c.cards()
 	if err != nil {
 		return "", err
 	}
