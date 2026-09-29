@@ -140,6 +140,13 @@ type Worktree struct {
 	Created string        `json:"created"`
 }
 
+// TranscriptMark is a point in a session's transcript: the session and how
+// many entries it held.
+type TranscriptMark struct {
+	Session string
+	Entries int
+}
+
 type Conflict struct {
 	A     string   `json:"a"`
 	B     string   `json:"b"`

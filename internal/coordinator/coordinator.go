@@ -208,15 +208,6 @@ func Send(l *ledger.Ledger, id string, r runner.Runner, h runner.Handle, text st
 	return l.SetRef(id, h.Ref)
 }
 
-// lastBody is the body of work's latest event of kind, or "" when it has none.
-func lastBody(l *ledger.Ledger, id string, kind core.EventKind) (string, error) {
-	events, err := l.Events(id, &kind)
-	if err != nil || len(events) == 0 {
-		return "", err
-	}
-	return events[len(events)-1].Body, nil
-}
-
 // CoordinateOnce runs one coordination pass over the epic's children: answer
 // known questions, escalate unknown ones and NEEDS-INPUT reports to
 // needs-input, harvest DONE/BLOCKED reports. A question or report already
@@ -258,11 +249,14 @@ func CoordinateOnce(epic core.Work, p *project.Project, l *ledger.Ledger, resolv
 			last = texts[len(texts)-1]
 		}
 		// The transcript keeps ending in a question or report until the
-		// executor writes again, so one already filed is not acted on twice.
-		filed := func(kind core.EventKind, body string) (bool, error) {
-			prev, err := lastBody(l, w.ID, kind)
-			return prev == body, err
+		// executor writes again, so the entry already filed is not acted on
+		// twice; the same words in a later entry or another session are new.
+		at := core.TranscriptMark{Session: h.Session, Entries: len(texts)}
+		prev, ok, err := l.Filed(w.ID)
+		if err != nil {
+			return PassResult{}, err
 		}
+		filed := ok && prev == at
 		seen := func() {
 			if w.State == core.StateNeedsInput {
 				res.Escalated = append(res.Escalated, w.ID)
@@ -280,16 +274,12 @@ func CoordinateOnce(epic core.Work, p *project.Project, l *ledger.Ledger, resolv
 			return nil
 		}
 		if ask := askRe.FindStringSubmatch(last); ask != nil {
-			question := strings.TrimSpace(ask[1])
-			done, err := filed(core.EventQuestion, question)
-			if err != nil {
-				return PassResult{}, err
-			}
-			if done {
+			if filed {
 				seen()
 				continue
 			}
-			if err := l.AddEvent(w.ID, core.EventQuestion, question); err != nil {
+			question := strings.TrimSpace(ask[1])
+			if err := l.File(w.ID, core.EventQuestion, question, at); err != nil {
 				return PassResult{}, err
 			}
 			answer, err := KnownAnswer(question, epic, children, l)
@@ -323,15 +313,11 @@ func CoordinateOnce(epic core.Work, p *project.Project, l *ledger.Ledger, resolv
 		}
 		report := status[1] + "\n" + last
 		if status[1] == "NEEDS-INPUT" {
-			done, err := filed(core.EventReport, report)
-			if err != nil {
-				return PassResult{}, err
-			}
-			if done {
+			if filed {
 				seen()
 				continue
 			}
-			if err := l.AddEvent(w.ID, core.EventReport, report); err != nil {
+			if err := l.File(w.ID, core.EventReport, report, at); err != nil {
 				return PassResult{}, err
 			}
 			if err := escalate(); err != nil {

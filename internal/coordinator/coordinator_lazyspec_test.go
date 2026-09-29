@@ -73,6 +73,7 @@ func (f *fakeRunner) Command() string { return "fake" }
 func (f *fakeRunner) Spawn(o runner.SpawnOptions) (runner.Handle, error) {
 	return runner.Handle{Runner: "fake"}, nil
 }
+
 // Send numbers its refs: each send starts a new process.
 func (f *fakeRunner) Send(h *runner.Handle, text string) error {
 	f.sends = append(f.sends, text)
@@ -530,6 +531,95 @@ func TestCoordinator(t *testing.T) {
 			}
 			if got := eventBodies(t, l, child.ID, core.EventReport); len(got) != 1 {
 				t.Fatalf("report events = %v, want one", got)
+			}
+		})
+	})
+
+	t.Run("A Question Asked Again Is Filed Again", func(t *testing.T) {
+		t.Run("an answered question asked again is answered again", func(t *testing.T) {
+			l := newTestLedger(t)
+			epic := add(t, l, "proj", "epic", ledger.AddOptions{Kind: core.WorkEpic})
+			child := add(t, l, "proj", "child", ledger.AddOptions{Parent: &epic.ID})
+			if err := l.AddEvent(epic.ID, core.EventDecision, "use modernc.org/sqlite as the database driver"); err != nil {
+				t.Fatalf("decision: %v", err)
+			}
+			setSession(t, l, child.ID, "ses_1")
+			move(t, l, child.ID, core.StateRunning)
+			ask := "ASK: which database driver should we use?"
+			fr := &fakeRunner{texts: []string{ask}}
+			for pass := 0; pass < 2; pass++ {
+				if _, err := CoordinateOnce(epic, proj, l, resolveFake(fr)); err != nil {
+					t.Fatalf("pass %d: %v", pass, err)
+				}
+			}
+			fr.texts = append(fr.texts, ask)
+			res, err := CoordinateOnce(epic, proj, l, resolveFake(fr))
+			if err != nil {
+				t.Fatalf("pass after asking again: %v", err)
+			}
+			if !slices.Equal(res.Answered, []string{child.ID}) {
+				t.Fatalf("answered = %v, want [%s]", res.Answered, child.ID)
+			}
+			if len(fr.sends) != 2 {
+				t.Fatalf("sends = %v, want the answer twice", fr.sends)
+			}
+			if got := eventBodies(t, l, child.ID, core.EventQuestion); len(got) != 2 {
+				t.Fatalf("question events = %v, want two", got)
+			}
+		})
+		t.Run("a needs-input report made again escalates again", func(t *testing.T) {
+			l := newTestLedger(t)
+			epic := add(t, l, "proj", "epic", ledger.AddOptions{Kind: core.WorkEpic})
+			child := add(t, l, "proj", "child", ledger.AddOptions{Parent: &epic.ID})
+			setSession(t, l, child.ID, "ses_1")
+			move(t, l, child.ID, core.StateRunning)
+			fr := &fakeRunner{texts: []string{"STATUS: NEEDS-INPUT"}}
+			if _, err := CoordinateOnce(epic, proj, l, resolveFake(fr)); err != nil {
+				t.Fatalf("first pass: %v", err)
+			}
+			move(t, l, child.ID, core.StateRunning)
+			if _, err := CoordinateOnce(epic, proj, l, resolveFake(fr)); err != nil {
+				t.Fatalf("second pass: %v", err)
+			}
+			fr.texts = append(fr.texts, "STATUS: NEEDS-INPUT")
+			res, err := CoordinateOnce(epic, proj, l, resolveFake(fr))
+			if err != nil {
+				t.Fatalf("pass after reporting again: %v", err)
+			}
+			if !slices.Equal(res.Escalated, []string{child.ID}) {
+				t.Fatalf("escalated = %v, want [%s]", res.Escalated, child.ID)
+			}
+			if got := eventBodies(t, l, child.ID, core.EventReport); len(got) != 2 {
+				t.Fatalf("report events = %v, want two", got)
+			}
+			w, err := l.Get(child.ID)
+			if err != nil {
+				t.Fatalf("get child: %v", err)
+			}
+			if w.State != core.StateNeedsInput {
+				t.Fatalf("state = %s, want needs-input", w.State)
+			}
+		})
+		t.Run("a new session asking the same question is answered", func(t *testing.T) {
+			l := newTestLedger(t)
+			epic := add(t, l, "proj", "epic", ledger.AddOptions{Kind: core.WorkEpic})
+			child := add(t, l, "proj", "child", ledger.AddOptions{Parent: &epic.ID})
+			if err := l.AddEvent(epic.ID, core.EventDecision, "use modernc.org/sqlite as the database driver"); err != nil {
+				t.Fatalf("decision: %v", err)
+			}
+			setSession(t, l, child.ID, "ses_1")
+			move(t, l, child.ID, core.StateRunning)
+			fr := &fakeRunner{texts: []string{"ASK: which database driver should we use?"}}
+			if _, err := CoordinateOnce(epic, proj, l, resolveFake(fr)); err != nil {
+				t.Fatalf("first pass: %v", err)
+			}
+			setSession(t, l, child.ID, "ses_2")
+			res, err := CoordinateOnce(epic, proj, l, resolveFake(fr))
+			if err != nil {
+				t.Fatalf("pass in the new session: %v", err)
+			}
+			if !slices.Equal(res.Answered, []string{child.ID}) {
+				t.Fatalf("answered = %v, want [%s]", res.Answered, child.ID)
 			}
 		})
 	})

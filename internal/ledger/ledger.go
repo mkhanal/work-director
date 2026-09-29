@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY, work TEXT NOT NULL REF
 CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT, card TEXT, source TEXT NOT NULL, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS concern (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), text TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, decision TEXT, at TEXT NOT NULL, resolved_at TEXT);
 CREATE TABLE IF NOT EXISTS worktree (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), path TEXT NOT NULL, branch TEXT, kind TEXT NOT NULL, state TEXT NOT NULL, created TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS filed (work TEXT PRIMARY KEY REFERENCES work(id), session TEXT NOT NULL, entries INTEGER NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS worktree_one_active_shared ON worktree(work) WHERE kind = 'shared' AND state = 'active';
 `
 
@@ -428,6 +429,33 @@ func addEvent(tx *sql.Tx, work string, kind core.EventKind, body, at string) err
 
 func (l *Ledger) AddEvent(work string, kind core.EventKind, body string) error {
 	return l.inTx(func(tx *sql.Tx) error { return addEvent(tx, work, kind, body, now()) })
+}
+
+// File records an event read from a transcript together with the point it
+// was read at, so the same entry is recognised as filed.
+func (l *Ledger) File(work string, kind core.EventKind, body string, at core.TranscriptMark) error {
+	return l.inTx(func(tx *sql.Tx) error {
+		if err := addEvent(tx, work, kind, body, now()); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO filed (work, session, entries) VALUES (?, ?, ?)
+			ON CONFLICT (work) DO UPDATE SET session = excluded.session, entries = excluded.entries`,
+			work, at.Session, at.Entries)
+		return err
+	})
+}
+
+// Filed is the transcript point work's latest event was filed from; ok is
+// false when nothing was filed from a transcript.
+func (l *Ledger) Filed(work string) (at core.TranscriptMark, ok bool, err error) {
+	err = l.db.QueryRow(`SELECT session, entries FROM filed WHERE work = ?`, work).Scan(&at.Session, &at.Entries)
+	if errors.Is(err, sql.ErrNoRows) {
+		return core.TranscriptMark{}, false, nil
+	}
+	if err != nil {
+		return core.TranscriptMark{}, false, err
+	}
+	return at, true, nil
 }
 
 func (l *Ledger) Events(work string, kind *core.EventKind) ([]core.Event, error) {

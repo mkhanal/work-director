@@ -80,6 +80,11 @@ An `ASK:` or `STATUS: NEEDS-INPUT` the pass already filed for the child is
 not filed, answered or escalated again: a needs-input child stays listed
 under escalated, and a running child — answered since — waits.
 
+## A Question Asked Again Is Filed Again
+An `ASK:` or `STATUS: NEEDS-INPUT` the executor writes again — in a later
+transcript entry, or from a new session — is filed and answered or
+escalated again.
+
 ## A Child Without Its Own Runner Or Directory Uses Its Epic's Then Its Project's
 A child with no runner coordinates with its epic's runner, else its
 project's; with no cwd it works in its epic's active shared worktree, else

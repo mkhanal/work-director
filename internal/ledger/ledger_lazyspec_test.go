@@ -613,7 +613,7 @@ CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT,
 			t.Fatalf("feedback = %v, want the seeded row", fb)
 		}
 
-		// The schema grew in place: four nullable columns, two new tables.
+		// The schema grew in place: four nullable columns and new tables.
 		after := workColumns(t, openDirect(t, path))
 		if len(after) != 16 {
 			t.Fatalf("migrated schema has %d work columns, want 16", len(after))
@@ -629,7 +629,7 @@ CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT,
 				t.Fatalf("column %s changed: %v -> %v", name, want, got)
 			}
 		}
-		for _, tbl := range []string{"concern", "worktree"} {
+		for _, tbl := range []string{"concern", "worktree", "filed"} {
 			if _, err := openDirect(t, path).Query("SELECT COUNT(*) FROM " + tbl); err != nil {
 				t.Fatalf("table %s missing after migration: %v", tbl, err)
 			}
