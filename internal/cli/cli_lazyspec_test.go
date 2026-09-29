@@ -3,6 +3,9 @@ package cli
 import (
 	"database/sql"
 	"encoding/json"
+	"io"
+	"net"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -562,6 +565,19 @@ func jsonNumber(t *testing.T, out, key string) string {
 
 func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 	f := newCLIFixture(t)
+	waited := jsonString(t, f.runOK(t, "add", "sample-app", "Waited on", "--epic", f.ids["epic"], "--json"), "id")
+	oneDocument := func(args []string, out string) {
+		t.Helper()
+		dec := json.NewDecoder(strings.NewReader(out))
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			t.Errorf("wd %s: %v in %q", strings.Join(args, " "), err, out)
+			return
+		}
+		if dec.More() {
+			t.Errorf("wd %s: more than one document in %q", strings.Join(args, " "), out)
+		}
+	}
 	for _, args := range [][]string{
 		{"brief", f.ids["t3"], "--json"},
 		{"projects", "add", "second", f.sample, "--lazyspec", "n", "--json"},
@@ -569,22 +585,16 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"open", "README.md", "--json"},
 		{"epic", "spawn", f.ids["planEpic"], "--count", "2", "--runner", "claude,opencode", "--json"},
 		{"epic", "run", f.ids["epic"], "--only", f.ids["t3"], "--json"},
+		{"epic", "run", f.ids["epic"], "--only", waited, "--wait", "--timeout", "1", "--json"},
 	} {
 		code, out, errStr := f.runEnv(t, noEditorEnv(t, f), args...)
 		if code != 0 {
 			t.Errorf("wd %s exited %d: %s", strings.Join(args, " "), code, errStr)
 			continue
 		}
-		dec := json.NewDecoder(strings.NewReader(out))
-		var v any
-		if err := dec.Decode(&v); err != nil {
-			t.Errorf("wd %s: %v in %q", strings.Join(args, " "), err, out)
-			continue
-		}
-		if dec.More() {
-			t.Errorf("wd %s: more than one document in %q", strings.Join(args, " "), out)
-		}
+		oneDocument(args, out)
 	}
+	oneDocument([]string{"serve", "--json"}, f.serveOutput(t, "--json"))
 	// epic spawn records the runner of the session it records.
 	out := f.runOK(t, "status", "--json")
 	var rows []map[string]any
@@ -596,6 +606,46 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 			t.Fatalf("epic runner = %v with session %v, want opencode (the last spawn's)", r["runner"], r["session"])
 		}
 	}
+}
+
+// serveOutput runs wd serve on a free port until it has announced its
+// address, then stops it and returns everything it wrote to stdout.
+func (f *cliFixture) serveOutput(t *testing.T, args ...string) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("find a free port: %v", err)
+	}
+	port := strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
+	ln.Close()
+	cmd := exec.Command(f.goBin, append([]string{"serve", "--port", port}, args...)...)
+	cmd.Env = f.env(t, f.bin)
+	cmd.Dir = f.dir
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start serve: %v", err)
+	}
+	var out []byte
+	buf := make([]byte, 4096)
+	for !strings.Contains(string(out), "127.0.0.1:"+port) {
+		n, err := stdout.Read(buf)
+		out = append(out, buf[:n]...)
+		if err != nil {
+			t.Fatalf("serve stopped before announcing its address: %v\n%s", err, out)
+		}
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("stop serve: %v", err)
+	}
+	rest, err := io.ReadAll(stdout)
+	if err != nil {
+		t.Fatalf("read serve output: %v", err)
+	}
+	cmd.Wait()
+	return string(append(out, rest...))
 }
 
 func TestCommandsOnUnknownWorkFailNamingIt(t *testing.T) {

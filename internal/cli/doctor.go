@@ -40,8 +40,7 @@ func (c *Cli) doctor(rest []string) error {
 		hint := initHint
 		report.Init = &hint
 	}
-	c.out(report, renderDoctor(report))
-	return nil
+	return c.out(report, renderDoctor(report))
 }
 
 // renderDoctor prints one line per runner, then the workspace line and, with

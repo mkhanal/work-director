@@ -5,6 +5,7 @@ package cli
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -273,19 +274,15 @@ func (c *Cli) dispatch() error {
 }
 
 // out prints the command's result: indented JSON on the --json rail, else text.
-func (c *Cli) out(v any, text string) {
+func (c *Cli) out(v any, text string) error {
 	if c.JSON {
-		c.jsonOut(v)
-		return
+		enc := json.NewEncoder(c.Stdout)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		return enc.Encode(v)
 	}
-	fmt.Fprintln(c.Stdout, text)
-}
-
-func (c *Cli) jsonOut(v any) {
-	enc := json.NewEncoder(c.Stdout)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	enc.Encode(v)
+	_, err := fmt.Fprintln(c.Stdout, text)
+	return err
 }
 
 // str is the --k value flag, nil when absent.
@@ -638,9 +635,15 @@ func isTTY(f *os.File) bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }
 
-func (c *Cli) ask(q string) string {
-	fmt.Fprint(c.Stdout, q)
-	reader := bufio.NewReader(os.Stdin)
-	line, _ := reader.ReadString('\n')
-	return strings.TrimRight(line, "\n")
+// ask prompts on stderr, so stdout stays the command's one result, and reads
+// one line of stdin; a last line without a newline is still the answer.
+func (c *Cli) ask(q string) (string, error) {
+	if _, err := fmt.Fprint(c.Stderr, q); err != nil {
+		return "", err
+	}
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && !(errors.Is(err, io.EOF) && line != "") {
+		return "", fmt.Errorf("read answer: %w", err)
+	}
+	return strings.TrimRight(line, "\n"), nil
 }
