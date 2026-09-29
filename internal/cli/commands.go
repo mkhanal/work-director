@@ -19,7 +19,6 @@ import (
 	"wd/internal/promotion"
 	"wd/internal/runner"
 	"wd/internal/serve"
-	"wd/internal/taste"
 )
 
 func (c *Cli) projects(rest []string) error {
@@ -1753,13 +1752,12 @@ func (c *Cli) concern(rest []string) error {
 func (c *Cli) scan(rest []string) error {
 	a := c.Args
 	adopt := str(a, "adopt")
-	cardsDir, err := tasteCardsDir()
+	cards, cardsDir, err := loadTasteCards()
 	if err != nil {
 		return err
 	}
-	cards, err := taste.LoadCards(cardsDir)
-	if err != nil {
-		return err
+	if adopt != nil && cardsDir == "" {
+		return fail("adopting a card writes it into a work-director checkout, and none was found; set WD_ROOT to one")
 	}
 	feedback, err := c.Ledger.Feedback()
 	if err != nil {

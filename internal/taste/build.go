@@ -3,7 +3,9 @@ package taste
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -37,19 +39,20 @@ type biomeFile struct {
 	} `json:"linter"`
 }
 
-// LoadCards reads every card under cardsDir, one subdirectory per category,
-// and returns them sorted by id.
-func LoadCards(cardsDir string) ([]Card, error) {
-	var cards []Card
-	dirs, err := os.ReadDir(cardsDir)
+// LoadCards reads every card in cards, one subdirectory per category, and
+// returns them sorted by id. origin names where cards came from, a checkout
+// directory or the embedded snapshot, and prefixes each card's path in errors.
+func LoadCards(cards fs.FS, origin string) ([]Card, error) {
+	var loaded []Card
+	dirs, err := fs.ReadDir(cards, ".")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("taste cards %s: %w", origin, err)
 	}
 	for _, d := range dirs {
 		if !d.IsDir() {
 			continue
 		}
-		files, err := os.ReadDir(filepath.Join(cardsDir, d.Name()))
+		files, err := fs.ReadDir(cards, d.Name())
 		if err != nil {
 			return nil, err
 		}
@@ -57,20 +60,20 @@ func LoadCards(cardsDir string) ([]Card, error) {
 			if !strings.HasSuffix(f.Name(), ".md") {
 				continue
 			}
-			path := filepath.Join(cardsDir, d.Name(), f.Name())
-			text, err := os.ReadFile(path)
+			rel := path.Join(d.Name(), f.Name())
+			text, err := fs.ReadFile(cards, rel)
 			if err != nil {
 				return nil, err
 			}
-			card, err := ParseCard(string(text), path)
+			card, err := ParseCard(string(text), filepath.Join(origin, filepath.FromSlash(rel)))
 			if err != nil {
 				return nil, err
 			}
-			cards = append(cards, *card)
+			loaded = append(loaded, *card)
 		}
 	}
-	sort.Slice(cards, func(i, j int) bool { return cards[i].ID < cards[j].ID })
-	return cards, nil
+	sort.Slice(loaded, func(i, j int) bool { return loaded[i].ID < loaded[j].ID })
+	return loaded, nil
 }
 
 // LoadPresets reads the biome and eslint rule ids from the presets
@@ -206,7 +209,7 @@ type BuildResult struct {
 // constitution and the dist artifacts. It fails when any loaded card's enforce
 // id is absent from the presets or the constitution exceeds its limit.
 func Build(p BuildPaths) (*BuildResult, error) {
-	loaded, err := LoadCards(p.CardsDir)
+	loaded, err := LoadCards(os.DirFS(p.CardsDir), p.CardsDir)
 	if err != nil {
 		return nil, err
 	}

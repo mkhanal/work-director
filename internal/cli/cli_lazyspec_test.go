@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 
 	"wd/internal/core"
 	"wd/internal/ledger"
+	"wd/internal/taste"
 )
 
 // Every requirement in cli.lazyspec.md is married to a test here. The schema
@@ -366,42 +368,129 @@ func TestAHumanClosesQueuedBriefedOrBlockedWork(t *testing.T) {
 	}
 }
 
-func TestCommandsThatNeedTasteCardsSayWhereTheyLooked(t *testing.T) {
+func TestAnInstalledBinaryReadsTheRuleCardsItWasBuiltWith(t *testing.T) {
 	f := newCLIFixture(t)
 	standalone := f.ids["standalone"]
+	installed := f.install(t, t.TempDir())
 	outside := t.TempDir()
-	var env []string
-	for _, kv := range f.env(t, f.bin) {
-		if !strings.HasPrefix(kv, "WD_ROOT=") {
-			env = append(env, kv)
+	env := withoutWDRoot(f.env(t, f.bin))
+	tsTitles := checkoutTSCardTitles(t)
+	code, out, errStr := f.runBinAt(t, installed, outside, env, "brief", standalone)
+	if code != 0 {
+		t.Fatalf("brief exited %d\n%s", code, errStr)
+	}
+	for _, title := range tsTitles {
+		if !strings.Contains(out, title) {
+			t.Fatalf("brief does not carry the built-in card %q:\n%s", title, out)
 		}
 	}
-	for _, args := range [][]string{{"brief", standalone}, {"spawn", standalone}, {"scan"}} {
-		code, _, errStr := f.runAt(t, outside, env, args...)
-		if code != 1 {
-			t.Fatalf("wd %s exited %d, want 1\n%s", strings.Join(args, " "), code, errStr)
+	for _, args := range [][]string{{"scan"}, {"spawn", standalone}} {
+		if code, _, errStr := f.runBinAt(t, installed, outside, env, args...); code != 0 {
+			t.Fatalf("wd %s exited %d\n%s", strings.Join(args, " "), code, errStr)
 		}
-		for _, want := range []string{"WD_ROOT", filepath.Dir(f.goBin), outside} {
-			if !strings.Contains(errStr, want) {
-				t.Fatalf("wd %s stderr %q does not name %q", strings.Join(args, " "), errStr, want)
+	}
+	code, _, errStr = f.runBinAt(t, installed, outside, env, "scan", "--adopt", "any-card")
+	if code != 1 || !strings.Contains(errStr, "WD_ROOT") {
+		t.Fatalf("scan --adopt exited %d, stderr %q; want 1 naming WD_ROOT", code, errStr)
+	}
+	if entries, err := os.ReadDir(outside); err != nil || len(entries) != 0 {
+		t.Fatalf("scan --adopt wrote into %s: %v %v", outside, entries, err)
+	}
+}
+
+func TestCardsInACheckoutReplaceTheEmbeddedOnes(t *testing.T) {
+	f := newCLIFixture(t)
+	standalone := f.ids["standalone"]
+	env := withoutWDRoot(f.env(t, f.bin))
+	tsTitles := checkoutTSCardTitles(t)
+	// checkoutWith writes a tree holding one lang:ts card titled title.
+	checkoutWith := func(root, title string) {
+		t.Helper()
+		path := filepath.Join(root, "taste", "cards", "judgment", "checkout-rule.md")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		text := "---\nid: checkout-rule\ntitle: " + title + "\ncategory: judgment\nscope: [lang:ts]\nkind: practice\nstatus: adopted\nalways: false\nenforce: []\nevidence: []\n---\nKeep it in the checkout.\n"
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	briefCarries := func(bin, dir string, env []string, title string) {
+		t.Helper()
+		code, out, errStr := f.runBinAt(t, bin, dir, env, "brief", standalone)
+		if code != 0 {
+			t.Fatalf("brief exited %d\n%s", code, errStr)
+		}
+		if !strings.Contains(out, title) {
+			t.Fatalf("brief does not carry the checkout's card %q:\n%s", title, out)
+		}
+		for _, embedded := range tsTitles {
+			if strings.Contains(out, embedded) {
+				t.Fatalf("brief carries the embedded card %q beside the checkout's:\n%s", embedded, out)
 			}
 		}
 	}
-	if code, _, errStr := f.runAt(t, outside, env, "status"); code != 0 {
-		t.Fatalf("status outside the checkout exited %d\n%s", code, errStr)
-	}
-	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+
+	root := t.TempDir()
+	checkoutWith(root, "Named by WD_ROOT")
+	named := append(slices.Clone(env), "WD_ROOT="+root)
+	briefCarries(f.goBin, t.TempDir(), named, "Named by WD_ROOT")
+	checkoutWith(root, "Edited without a rebuild")
+	briefCarries(f.goBin, t.TempDir(), named, "Edited without a rebuild")
+
+	beside := t.TempDir()
+	checkoutWith(beside, "Beside the binary")
+	briefCarries(f.install(t, beside), t.TempDir(), env, "Beside the binary")
+
+	workingDir := t.TempDir()
+	checkoutWith(workingDir, "In the working directory")
+	briefCarries(f.install(t, t.TempDir()), workingDir, env, "In the working directory")
+}
+
+// checkoutTSCardTitles returns the titles of this repository's adopted
+// lang:ts cards, which reach a brief for the fixture's ts project.
+func checkoutTSCardTitles(t *testing.T) []string {
+	t.Helper()
+	cards, err := taste.LoadCards(os.DirFS(filepath.Join(repoRoot(t), "taste", "cards")), "checkout")
 	if err != nil {
-		t.Fatalf("ledger: %v", err)
+		t.Fatalf("load checkout cards: %v", err)
 	}
-	defer l.Close()
-	w, err := l.Get(standalone)
+	var titles []string
+	for _, c := range cards {
+		if c.Status == taste.StatusAdopted && slices.Contains(c.Scope, taste.Scope("lang:ts")) {
+			titles = append(titles, c.Title)
+		}
+	}
+	if len(titles) == 0 {
+		t.Fatal("the checkout holds no adopted lang:ts card")
+	}
+	return titles
+}
+
+// withoutWDRoot returns env with WD_ROOT removed.
+func withoutWDRoot(env []string) []string {
+	var out []string
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "WD_ROOT=") {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+// install copies the built binary alone into dir, as scripts/install.sh
+// leaves it, and returns its path.
+func (f *cliFixture) install(t *testing.T, dir string) string {
+	t.Helper()
+	data, err := os.ReadFile(f.goBin)
 	if err != nil {
-		t.Fatalf("get %s: %v", standalone, err)
+		t.Fatalf("read binary: %v", err)
 	}
-	if w.State != core.StateQueued || w.Session != nil {
-		t.Errorf("%s = state %s session %v, want untouched", standalone, w.State, w.Session)
+	bin := filepath.Join(dir, "wd")
+	if err := os.WriteFile(bin, data, 0o755); err != nil {
+		t.Fatalf("install binary: %v", err)
 	}
+	return bin
 }
 
 // backdate sets a work item's last activity to age ago, as a ledger left alone

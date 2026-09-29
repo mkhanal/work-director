@@ -279,7 +279,14 @@ func (f *cliFixture) runEnv(t *testing.T, env []string, args ...string) (int, st
 // stdout, stderr.
 func (f *cliFixture) runAt(t *testing.T, dir string, env []string, args ...string) (int, string, string) {
 	t.Helper()
-	c := exec.Command(f.goBin, args...)
+	return f.runBinAt(t, f.goBin, dir, env, args...)
+}
+
+// runBinAt runs the wd binary at bin with args under env in dir and returns
+// exit code, stdout, stderr.
+func (f *cliFixture) runBinAt(t *testing.T, bin, dir string, env []string, args ...string) (int, string, string) {
+	t.Helper()
+	c := exec.Command(bin, args...)
 	c.Env = env
 	c.Dir = dir
 	var stdout, stderr strings.Builder

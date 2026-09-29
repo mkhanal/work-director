@@ -61,11 +61,17 @@ or any event — is over 30 days old is marked stale on its `wd status` row.
 `wd done` closes queued, briefed and blocked work directly; running,
 needs-input and review work still refuses with the illegal-transition message.
 
-## Commands That Need Taste Cards Say Where They Looked
+## An Installed Binary Reads The Rule Cards It Was Built With
 With no `WD_ROOT` and no `taste/cards` beside the binary or in the working
-directory, `wd brief`, `wd spawn` and `wd scan` exit 1 naming `WD_ROOT` and
-each directory searched; the work item stays as it was. Commands that read no
-cards run from any directory.
+directory, `wd brief`, `wd spawn` and `wd scan` read the cards embedded in the
+binary at build time.
+`wd scan --adopt` there exits 1 naming `WD_ROOT` and writes nothing: adopting
+writes a card into a checkout.
+
+## Cards In A Checkout Replace The Embedded Ones
+`$WD_ROOT/taste/cards`, else `taste/cards` beside the binary, else in the
+working directory, is read instead of the embedded cards.
+An edit to a card there reaches the next brief without a rebuild.
 
 ## Errors And Exit Codes Match
 Usage errors, illegal transitions, not-ready refusals and unknown runners
