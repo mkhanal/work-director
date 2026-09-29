@@ -331,6 +331,32 @@ func TestLedger(t *testing.T) {
 		if cs := allOpenConcerns(t, l, epic.ID); len(cs) != 0 {
 			t.Fatalf("open concerns = %v, want none", cs)
 		}
+		if _, err := l.ResolveConcern(c.ID, "undo it"); err == nil {
+			t.Fatal("resolving a resolved concern succeeded")
+		}
+		cs, err := l.Concerns(&task.ID)
+		wantNoErr(t, err)
+		if len(cs) != 1 || cs[0].Decision == nil || *cs[0].Decision != decision {
+			t.Fatalf("concerns = %+v, want the first decision kept", cs)
+		}
+	})
+
+	t.Run("Events Concerns And Worktrees Belong To Existing Work", func(t *testing.T) {
+		l := newTestLedger(t)
+		if err := l.AddEvent("nope", core.EventNote, "x"); err == nil {
+			t.Fatal("event for unknown work was stored")
+		}
+		if _, err := l.AddConcern("nope", "x"); err == nil {
+			t.Fatal("concern for unknown work was stored")
+		}
+		if _, err := l.AddWorktree("nope", WorktreeInfo{Path: "/tmp/wt", Kind: core.WorktreePrivate}); err == nil {
+			t.Fatal("worktree for unknown work was stored")
+		}
+		var rows int
+		wantNoErr(t, l.db.QueryRow(`SELECT (SELECT COUNT(*) FROM event) + (SELECT COUNT(*) FROM concern) + (SELECT COUNT(*) FROM worktree)`).Scan(&rows))
+		if rows != 0 {
+			t.Fatalf("%d rows stored for unknown work, want 0", rows)
+		}
 	})
 
 	t.Run("Worktrees Track Path Branch And State", func(t *testing.T) {

@@ -499,3 +499,41 @@ func jsonNumber(t *testing.T, out, key string) string {
 	t.Fatalf("key %s not a number in %s", key, out)
 	return ""
 }
+
+func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
+	f := newCLIFixture(t)
+	for _, args := range [][]string{
+		{"brief", f.ids["t3"], "--json"},
+		{"projects", "add", "second", f.sample, "--lazyspec", "n", "--json"},
+		{"runner", "init", "fresh", "--json"},
+		{"open", "README.md", "--json"},
+		{"epic", "spawn", f.ids["planEpic"], "--count", "2", "--runner", "claude,opencode", "--json"},
+		{"epic", "run", f.ids["epic"], "--only", f.ids["t3"], "--json"},
+	} {
+		code, out, errStr := f.runEnv(t, noEditorEnv(t, f), args...)
+		if code != 0 {
+			t.Errorf("wd %s exited %d: %s", strings.Join(args, " "), code, errStr)
+			continue
+		}
+		dec := json.NewDecoder(strings.NewReader(out))
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			t.Errorf("wd %s: %v in %q", strings.Join(args, " "), err, out)
+			continue
+		}
+		if dec.More() {
+			t.Errorf("wd %s: more than one document in %q", strings.Join(args, " "), out)
+		}
+	}
+	// epic spawn records the runner of the session it records.
+	out := f.runOK(t, "status", "--json")
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	for _, r := range rows {
+		if r["id"] == f.ids["planEpic"] && r["runner"] != "opencode" {
+			t.Fatalf("epic runner = %v with session %v, want opencode (the last spawn's)", r["runner"], r["session"])
+		}
+	}
+}

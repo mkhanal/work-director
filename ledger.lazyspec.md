@@ -31,7 +31,7 @@ With `codeChanged` true, `SoftDone` also requires a `pr` event.
 `Add` with a parent requires the parent to exist and be an epic; an epic or goal itself cannot have a parent.
 
 ## Concerns Resolve With A Decision
-`AddConcern` records an unresolved concern; `ResolveConcern` marks it resolved with the decision and files a note event.
+`AddConcern` records an unresolved concern; `ResolveConcern` marks it resolved with the decision and files a note event; resolving it again fails and keeps the first decision.
 
 ## Worktrees Track Path Branch And State
 `AddWorktree` records an active worktree; `SetWorktreeState` moves it to merged or abandoned.
@@ -50,3 +50,7 @@ Work added to a file-backed ledger is still there after closing and reopening it
 
 ## Migration Is Additive Only
 Migration adds nullable columns and creates missing tables; it never drops, renames or rewrites a column or table, so a ledger migrated by the Go wd stays readable by the TypeScript wd, and opening an already-migrated ledger changes nothing.
+
+## Events Concerns And Worktrees Belong To Existing Work
+`AddEvent`, `AddConcern` and `AddWorktree` for a work id that does not exist
+fail and store nothing.

@@ -69,3 +69,7 @@ print the same message and exit 1; a failing verify exits 1 after recording.
 `wd decide <id> <text>` records a `decision` event on existing work. The
 work's brief lists its decisions and its resolved concerns' decisions under
 "Decisions already made", and nothing else there.
+
+## Every Json Command Writes One Document
+With `--json`, a command writes exactly one JSON document to stdout — no
+progress lines, no document per spawned session.

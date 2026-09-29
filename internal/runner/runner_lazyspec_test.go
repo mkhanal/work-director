@@ -419,4 +419,21 @@ transcript = "cat {log}"
 			}
 		})
 	})
+
+	t.Run("A Runner File That Cannot Work Is Rejected When Added", func(t *testing.T) {
+		base := `spawn = "x run {brief}"` + "\n" + `session_id = 'session=(\w+)'` + "\n"
+		for _, c := range []struct{ name, text, want string }{
+			{"badregex", base + `status = "x status {session}"` + "\n" + `running = '(unclosed'` + "\n", "running"},
+			{"badplaceholder", base + `send = "x send {brief}"` + "\n", "{brief}"},
+			{"badsession", `spawn = "x"` + "\n" + `session_id = '(bad'` + "\n", "session_id"},
+		} {
+			_, err := WriteSpec(c.name, c.text)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("%s: err = %v, want it to name %s", c.name, err, c.want)
+			}
+			if _, err := os.Stat(filepath.Join(specDir, c.name+".toml")); !os.IsNotExist(err) {
+				t.Errorf("%s: written anyway (%v)", c.name, err)
+			}
+		}
+	})
 }

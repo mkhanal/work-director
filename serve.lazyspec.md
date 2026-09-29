@@ -35,12 +35,14 @@ action is a wrapper over the CLI.
 `GET /ws` upgrades to a WebSocket connection. The server sends a
 `board` message with the current board state on connect, then sends
 `event` messages whenever a ledger event is added. Clients can send
-`{"type": "action", "argv": [...]}` to run a CLI action.
+`{"type": "action", "argv": [...]}` to run a CLI action; a message that is
+not one gets a `{"type": "error", "error": "..."}` reply. A plain `GET /ws`
+that is no upgrade returns 400 with `{"error": "..."}`.
 
 ## Empty Collections Serialize As Empty Arrays
 A command that returns no rows emits `[]` for the collection, never null.
 
 ## Errors Return JSON
 An unknown path returns 404 with `{"error": "not found"}`. A bad
-request returns 400 with `{"error": "..."}`. An unknown work id returns
-404 with `{"error": "no work <id>"}`.
+request returns 400 with `{"error": "..."}`, and a wrong method 405. An unknown work id returns 404
+with `{"error": "no work <id>"}`.
