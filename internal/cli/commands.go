@@ -706,10 +706,10 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 	spawned := []handleWithAttach{}
 	var lines []string
 	for i, child := range children {
-		// Work past briefed has a session of its own or is waiting on a human;
-		// spawning would orphan it.
+		// Work past briefed has a session of its own, a claimed one, or is
+		// waiting on a human; spawning would orphan it.
 		spawnable := child.State == core.StateQueued || child.State == core.StateBriefed ||
-			(child.State == core.StateRunning && child.Session == nil)
+			(child.State == core.StateRunning && child.Session == nil && child.Claim == nil)
 		if !spawnable {
 			continue
 		}

@@ -83,7 +83,6 @@ func (f *cliFixture) seedLedger(t *testing.T) {
 		t.Fatalf("ledger: %v", err)
 	}
 	t.Cleanup(func() { l.Close() })
-	strPtr := func(s string) *string { return &s }
 	epic, err := l.Add("sample-app", "Metabase → Superset", ledger.AddOptions{Kind: core.WorkEpic})
 	if err != nil {
 		t.Fatalf("add epic: %v", err)

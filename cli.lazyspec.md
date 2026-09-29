@@ -105,9 +105,9 @@ candidate <card>`, leaving the written candidate as it was.
 
 ## Epic Run Spawns Only Children Not Yet Under Way
 `wd epic run` spawns the open children that are queued or briefed, or
-running with no session. Children in review, needs-input, blocked or
-soft-done, and running children with a session, keep their state and
-session. It reports how many it spawned; a run that spawns none leaves the
+running with neither session nor claim. Children in review, needs-input,
+blocked or soft-done, and running children with a session or a claim, keep
+their state, session and claim. It reports how many it spawned; a run that spawns none leaves the
 epic's state as it was.
 
 ## A Claim Names Someone

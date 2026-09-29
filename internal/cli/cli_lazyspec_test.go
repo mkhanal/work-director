@@ -26,7 +26,6 @@ import (
 // key values, error messages and exit codes.
 
 func TestWorkItemsSerializeWithTheWireSchema(t *testing.T) {
-	strPtr := func(s string) *string { return &s }
 	w := core.Work{
 		ID: "abc12345", Project: "p", Title: "T", Detail: "D",
 		Kind: core.WorkTask, State: core.StateRunning,
@@ -48,7 +47,6 @@ func TestWorkItemsSerializeWithTheWireSchema(t *testing.T) {
 }
 
 func TestLedgerObjectsKeepTheirColumnNames(t *testing.T) {
-	strPtr := func(s string) *string { return &s }
 	assertKeys(t, core.Event{ID: 1, Work: "w", Kind: core.EventReport, Body: "b", At: "a"},
 		[]string{"id", "work", "kind", "body", "at"})
 	assertKeys(t, core.Feedback{ID: 1, Text: "t", Project: strPtr("p"), Card: strPtr("c"), Source: core.FeedbackDirector, At: "a"},
@@ -843,14 +841,20 @@ func TestEpicRunSpawnsOnlyChildrenNotYetUnderWay(t *testing.T) {
 		}
 		return w.ID
 	}
+	claimed := child(epic, "Claimed by an outside session", core.StateRunning)
+	if _, err := l.SetClaim(claimed, strPtr("ses_outside")); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
 	underWay := []string{
 		t2,
+		claimed,
 		child(epic, "In review", core.StateRunning, core.StateReview),
 		child(epic, "Waiting on a human", core.StateRunning, core.StateNeedsInput),
 		child(epic, "Blocked", core.StateBlocked),
 		child(epic, "Soft done", core.StateRunning, core.StateReview, core.StateSoftDone),
 	}
 	briefed := child(epic, "Briefed", core.StateBriefed)
+	bare := child(epic, "Running with no session or claim", core.StateRunning)
 	before := map[string]core.Work{}
 	for _, id := range underWay {
 		if before[id], err = l.Get(id); err != nil {
@@ -859,19 +863,20 @@ func TestEpicRunSpawnsOnlyChildrenNotYetUnderWay(t *testing.T) {
 	}
 
 	out := f.runOK(t, "epic", "run", epic)
-	if !strings.Contains(out, "2 task(s) spawned") {
-		t.Fatalf("epic run = %q, want 2 task(s) spawned", out)
+	if !strings.Contains(out, "3 task(s) spawned") {
+		t.Fatalf("epic run = %q, want 3 task(s) spawned", out)
 	}
 	for _, id := range underWay {
 		w, err := l.Get(id)
 		if err != nil {
 			t.Fatalf("get %s: %v", id, err)
 		}
-		if w.State != before[id].State || strOrEmpty(w.Session) != strOrEmpty(before[id].Session) {
-			t.Errorf("%s = %s session %v, want %s session %v untouched", id, w.State, w.Session, before[id].State, before[id].Session)
+		was := before[id]
+		if w.State != was.State || strOrEmpty(w.Session) != strOrEmpty(was.Session) || strOrEmpty(w.Claim) != strOrEmpty(was.Claim) {
+			t.Errorf("%s = %s session %v claim %v, want %s session %v claim %v untouched", id, w.State, w.Session, w.Claim, was.State, was.Session, was.Claim)
 		}
 	}
-	for _, id := range []string{t3, briefed} {
+	for _, id := range []string{t3, briefed, bare} {
 		if w, err := l.Get(id); err != nil || w.State != core.StateRunning || w.Session == nil {
 			t.Errorf("%s = %+v, %v; want running with a session", id, w, err)
 		}
@@ -890,6 +895,8 @@ func TestEpicRunSpawnsOnlyChildrenNotYetUnderWay(t *testing.T) {
 		t.Fatalf("epic = %+v, %v; want it left queued", w, err)
 	}
 }
+
+func strPtr(s string) *string { return &s }
 
 func TestAClaimNamesSomeone(t *testing.T) {
 	f := newCLIFixture(t)
