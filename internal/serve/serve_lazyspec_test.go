@@ -369,12 +369,30 @@ func aClientThatStopsReadingNeverDelaysTheOthers(t *testing.T) {
 		}
 	}
 
+	// A client joining while the stalled one is still connected gets its board
+	// as promptly.
+	srv.hub.mu.Lock()
+	n := len(srv.hub.conns)
+	srv.hub.mu.Unlock()
+	if n != 2 {
+		t.Fatalf("%d clients connected, want the stalled one still there", n)
+	}
+	joined := dialWS(t, addr)
+	if err := joined.conn.SetReadDeadline(time.Now().Add(wsWriteTimeout / 2)); err != nil {
+		t.Fatalf("deadline: %v", err)
+	}
+	board.Type = ""
+	readWSJSON(t, joined, &board)
+	if board.Type != "board" {
+		t.Fatalf("joining client's first message type = %q, want board", board.Type)
+	}
+
 	// Reading from the stalled client would unstall it, so watch the hub.
 	for deadline := time.Now().Add(3 * wsWriteTimeout); ; time.Sleep(20 * time.Millisecond) {
 		srv.hub.mu.Lock()
 		n := len(srv.hub.conns)
 		srv.hub.mu.Unlock()
-		if n == 1 {
+		if n == 2 {
 			break
 		}
 		if time.Now().After(deadline) {
