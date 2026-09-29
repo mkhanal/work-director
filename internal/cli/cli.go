@@ -314,13 +314,22 @@ func flag(a Args, k string) bool {
 	return ok
 }
 
-func oneOf(values []string, x, what string) (string, error) {
-	for _, v := range values {
-		if v == x {
-			return x, nil
+// oneOf parses x as one of values, failing with the list.
+func oneOf[T ~string](values []T, x, what string) (T, error) {
+	names := make([]string, len(values))
+	for i, v := range values {
+		if string(v) == x {
+			return v, nil
 		}
+		names[i] = string(v)
 	}
-	return "", fail("unknown %s %s; one of %s", what, x, strings.Join(values, ", "))
+	return "", fail("unknown %s %s; one of %s", what, x, strings.Join(names, ", "))
+}
+
+// settableStates are the states `wd set` accepts, in the order it lists them.
+var settableStates = []core.State{
+	core.StateQueued, core.StateBriefed, core.StateRunning, core.StateNeedsInput, core.StateReview,
+	core.StateSoftDone, core.StateDone, core.StateBlocked, core.StateDropped,
 }
 
 func kindPtr(k core.EventKind) *core.EventKind { return &k }

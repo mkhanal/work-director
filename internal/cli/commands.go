@@ -273,17 +273,17 @@ func (c *Cli) add(rest []string) error {
 	if _, err := c.project(name); err != nil {
 		return err
 	}
-	kind, err := oneOf([]string{"task", "evolution", "workflow", "goal", "epic"}, strOr(c.Args, "kind", "task"), "kind")
+	kind, err := oneOf(core.WorkKinds, strOr(c.Args, "kind", "task"), "kind")
 	if err != nil {
 		return err
 	}
 	parent := str(c.Args, "epic")
 	heading := str(c.Args, "heading")
-	if parent != nil && core.IsEpic(core.WorkKind(kind)) {
+	if parent != nil && core.IsEpic(kind) {
 		return fail("an epic cannot sit under another work item")
 	}
 	w, err := c.Ledger.Add(name, title, ledger.AddOptions{
-		Kind:    core.WorkKind(kind),
+		Kind:    kind,
 		Detail:  strOr(c.Args, "detail", ""),
 		Parent:  parent,
 		Heading: heading,
@@ -1200,14 +1200,14 @@ func (c *Cli) set(rest []string) error {
 		return fail("usage: wd set <id> <state>")
 	}
 	id, to := rest[0], rest[1]
-	state, err := oneOf([]string{"queued", "briefed", "running", "needs-input", "review", "soft-done", "done", "blocked", "dropped"}, to, "state")
+	state, err := oneOf(settableStates, to, "state")
 	if err != nil {
 		return err
 	}
-	if core.State(state) == core.StateSoftDone {
+	if state == core.StateSoftDone {
 		return c.softDone(rest[:1])
 	}
-	after, err := c.Ledger.Transition(id, core.State(state))
+	after, err := c.Ledger.Transition(id, state)
 	if err != nil {
 		if _, ok := err.(core.IllegalTransition); ok {
 			return fail("%s", err.Error())
@@ -1801,7 +1801,7 @@ func (c *Cli) scan(rest []string) error {
 		if err != nil {
 			return err
 		}
-		c.out(map[string]any{"path": path}, fmt.Sprintf("wrote global candidate card %s → %s\nreview it, then `go run ./cmd/taste` when adopted", cand.Card.ID, path))
+		c.out(map[string]any{"path": path}, fmt.Sprintf("wrote global candidate card %s from %s → %s\nreview it, then `go run ./cmd/taste` when adopted", strings.TrimSuffix(filepath.Base(path), ".md"), cand.Card.ID, path))
 		return nil
 	}
 	var b strings.Builder
@@ -1872,16 +1872,18 @@ func (c *Cli) feedback(rest []string) error {
 			return fail("usage: wd feedback add <text> [--project p] [--card c] [--source director|note|attached]")
 		}
 		text := rest[1]
-		source := str(a, "source")
-		if source != nil {
-			if _, err := oneOf([]string{"director", "note", "attached"}, *source, "source"); err != nil {
+		var source core.FeedbackSource
+		if s := str(a, "source"); s != nil {
+			parsed, err := oneOf(core.FeedbackSources, *s, "source")
+			if err != nil {
 				return err
 			}
+			source = parsed
 		}
 		f, err := c.Ledger.AddFeedback(text, ledger.FeedbackOptions{
 			Project: str(a, "project"),
 			Card:    str(a, "card"),
-			Source:  core.FeedbackSource(strOr(a, "source", "")),
+			Source:  source,
 		})
 		if err != nil {
 			return err
