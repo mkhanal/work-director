@@ -1,7 +1,5 @@
 // Package open resolves file targets and opens them in the host's editor,
-// printing an OSC-8 clickable link either way. It is a port of
-// packages/wd/src/open.ts with the same targets, editor preference and
-// output.
+// printing an OSC-8 clickable link either way.
 package open
 
 import (

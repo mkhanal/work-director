@@ -30,7 +30,7 @@ learns taste from feedback. Design: `docs/superpowers/specs/2026-09-04-work-dire
 - Be succinct. Briefs, reports, replies: outcome first, no narration.
 - Private state (ledger, project files, feedback) lives in `~/.work-director`, never in this repo.
 - Rule cards in `taste/cards/` are the source; everything in `plugin/` and `dist/` is generated
-  by `go run ./cmd/taste` (the rewrite of `bun run build`). Never hand-edit generated files.
+  by `go run ./cmd/taste`. Never hand-edit generated files.
 
 ## Director chat contract
 

@@ -1,7 +1,5 @@
 // Package cli is the director's command line: every wd command over the core
-// and the ledger, printing either human text or the --json rail. It is a port
-// of packages/wd/src/cli.ts with the same commands, flags, output and error
-// messages.
+// and the ledger, printing either human text or the --json rail.
 package cli
 
 import (

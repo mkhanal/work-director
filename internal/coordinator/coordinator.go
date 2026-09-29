@@ -1,8 +1,7 @@
 // Package coordinator drives an epic's planning and task sessions: the
 // planning brief, parsing the planner's reply, answering questions from
 // what the ledger already knows, and one coordination pass over the
-// children. It is a port of packages/wd/src/coordinator.ts with the same
-// parsing, matching and state changes.
+// children.
 package coordinator
 
 import (

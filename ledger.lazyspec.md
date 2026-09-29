@@ -1,8 +1,13 @@
+> **lazyspec.** Humans edit freely. Agents change this only through
+> `/lazyspec`, with its tests, in one edit.
+>
+> Each `##` heading is one requirement. Its test repeats that heading
+> as its own name — to find it, search the tests for that text.
+
 # Ledger (Go)
 
-The Go ledger keeps the schema and semantics of the TypeScript ledger it ports
-(`packages/wd/src/ledger.ts`): same tables, same DDL, same additive migration, same
-error messages, same state machine.
+The ledger owns the director's tables, their additive migration, its error messages
+and the work state machine. It opens every ledger an earlier wd wrote.
 
 ## New Work Starts Queued
 `Add` returns work in state `queued` with a `state` event recording it.

@@ -1,6 +1,5 @@
 // Package promotion decides when a project-scoped rule card has been seen
-// enough in the real world to become a global candidate. It is a port of
-// packages/wd/src/promotion.ts with the same thresholds and ordering.
+// enough in the real world to become a global candidate.
 package promotion
 
 import (

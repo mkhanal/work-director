@@ -1,7 +1,5 @@
 // Package runner drives provider CLIs: the three foundation adapters (claude,
 // opencode, codex) and spec-file runners defined by TOML command files.
-// It is a port of packages/wd/src/runner/ with the same commands, session
-// discovery, transcript parsing and error messages.
 package runner
 
 import (

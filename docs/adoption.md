@@ -18,7 +18,7 @@ Nothing to adopt ever means a rule file inside a project repo.
 
 ## 1. Taste — your rules, wherever the agent runs
 
-Rule cards in `taste/cards/` are the single source. `bun run build` generates the artifacts
+Rule cards in `taste/cards/` are the single source. `go run ./cmd/taste` generates the artifacts
 below; never hand-edit generated files (`plugin/`, `dist/`).
 
 ### Claude Code (claude)
@@ -71,7 +71,7 @@ match your stack.
 wd feedback add "a handler swallowed the failure and logged" --card fail-loud
 wd distill                      # groups repeated feedback into candidates
 wd scan                         # also surfaces project rules to promote to global
-wd scan --adopt <candidate>     # writes a global *candidate* card; adopt it, then bun run build
+wd scan --adopt <candidate>     # writes a global *candidate* card; adopt it, then go run ./cmd/taste
 ```
 
 ## 2. Director — orchestrate many repos from the terminal
@@ -173,10 +173,7 @@ wd concern resolve <n> "<decision>"
 ### Where everything lives
 
 No private data is in the repo. The ledger (SQLite), project files, feedback and worktrees
-live under `~/.work-director` (override with `WD_HOME`). `testbed/` is a committed validation
-playground: `bun testbed/eval.ts` remakes a disposable sample repo and drives the real CLI
-through the whole epic flow with fake runners (no LLMs); `bun testbed/setup.ts` lets you drive
-it by hand with a real session. See `testbed/README.md`.
+live under `~/.work-director` (override with `WD_HOME`).
 
 ## 3. If you want the UI later
 

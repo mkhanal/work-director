@@ -1,7 +1,5 @@
 // Package ledger is the sqlite-backed store of the director's truth: work
-// items, their events, feedback, concerns and worktrees. It is a port of
-// packages/wd/src/ledger.ts with the same schema, the same DDL and the same
-// semantics; rows are parsed into core domain types at this boundary and never
+// items, their events, feedback, concerns and worktrees. Rows are parsed into core domain types at this boundary and never
 // cast afterwards.
 package ledger
 

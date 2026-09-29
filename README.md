@@ -32,14 +32,14 @@ Mechanical rules ship as presets in `presets/` (Biome, ESLint, tsconfig).
 
 ## Rule cards
 
-One file per rule in `taste/cards/<category>/<id>.md`: scope (`global`, `lang:ts`, `stack:biome`, `project:x`), kind, status, whether it is always-on, and which lint rules enforce it. `bun run build` regenerates the plugin and fails if the constitution exceeds its limit or an enforced rule is missing from the presets. Cards with `project:` scope never leave the repo they describe; the director proposes them as a PR to that repo instead.
+One file per rule in `taste/cards/<category>/<id>.md`: scope (`global`, `lang:ts`, `stack:biome`, `project:x`), kind, status, whether it is always-on, and which lint rules enforce it. `go run ./cmd/taste` regenerates the plugin and fails if the constitution exceeds its limit or an enforced rule is missing from the presets. Cards with `project:` scope never leave the repo they describe; the director proposes them as a PR to that repo instead.
 
 ## Run the director
 
 The director is a **chat session in this repo** — open claude or opencode here and `AGENTS.md`
 makes it the chat surface: it maintains statuses and todos, records decisions, auto-resumes
 from the ledger after a crash, and enforces clash reporting. The `wd` CLI is the rail that
-session drives — and the hands-off rail for scripted work (`bun run testbed` exercises it).
+session drives — and the hands-off rail for scripted work.
 
 ```
 curl -fsSL https://raw.githubusercontent.com/mkhanal/work-director/main/scripts/install.sh | sh
@@ -104,6 +104,6 @@ State lives in `~/.work-director` (SQLite ledger, project files, worktrees). The
 
 ## Design
 
-`docs/superpowers/specs/2026-09-04-work-director-design.md` for the decisions; `docs/superpowers/specs/2026-09-25-work-director-parallel-orchestration.md` for the epic/coordination model (worktrees, claims, concerns, promotion, lazyspec adoption) with its recorded decisions; `docs/analysis/` for the verified primitives and the landscape survey; `docs/adoption.md` to get people started. Requirements are lazyspec files married to tests under `packages/*/specs`. The `testbed/` folder validates the director end-to-end against a disposable sample project — `bun testbed/eval.ts` offline with fake runners (~150ms, no LLMs), or drive `testbed/run/sample-app` by hand with a real session (see `testbed/README.md`).
+`docs/superpowers/specs/2026-09-04-work-director-design.md` for the decisions; `docs/superpowers/specs/2026-09-25-work-director-parallel-orchestration.md` for the epic/coordination model (worktrees, claims, concerns, promotion, lazyspec adoption) with its recorded decisions; `docs/analysis/` for the verified primitives and the landscape survey; `docs/adoption.md` to get people started. Requirements are the root `*.lazyspec.md` files, married to `internal/<pkg>/<stem>_lazyspec_test.go`; `scripts/lazyspec-check.sh` checks every one. The CLI tests drive the built `wd` against a disposable sample repo with fake runners (`internal/cli/testdata`), no LLMs.
 
 MIT.

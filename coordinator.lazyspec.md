@@ -1,7 +1,12 @@
+> **lazyspec.** Humans edit freely. Agents change this only through
+> `/lazyspec`, with its tests, in one edit.
+>
+> Each `##` heading is one requirement. Its test repeats that heading
+> as its own name — to find it, search the tests for that text.
+
 # Coordinator (Go)
 
-The Go coordinator keeps the behaviour of the TypeScript coordinator it
-ports (`packages/wd/src/coordinator.ts`): the planning brief, the plan
+The coordinator owns the planning brief, the plan
 parser, the known-answer lookup and one coordination pass over an epic's
 children. The ledger's claims, impacts, conflicts, concerns and worktrees
 are specified in `ledger.lazyspec.md`.
