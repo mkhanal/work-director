@@ -47,6 +47,23 @@ func transition(t *testing.T, l *ledger.Ledger, id string, to core.State) {
 	}
 }
 
+// softDone passes work in review through the soft-done gate: a DONE report
+// and a passing verify, no code changed.
+func softDone(t *testing.T, l *ledger.Ledger, id string) {
+	t.Helper()
+	for _, e := range []struct {
+		kind core.EventKind
+		body string
+	}{{core.EventReport, "DONE"}, {core.EventVerify, "pass"}} {
+		if err := l.AddEvent(id, e.kind, e.body); err != nil {
+			t.Fatalf("event %s: %v", e.kind, err)
+		}
+	}
+	if _, err := l.SoftDone(id, false); err != nil {
+		t.Fatalf("soft-done %s: %v", id, err)
+	}
+}
+
 func assertContains(t *testing.T, text, want string) {
 	t.Helper()
 	if !strings.Contains(text, want) {
@@ -171,13 +188,13 @@ func TestTui(t *testing.T) {
 			transition(t, l, t1.ID, core.StateBriefed)
 			transition(t, l, t1.ID, core.StateRunning)
 			transition(t, l, t1.ID, core.StateReview)
-			transition(t, l, t1.ID, core.StateSoftDone)
+			softDone(t, l, t1.ID)
 			transition(t, l, t1.ID, core.StateDone)
 			transition(t, l, t2.ID, core.StateBriefed)
 			transition(t, l, finished.ID, core.StateBriefed)
 			transition(t, l, finished.ID, core.StateRunning)
 			transition(t, l, finished.ID, core.StateReview)
-			transition(t, l, finished.ID, core.StateSoftDone)
+			softDone(t, l, finished.ID)
 			transition(t, l, finished.ID, core.StateDone)
 			ref := "wd/rewrite-the-core"
 			if err := l.SetSession(epic.ID, ledger.SessionInfo{Runner: "claude", Session: "ses_epic", Ref: &ref}); err != nil {

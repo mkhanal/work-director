@@ -21,6 +21,10 @@ Adding an event moves the work's `updated` to that event's time.
 ## Soft Done Requires A Done Report And A Passing Verify
 From `review`, `SoftDone` refuses (NotReady listing what is missing) until the latest report starts with DONE and the latest verify starts with pass.
 
+## Soft Done Is Reached Only Through Its Gate
+`Transition` to soft-done fails and changes nothing; only `SoftDone` moves
+work there.
+
 ## Code Changes Need A Pull Request Before Soft Done
 With `codeChanged` true, `SoftDone` also requires a `pr` event.
 

@@ -362,7 +362,16 @@ func (l *Ledger) Tasks(epicID string) ([]core.Work, error) {
 	return out, rows.Err()
 }
 
+// Transition moves work along core.Transitions. Soft-done is reached only
+// through SoftDone, which checks readiness first.
 func (l *Ledger) Transition(id string, to core.State) (core.Work, error) {
+	if to == core.StateSoftDone {
+		return core.Work{}, fmt.Errorf("work %s: soft-done is reached only through SoftDone, which checks readiness", id)
+	}
+	return l.transition(id, to)
+}
+
+func (l *Ledger) transition(id string, to core.State) (core.Work, error) {
 	err := l.inTx(func(tx *sql.Tx) error {
 		w, err := getWork(tx, id)
 		if err != nil {
@@ -741,7 +750,7 @@ func (l *Ledger) SoftDone(id string, codeChanged bool) (core.Work, error) {
 	if len(missing) > 0 {
 		return core.Work{}, core.NotReady{Missing: missing}
 	}
-	return l.Transition(id, core.StateSoftDone)
+	return l.transition(id, core.StateSoftDone)
 }
 
 type FeedbackOptions struct {

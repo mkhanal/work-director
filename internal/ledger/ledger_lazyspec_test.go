@@ -244,6 +244,28 @@ func TestLedger(t *testing.T) {
 		}
 	})
 
+	t.Run("Soft Done Is Reached Only Through Its Gate", func(t *testing.T) {
+		l := newTestLedger(t)
+		w := add(t, l, "p", "t", AddOptions{})
+		for _, s := range []core.State{core.StateBriefed, core.StateRunning, core.StateReview} {
+			move(t, l, w.ID, s)
+		}
+		before := allEvents(t, l, w.ID, nil)
+		if _, err := l.Transition(w.ID, core.StateSoftDone); err == nil {
+			t.Fatal("Transition moved work to soft-done without its gate")
+		}
+		got, err := l.Get(w.ID)
+		wantNoErr(t, err)
+		if got.State != core.StateReview || len(allEvents(t, l, w.ID, nil)) != len(before) {
+			t.Fatalf("state = %q with %d events, want review unchanged", got.State, len(allEvents(t, l, w.ID, nil)))
+		}
+		l.AddEvent(w.ID, core.EventReport, "DONE")
+		l.AddEvent(w.ID, core.EventVerify, "pass")
+		if got := softDone(t, l, w.ID, false); got.State != core.StateSoftDone {
+			t.Fatalf("state = %q, want soft-done", got.State)
+		}
+	})
+
 	t.Run("Code Changes Need A Pull Request Before Soft Done", func(t *testing.T) {
 		l := newTestLedger(t)
 		w := add(t, l, "p", "t", AddOptions{})
@@ -418,9 +440,12 @@ func TestLedger(t *testing.T) {
 		if len(got) != 1 || got[0].A != a.ID || got[0].B != b.ID || !slices.Equal(got[0].Paths, []string{"a/b"}) {
 			t.Fatalf("conflicts = %v, want one overlap on a/b", got)
 		}
-		for _, s := range []core.State{core.StateBriefed, core.StateRunning, core.StateReview, core.StateSoftDone, core.StateDone} {
+		for _, s := range []core.State{core.StateBriefed, core.StateRunning, core.StateReview} {
 			move(t, l, b.ID, s)
 		}
+		l.AddEvent(b.ID, core.EventReport, "DONE")
+		softDone(t, l, b.ID, false)
+		move(t, l, b.ID, core.StateDone)
 		if got := allConflicts(t, l, epic.ID); len(got) != 0 {
 			t.Fatalf("conflicts = %v, want none once a task is done", got)
 		}
@@ -445,7 +470,8 @@ func TestLedger(t *testing.T) {
 		move(t, l, task.ID, core.StateBriefed)
 		move(t, l, task.ID, core.StateRunning)
 		move(t, l, task.ID, core.StateReview)
-		move(t, l, task.ID, core.StateSoftDone)
+		l.AddEvent(task.ID, core.EventReport, "DONE")
+		softDone(t, l, task.ID, false)
 		move(t, l, task.ID, core.StateDone)
 		if got := softDone(t, l, epic.ID, true); got.State != core.StateSoftDone {
 			t.Fatalf("state = %q, want soft-done", got.State)
