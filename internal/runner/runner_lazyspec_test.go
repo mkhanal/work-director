@@ -89,6 +89,7 @@ esac`)
 		`{"type":"user","message":{"content":"go"}}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"READY"}]}}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"STATUS: DONE"}]}}`,
+		``,
 	}, "\n")
 	if err := os.WriteFile(filepath.Join(claudeDir, testSID+".jsonl"), []byte(transcript), 0o644); err != nil {
 		t.Fatalf("write transcript: %v", err)
@@ -233,6 +234,55 @@ transcript = "cat {log}"
 		}
 		if !slices.Equal(got, []string{"READY", "STATUS: DONE"}) {
 			t.Fatalf("transcript = %v, want [READY STATUS: DONE]", got)
+		}
+	})
+
+	t.Run("A Transcript Skips A Line Still Being Written", func(t *testing.T) {
+		codexDir := filepath.Join(home, ".work-director", "codex")
+		if err := os.MkdirAll(codexDir, 0o755); err != nil {
+			t.Fatalf("mkdir codex: %v", err)
+		}
+		cases := []struct {
+			runner   Runner
+			handle   Handle
+			log      string
+			complete string
+			torn     string
+		}{
+			{
+				runner:   claude,
+				handle:   Handle{Runner: "claude", Session: "5e1f2a3b-0c4d-4e5f-8a6b-7c8d9e0f1a2b", Cwd: cwd},
+				log:      filepath.Join(claudeDir, "5e1f2a3b-0c4d-4e5f-8a6b-7c8d9e0f1a2b.jsonl"),
+				complete: `{"type":"assistant","message":{"content":[{"type":"text","text":"READY"}]}}`,
+				torn:     `{"type":"assistant","message":{"content":[{"type":"te`,
+			},
+			{
+				runner:   codex,
+				handle:   Handle{Runner: "codex", Session: "codex-torn123", Cwd: cwd},
+				log:      filepath.Join(codexDir, "codex-torn123.1.jsonl"),
+				complete: `{"type":"thread","thread":{"messages":[{"role":"assistant","content":[{"type":"text","text":"READY"}]}]}}`,
+				torn:     `{"type":"thread","thread":{"messages":[{"role":"assi`,
+			},
+		}
+		for _, c := range cases {
+			t.Run(c.runner.Name(), func(t *testing.T) {
+				if err := os.WriteFile(c.log, []byte(c.complete+"\n"+c.torn), 0o644); err != nil {
+					t.Fatalf("write log: %v", err)
+				}
+				got, err := c.runner.Transcript(c.handle)
+				if err != nil {
+					t.Fatalf("transcript mid-write: %v", err)
+				}
+				if !slices.Equal(got, []string{"READY"}) {
+					t.Fatalf("transcript mid-write = %v, want [READY]", got)
+				}
+				if err := os.WriteFile(c.log, []byte(c.complete+"\n"+c.torn+"\n"), 0o644); err != nil {
+					t.Fatalf("write log: %v", err)
+				}
+				if got, err := c.runner.Transcript(c.handle); err == nil {
+					t.Fatalf("transcript with a malformed complete line = %v, want a parse error", got)
+				}
+			})
 		}
 	})
 

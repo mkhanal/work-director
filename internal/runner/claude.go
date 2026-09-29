@@ -151,7 +151,7 @@ func (claudeRunner) Transcript(h Handle) ([]string, error) {
 		return nil, err
 	}
 	var out []string
-	for _, line := range strings.Split(string(text), "\n") {
+	for _, line := range jsonlRecords(string(text)) {
 		if line == "" {
 			continue
 		}

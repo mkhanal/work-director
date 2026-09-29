@@ -140,7 +140,7 @@ func codexTexts(log string) ([]string, error) {
 		return nil, err
 	}
 	var out []string
-	for i, line := range strings.Split(string(text), "\n") {
+	for i, line := range jsonlRecords(string(text)) {
 		if line == "" {
 			continue
 		}

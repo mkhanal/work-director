@@ -168,6 +168,14 @@ func lines(text string) []string {
 	return out
 }
 
+// jsonlRecords are a live jsonl store's complete lines. The executor may be
+// part way through writing the last line, so a line is a record only once
+// its newline is written.
+func jsonlRecords(text string) []string {
+	records := strings.Split(text, "\n")
+	return records[:len(records)-1]
+}
+
 var slugRe = regexp.MustCompile(`[^A-Za-z0-9-]`)
 
 // projectSlug matches claude's project dir naming: cwd with every
