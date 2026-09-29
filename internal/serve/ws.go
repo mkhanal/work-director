@@ -141,6 +141,11 @@ func (c *wsConn) writeFrame(opcode wsOpCode, payload []byte) error {
 	if c.closed {
 		return errors.New("connection closed")
 	}
+	return c.writeFrameLocked(opcode, payload)
+}
+
+// writeFrameLocked writes one frame; the caller holds wmu.
+func (c *wsConn) writeFrameLocked(opcode wsOpCode, payload []byte) error {
 	var hdr []byte
 	hdr = append(hdr, byte(0x80|opcode))
 	switch {
@@ -183,7 +188,8 @@ func (c *wsConn) close() {
 		return
 	}
 	c.closed = true
-	c.writeFrame(opClose, nil)
+	// The peer may already be gone; the close frame is a courtesy.
+	c.writeFrameLocked(opClose, nil)
 	c.conn.Close()
 }
 
@@ -217,7 +223,7 @@ func (c *wsConn) readLoop(onMessage func([]byte) error) {
 // wsHub tracks every connected WebSocket client and broadcasts messages
 // to all of them.
 type wsHub struct {
-	mu   sync.Mutex
+	mu    sync.Mutex
 	conns map[*wsConn]bool
 }
 
@@ -239,12 +245,15 @@ func (h *wsHub) remove(c *wsConn) {
 	delete(h.conns, c)
 }
 
-// broadcast sends a JSON message to every connected client.
+// broadcast sends a JSON message to every connected client. A client that
+// cannot be written to is closed, which ends its handler and unregisters it.
 func (h *wsHub) broadcast(v any) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for c := range h.conns {
-		c.writeJSON(v)
+		if err := c.writeJSON(v); err != nil {
+			c.close()
+		}
 	}
 }
 

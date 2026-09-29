@@ -375,6 +375,32 @@ func (l *Ledger) Events(work string, kind *core.EventKind) ([]core.Event, error)
 	return out, rows.Err()
 }
 
+// EventsAfter returns every event, across all work, with an id above after,
+// in id order.
+func (l *Ledger) EventsAfter(after int) ([]core.Event, error) {
+	rows, err := l.db.Query(`SELECT id, work, kind, body, at FROM event WHERE id > ? ORDER BY id`, after)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []core.Event{}
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// LastEventID returns the highest event id, or 0 when there are no events.
+func (l *Ledger) LastEventID() (int, error) {
+	var id int
+	err := l.db.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM event`).Scan(&id)
+	return id, err
+}
+
 func (l *Ledger) AddConcern(work, text string) (core.Concern, error) {
 	c, err := scanConcern(l.db.QueryRow(
 		`INSERT INTO concern (work, text, at) VALUES (?, ?, ?)
