@@ -130,6 +130,12 @@ func parseBasicString(s string) (string, error) {
 	return "", fmt.Errorf("unterminated string")
 }
 
+// tomlString writes s as a TOML basic string, escaping what parseBasicString
+// unescapes.
+func tomlString(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\t", `\t`, "\r", `\r`).Replace(s) + `"`
+}
+
 // parseLiteralString parses a TOML literal string: single-quoted, no escapes.
 func parseLiteralString(s string) (string, error) {
 	end := strings.Index(s[1:], "'")

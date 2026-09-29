@@ -59,6 +59,19 @@ func TestCommandsFailLoud(t *testing.T) {
 		}
 	})
 
+	t.Run("runner add refuses a name that is not a plain file name", func(t *testing.T) {
+		file := filepath.Join(t.TempDir(), "spec.toml")
+		if err := os.WriteFile(file, []byte(`spawn = "x run {brief}"`+"\n"+`session_id = 'session=(\w+)'`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if errStr := f.runFail(t, "runner", "add", "../escape", file); !strings.Contains(errStr, "runner name") {
+			t.Fatalf("stderr = %q, want the runner name refused", errStr)
+		}
+		if _, err := os.Stat(filepath.Join(f.wdHome, "escape.toml")); !os.IsNotExist(err) {
+			t.Fatalf("a spec was written outside the runners dir: %v", err)
+		}
+	})
+
 	t.Run("an unknown feedback subcommand fails", func(t *testing.T) {
 		if errStr := f.runFail(t, "feedback", "ad", "x"); !strings.Contains(errStr, "usage: wd feedback") {
 			t.Fatalf("stderr = %q, want feedback usage", errStr)

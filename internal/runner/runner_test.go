@@ -144,3 +144,38 @@ session_id = 'session=(\w+)'
 		t.Fatalf("WriteSpec err = %v, want the session_id regex error", err)
 	}
 }
+
+func TestWriteSpecRefusesANameThatIsNotAPlainFileName(t *testing.T) {
+	_, wdHome := isolate(t)
+	text := `name = "whatever"` + "\n" + `spawn = "x run {brief}"` + "\n" + `session_id = 'session=(\w+)'` + "\n"
+	for _, name := range []string{"../escape", "a/b", "", "bad name", `q"x`} {
+		if _, err := WriteSpec(name, text); err == nil || !strings.Contains(err.Error(), "runner name") {
+			t.Errorf("WriteSpec(%q) err = %v, want the runner name refused", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(wdHome, "escape.toml")); !os.IsNotExist(err) {
+		t.Fatalf("a spec was written outside the runners dir: %v", err)
+	}
+	path, err := WriteSpec("my-agent_2", text)
+	if err != nil {
+		t.Fatalf("WriteSpec: %v", err)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if spec, err := parseSpecTOML(string(written)); err != nil || spec.Name != "my-agent_2" {
+		t.Fatalf("written spec = %+v, %v; want name my-agent_2", spec, err)
+	}
+}
+
+func TestTOMLStringsRoundTrip(t *testing.T) {
+	for _, s := range []string{"plain", `quo"te`, `back\slash`, "tab\there", "line\nbreak", "$1 dollars"} {
+		if got, err := parseBasicString(tomlString(s)); err != nil || got != s {
+			t.Errorf("tomlString(%q) parses back as %q, %v", s, got, err)
+		}
+	}
+	if spec, err := parseSpecTOML(SpecTemplate("my-agent")); err != nil || spec.Name != "my-agent" {
+		t.Fatalf("template = %+v, %v; want name my-agent", spec, err)
+	}
+}

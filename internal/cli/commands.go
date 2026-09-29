@@ -189,10 +189,13 @@ func (c *Cli) runner(rest []string) error {
 		}
 		return c.out(map[string]any{"runner": name, "path": path}, fmt.Sprintf("runner %s added (%s); try wd spawn <id> --runner %s", name, path, name))
 	case "init":
-		if len(rest) < 2 || rest[1] == "" || !matchesName(rest[1]) {
+		if len(rest) < 2 {
 			return fail("usage: wd runner init <name>")
 		}
 		name := rest[1]
+		if err := runner.CheckName(name); err != nil {
+			return fail("usage: wd runner init <name> — %s", err)
+		}
 		dir, err := runner.SpecDir()
 		if err != nil {
 			return err
@@ -239,15 +242,6 @@ func renderRunnerListing(l RunnerListing, specDir string) string {
 		return l.Runner + "\t" + where + "\tdetected " + *l.Path
 	}
 	return l.Runner + "\t" + where + "\tnot detected (" + l.Command + " not on PATH)"
-}
-
-func matchesName(s string) bool {
-	for _, r := range s {
-		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
-			return false
-		}
-	}
-	return len(s) > 0
 }
 
 func (c *Cli) add(rest []string) error {

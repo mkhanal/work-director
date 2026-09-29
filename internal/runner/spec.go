@@ -166,9 +166,23 @@ func loadSpecs(dir string) ([]checkedSpec, error) {
 	return out, nil
 }
 
+var nameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// CheckName fails unless name can name a spec file in the spec dir: letters,
+// digits, _ and - only.
+func CheckName(name string) error {
+	if !nameRe.MatchString(name) {
+		return fmt.Errorf("runner name %q: use letters, digits, _ and - only", name)
+	}
+	return nil
+}
+
 // WriteSpec validates a spec file's text and writes it under the spec dir as
 // <name>.toml, forcing the name field to the file's name.
 func WriteSpec(name, text string) (string, error) {
+	if err := CheckName(name); err != nil {
+		return "", err
+	}
 	spec, err := parseSpecTOML(text)
 	if err != nil {
 		return "", err
@@ -185,7 +199,7 @@ func WriteSpec(name, text string) (string, error) {
 		return "", err
 	}
 	file := filepath.Join(dir, name+".toml")
-	replaced := regexp.MustCompile(`(?m)^name\s*=.*$`).ReplaceAllString(text, `name = "`+name+`"`)
+	replaced := regexp.MustCompile(`(?m)^name\s*=.*$`).ReplaceAllLiteralString(text, "name = "+tomlString(name))
 	if err := os.WriteFile(file, []byte(replaced), 0o644); err != nil {
 		return "", err
 	}
@@ -200,7 +214,7 @@ func SpecTemplate(name string) string {
 # {cwd} {session} {home} {slug_cwd}, send also {text}, and {log} (the session's
 # spawn output) when detach = true. models: {home}. Write commands exactly as
 # you would run them, including pipes and redirects.
-name = "` + name + `"
+name = ` + tomlString(name) + `
 spawn = "` + name + ` run --cwd {cwd} --title {name} --json {brief}"
 detach = true
 session_id = '"session":"([A-Za-z0-9_-]+)"'
