@@ -84,3 +84,8 @@ under escalated, and a running child — answered since — waits.
 A child with no runner coordinates with its epic's runner, else its
 project's; with no cwd it works in its epic's active shared worktree, else
 the project's path — the same session `wd send` and `wd report` reach.
+
+## Sending Records The Ref The Runner Returns
+`Send` continues a child's session and records the ref the runner returns,
+so a status check reaches the process now serving it; the child's runner
+and directory still follow its epic.

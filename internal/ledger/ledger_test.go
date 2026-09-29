@@ -187,4 +187,5 @@ func TestSessionWritesToUnknownWorkFail(t *testing.T) {
 	l := newTestLedger(t)
 	wantErr(t, l.SetSession("nope", SessionInfo{Runner: "claude", Session: "s", Cwd: "/tmp"}), "no work nope; wd status for known work items")
 	wantErr(t, l.SetCwd("nope", "/tmp"), "no work nope; wd status for known work items")
+	wantErr(t, l.SetRef("nope", nil), "no work nope; wd status for known work items")
 }

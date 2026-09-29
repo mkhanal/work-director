@@ -1,6 +1,7 @@
 package coordinator
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -63,6 +64,7 @@ type fakeRunner struct {
 	sends    []string
 	resolved []string
 	cwds     []string
+	sessions []string
 }
 
 func (f *fakeRunner) Name() string { return "fake" }
@@ -71,8 +73,11 @@ func (f *fakeRunner) Command() string { return "fake" }
 func (f *fakeRunner) Spawn(o runner.SpawnOptions) (runner.Handle, error) {
 	return runner.Handle{Runner: "fake"}, nil
 }
+// Send numbers its refs: each send starts a new process.
 func (f *fakeRunner) Send(h *runner.Handle, text string) error {
 	f.sends = append(f.sends, text)
+	ref := fmt.Sprintf("pid:%d", len(f.sends))
+	h.Ref = &ref
 	return nil
 }
 func (f *fakeRunner) Status(h runner.Handle) (runner.RunnerStatus, error) {
@@ -80,6 +85,7 @@ func (f *fakeRunner) Status(h runner.Handle) (runner.RunnerStatus, error) {
 }
 func (f *fakeRunner) Transcript(h runner.Handle) ([]string, error) {
 	f.cwds = append(f.cwds, h.Cwd)
+	f.sessions = append(f.sessions, h.Session)
 	return f.texts, nil
 }
 func (f *fakeRunner) Models() ([]string, error)         { return nil, nil }
@@ -559,6 +565,50 @@ func TestCoordinator(t *testing.T) {
 		}
 		if !slices.Equal(fr.resolved, []string{"epic-runner"}) || !slices.Equal(fr.cwds, []string{"/wt/shared"}) {
 			t.Fatalf("resolved %v in %v, want epic-runner in /wt/shared", fr.resolved, fr.cwds)
+		}
+	})
+
+	t.Run("Sending Records The Ref The Runner Returns", func(t *testing.T) {
+		l := newTestLedger(t)
+		epic := add(t, l, "proj", "epic", ledger.AddOptions{Kind: core.WorkEpic})
+		child := add(t, l, "proj", "child", ledger.AddOptions{Parent: &epic.ID})
+		if _, err := l.SetClaim(child.ID, strPtr("ses_claim")); err != nil {
+			t.Fatalf("set claim: %v", err)
+		}
+		first, err := l.AddWorktree(epic.ID, ledger.WorktreeInfo{Path: "/wt/first", Kind: core.WorktreeShared})
+		if err != nil {
+			t.Fatalf("shared worktree: %v", err)
+		}
+		w, err := l.Get(child.ID)
+		if err != nil {
+			t.Fatalf("get child: %v", err)
+		}
+		h, _, err := Handle(l, w, proj)
+		if err != nil {
+			t.Fatalf("handle: %v", err)
+		}
+		if err := Send(l, child.ID, &fakeRunner{}, h, "more"); err != nil {
+			t.Fatalf("send: %v", err)
+		}
+		w, err = l.Get(child.ID)
+		if err != nil {
+			t.Fatalf("get child: %v", err)
+		}
+		if w.Ref == nil || *w.Ref != "pid:1" {
+			t.Fatalf("ref = %v, want pid:1", w.Ref)
+		}
+		if _, err := l.SetWorktreeState(first.ID, core.WorktreeMerged); err != nil {
+			t.Fatalf("merge worktree: %v", err)
+		}
+		if _, err := l.AddWorktree(epic.ID, ledger.WorktreeInfo{Path: "/wt/second", Kind: core.WorktreeShared}); err != nil {
+			t.Fatalf("shared worktree: %v", err)
+		}
+		h, _, err = Handle(l, w, proj)
+		if err != nil {
+			t.Fatalf("handle: %v", err)
+		}
+		if h.Runner != "project-runner" || h.Session != "ses_claim" || h.Cwd != "/wt/second" || h.Ref == nil || *h.Ref != "pid:1" {
+			t.Fatalf("handle after send = %+v, want project-runner ses_claim in /wt/second at pid:1", h)
 		}
 	})
 }

@@ -198,12 +198,14 @@ func Handle(l *ledger.Ledger, w core.Work, p *project.Project) (runner.Handle, b
 }
 
 // Send continues work's session and records the ref the runner returns, so a
-// status check reaches the process now serving the session.
+// status check reaches the process now serving the session. Only the ref is
+// recorded: a runner and directory work does not set itself keep following
+// its epic.
 func Send(l *ledger.Ledger, id string, r runner.Runner, h runner.Handle, text string) error {
 	if err := r.Send(&h, text); err != nil {
 		return err
 	}
-	return l.SetSession(id, ledger.SessionInfo{Runner: h.Runner, Session: h.Session, Ref: h.Ref, Cwd: h.Cwd})
+	return l.SetRef(id, h.Ref)
 }
 
 // lastBody is the body of work's latest event of kind, or "" when it has none.

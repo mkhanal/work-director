@@ -392,6 +392,10 @@ func (l *Ledger) SetSession(id string, s SessionInfo) error {
 		s.Runner, s.Session, s.Ref, s.Cwd, now(), id)
 }
 
+func (l *Ledger) SetRef(id string, ref *string) error {
+	return updateWork(l.db, id, `UPDATE work SET ref = ?, updated = ? WHERE id = ?`, ref, now(), id)
+}
+
 func (l *Ledger) SetCwd(id, cwd string) error {
 	return updateWork(l.db, id, `UPDATE work SET cwd = ?, updated = ? WHERE id = ?`, cwd, now(), id)
 }
