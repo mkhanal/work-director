@@ -36,6 +36,10 @@ With `codeChanged` true, `SoftDone` also requires a `pr` event.
 ## Worktrees Track Path Branch And State
 `AddWorktree` records an active worktree; `SetWorktreeState` moves it to merged or abandoned.
 
+## An Epic Has At Most One Active Shared Worktree
+`AddWorktree` and `SetWorktreeState` refuse a second active shared worktree
+for the same work; a merged or abandoned one no longer counts.
+
 ## Conflicts Surface When Claimed Tasks Overlap
 `Conflicts` pairs concurrently claimed, non-terminal tasks of an epic whose impact paths overlap, listing the overlapping paths.
 

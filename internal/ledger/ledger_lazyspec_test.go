@@ -376,6 +376,35 @@ func TestLedger(t *testing.T) {
 		}
 	})
 
+	t.Run("An Epic Has At Most One Active Shared Worktree", func(t *testing.T) {
+		l := newTestLedger(t)
+		epic := add(t, l, "p", "epic", AddOptions{Kind: core.WorkEpic})
+		other := add(t, l, "p", "other", AddOptions{Kind: core.WorkEpic})
+		first, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/first", Kind: core.WorktreeShared})
+		wantNoErr(t, err)
+		if _, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/second", Kind: core.WorktreeShared}); err == nil {
+			t.Fatal("a second active shared worktree was stored")
+		}
+		if _, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/private", Kind: core.WorktreePrivate}); err != nil {
+			t.Fatalf("private worktree beside the shared one: %v", err)
+		}
+		if _, err := l.AddWorktree(other.ID, WorktreeInfo{Path: "/wt/other", Kind: core.WorktreeShared}); err != nil {
+			t.Fatalf("another epic's shared worktree: %v", err)
+		}
+		_, err = l.SetWorktreeState(first.ID, core.WorktreeMerged)
+		wantNoErr(t, err)
+		second, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/second", Kind: core.WorktreeShared})
+		if err != nil {
+			t.Fatalf("shared worktree after the first merged: %v", err)
+		}
+		if _, err := l.SetWorktreeState(first.ID, core.WorktreeActive); err == nil {
+			t.Fatal("a merged shared worktree became active beside another")
+		}
+		if ws := allWorktrees(t, l, epic.ID); len(ws) != 3 || ws[2].ID != second.ID {
+			t.Fatalf("worktrees = %v, want first, private and second", ws)
+		}
+	})
+
 	t.Run("Conflicts Surface When Claimed Tasks Overlap", func(t *testing.T) {
 		l := newTestLedger(t)
 		epic := add(t, l, "p", "E", AddOptions{Kind: core.WorkEpic})
