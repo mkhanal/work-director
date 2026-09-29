@@ -42,7 +42,7 @@ var claudeRefRe = regexp.MustCompile(`backgrounded\s*·\s*([0-9a-f]{8})`)
 type claudeRunner struct{}
 
 // claude is the built-in claude adapter: spawn resolves the session id via
-// `claude agents`, transcript reads the jsonl under ~/.claude/projects/<slug>.
+// `claude agents`, transcript reads the session's jsonl under ~/.claude/projects.
 var claude = claudeRunner{}
 
 func (claudeRunner) Name() string { return "claude" }
@@ -125,11 +125,23 @@ func (claudeRunner) Status(h Handle) (RunnerStatus, error) {
 	return StatusExited, nil
 }
 
+// Transcript searches every project dir: claude files a session under the
+// slug of its current cwd, which moves when the session enters a worktree.
+// No file yet means no messages yet.
 func (claudeRunner) Transcript(h Handle) ([]string, error) {
-	file := filepath.Join(home(), ".claude", "projects", projectSlug(h.Cwd), h.Session+".jsonl")
-	text, err := os.ReadFile(file)
+	files, err := filepath.Glob(filepath.Join(home(), ".claude", "projects", "*", h.Session+".jsonl"))
 	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
 		return []string{}, nil
+	}
+	if len(files) > 1 {
+		return nil, &RunnerError{Runner: "claude", Detail: fmt.Sprintf("session %s has %d transcripts: %s", h.Session, len(files), strings.Join(files, ", "))}
+	}
+	text, err := os.ReadFile(files[0])
+	if err != nil {
+		return nil, err
 	}
 	var out []string
 	for _, line := range strings.Split(string(text), "\n") {

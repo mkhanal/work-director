@@ -19,6 +19,9 @@ provider is a TOML file of commands under `~/.work-director/runners/`.
 ## A Transcript Yields The Executor Messages
 `transcript` returns the assistant texts of the session, oldest first, from the runner's own store.
 
+## A Transcript Follows Its Session Into A Worktree
+`transcript` finds a session by its id wherever the runner's store now keeps it, so a session that moved into a worktree after spawn still reports.
+
 ## A Runner Forwards The Chosen Model
 Providers whose CLI takes a `--model` flag get it on spawn, forwarded as-is; a runner whose command line cannot take one fails loud instead of dropping the choice.
 
