@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"wd/internal/core"
 )
@@ -80,6 +81,58 @@ func TestNewEnforcesForeignKeysAndWaitsOnLocks(t *testing.T) {
 	}
 	if err := l.File("nope", core.EventQuestion, "x", core.TranscriptMark{Session: "s", Entries: 1}); err == nil {
 		t.Fatal("filed event for unknown work was stored")
+	}
+}
+
+func TestReadThenWriteTransactionsOnOneFileBothCommit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ledger.db")
+	a, err := New(path)
+	wantNoErr(t, err)
+	defer a.Close()
+	b, err := New(path)
+	wantNoErr(t, err)
+	defer b.Close()
+	w := add(t, a, "p", "t", AddOptions{})
+	readThenWrite := func(tx *sql.Tx, title string) error {
+		var n int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM event`).Scan(&n); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`UPDATE work SET title = ? WHERE id = ?`, title, w.ID)
+		return err
+	}
+	aRead := make(chan struct{})
+	bDone := make(chan error, 1)
+	go func() {
+		<-aRead
+		bDone <- b.inTx(func(tx *sql.Tx) error { return readThenWrite(tx, "b") })
+	}()
+	var bErr error
+	bWaited := true
+	aErr := a.inTx(func(tx *sql.Tx) error {
+		var n int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM event`).Scan(&n); err != nil {
+			return err
+		}
+		close(aRead)
+		select {
+		case bErr = <-bDone:
+			bWaited = false
+		case <-time.After(300 * time.Millisecond):
+		}
+		_, err := tx.Exec(`UPDATE work SET title = 'a' WHERE id = ?`, w.ID)
+		return err
+	})
+	if bWaited {
+		bErr = <-bDone
+	}
+	if aErr != nil || bErr != nil {
+		t.Fatalf("a = %v, b = %v, want both committed", aErr, bErr)
+	}
+	got, err := a.Get(w.ID)
+	wantNoErr(t, err)
+	if got.Title != "b" {
+		t.Fatalf("title = %q, want b: the second transaction waits for the first", got.Title)
 	}
 }
 
