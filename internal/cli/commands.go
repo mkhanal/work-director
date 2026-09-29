@@ -1042,20 +1042,13 @@ func (c *Cli) report(rest []string) error {
 	if err != nil {
 		return err
 	}
-	if w.State != core.StateDone && w.State != core.StateSoftDone {
-		if _, err := c.Ledger.AddEvent(id, core.EventReport, status+"\n"+last); err != nil {
+	if w.State == core.StateRunning || w.State == core.StateNeedsInput {
+		known, err := coordinator.Known(c.Ledger, w)
+		if err != nil {
 			return err
 		}
-		if w.State == core.StateRunning {
-			to := core.StateReview
-			if status == "BLOCKED" {
-				to = core.StateBlocked
-			} else if status == "NEEDS-INPUT" {
-				to = core.StateNeedsInput
-			}
-			if _, err := c.Ledger.Transition(id, to); err != nil {
-				return err
-			}
+		if _, err := coordinator.Coordinate(w, known, c.Ledger, r, h, texts); err != nil {
+			return err
 		}
 	}
 	messages := sliceLastN(texts, n)

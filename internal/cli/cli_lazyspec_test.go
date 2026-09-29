@@ -1302,3 +1302,145 @@ func TestReportWithoutAStatusLineFilesNothingAndFails(t *testing.T) {
 		}
 	}
 }
+
+// transcriptSay appends an assistant entry to the fake claude session's
+// transcript, so it becomes the entry wd report reads last.
+func (f *cliFixture) transcriptSay(t *testing.T, session, text string) {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(f.home, ".claude", "projects", "*", session+".jsonl"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("transcript for %s: %v %v", session, files, err)
+	}
+	entry, err := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{
+		"content": []map[string]string{{"type": "text", "text": text}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(files[0], os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.Write(append(entry, '\n')); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// eventsOf counts work's events of kind through wd events.
+func (f *cliFixture) eventsOf(t *testing.T, id string, kind core.EventKind) int {
+	t.Helper()
+	var evs []core.Event
+	if err := json.Unmarshal([]byte(f.runOK(t, "events", id, "--json")), &evs); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range evs {
+		if e.Kind == kind {
+			n++
+		}
+	}
+	return n
+}
+
+// stateOf is work's state through wd status.
+func (f *cliFixture) stateOf(t *testing.T, id string) core.State {
+	t.Helper()
+	var ws []core.Work
+	if err := json.Unmarshal([]byte(f.runOK(t, "status", "--all", "--json")), &ws); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range ws {
+		if w.ID == id {
+			return w.State
+		}
+	}
+	t.Fatalf("no work %s in status", id)
+	return ""
+}
+
+func TestAStandaloneTaskClosesThroughTheCLIAlone(t *testing.T) {
+	f := newCLIFixture(t)
+	id := jsonString(t, f.runOK(t, "add", "sample-app", "Close me standalone", "--json"), "id")
+	f.runOK(t, "spawn", id, "--runner", "claude")
+	if got := jsonString(t, f.runOK(t, "report", id, "--json"), "report"); got != "DONE" {
+		t.Fatalf("report = %q, want DONE", got)
+	}
+	f.runOK(t, "verify", id)
+	f.runOK(t, "pr", id, "https://example.test/pr/standalone")
+	f.runOK(t, "soft-done", id)
+	if got := jsonString(t, f.runOK(t, "done", id, "--json"), "state"); got != string(core.StateDone) {
+		t.Fatalf("state = %q, want done", got)
+	}
+	if got := f.eventsOf(t, id, core.EventReport); got != 1 {
+		t.Errorf("%d report events, want 1", got)
+	}
+
+	unspawned := jsonString(t, f.runOK(t, "add", "sample-app", "Never spawned", "--json"), "id")
+	if errStr := f.runFail(t, "report", unspawned); !strings.Contains(errStr, "no session") {
+		t.Errorf("report with no session: stderr %q, want no session named", errStr)
+	}
+	if got := f.eventsOf(t, unspawned, core.EventReport); got != 0 {
+		t.Errorf("report with no session filed %d reports, want 0", got)
+	}
+	if got := f.stateOf(t, unspawned); got != core.StateQueued {
+		t.Errorf("report with no session left state %s, want queued", got)
+	}
+
+	for _, status := range []string{"BLOCKED", "NEEDS-INPUT"} {
+		id := jsonString(t, f.runOK(t, "add", "sample-app", "Reports "+status, "--json"), "id")
+		session := jsonString(t, f.runOK(t, "spawn", id, "--runner", "claude", "--json"), "session")
+		f.transcriptSay(t, session, "STATUS: "+status+"\nNOTES: not finished")
+		f.runOK(t, "report", id)
+		f.runOK(t, "set", id, "running")
+		f.runOK(t, "set", id, "review")
+		f.runOK(t, "verify", id)
+		f.runOK(t, "pr", id, "https://example.test/pr/"+status)
+		if errStr := f.runFail(t, "soft-done", id); !strings.Contains(errStr, "DONE report") {
+			t.Errorf("soft-done after a %s report: stderr %q, want DONE report named", status, errStr)
+		}
+		if got := f.stateOf(t, id); got != core.StateReview {
+			t.Errorf("soft-done after a %s report left state %s, want review", status, got)
+		}
+	}
+}
+
+func TestReportFilesWhatTheCoordinatorWould(t *testing.T) {
+	f := newCLIFixture(t)
+	spawn := func(title string, add ...string) (string, string) {
+		t.Helper()
+		id := jsonString(t, f.runOK(t, append([]string{"add", "sample-app", title, "--json"}, add...)...), "id")
+		return id, jsonString(t, f.runOK(t, "spawn", id, "--runner", "claude", "--json"), "session")
+	}
+	expect := func(id string, want core.State, reports int) {
+		t.Helper()
+		if got := f.stateOf(t, id); got != want {
+			t.Errorf("%s state = %s, want %s", id, got, want)
+		}
+		if got := f.eventsOf(t, id, core.EventReport); got != reports {
+			t.Errorf("%s has %d reports, want %d", id, got, reports)
+		}
+	}
+
+	asking, session := spawn("Needs a judgment")
+	f.transcriptSay(t, session, "STATUS: NEEDS-INPUT\nNOTES: pick a vendor")
+	f.runOK(t, "report", asking)
+	f.runOK(t, "report", asking)
+	expect(asking, core.StateNeedsInput, 1)
+
+	f.transcriptSay(t, session, "STATUS: DONE\nFILES: none")
+	f.runOK(t, "report", asking)
+	f.runOK(t, "report", asking)
+	expect(asking, core.StateReview, 2)
+
+	blocked, session := spawn("Blocked on access")
+	f.transcriptSay(t, session, "STATUS: BLOCKED\nNOTES: no credentials")
+	f.runOK(t, "report", blocked)
+	f.runOK(t, "report", blocked)
+	expect(blocked, core.StateBlocked, 1)
+
+	child, session := spawn("A child of the epic", "--epic", f.ids["epic"])
+	f.transcriptSay(t, session, "STATUS: NEEDS-INPUT\nNOTES: which schema?")
+	f.runOK(t, "report", child)
+	f.runOK(t, "report", child)
+	expect(child, core.StateNeedsInput, 1)
+}
