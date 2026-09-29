@@ -69,7 +69,8 @@ cards run from any directory.
 
 ## Errors And Exit Codes Match
 Usage errors, illegal transitions, not-ready refusals and unknown runners
-print the same message and exit 1; a failing verify exits 1 after recording.
+print the same message and exit 1. A verify whose commands ran and failed
+exits 1 after recording the failed verify.
 
 ## A Decision Is Recorded In One Line And Reaches The Brief
 `wd decide <id> <text>` records a `decision` event on existing work. The
@@ -95,9 +96,10 @@ ref and cwd on the work item.
 work that is not ready exits 1 with the not-ready message and keeps its
 state.
 
-## Verify With No Commands Fails Without Recording
-`wd verify` on a project that lists no verify commands exits 1 saying so and
-records no verify event.
+## Verify With No Commands Is Refused Without Recording
+`wd verify` on a project that lists no verify commands is a refusal, not a
+failed verify: it runs nothing, exits 1 saying so and records no verify
+event.
 
 ## An Adopted Card Leaves The Promotion Candidates
 After `wd scan --adopt <card>` writes the global candidate, `wd scan` exits 0

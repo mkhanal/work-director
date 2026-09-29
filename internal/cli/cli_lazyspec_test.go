@@ -526,6 +526,28 @@ func TestErrorsAndExitCodesMatch(t *testing.T) {
 			t.Errorf("wd %s: stderr %q does not contain %q", strings.Join(c.args, " "), errStr, c.want)
 		}
 	}
+
+	f.runOK(t, "projects", "add", "failing", f.sample, "--verify", "false", "--lazyspec", "n")
+	id := jsonString(t, f.runOK(t, "add", "failing", "Checked", "--json"), "id")
+	if errStr := f.runFail(t, "verify", id); !strings.Contains(errStr, "verify failed for "+id) {
+		t.Fatalf("failing verify: stderr %q, want verify failed for %s", errStr, id)
+	}
+	var verifies []core.Event
+	if err := json.Unmarshal([]byte(f.runOK(t, "events", id, "--json")), &verifies); err != nil {
+		t.Fatalf("events --json: %v", err)
+	}
+	recorded := 0
+	for _, e := range verifies {
+		if e.Kind == core.EventVerify {
+			recorded++
+			if !strings.HasPrefix(e.Body, "fail\n") {
+				t.Fatalf("verify event = %q, want the failure recorded", e.Body)
+			}
+		}
+	}
+	if recorded != 1 {
+		t.Fatalf("verify events = %d, want the failed verify recorded once", recorded)
+	}
 }
 
 // assertKeys marshals v and asserts the top-level JSON keys are exactly want.
@@ -741,18 +763,37 @@ func TestAttachRecordsTheRefAndCwdItIsGiven(t *testing.T) {
 
 func TestSetCannotSkipTheSoftDoneGate(t *testing.T) {
 	f := newCLIFixture(t)
-	t2 := f.ids["t2"]
+	t2, t3 := f.ids["t2"], f.ids["t3"]
 	f.runOK(t, "set", t2, "review")
+	f.runOK(t, "set", t3, "running")
+	f.runOK(t, "set", t3, "review")
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	defer l.Close()
+	if _, err := l.AddEvent(t3, core.EventReport, "DONE\nSTATUS: DONE"); err != nil {
+		t.Fatalf("report: %v", err)
+	}
+
 	errStr := f.runFail(t, "set", t2, "soft-done")
 	if !strings.Contains(errStr, "not ready for soft-done") {
 		t.Fatalf("stderr = %q, want the soft-done gate", errStr)
 	}
-	if out := f.runOK(t, "status", "--json"); !strings.Contains(out, `"id": "`+t2+`"`) || strings.Contains(out, `"state": "soft-done"`) {
-		t.Fatalf("status = %s, want %s still in review", out, t2)
+	out := f.runOK(t, "set", t3, "soft-done", "--json")
+	assertHasKey(t, out, `"state": "soft-done"`)
+	for id, want := range map[string]core.State{t2: core.StateReview, t3: core.StateSoftDone} {
+		w, err := l.Get(id)
+		if err != nil {
+			t.Fatalf("get %s: %v", id, err)
+		}
+		if w.State != want {
+			t.Errorf("%s = %s, want %s", id, w.State, want)
+		}
 	}
 }
 
-func TestVerifyWithNoCommandsFailsWithoutRecording(t *testing.T) {
+func TestVerifyWithNoCommandsIsRefusedWithoutRecording(t *testing.T) {
 	f := newCLIFixture(t)
 	f.runOK(t, "projects", "add", "unverified", f.sample, "--lazyspec", "n")
 	id := jsonString(t, f.runOK(t, "add", "unverified", "Unchecked", "--json"), "id")
@@ -953,6 +994,8 @@ func TestFlagsThatDoNotParseFail(t *testing.T) {
 		{[]string{"report", t2, "--tail="}, "--tail"},
 		{[]string{"report", t2, "--tail"}, "--tail"},
 		{[]string{"attach", t3, "ses_x", "--ref"}, "--ref"},
+		{[]string{"attach", t3, "ses_x", "--ref", "--cwd", f.sample}, "--ref"},
+		{[]string{"attach", t3, "ses_x", "--ref", "--json"}, "--ref"},
 		{[]string{"attach", t3, "ses_x", "--cwd", "--json"}, "--cwd"},
 		{[]string{"status", "--json=x"}, "--json"},
 		{[]string{"epic", "run", epic, "--wait", "--timeout", "30m"}, "--timeout"},
