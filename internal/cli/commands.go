@@ -660,17 +660,20 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 	if err != nil {
 		return err
 	}
-	cwd, err := c.ensureSharedWorktree(epic, p)
-	if err != nil {
-		return err
-	}
 	var only []string
 	if v := str(a, "only"); v != nil {
 		for _, s := range strings.Split(*v, ",") {
 			if t := strings.TrimSpace(s); t != "" {
+				if _, err := c.Ledger.Get(t); err != nil {
+					return err
+				}
 				only = append(only, t)
 			}
 		}
+	}
+	cwd, err := c.ensureSharedWorktree(epic, p)
+	if err != nil {
+		return err
 	}
 	heading := str(a, "heading")
 	all, err := c.Ledger.Tasks(epic.ID)

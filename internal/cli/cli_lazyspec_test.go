@@ -684,6 +684,9 @@ func TestCommandsOnUnknownWorkFailNamingIt(t *testing.T) {
 		{"impact", "nope", "+src"}, {"merge", "nope"}, {"events", "nope"}, {"tasks", "nope"},
 		{"conflict", "nope"}, {"epic", "status", "nope"}, {"concern", "add", "nope", "x"},
 		{"concern", "list", "nope"}, {"worktree", "attach", "nope", f.sample}, {"worktree", "list", "nope"},
+		{"add", "sample-app", "x", "--epic", "nope"}, {"epic", "plan", "nope"}, {"epic", "spawn", "nope"},
+		{"epic", "run", "nope"}, {"epic", "review", "nope"}, {"epic", "run", f.ids["epic"], "--only", "nope"},
+		{"epic", "run", f.ids["epic"], "--only", f.ids["t3"] + ",nope"},
 	} {
 		if code, _, errStr := f.run(t, args...); code != 1 || !strings.Contains(errStr, "no work nope") {
 			t.Errorf("wd %s: exit %d, stderr %q, want 1 and no work nope", strings.Join(args, " "), code, errStr)
