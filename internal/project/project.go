@@ -65,9 +65,6 @@ func ParseProject(text, path string) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(runner) == "" {
-		return nil, &ProjectError{Path: path, Detail: "missing field runner"}
-	}
 	pathField, err := need("path")
 	if err != nil {
 		return nil, err
@@ -79,9 +76,9 @@ func ParseProject(text, path string) (*Project, error) {
 	if mode != ModeAsk && mode != ModeAuto {
 		return nil, &ProjectError{Path: path, Detail: "unknown mode " + string(mode)}
 	}
-	agent, hasAgent := fields["agent"]
-	model, hasModel := fields["model"]
-	if strings.HasPrefix(pathField, "~") {
+	agent := fields["agent"]
+	model := fields["model"]
+	if pathField == "~" || strings.HasPrefix(pathField, "~/") {
 		pathField = os.Getenv("HOME") + pathField[1:]
 	}
 	p := &Project{
@@ -102,10 +99,10 @@ func ParseProject(text, path string) (*Project, error) {
 	if p.DefaultBranch == "" {
 		p.DefaultBranch = "main"
 	}
-	if hasAgent {
+	if agent != "" {
 		p.Agent = &agent
 	}
-	if hasModel && model != "" {
+	if model != "" {
 		p.Model = &model
 	}
 	return p, nil
