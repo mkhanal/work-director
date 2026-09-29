@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { claude, projectSlug } from '../src/runner/claude.ts';
 import { opencode } from '../src/runner/opencode.ts';
 import { codex } from '../src/runner/codex.ts';
-import { ao } from '../src/runner/ao.ts';
 import { allRunnerNames, runnerNamed } from '../src/runner/registry.ts';
 
 let bin = '', cwd = '', home = '';
@@ -30,11 +29,6 @@ esac`);
   await fake('codex', `case "$1" in
   exec) echo '{"type":"thread","session_id":"codex-abc123","thread":{"messages":[]}}';;
   debug) echo 'codex/opus-5'; echo 'codex/sonnet-4-5';;
-esac`);
-  await fake('ao', `case "$1" in
-  spawn) echo "spawned session scratch-1 (idle) [prompt 58 B, system 7883 B]";;
-  send) echo ok;;
-  session) echo '{"session":{"id":"scratch-1","activity":{"state":"idle"},"isTerminated":false,"status":"idle"}}';;
 esac`);
   await fake('myagent', `case "$1" in
   run) echo "session=victory-001";;
@@ -107,18 +101,6 @@ describe('A Transcript Yields The Executor Messages', () => {
   });
 });
 
-describe('The Ao Adapter Spawns With The Brief As Prompt', () => {
-  test('prompt, 20-char name, harness mapping, send flags, status', async () => {
-    const h = await ao.spawn({ cwd, name: 'wd-3 a very long display name here', brief: 'B', agent: 'claude' });
-    expect(h.session).toBe('scratch-1');
-    const log = await calls();
-    expect(log).toContain('ao spawn --name wd-3 a very long dis --prompt B --harness claude-code');
-    await ao.send(h, 'more');
-    expect(log + (await calls())).toContain(`ao send --session ${h.session} --message more`);
-    expect(await ao.status(h)).toBe('idle');
-  });
-});
-
 describe('A Runner Forwards The Chosen Model', () => {
   test('claude passes --model on spawn', async () => {
     await claude.spawn({ cwd, name: 'wd-1 t', brief: 'B', model: 'fable' });
@@ -129,8 +111,9 @@ describe('A Runner Forwards The Chosen Model', () => {
     expect(h.session).toBe('codex-abc123');
     expect(await calls()).toContain(`codex exec --cd ${cwd} --json --full-auto --model opus B`);
   });
-  test('ao fails loud because its command line cannot take a model', async () => {
-    await expect(ao.spawn({ cwd, name: 'wd-3 t', brief: 'B', model: 'fable' })).rejects.toThrow(/model/);
+  test('a spec runner whose spawn line has no {model} fails loud', async () => {
+    const r = await runnerNamed('myagent');
+    await expect(r.spawn({ cwd, name: 'wd-3 t', brief: 'B', model: 'fable' })).rejects.toThrow(/model/);
   });
 });
 
@@ -139,15 +122,14 @@ describe('Model Lists Come From The Provider CLI, Not A Registry', () => {
     expect(await list(opencode)).toEqual(['anthropic/claude-opus-5', 'openai/gpt-5.2']);
     expect(await list(codex)).toEqual(['codex/opus-5', 'codex/sonnet-4-5']);
   });
-  test('claude and ao have no CLI list and return none, never a guess', async () => {
+  test('claude has no CLI list and returns none, never a guess', async () => {
     expect(await list(claude)).toEqual([]);
-    expect(await list(ao)).toEqual([]);
   });
 });
 
 describe('A Runner Can Be Defined By A File Of Commands', () => {
   test('a ~/.work-director/runners/*.toml drives spawn, send, status, transcript, models', async () => {
-    expect((await allRunnerNames()).sort()).toEqual(['ao', 'claude', 'codex', 'myagent', 'opencode']);
+    expect((await allRunnerNames()).sort()).toEqual(['claude', 'codex', 'myagent', 'opencode']);
     const r = await runnerNamed('myagent');
     const h = await r.spawn({ cwd, name: 'wd-8 t', brief: 'B' });
     expect(h.session).toBe('victory-001');

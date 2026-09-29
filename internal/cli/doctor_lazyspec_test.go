@@ -47,7 +47,7 @@ func TestDoctor(t *testing.T) {
 				t.Errorf("%s = %+v, want detected at %s", name, a, filepath.Join(path, name))
 			}
 		}
-		for _, name := range []string{"opencode", "codex", "ao", "planner", "advisor"} {
+		for _, name := range []string{"opencode", "codex", "planner", "advisor"} {
 			a, ok := got[name]
 			if !ok {
 				t.Errorf("%s not listed", name)

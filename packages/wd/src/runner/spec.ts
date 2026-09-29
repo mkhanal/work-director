@@ -59,6 +59,7 @@ attach = "cd {cwd} && ${name} -s {session}"
 # status: omit to report liveness only; include to classify output by these regexes
 # (exited, then waiting, then running). transcript/models return one item per line.
 # session_id is required: the first match in spawn output names the session.
+# A spawn line without {model} refuses a spawn that names a model.
 `;
 
 const q = (s: string): string => `'${s.replace(/'/g, '\'\\\'\'')}'`;
@@ -78,6 +79,7 @@ export const specRunner = (spec: RunnerSpec): Runner => {
     name: spec.name,
     async spawn(o: SpawnOptions): Promise<Handle> {
       if (!spec.spawn || !spec.session_id) throw new RunnerError(spec.name, 'spec needs spawn and session_id');
+      if (o.model !== undefined && !spec.spawn.includes('{model}')) throw new RunnerError(spec.name, `model ${o.model}: spawn line has no {model} placeholder`);
       const sessionRegex = spec.session_id;
       const common = {
         cwd: o.cwd, name: o.name, name20: o.name.slice(0, 20), brief: o.brief,

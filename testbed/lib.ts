@@ -43,7 +43,7 @@ export async function setup(): Promise<void> {
   const template = await readFile(join(root, 'projects/sample-app.md'), 'utf8');
   await writeFile(join(projectsDir, 'sample-app.md'), template.replaceAll('TESTBED/', `${root}/`));
 
-  for (const r of ['claude', 'opencode', 'codex', 'ao', 'myagent', 'planner', 'advisor'] as const) {
+  for (const r of ['claude', 'opencode', 'codex', 'myagent', 'planner', 'advisor'] as const) {
     await copyFile(join(root, 'runners', r), join(bin, r));
     await chmod(join(bin, r), 0o755);
   }

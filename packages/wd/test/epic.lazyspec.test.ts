@@ -126,11 +126,11 @@ describe('Worktrees Are Registered Shared Or Private', () => {
 
 describe('An Epic Spawn Can Parcel Sessions Across Inference Providers', () => {
   test('comma list cycles over providers; empty falls back; unknown is rejected', async () => {
-    expect(await parseRunnerList('claude,opencode', 'ao')).toEqual(['claude', 'opencode']);
-    expect((await parseRunnerList('claude,opencode', 'ao')).length).toBe(2);
-    expect(await parseRunnerList('', 'ao')).toEqual(['ao']);
-    expect(await parseRunnerList('claude, claude ', 'ao')).toEqual(['claude', 'claude']);
-    await expect(parseRunnerList('cursor,cursor', 'ao')).rejects.toThrow(/cursor/);
+    expect(await parseRunnerList('claude,opencode', 'codex')).toEqual(['claude', 'opencode']);
+    expect((await parseRunnerList('claude,opencode', 'codex')).length).toBe(2);
+    expect(await parseRunnerList('', 'codex')).toEqual(['codex']);
+    expect(await parseRunnerList('claude, claude ', 'codex')).toEqual(['claude', 'claude']);
+    await expect(parseRunnerList('cursor,cursor', 'codex')).rejects.toThrow(/cursor/);
   });
 });
 

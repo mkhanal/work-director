@@ -1,5 +1,5 @@
-// Package runner drives provider CLIs: the four foundation adapters (claude,
-// opencode, codex, ao) and spec-file runners defined by TOML command files.
+// Package runner drives provider CLIs: the three foundation adapters (claude,
+// opencode, codex) and spec-file runners defined by TOML command files.
 // It is a port of packages/wd/src/runner/ with the same commands, session
 // discovery, transcript parsing and error messages.
 package runner
@@ -182,7 +182,7 @@ func logName(s string) string {
 	return logNameRe.ReplaceAllString(s, "-")
 }
 
-// name20 truncates a display name to 20 characters (ao's --name limit).
+// name20 truncates a display name to 20 characters (the {name20} spec placeholder).
 func name20(s string) string {
 	if len(s) > 20 {
 		return s[:20]

@@ -3,7 +3,7 @@ import { basename, join } from 'node:path';
 import { parseFrontmatter, list } from '../../taste/src/frontmatter.ts';
 import { allRunnerNames } from './runner/registry.ts';
 
-export const Runners = ['claude', 'opencode', 'codex', 'ao'] as const;
+export const Runners = ['claude', 'opencode', 'codex'] as const;
 // A runner is a built-in or any file of commands under ~/.work-director/runners/*.toml.
 export type RunnerName = string;
 export const Modes = ['ask', 'auto'] as const;

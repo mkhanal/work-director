@@ -126,7 +126,7 @@ switch (cmd) {
     const sub = rest[0];
     if (sub === 'add') {
       const name = rest[1], path = rest[2];
-      if (!name || !path) fail('usage: wd projects add <name> <path> [--runner claude|opencode|codex|ao] [--mode ask|auto] [--model id] [--lazyspec y|n] [--verify cmd]');
+      if (!name || !path) fail('usage: wd projects add <name> <path> [--runner claude|opencode|codex] [--mode ask|auto] [--model id] [--lazyspec y|n] [--verify cmd]');
       if (projects.has(name)) fail(`project ${name} already exists`);
       const csv = (k: string): string[] => { const v = str(a, k); return v === undefined ? [] : v.split(',').map((s) => s.trim()).filter(Boolean); };
       await writeFile(join(projectsDir, `${name}.md`), projectTemplate(name, path.replace(/^~/, process.env.HOME ?? '~'), {
@@ -166,7 +166,7 @@ switch (cmd) {
     const sub = rest[0];
     if (sub === 'list') {
       const known = await allRunnerNames();
-      out(known, known.map((r) => `${r}\t${r in { claude: 1, opencode: 1, codex: 1, ao: 1 } ? 'built-in' : specDir()}`).join('\n'));
+      out(known, known.map((r) => `${r}\t${r in { claude: 1, opencode: 1, codex: 1 } ? 'built-in' : specDir()}`).join('\n'));
       break;
     }
     if (sub === 'add') {
@@ -215,7 +215,7 @@ switch (cmd) {
     break;
   }
   case 'spawn': {
-    const id = rest[0] ?? fail('usage: wd spawn <id> [--runner claude|opencode|codex|ao|myagent…] [--model id] [--worktree]');
+    const id = rest[0] ?? fail('usage: wd spawn <id> [--runner claude|opencode|codex|myagent…] [--model id] [--worktree]');
     const w = ledger.get(id), p = project(w.project);
     const runner = str(a, 'runner') ?? p.runner;
     let cwd = p.path;
@@ -271,7 +271,7 @@ switch (cmd) {
       break;
     }
     if (sub === 'spawn') {
-      if (epic === undefined) fail(`usage: wd ${cmd} spawn <id> [--count n] [--model id] [--runner claude|opencode|codex|ao|claude,opencode,…]`);
+      if (epic === undefined) fail(`usage: wd ${cmd} spawn <id> [--count n] [--model id] [--runner claude|opencode|codex|claude,opencode,…]`);
       const p = project(epic.project);
       const runners = await parseRunnerList(str(a, 'runner') ?? p.runner, p.runner);
       const count = Number(str(a, 'count') ?? 1);

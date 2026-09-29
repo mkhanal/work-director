@@ -1,7 +1,7 @@
 # work-director
 
 The director: holds roadmap, taste and work status for many repos; hands whole tasks to
-separate executor sessions (Claude Code, opencode, codex, via AO if routed); verifies; gates PRs;
+separate executor sessions (Claude Code, opencode, codex); verifies; gates PRs;
 learns taste from feedback. Design: `docs/superpowers/specs/2026-09-04-work-director-design.md`.
 
 ## Ground rules

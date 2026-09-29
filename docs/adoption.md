@@ -8,7 +8,7 @@ The director is lazy by design: a project's own skills, hooks, agent files and w
 honoured as-is — the director never installs a parallel work system into a repo. Against that,
 it adds exactly three things: **(1)** every piece of work has a status, viewable many ways
 now (`wd status`, `wd tasks`, all `--json`) and in a future UI; **(2)** claude, opencode and
-AO sessions coordinate on one shared branch through claims, impacts, conflicts, concerns and
+codex sessions coordinate on one shared branch through claims, impacts, conflicts, concerns and
 verification-gated merges; **(3)** feedback and learning — global rules injected at runtime
 via the taste plugin, project-level direction landing in the project's own instruction files
 as a PR the project accepts.
@@ -78,7 +78,7 @@ wd scan --adopt <candidate>     # writes a global *candidate* card; adopt it, th
 
 ```
 curl -fsSL https://raw.githubusercontent.com/mkhanal/work-director/main/scripts/install.sh | sh
-wd doctor                         # detected runner CLIs (claude, opencode, codex, ao) + repo state
+wd doctor                         # detected runner CLIs (claude, opencode, codex) + repo state
 cp projects/example.md ~/.work-director/projects/my-app.md   # edit path, runner, mode, stack, verify
 ```
 
@@ -91,7 +91,7 @@ A project file is one markdown with frontmatter and a roadmap body:
 ```yaml
 ---
 path: ~/work/my-app
-runner: claude            # claude | opencode | codex | ao
+runner: claude            # claude | opencode | codex
 mode: auto                # auto (default): proceed and report; ask: confirm PRs/merges
 model:                    # optional: chosen once, e.g. fable or openai/gpt-5.2 — see `wd models`
 stack: [ts, biome]
@@ -122,7 +122,7 @@ Pick the mechanism, then the model — both chosen live, never from a list the d
 
 ```
 wd models                             # detected runners only: whatever each provider's own CLI prints (opencode models,
-                                      # codex debug models; claude/AO have no list → their own pickers)
+                                      # codex debug models; claude has no list → their own pickers)
 wd add my-app "Make the import idempotent"
 wd spawn <id> --model fable           # forwards --model to the provider's CLI
 wd report <id>                    # reads the DONE/BLOCKED status, moves it to review
@@ -132,7 +132,7 @@ wd pr <id> <url> && wd soft-done <id> && wd done <id>
 
 ### Any other provider is a file, not a code change
 
-claude, opencode, codex and ao are code adapters; every *other* provider is one TOML command
+claude, opencode and codex are code adapters; every *other* provider is one TOML command
 list that `wd` runs, so adding a provider never means editing the director:
 
 ```

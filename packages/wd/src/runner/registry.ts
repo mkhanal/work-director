@@ -1,4 +1,3 @@
-import { ao } from './ao.ts';
 import { claude } from './claude.ts';
 import { codex } from './codex.ts';
 import { opencode } from './opencode.ts';
@@ -7,10 +6,10 @@ import type { Runner } from './types.ts';
 
 export { specDir, specTemplate, writeSpec } from './spec.ts';
 
-// The four foundation adapters are code: claude's two-step session resolve,
+// The three foundation adapters are code: claude's two-step session resolve,
 // opencode/codex staged session discovery and their transcript stores needed
 // logic. Every *other* provider is a file of commands (see `wd runner init`).
-const builtin: Record<string, Runner> = { claude, opencode, codex, ao };
+const builtin: Record<string, Runner> = { claude, opencode, codex };
 export const builtinNames = Object.keys(builtin);
 
 let specsCache: { at: string; list: RunnerSpec[] } | undefined;
