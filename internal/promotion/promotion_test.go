@@ -45,7 +45,7 @@ func TestAdoptCardWritesBesideTheProjectCardNeverOverIt(t *testing.T) {
 	if global.ID == card.ID || global.Status != taste.StatusCandidate || len(global.Scope) != 1 || global.Scope[0] != "global" {
 		t.Fatalf("global = %+v, want a distinct global candidate", global)
 	}
-	cards, err := taste.LoadCards(cardsDir)
+	cards, err := taste.LoadCards(os.DirFS(cardsDir), cardsDir)
 	if err != nil || len(cards) != 2 {
 		t.Fatalf("cards = %v, %v, want the project card and the candidate", cards, err)
 	}
@@ -68,7 +68,7 @@ func TestAnAdoptedCardIsNoLongerAPromotionCandidate(t *testing.T) {
 	card, appA, appB := "proj-rule", "app-a", "app-b"
 	feedback := []core.Feedback{{ID: 1, Card: &card, Project: &appA}, {ID: 2, Card: &card, Project: &appB}}
 
-	cards, err := taste.LoadCards(cardsDir)
+	cards, err := taste.LoadCards(os.DirFS(cardsDir), cardsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestAnAdoptedCardIsNoLongerAPromotionCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cards, err = taste.LoadCards(cardsDir)
+	cards, err = taste.LoadCards(os.DirFS(cardsDir), cardsDir)
 	if err != nil {
 		t.Fatal(err)
 	}

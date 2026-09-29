@@ -3,10 +3,14 @@ package taste
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"wd/taste/cards"
 )
 
 func card(fields map[string]string, body string) string {
@@ -212,6 +216,37 @@ func TestAnEnforceIdAbsentFromThePresetsFailsTheBuild(t *testing.T) {
 	}, map[string]any{"style": map[string]any{"noEnum": "error"}})
 	_, err = Build(f3.paths)
 	wantErr(t, err, "enforce ids absent from presets:\nc: biome:style/noSuchRule")
+}
+
+func TestABuiltBinaryEmbedsEveryCardOfItsTree(t *testing.T) {
+	tree := filepath.Join("..", "..", "taste", "cards")
+	var files int
+	err := filepath.WalkDir(tree, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(p, ".md") {
+			files++
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", tree, err)
+	}
+	onDisk, err := LoadCards(os.DirFS(tree), tree)
+	if err != nil {
+		t.Fatalf("load %s: %v", tree, err)
+	}
+	embedded, err := LoadCards(cards.Snapshot, "embedded")
+	if err != nil {
+		t.Fatalf("load embedded: %v", err)
+	}
+	if len(onDisk) != files || len(embedded) != files {
+		t.Fatalf("%d card files in the tree, %d loaded from it, %d embedded", files, len(onDisk), len(embedded))
+	}
+	for i := range onDisk {
+		onDisk[i].Path, embedded[i].Path = "", ""
+	}
+	if !reflect.DeepEqual(onDisk, embedded) {
+		t.Fatalf("embedded cards differ from the tree:\nembedded %+v\ntree     %+v", embedded, onDisk)
+	}
 }
 
 func TestTheAgentsFragmentIsWrappedInTasteMarkers(t *testing.T) {

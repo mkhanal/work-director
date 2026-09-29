@@ -49,8 +49,9 @@ claude                                                        # in this repo: th
 ```
 
 `wd` is one static binary (Go, CGO disabled) — no runtime dependencies, nothing to build.
-Briefs and `wd scan` read the taste cards in a work-director checkout: `wd` finds them beside
-its binary or in the working directory, else set `WD_ROOT` to the checkout.
+The binary carries the taste cards it was built with. A work-director checkout's `taste/cards`
+(named by `WD_ROOT`, or found beside the binary or in the working directory) replaces them, so
+an edited card reaches the next brief without a rebuild; `wd scan --adopt` needs that checkout.
 `wd doctor` reports which registered runners (claude, opencode, codex, your spec files)
 are detected on PATH and whether this directory is a repo. A missing runner is information:
 install the ones you use. Outside a repo it offers `git init`; running it is your call.
