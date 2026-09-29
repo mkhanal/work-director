@@ -90,7 +90,7 @@ func migrate(db *sql.DB) error {
 func (l *Ledger) Close() error { return l.db.Close() }
 
 // now matches new Date().toISOString(): UTC with millisecond precision.
-func now() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00") }
+func now() string { return time.Now().UTC().Format(core.TimeLayout) }
 
 // newId matches randomUUID().slice(0, 8): eight hex characters.
 func newId() (string, error) {
@@ -344,9 +344,22 @@ func (l *Ledger) SetImpact(id string, paths []string) (core.Work, error) {
 	return l.Get(id)
 }
 
+// addEvent records the event and moves the work's updated to it: updated is
+// the work's last activity, which staleness is measured from.
 func (l *Ledger) addEvent(work string, kind core.EventKind, body string) error {
-	_, err := l.db.Exec(`INSERT INTO event (work, kind, body, at) VALUES (?, ?, ?, ?)`, work, string(kind), body, now())
-	return err
+	tx, err := l.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	at := now()
+	if _, err := tx.Exec(`INSERT INTO event (work, kind, body, at) VALUES (?, ?, ?, ?)`, work, string(kind), body, at); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE work SET updated = ? WHERE id = ?`, at, work); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (l *Ledger) AddEvent(work string, kind core.EventKind, body string) error {

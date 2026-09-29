@@ -1226,6 +1226,12 @@ func (c *Cli) done(rest []string) error {
 	return nil
 }
 
+// statusRow is one wd status row: the work item and whether it is stale.
+type statusRow struct {
+	core.Work
+	Stale bool `json:"stale"`
+}
+
 func (c *Cli) status(rest []string) error {
 	a := c.Args
 	filter := ledger.ListFilter{}
@@ -1236,14 +1242,20 @@ func (c *Cli) status(rest []string) error {
 	if err != nil {
 		return err
 	}
-	open := []core.Work{}
+	open := []statusRow{}
+	at := time.Now()
 	for _, w := range items {
 		if flag(a, "all") || (w.State != core.StateDone && w.State != core.StateDropped) {
-			open = append(open, w)
+			stale, err := core.Stale(w, at)
+			if err != nil {
+				return err
+			}
+			open = append(open, statusRow{Work: w, Stale: stale})
 		}
 	}
 	table := make([]string, 0, len(open))
-	for _, w := range open {
+	for _, r := range open {
+		w := r.Work
 		line := fmt.Sprintf("%s\t%-11s\t%s\t%s\t%s\t%s", w.ID, w.State, w.Project, w.Kind, strOrEmpty(w.Heading), w.Title)
 		if w.Runner != nil {
 			ref := w.Ref
@@ -1251,6 +1263,9 @@ func (c *Cli) status(rest []string) error {
 				ref = w.Session
 			}
 			line += fmt.Sprintf("\t%s:%s", *w.Runner, strOrEmpty(ref))
+		}
+		if r.Stale {
+			line += fmt.Sprintf("\tstale since %s", w.Updated[:len("2006-01-02")])
 		}
 		table = append(table, line)
 	}
@@ -1265,7 +1280,8 @@ func (c *Cli) status(rest []string) error {
 		}
 		lines := []string{context.ContextLine(head)}
 		seen := map[string]bool{}
-		for _, w := range open {
+		for _, r := range open {
+			w := r.Work
 			if seen[w.Project] {
 				continue
 			}

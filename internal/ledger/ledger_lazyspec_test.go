@@ -140,18 +140,35 @@ func TestLedger(t *testing.T) {
 				t.Fatalf("state = %q, want done", got.State)
 			}
 		})
-		t.Run("queued to done fails naming both states", func(t *testing.T) {
+		t.Run("running to done fails naming both states", func(t *testing.T) {
 			l := newTestLedger(t)
 			w := add(t, l, "p", "t", AddOptions{})
+			move(t, l, w.ID, core.StateRunning)
 			var it core.IllegalTransition
 			_, err := l.Transition(w.ID, core.StateDone)
 			if !errors.As(err, &it) {
 				t.Fatalf("error = %v, want IllegalTransition", err)
 			}
-			if it.From != core.StateQueued || it.To != core.StateDone {
-				t.Fatalf("IllegalTransition = %v, want queued to done", it)
+			if it.From != core.StateRunning || it.To != core.StateDone {
+				t.Fatalf("IllegalTransition = %v, want running to done", it)
 			}
-			wantErr(t, err, "illegal transition queued → done")
+			wantErr(t, err, "illegal transition running → done")
+		})
+		t.Run("queued briefed and blocked go straight to done", func(t *testing.T) {
+			l := newTestLedger(t)
+			for _, path := range [][]core.State{
+				{},
+				{core.StateBriefed},
+				{core.StateBlocked},
+			} {
+				w := add(t, l, "p", "t", AddOptions{})
+				for _, s := range path {
+					move(t, l, w.ID, s)
+				}
+				if got := move(t, l, w.ID, core.StateDone); got.State != core.StateDone {
+					t.Fatalf("after %v: state = %q, want done", path, got.State)
+				}
+			}
 		})
 		t.Run("queued to running is the attached-outside-conversation path", func(t *testing.T) {
 			l := newTestLedger(t)
@@ -178,6 +195,22 @@ func TestLedger(t *testing.T) {
 			_, err := l.Transition(w.ID, core.StateQueued)
 			wantErr(t, err, "illegal transition dropped → queued")
 		})
+	})
+
+	t.Run("Any Event Counts As Activity", func(t *testing.T) {
+		l := newTestLedger(t)
+		w := add(t, l, "p", "t", AddOptions{})
+		if _, err := l.db.Exec(`UPDATE work SET updated = '2026-01-01T00:00:00.000Z' WHERE id = ?`, w.ID); err != nil {
+			t.Fatalf("backdate: %v", err)
+		}
+		wantNoErr(t, l.AddEvent(w.ID, core.EventNote, "still alive"))
+		ev, err := l.Events(w.ID, nil)
+		wantNoErr(t, err)
+		got, err := l.Get(w.ID)
+		wantNoErr(t, err)
+		if last := ev[len(ev)-1]; got.Updated != last.At {
+			t.Fatalf("updated = %q, want the event's time %q", got.Updated, last.At)
+		}
 	})
 
 	t.Run("Soft Done Requires A Done Report And A Passing Verify", func(t *testing.T) {

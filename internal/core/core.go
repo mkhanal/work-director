@@ -6,6 +6,7 @@ package core
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 type State string
@@ -145,15 +146,35 @@ type Conflict struct {
 }
 
 var Transitions = map[State][]State{
-	StateQueued:     {StateBriefed, StateRunning, StateBlocked, StateDropped},
-	StateBriefed:    {StateRunning, StateQueued, StateBlocked, StateDropped},
+	StateQueued:     {StateBriefed, StateRunning, StateBlocked, StateDone, StateDropped},
+	StateBriefed:    {StateRunning, StateQueued, StateBlocked, StateDone, StateDropped},
 	StateRunning:    {StateNeedsInput, StateReview, StateBlocked, StateDropped},
 	StateNeedsInput: {StateRunning, StateBlocked, StateDropped},
 	StateReview:     {StateSoftDone, StateRunning, StateBlocked, StateDropped},
 	StateSoftDone:   {StateDone, StateRunning, StateDropped},
-	StateBlocked:    {StateQueued, StateRunning, StateDropped},
+	StateBlocked:    {StateQueued, StateRunning, StateDone, StateDropped},
 	StateDone:       {},
 	StateDropped:    {},
+}
+
+// StaleAfter is how long open work may go without a state change or event
+// before it is reported stale.
+const StaleAfter = 30 * 24 * time.Hour
+
+// TimeLayout is the ledger's timestamp format: UTC with millisecond precision.
+const TimeLayout = "2006-01-02T15:04:05.000Z07:00"
+
+// Stale reports whether w is still open and its last activity is older than
+// StaleAfter at now.
+func Stale(w Work, now time.Time) (bool, error) {
+	if w.State == StateDone || w.State == StateDropped {
+		return false, nil
+	}
+	updated, err := time.Parse(TimeLayout, w.Updated)
+	if err != nil {
+		return false, fmt.Errorf("work %s: updated %q is not a ledger timestamp: %w", w.ID, w.Updated, err)
+	}
+	return now.Sub(updated) > StaleAfter, nil
 }
 
 type IllegalTransition struct {

@@ -13,7 +13,10 @@ and the work state machine. It opens every ledger an earlier wd wrote.
 `Add` returns work in state `queued` with a `state` event recording it.
 
 ## Only Listed Transitions Are Allowed
-queued→briefed→running→(needs-input|review)→soft-done→done, with blocked and dropped reachable from open states; queued→running is reserved for attaching an outside conversation that is already working; anything else fails with IllegalTransition naming both states.
+queued→briefed→running→(needs-input|review)→soft-done→done, with blocked and dropped reachable from open states; queued→running is reserved for attaching an outside conversation that is already working; queued, briefed and blocked work goes straight to done when a human closes it; anything else fails with IllegalTransition naming both states.
+
+## Any Event Counts As Activity
+Adding an event moves the work's `updated` to that event's time.
 
 ## Soft Done Requires A Done Report And A Passing Verify
 From `review`, `SoftDone` refuses (NotReady listing what is missing) until the latest report starts with DONE and the latest verify starts with pass.

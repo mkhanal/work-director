@@ -52,6 +52,15 @@ runner fails with the not-detected guidance.
 the not-detected guidance; the work item's state and worktrees stay as they
 were.
 
+## Status Marks Work Stale After Thirty Days Without Activity
+Work that is neither done nor dropped and whose last activity — a state change
+or any event — is over 30 days old is marked stale on its `wd status` row.
+`--json` rows carry every work key plus `stale`, a boolean.
+
+## A Human Closes Queued Briefed Or Blocked Work
+`wd done` closes queued, briefed and blocked work directly; running,
+needs-input and review work still refuses with the illegal-transition message.
+
 ## Errors And Exit Codes Match
 Usage errors, illegal transitions, not-ready refusals and unknown runners
 print the same message and exit 1; a failing verify exits 1 after recording.
