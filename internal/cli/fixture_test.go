@@ -50,15 +50,12 @@ func newCLIFixture(t *testing.T) *cliFixture {
 	if err != nil {
 		t.Fatalf("user home: %v", err)
 	}
-	base := filepath.Join(home, ".wd-cli-tests")
-	if err := os.MkdirAll(base, 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", base, err)
-	}
-	dir, err := os.MkdirTemp(base, "fixture-")
+	// One directory per fixture: concurrent test runs share $HOME.
+	dir, err := os.MkdirTemp(home, ".wd-cli-fixture-")
 	if err != nil {
 		t.Fatalf("mktemp: %v", err)
 	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	t.Cleanup(func() { os.RemoveAll(dir) })
 	f := &cliFixture{
 		dir:    dir,
 		wdHome: filepath.Join(dir, "wd-home"),
