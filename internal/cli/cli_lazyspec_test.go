@@ -1144,3 +1144,116 @@ func TestFlagsThatDoNotParseFail(t *testing.T) {
 		}
 	}
 }
+
+// transcriptSay appends an assistant entry to the fake claude session's
+// transcript, so it becomes the entry wd report reads last.
+func (f *cliFixture) transcriptSay(t *testing.T, session, text string) {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(f.home, ".claude", "projects", "*", session+".jsonl"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("transcript for %s: %v %v", session, files, err)
+	}
+	entry, err := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{
+		"content": []map[string]string{{"type": "text", "text": text}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(files[0], os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.Write(append(entry, '\n')); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// eventsOf counts work's events of kind through wd events.
+func (f *cliFixture) eventsOf(t *testing.T, id string, kind core.EventKind) int {
+	t.Helper()
+	var evs []core.Event
+	if err := json.Unmarshal([]byte(f.runOK(t, "events", id, "--json")), &evs); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range evs {
+		if e.Kind == kind {
+			n++
+		}
+	}
+	return n
+}
+
+func TestAStandaloneTaskClosesThroughTheCLIAlone(t *testing.T) {
+	f := newCLIFixture(t)
+	id := jsonString(t, f.runOK(t, "add", "sample-app", "Close me standalone", "--json"), "id")
+	f.runOK(t, "spawn", id, "--runner", "claude")
+	if got := jsonString(t, f.runOK(t, "report", id, "--json"), "report"); got != "DONE" {
+		t.Fatalf("report = %q, want DONE", got)
+	}
+	f.runOK(t, "verify", id)
+	f.runOK(t, "pr", id, "https://example.test/pr/standalone")
+	f.runOK(t, "soft-done", id)
+	if got := jsonString(t, f.runOK(t, "done", id, "--json"), "state"); got != string(core.StateDone) {
+		t.Fatalf("state = %q, want done", got)
+	}
+}
+
+func TestReportFilesWhatTheCoordinatorWould(t *testing.T) {
+	f := newCLIFixture(t)
+	state := func(id string) core.State {
+		t.Helper()
+		var ws []core.Work
+		if err := json.Unmarshal([]byte(f.runOK(t, "status", "--all", "--json")), &ws); err != nil {
+			t.Fatal(err)
+		}
+		for _, w := range ws {
+			if w.ID == id {
+				return w.State
+			}
+		}
+		t.Fatalf("no work %s in status", id)
+		return ""
+	}
+	spawn := func(title string) (string, string) {
+		t.Helper()
+		id := jsonString(t, f.runOK(t, "add", "sample-app", title, "--json"), "id")
+		return id, jsonString(t, f.runOK(t, "spawn", id, "--runner", "claude", "--json"), "session")
+	}
+	expect := func(id string, want core.State, kind core.EventKind, n int) {
+		t.Helper()
+		if got := state(id); got != want {
+			t.Errorf("%s state = %s, want %s", id, got, want)
+		}
+		if got := f.eventsOf(t, id, kind); got != n {
+			t.Errorf("%s has %d %s events, want %d", id, got, kind, n)
+		}
+	}
+
+	id, session := spawn("Paint the button")
+	f.runOK(t, "decide", id, "the button colour is teal")
+	f.transcriptSay(t, session, "ASK: which colour is the button?")
+	f.runOK(t, "report", id)
+	expect(id, core.StateRunning, core.EventAnswer, 1)
+
+	f.transcriptSay(t, session, "ASK: what font should the heading use?")
+	f.runOK(t, "report", id)
+	f.runOK(t, "report", id)
+	expect(id, core.StateNeedsInput, core.EventQuestion, 2)
+
+	f.transcriptSay(t, session, "STATUS: DONE\nFILES: none")
+	f.runOK(t, "report", id)
+	f.runOK(t, "report", id)
+	expect(id, core.StateReview, core.EventReport, 1)
+
+	blocked, session := spawn("Blocked on access")
+	f.transcriptSay(t, session, "STATUS: BLOCKED\nNOTES: no credentials")
+	f.runOK(t, "report", blocked)
+	expect(blocked, core.StateBlocked, core.EventReport, 1)
+
+	asking, session := spawn("Needs a judgment")
+	f.transcriptSay(t, session, "STATUS: NEEDS-INPUT\nNOTES: pick a vendor")
+	f.runOK(t, "report", asking)
+	f.runOK(t, "report", asking)
+	expect(asking, core.StateNeedsInput, core.EventReport, 1)
+}

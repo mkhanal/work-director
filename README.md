@@ -64,7 +64,7 @@ wd spawn <id> --worktree --model fable  # claude --bg / opencode run / codex exe
 wd runner init <name>         # any other provider = one TOML command file, no code change
 wd attach <id> <session>      # bind a conversation started OUTSIDE the director (its own LLM) to this item
 wd context <id>               # cwd, worktree, branch + an OSC-8 link that opens it in your editor
-wd report <id>                # reads the executor's STATUS report, moves the item to review
+wd report <id>                # files the STATUS report or ASK, moves the item to review/blocked/needs-input
 wd verify <id>                    # runs the project's verify commands in the executor's worktree
 wd soft-done <id> && wd done <id> # task: needs only a DONE report; standalone: + passing verify, + PR when code changed
 wd feedback add "..." --card parse-at-boundary ; wd distill

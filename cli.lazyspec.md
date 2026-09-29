@@ -133,3 +133,15 @@ A value flag with no value (`--tail=`, or `--ref` last or before another
 flag), a switch given a value (`--json=x`), and a numeric flag that is not a
 positive integer (`--tail`, `--timeout`, `--port`, `--count`) exit 1 naming
 the flag; none falls back to its default.
+
+## A Standalone Task Closes Through The CLI Alone
+A task with no epic goes from queued to done through `wd add`, `wd spawn`,
+`wd report`, `wd verify`, `wd pr`, `wd soft-done` and `wd done`; nothing
+else writes the ledger.
+
+## Report Files What The Coordinator Would
+`wd report` on running or needs-input work, with or without an epic, runs
+the pass `wd epic review` runs over an epic's child: a DONE report moves it
+to review, BLOCKED to blocked, NEEDS-INPUT or a question with no known
+answer to needs-input, and a question its decisions answer is answered. A
+report or question already filed is not filed again.

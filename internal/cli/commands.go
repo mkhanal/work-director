@@ -1034,24 +1034,13 @@ func (c *Cli) report(rest []string) error {
 	if err != nil {
 		return err
 	}
-	if status != "" && w.State != core.StateDone && w.State != core.StateSoftDone {
-		body := status + "\n" + last
-		if status == "DONE" {
-			body = "DONE\n" + last
-		}
-		if _, err := c.Ledger.AddEvent(id, core.EventReport, body); err != nil {
+	if w.State == core.StateRunning || w.State == core.StateNeedsInput {
+		known, err := coordinator.Known(c.Ledger, w)
+		if err != nil {
 			return err
 		}
-		if w.State == core.StateRunning {
-			to := core.StateReview
-			if status == "BLOCKED" {
-				to = core.StateBlocked
-			} else if status == "NEEDS-INPUT" {
-				to = core.StateNeedsInput
-			}
-			if _, err := c.Ledger.Transition(id, to); err != nil {
-				return err
-			}
+		if _, err := coordinator.Coordinate(w, known, c.Ledger, r, h, texts); err != nil {
+			return err
 		}
 	}
 	runnerStatus, err := r.Status(h)
