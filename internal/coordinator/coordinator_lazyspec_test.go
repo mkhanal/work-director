@@ -62,6 +62,7 @@ func eventBodies(t *testing.T, l *ledger.Ledger, work string, kind core.EventKin
 type fakeRunner struct {
 	texts    []string
 	sends    []string
+	sentTo   []runner.Handle
 	resolved []string
 	cwds     []string
 	sessions []string
@@ -77,6 +78,7 @@ func (f *fakeRunner) Spawn(o runner.SpawnOptions) (runner.Handle, error) {
 // Send numbers its refs: each send starts a new process.
 func (f *fakeRunner) Send(h *runner.Handle, text string) error {
 	f.sends = append(f.sends, text)
+	f.sentTo = append(f.sentTo, *h)
 	ref := fmt.Sprintf("pid:%d", len(f.sends))
 	h.Ref = &ref
 	return nil
@@ -484,6 +486,33 @@ func TestCoordinator(t *testing.T) {
 				t.Fatalf("question events = %v, want one", got)
 			}
 		})
+		t.Run("an unanswered needs-input report stays escalated", func(t *testing.T) {
+			l := newTestLedger(t)
+			epic := add(t, l, "proj", "epic", ledger.AddOptions{Kind: core.WorkEpic})
+			child := add(t, l, "proj", "child", ledger.AddOptions{Parent: &epic.ID})
+			setSession(t, l, child.ID, "ses_1")
+			move(t, l, child.ID, core.StateRunning)
+			fr := &fakeRunner{texts: []string{"STATUS: NEEDS-INPUT\nNOTES: pick a queue"}}
+			for pass := 0; pass < 2; pass++ {
+				res, err := CoordinateOnce(epic, proj, l, resolveFake(fr))
+				if err != nil {
+					t.Fatalf("pass %d: %v", pass, err)
+				}
+				if !slices.Equal(res.Escalated, []string{child.ID}) {
+					t.Fatalf("pass %d escalated = %v, want [%s]", pass, res.Escalated, child.ID)
+				}
+			}
+			if got := eventBodies(t, l, child.ID, core.EventReport); len(got) != 1 {
+				t.Fatalf("report events = %v, want one", got)
+			}
+			w, err := l.Get(child.ID)
+			if err != nil {
+				t.Fatalf("get child: %v", err)
+			}
+			if w.State != core.StateNeedsInput {
+				t.Fatalf("state = %s, want needs-input", w.State)
+			}
+		})
 		t.Run("an answered question waits", func(t *testing.T) {
 			l := newTestLedger(t)
 			epic := add(t, l, "proj", "epic", ledger.AddOptions{Kind: core.WorkEpic})
@@ -621,6 +650,41 @@ func TestCoordinator(t *testing.T) {
 			if !slices.Equal(res.Answered, []string{child.ID}) {
 				t.Fatalf("answered = %v, want [%s]", res.Answered, child.ID)
 			}
+			if got := eventBodies(t, l, child.ID, core.EventQuestion); len(got) != 2 {
+				t.Fatalf("question events = %v, want two", got)
+			}
+			if len(fr.sentTo) != 2 || fr.sentTo[1].Session != "ses_2" {
+				t.Fatalf("sent to %+v, want the answer sent again, to ses_2", fr.sentTo)
+			}
+		})
+		t.Run("a new session reporting needs-input escalates again", func(t *testing.T) {
+			l := newTestLedger(t)
+			epic := add(t, l, "proj", "epic", ledger.AddOptions{Kind: core.WorkEpic})
+			child := add(t, l, "proj", "child", ledger.AddOptions{Parent: &epic.ID})
+			setSession(t, l, child.ID, "ses_1")
+			move(t, l, child.ID, core.StateRunning)
+			fr := &fakeRunner{texts: []string{"STATUS: NEEDS-INPUT"}}
+			if _, err := CoordinateOnce(epic, proj, l, resolveFake(fr)); err != nil {
+				t.Fatalf("first pass: %v", err)
+			}
+			setSession(t, l, child.ID, "ses_2")
+			res, err := CoordinateOnce(epic, proj, l, resolveFake(fr))
+			if err != nil {
+				t.Fatalf("pass in the new session: %v", err)
+			}
+			if !slices.Equal(res.Escalated, []string{child.ID}) {
+				t.Fatalf("escalated = %v, want [%s]", res.Escalated, child.ID)
+			}
+			if got := eventBodies(t, l, child.ID, core.EventReport); len(got) != 2 {
+				t.Fatalf("report events = %v, want two", got)
+			}
+			w, err := l.Get(child.ID)
+			if err != nil {
+				t.Fatalf("get child: %v", err)
+			}
+			if w.State != core.StateNeedsInput {
+				t.Fatalf("state = %s, want needs-input", w.State)
+			}
 		})
 	})
 
@@ -673,6 +737,9 @@ func TestCoordinator(t *testing.T) {
 		if _, err := l.SetClaim(child.ID, strPtr("ses_claim")); err != nil {
 			t.Fatalf("set claim: %v", err)
 		}
+		if err := l.SetSession(epic.ID, ledger.SessionInfo{Runner: "epic-runner", Session: "ses_e", Cwd: "/epic/own"}); err != nil {
+			t.Fatalf("epic session: %v", err)
+		}
 		first, err := l.AddWorktree(epic.ID, ledger.WorktreeInfo{Path: "/wt/first", Kind: core.WorktreeShared})
 		if err != nil {
 			t.Fatalf("shared worktree: %v", err)
@@ -685,15 +752,22 @@ func TestCoordinator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handle: %v", err)
 		}
-		if err := Send(l, child.ID, &fakeRunner{}, h, "more"); err != nil {
+		fr := &fakeRunner{}
+		if err := Send(l, child.ID, fr, h, "more"); err != nil {
 			t.Fatalf("send: %v", err)
+		}
+		if len(fr.sentTo) != 1 || fr.sentTo[0].Runner != "epic-runner" || fr.sentTo[0].Session != "ses_claim" || fr.sentTo[0].Cwd != "/wt/first" || fr.sends[0] != "more" {
+			t.Fatalf("sent %v to %+v, want more to epic-runner ses_claim in /wt/first", fr.sends, fr.sentTo)
 		}
 		w, err = l.Get(child.ID)
 		if err != nil {
 			t.Fatalf("get child: %v", err)
 		}
-		if w.Ref == nil || *w.Ref != "pid:1" {
-			t.Fatalf("ref = %v, want pid:1", w.Ref)
+		if w.Ref == nil || *w.Ref != "pid:1" || w.Runner != nil || w.Cwd != nil {
+			t.Fatalf("child = ref %v runner %v cwd %v, want ref pid:1 and no runner or cwd of its own", w.Ref, w.Runner, w.Cwd)
+		}
+		if err := l.SetSession(epic.ID, ledger.SessionInfo{Runner: "next-runner", Session: "ses_e2", Cwd: "/epic/own"}); err != nil {
+			t.Fatalf("epic session: %v", err)
 		}
 		if _, err := l.SetWorktreeState(first.ID, core.WorktreeMerged); err != nil {
 			t.Fatalf("merge worktree: %v", err)
@@ -705,8 +779,8 @@ func TestCoordinator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handle: %v", err)
 		}
-		if h.Runner != "project-runner" || h.Session != "ses_claim" || h.Cwd != "/wt/second" || h.Ref == nil || *h.Ref != "pid:1" {
-			t.Fatalf("handle after send = %+v, want project-runner ses_claim in /wt/second at pid:1", h)
+		if h.Runner != "next-runner" || h.Session != "ses_claim" || h.Cwd != "/wt/second" || h.Ref == nil || *h.Ref != "pid:1" {
+			t.Fatalf("handle after send = %+v, want next-runner ses_claim in /wt/second at pid:1", h)
 		}
 	})
 }
