@@ -72,6 +72,28 @@ func TestCommandsFailLoud(t *testing.T) {
 		}
 	})
 
+	t.Run("a taste directory that cannot be read fails naming why", func(t *testing.T) {
+		dir := t.TempDir()
+		taste := filepath.Join(dir, "taste")
+		if err := os.MkdirAll(filepath.Join(taste, "cards"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(taste, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(taste, 0o755) })
+		var env []string
+		for _, kv := range f.env(t, f.bin) {
+			if !strings.HasPrefix(kv, "WD_ROOT=") {
+				env = append(env, kv)
+			}
+		}
+		code, _, errStr := f.runAt(t, dir, env, "scan")
+		if code != 1 || !strings.Contains(errStr, "permission denied") {
+			t.Fatalf("exit %d, stderr %q; want 1 naming permission denied", code, errStr)
+		}
+	})
+
 	t.Run("an unknown feedback subcommand fails", func(t *testing.T) {
 		if errStr := f.runFail(t, "feedback", "ad", "x"); !strings.Contains(errStr, "usage: wd feedback") {
 			t.Fatalf("stderr = %q, want feedback usage", errStr)

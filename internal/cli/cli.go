@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -187,7 +188,14 @@ func tasteCardsDir() (string, error) {
 	searched := []string{filepath.Dir(exe), wd}
 	for _, base := range searched {
 		dir := filepath.Join(base, "taste", "cards")
-		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+		st, err := os.Stat(dir)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if st.IsDir() {
 			return dir, nil
 		}
 	}
