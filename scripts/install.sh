@@ -5,8 +5,8 @@
 #
 # Downloads the static wd binary for this platform from the latest GitHub
 # release, verifies its sha256, and puts it on PATH. The binary has no
-# runtime dependencies; what it shells out to (git, the runner CLIs) is
-# probed by `wd setup` afterwards.
+# runtime dependencies; `wd doctor` afterwards reports which runner CLIs
+# are detected.
 set -euo pipefail
 
 repo=mkhanal/work-director
@@ -59,4 +59,4 @@ case :$PATH: in
   *:$dir:*) ;;
   *) echo "note: $dir is not on PATH — add it with: export PATH=\"$dir:\$PATH\"" ;;
 esac
-echo "next: wd setup"
+echo "next: wd doctor"

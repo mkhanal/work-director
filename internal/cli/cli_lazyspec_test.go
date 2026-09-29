@@ -173,41 +173,32 @@ func TestCommandsComputeTheSameStatesAndValues(t *testing.T) {
 	assertHasKey(t, out, `"anthropic/claude-opus-5"`)
 }
 
-func TestSetupReportsTheRuntimeDependencies(t *testing.T) {
+func TestDoctorEmitsItsReportOnTheJsonRail(t *testing.T) {
 	f := newCLIFixture(t)
-	// With the fixture's fake runners on PATH, every dependency is present.
-	out := f.runOK(t, "setup", "--json")
-	for _, name := range []string{"git", "claude", "opencode", "codex", "ao"} {
-		assertHasKey(t, out, `"`+name+`"`)
-		assertHasKey(t, out, `"status": "present"`)
+	var report map[string]any
+	if err := json.Unmarshal([]byte(f.runOK(t, "doctor", "--json")), &report); err != nil {
+		t.Fatalf("doctor --json: %v", err)
 	}
-	// The text report is a table: name, status, then path or install command.
-	out = f.runOK(t, "setup")
-	if !strings.Contains(out, "git") || !strings.Contains(out, "present") {
-		t.Fatalf("setup text report = %q", out)
+	assertKeys(t, report, []string{"init", "runners", "workspace"})
+	runners, ok := report["runners"].([]any)
+	if !ok || len(runners) == 0 {
+		t.Fatalf("runners = %v, want a non-empty array", report["runners"])
 	}
+	for _, r := range runners {
+		assertKeys(t, r, []string{"command", "detected", "path", "runner"})
+	}
+	assertKeys(t, report["workspace"], []string{"branch", "changed", "dir", "linked", "repo"})
 }
 
-func TestSetupFailsWhenADependencyIsMissing(t *testing.T) {
+func TestDoctorExitsZeroWhateverItFinds(t *testing.T) {
 	f := newCLIFixture(t)
-	// Bare PATH: the exit code matches the report — 1 when any dependency
-	// is missing, 0 when all are present.
-	code, out, errStr := f.runBare(t, "setup", "--json")
-	if !strings.Contains(out, `"git"`) {
-		t.Fatalf("setup --json = %q, want the git dependency", out)
-	}
-	missing := strings.Count(out, `"status": "missing"`)
-	if missing > 0 {
-		if code != 1 {
-			t.Fatalf("setup exited %d with %d missing, want 1", code, missing)
-		}
-		if !strings.Contains(errStr, "missing") {
-			t.Fatalf("stderr %q does not name the missing dependencies", errStr)
-		}
-		return
-	}
+	// Only git on PATH: no runner is detected and the fixture dir is no repo.
+	code, out, errStr := f.runAt(t, t.TempDir(), f.envWithPath(t, gitOnlyPath(t)), "doctor")
 	if code != 0 {
-		t.Fatalf("setup exited %d with every dependency present, want 0", code)
+		t.Fatalf("doctor exited %d, want 0\n%s\n%s", code, out, errStr)
+	}
+	if !strings.Contains(out, "not detected") || !strings.Contains(out, "no git repo") {
+		t.Fatalf("doctor report = %q", out)
 	}
 }
 

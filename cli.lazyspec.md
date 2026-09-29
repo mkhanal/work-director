@@ -24,13 +24,14 @@ and key values: states transition through the same machine, claims and impacts
 record per task, conflicts pair overlapping claims, concerns resolve with a
 decision.
 
-## Setup Reports The Runtime Dependencies
-`wd setup` prints the probed dependencies — present with their path, missing
-with their install command — and emits them on the --json rail.
+## Doctor Emits Its Report On The Json Rail
+`wd doctor --json` emits runners (runner, command, detected, path),
+workspace (the `wd context` object) and init — path and init strings or
+null.
 
-## Setup Fails When A Dependency Is Missing
-`wd setup` exits 0 when every dependency is present and 1 when any is
-missing; `wd setup --install` installs the missing ones first.
+## Doctor Exits Zero Whatever It Finds
+Undetected runners and a directory outside any repo are reported, never a
+failure: `wd doctor` exits 0.
 
 ## Errors And Exit Codes Match
 Usage errors, illegal transitions, not-ready refusals and unknown runners

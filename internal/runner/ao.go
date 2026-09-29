@@ -22,6 +22,8 @@ var ao = aoRunner{}
 
 func (aoRunner) Name() string { return "ao" }
 
+func (aoRunner) Command() string { return "ao" }
+
 func (aoRunner) Spawn(o SpawnOptions) (Handle, error) {
 	if o.Model != nil {
 		return Handle{}, &RunnerError{Runner: "ao", Detail: "model " + *o.Model + ": ao spawn has no --model flag; set the model on the ao project"}

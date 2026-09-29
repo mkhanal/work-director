@@ -30,6 +30,8 @@ var codex = &codexRunner{logs: map[string]string{}}
 
 func (r *codexRunner) Name() string { return "codex" }
 
+func (r *codexRunner) Command() string { return "codex" }
+
 func (r *codexRunner) Spawn(o SpawnOptions) (Handle, error) {
 	log := filepath.Join(codexLogDir(), fmt.Sprintf("%s-%d.jsonl", logName(o.Name), time.Now().UnixMilli()))
 	args := []string{"codex", "exec", "--cd", o.Cwd, "--json", "--full-auto"}

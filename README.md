@@ -43,14 +43,15 @@ session drives — and the hands-off rail for scripted work (`bun run testbed` e
 
 ```
 curl -fsSL https://raw.githubusercontent.com/mkhanal/work-director/main/scripts/install.sh | sh
-wd setup                          # probe git + your runner CLIs; --install fills the gaps
+wd doctor                         # which runner CLIs are detected; repo state here
 cp projects/example.md ~/.work-director/projects/my-app.md   # edit path, runner, mode, verify
 claude                                                        # in this repo: the session is the director
 ```
 
 `wd` is one static binary (Go, CGO disabled) — no runtime dependencies, nothing to build.
-`wd setup` probes what it shells out to — git and the runner CLIs (claude, opencode, codex,
-ao) — reports what's missing, and `--install` fills the gaps.
+`wd doctor` reports which registered runners (claude, opencode, codex, ao, your spec files)
+are detected on PATH and whether this directory is a repo. A missing runner is information:
+install the ones you use. Outside a repo it offers `git init`; running it is your call.
 
 One work item:
 

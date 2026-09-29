@@ -25,3 +25,8 @@ Providers whose CLI takes a `--model` flag get it on spawn, forwarded as-is; a r
 
 ## A Runner Can Be Defined By A File Of Commands
 Every runner besides the four foundation adapters is a TOML file under `~/.work-director/runners/` listing the commands to spawn, send, check status and list models; any provider whose CLI fits that shape works with no code change, and `wd runner init` writes the starter file.
+
+## Every Registered Runner Reports Whether It Is Detected
+Each built-in and spec-file runner names the command it runs (a spec's is
+the first word of its spawn line); it is detected, with the resolved path,
+when that command is on PATH. Not detected is a fact, never an error.

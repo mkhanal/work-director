@@ -48,10 +48,11 @@ const (
 	StatusUnknown RunnerStatus = "unknown"
 )
 
-// Runner drives one provider's CLI. Send takes a pointer because detached
+// Runner drives one provider's CLI, the executable Command names. Send takes a pointer because detached
 // runners (opencode, codex, spec) record the new process ref on the handle.
 type Runner interface {
 	Name() string
+	Command() string
 	Spawn(o SpawnOptions) (Handle, error)
 	Send(h *Handle, text string) error
 	Status(h Handle) (RunnerStatus, error)
