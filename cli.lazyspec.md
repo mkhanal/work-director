@@ -61,6 +61,12 @@ or any event — is over 30 days old is marked stale on its `wd status` row.
 `wd done` closes queued, briefed and blocked work directly; running,
 needs-input and review work still refuses with the illegal-transition message.
 
+## Commands That Need Taste Cards Say Where They Looked
+With no `WD_ROOT` and no `taste/cards` beside the binary or in the working
+directory, `wd brief`, `wd spawn` and `wd scan` exit 1 naming `WD_ROOT` and
+each directory searched; the work item stays as it was. Commands that read no
+cards run from any directory.
+
 ## Errors And Exit Codes Match
 Usage errors, illegal transitions, not-ready refusals and unknown runners
 print the same message and exit 1; a failing verify exits 1 after recording.

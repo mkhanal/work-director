@@ -19,6 +19,7 @@ import (
 	"wd/internal/promotion"
 	"wd/internal/runner"
 	"wd/internal/serve"
+	"wd/internal/taste"
 )
 
 func (c *Cli) projects(rest []string) error {
@@ -1787,7 +1788,11 @@ func (c *Cli) concern(rest []string) error {
 func (c *Cli) scan(rest []string) error {
 	a := c.Args
 	adopt := str(a, "adopt")
-	cards, cardsDir, err := c.cards()
+	cardsDir, err := tasteCardsDir()
+	if err != nil {
+		return err
+	}
+	cards, err := taste.LoadCards(cardsDir)
 	if err != nil {
 		return err
 	}
@@ -1957,16 +1962,12 @@ func (c *Cli) serve(rest []string) error {
 	if err != nil {
 		return err
 	}
-	root, err := c.root()
-	if err != nil {
-		return err
-	}
 	// Board actions run this same binary, so they can never drift from it.
 	cliPath, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	srv := serve.New(c.Ledger, root, cliPath)
+	srv := serve.New(c.Ledger, cliPath)
 	addr, failed, err := srv.Start(port)
 	if err != nil {
 		return err

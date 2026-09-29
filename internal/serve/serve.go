@@ -23,17 +23,15 @@ const DefaultPort = 8787
 // broadcasts live events to WebSocket clients.
 type Server struct {
 	ledger  *ledger.Ledger
-	root    string
 	cliPath string
 	hub     *wsHub
 }
 
-// New creates a serve server over the given ledger. root is the repo root
-// (where taste/cards lives); cliPath is the path to the wd CLI binary.
-func New(l *ledger.Ledger, root, cliPath string) *Server {
+// New creates a serve server over the given ledger; cliPath is the path to
+// the wd CLI binary.
+func New(l *ledger.Ledger, cliPath string) *Server {
 	return &Server{
 		ledger:  l,
-		root:    root,
 		cliPath: cliPath,
 		hub:     newWSHub(),
 	}
@@ -380,11 +378,10 @@ func goalRollup(children []core.Work) rollup {
 	return rollup{Counts: counts, Done: counts[core.StateDone], Total: len(children)}
 }
 
-// runCLI runs the wd CLI with argv from the repo root. A non-zero exit is
-// a result; failing to run the CLI at all is an error.
+// runCLI runs the wd CLI with argv. A non-zero exit is a result; failing to
+// run the CLI at all is an error.
 func (s *Server) runCLI(argv []string) (actionResult, error) {
 	cmd := exec.Command(s.cliPath, argv...)
-	cmd.Dir = s.root
 	out, err := cmd.CombinedOutput()
 	var exit *exec.ExitError
 	if err != nil && !errors.As(err, &exit) {

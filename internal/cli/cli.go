@@ -154,11 +154,12 @@ func Run(args []string) error {
 	return c.dispatch()
 }
 
-// root locates the repo root (where taste/cards lives): $WD_ROOT, else the
-// executable's directory, else the working directory.
-func (c *Cli) root() (string, error) {
+// tasteCardsDir locates the taste cards of the work-director checkout:
+// $WD_ROOT/taste/cards, else taste/cards beside the executable or in the
+// working directory.
+func tasteCardsDir() (string, error) {
 	if r := os.Getenv("WD_ROOT"); r != "" {
-		return r, nil
+		return filepath.Join(r, "taste", "cards"), nil
 	}
 	exe, err := os.Executable()
 	if err != nil {
@@ -168,23 +169,14 @@ func (c *Cli) root() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, base := range []string{filepath.Dir(exe), wd} {
-		if st, err := os.Stat(filepath.Join(base, "taste", "cards")); err == nil && st.IsDir() {
-			return base, nil
+	searched := []string{filepath.Dir(exe), wd}
+	for _, base := range searched {
+		dir := filepath.Join(base, "taste", "cards")
+		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+			return dir, nil
 		}
 	}
-	return "", fail("cannot find taste/cards beside %s or in the working directory; set WD_ROOT to the work-director checkout", exe)
-}
-
-// cards loads the taste cards under the repo root.
-func (c *Cli) cards() ([]taste.Card, string, error) {
-	root, err := c.root()
-	if err != nil {
-		return nil, "", err
-	}
-	dir := filepath.Join(root, "taste", "cards")
-	cards, err := taste.LoadCards(dir)
-	return cards, dir, err
+	return "", fail("taste cards not found: no taste/cards in %s; set WD_ROOT to the work-director checkout", strings.Join(searched, " or "))
 }
 
 const usage = "wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve|doctor> [--json]"
@@ -462,7 +454,11 @@ func (c *Cli) briefFor(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cards, _, err := c.cards()
+	cardsDir, err := tasteCardsDir()
+	if err != nil {
+		return "", err
+	}
+	cards, err := taste.LoadCards(cardsDir)
 	if err != nil {
 		return "", err
 	}
