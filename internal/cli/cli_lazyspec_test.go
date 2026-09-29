@@ -378,6 +378,39 @@ func (f *cliFixture) backdate(t *testing.T, id string, age time.Duration) {
 	}
 }
 
+func TestADecisionIsRecordedInOneLineAndReachesTheBrief(t *testing.T) {
+	f := newCLIFixture(t)
+	id := f.ids["standalone"]
+
+	out := f.runOK(t, "decide", id, "use sqlite everywhere", "--json")
+	assertHasKey(t, out, `"kind": "decision"`)
+	assertHasKey(t, out, `"body": "use sqlite everywhere"`)
+	if errStr := f.runFail(t, "decide", "nope", "x"); !strings.Contains(errStr, "no work nope") {
+		t.Fatalf("decide on unknown work: stderr %q", errStr)
+	}
+
+	out = f.runOK(t, "concern", "add", id, "which queue?", "--json")
+	f.runOK(t, "concern", "resolve", jsonNumber(t, out, "id"), "use the outbox table")
+
+	brief := f.runOK(t, "brief", id)
+	start := strings.Index(brief, "Decisions already made")
+	if start < 0 {
+		t.Fatalf("brief has no decisions section:\n%s", brief)
+	}
+	section := brief[start:]
+	if end := strings.Index(section, "\n\n"); end >= 0 {
+		section = section[:end]
+	}
+	for _, want := range []string{"- use sqlite everywhere", "- use the outbox table"} {
+		if !strings.Contains(section, want) {
+			t.Fatalf("decisions section missing %q:\n%s", want, section)
+		}
+	}
+	if strings.Contains(section, "resolved:") {
+		t.Fatalf("decisions section carries a ledger note:\n%s", section)
+	}
+}
+
 func TestErrorsAndExitCodesMatch(t *testing.T) {
 	f := newCLIFixture(t)
 	epic, t1 := f.ids["epic"], f.ids["t1"]

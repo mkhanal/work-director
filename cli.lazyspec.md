@@ -64,3 +64,8 @@ needs-input and review work still refuses with the illegal-transition message.
 ## Errors And Exit Codes Match
 Usage errors, illegal transitions, not-ready refusals and unknown runners
 print the same message and exit 1; a failing verify exits 1 after recording.
+
+## A Decision Is Recorded In One Line And Reaches The Brief
+`wd decide <id> <text>` records a `decision` event on existing work. The
+work's brief lists its decisions and its resolved concerns' decisions under
+"Decisions already made", and nothing else there.

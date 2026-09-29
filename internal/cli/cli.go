@@ -187,7 +187,7 @@ func (c *Cli) cards() ([]taste.Card, string, error) {
 	return cards, dir, err
 }
 
-const usage = "wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve|doctor> [--json]"
+const usage = "wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve|doctor> [--json]"
 
 func (c *Cli) dispatch() error {
 	a := c.Args
@@ -220,6 +220,8 @@ func (c *Cli) dispatch() error {
 		return c.report(rest)
 	case "verify":
 		return c.verify(rest)
+	case "decide":
+		return c.decide(rest)
 	case "pr":
 		return c.pr(rest)
 	case "soft-done":
@@ -413,7 +415,11 @@ func (c *Cli) sendTo(id, text string) error {
 
 // cycle gathers the brief context for work: decisions, history, roadmap.
 func (c *Cli) cycle(id string) (brief.Context, error) {
-	notes, err := c.Ledger.Events(id, kindPtr(core.EventNote))
+	decided, err := c.Ledger.Events(id, kindPtr(core.EventDecision))
+	if err != nil {
+		return brief.Context{}, err
+	}
+	concerns, err := c.Ledger.Concerns(&id)
 	if err != nil {
 		return brief.Context{}, err
 	}
@@ -430,8 +436,13 @@ func (c *Cli) cycle(id string) (brief.Context, error) {
 		return brief.Context{}, err
 	}
 	var decisions []string
-	for _, e := range notes {
+	for _, e := range decided {
 		decisions = append(decisions, e.Body)
+	}
+	for _, cx := range concerns {
+		if cx.Decision != nil {
+			decisions = append(decisions, *cx.Decision)
+		}
 	}
 	var history []string
 	for _, e := range reports {

@@ -1154,6 +1154,25 @@ func lastLines(text string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
+func (c *Cli) decide(rest []string) error {
+	if len(rest) < 2 {
+		return fail("usage: wd decide <id> <text>")
+	}
+	id, text := rest[0], rest[1]
+	if _, err := c.Ledger.Get(id); err != nil {
+		return err
+	}
+	if err := c.Ledger.AddEvent(id, core.EventDecision, text); err != nil {
+		return err
+	}
+	decisions, err := c.Ledger.Events(id, kindPtr(core.EventDecision))
+	if err != nil {
+		return err
+	}
+	c.out(decisions[len(decisions)-1], "decided: "+text)
+	return nil
+}
+
 func (c *Cli) pr(rest []string) error {
 	if len(rest) < 2 {
 		return fail("usage: wd pr <id> <url>")
