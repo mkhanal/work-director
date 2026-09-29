@@ -799,7 +799,7 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 	escalated := false
 	for time.Now().Before(deadline) {
-		res, err := coordinator.CoordinateOnce(epic, c.Ledger, runner.RunnerNamed)
+		res, err := coordinator.CoordinateOnce(epic, p, c.Ledger, runner.RunnerNamed)
 		if err != nil {
 			return err
 		}
@@ -862,7 +862,11 @@ func contains(list []string, x string) bool {
 }
 
 func (c *Cli) epicReview(epic core.Work) error {
-	res, err := coordinator.CoordinateOnce(epic, c.Ledger, runner.RunnerNamed)
+	p, err := c.project(epic.Project)
+	if err != nil {
+		return err
+	}
+	res, err := coordinator.CoordinateOnce(epic, p, c.Ledger, runner.RunnerNamed)
 	if err != nil {
 		return err
 	}
@@ -898,29 +902,8 @@ func (c *Cli) send(rest []string) error {
 	if len(rest) < 2 {
 		return fail("usage: wd send <id> <text>")
 	}
-	id, text := rest[0], rest[1]
-	h, err := c.handle(id)
-	if err != nil {
+	if err := c.sendTo(rest[0], rest[1]); err != nil {
 		return err
-	}
-	r, err := runner.RunnerNamed(h.Runner)
-	if err != nil {
-		return err
-	}
-	if err := r.Send(&h, text); err != nil {
-		return err
-	}
-	if err := c.Ledger.AddEvent(id, core.EventSent, text); err != nil {
-		return err
-	}
-	w, err := c.Ledger.Get(id)
-	if err != nil {
-		return err
-	}
-	if w.State != core.StateRunning {
-		if _, err := c.Ledger.Transition(id, core.StateRunning); err != nil {
-			return err
-		}
 	}
 	c.out(map[string]any{"ok": true}, "sent")
 	return nil

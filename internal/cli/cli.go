@@ -9,10 +9,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	"wd/internal/brief"
+	"wd/internal/coordinator"
 	"wd/internal/core"
 	"wd/internal/ledger"
 	"wd/internal/project"
@@ -353,37 +355,47 @@ func (c *Cli) handle(id string) (runner.Handle, error) {
 	if err != nil {
 		return runner.Handle{}, err
 	}
-	runnerName := w.Runner
-	if runnerName == nil {
-		runnerName = &p.Runner
+	h, ok, err := coordinator.Handle(c.Ledger, w, p)
+	if err != nil {
+		return runner.Handle{}, err
 	}
-	session := w.Session
-	if session == nil {
-		session = w.Claim
-	}
-	if session == nil {
+	if !ok {
 		return runner.Handle{}, fail("work %s has no session or claim", id)
 	}
-	var shared *string
-	if w.Parent != nil {
-		wts, err := c.Ledger.Worktrees(*w.Parent)
-		if err != nil {
-			return runner.Handle{}, err
+	return h, nil
+}
+
+// sendTo continues work's recorded session with text and moves the work to
+// running. Work that cannot return to running is refused before anything is
+// sent.
+func (c *Cli) sendTo(id, text string) error {
+	w, err := c.Ledger.Get(id)
+	if err != nil {
+		return err
+	}
+	if w.State != core.StateRunning && !slices.Contains(core.Transitions[w.State], core.StateRunning) {
+		return fail("%s", core.IllegalTransition{From: w.State, To: core.StateRunning}.Error())
+	}
+	h, err := c.handle(id)
+	if err != nil {
+		return err
+	}
+	r, err := runner.RunnerNamed(h.Runner)
+	if err != nil {
+		return err
+	}
+	if err := coordinator.Send(c.Ledger, id, r, h, text); err != nil {
+		return err
+	}
+	if err := c.Ledger.AddEvent(id, core.EventSent, text); err != nil {
+		return err
+	}
+	if w.State != core.StateRunning {
+		if _, err := c.Ledger.Transition(id, core.StateRunning); err != nil {
+			return err
 		}
-		for _, wt := range wts {
-			if wt.Kind == core.WorktreeShared && wt.State == core.WorktreeActive {
-				shared = &wt.Path
-			}
-		}
 	}
-	cwd := w.Cwd
-	if cwd == nil {
-		cwd = shared
-	}
-	if cwd == nil {
-		cwd = &p.Path
-	}
-	return runner.Handle{Runner: *runnerName, Session: *session, Ref: w.Ref, Cwd: *cwd}, nil
+	return nil
 }
 
 // cycle gathers the brief context for work: decisions, history, roadmap.

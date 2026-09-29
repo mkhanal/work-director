@@ -70,3 +70,17 @@ A running child with neither session nor claim is listed under waiting.
 ## A Child With Nothing New Waits
 A running child whose last transcript line is neither an ASK nor a
 STATUS report is listed under waiting.
+
+## A Needs-Input Report Escalates
+A transcript ending in `STATUS: NEEDS-INPUT` files the report, moves the
+child to needs-input and lists it under escalated.
+
+## A Question Already Filed Is Not Filed Again
+An `ASK:` or `STATUS: NEEDS-INPUT` the pass already filed for the child is
+not filed, answered or escalated again: a needs-input child stays listed
+under escalated, and a running child — answered since — waits.
+
+## A Child Without Its Own Runner Or Directory Uses Its Epic's Then Its Project's
+A child with no runner coordinates with its epic's runner, else its
+project's; with no cwd it works in its epic's active shared worktree, else
+the project's path — the same session `wd send` and `wd report` reach.

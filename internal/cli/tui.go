@@ -92,30 +92,7 @@ func (s *tuiSource) sessionView(id string) (*tui.SessionView, error) {
 
 // Send continues the work item's recorded session, mirroring `wd send`.
 func (s *tuiSource) Send(id, text string) error {
-	h, err := s.handle(id)
-	if err != nil {
-		return err
-	}
-	rn, err := runner.RunnerNamed(h.Runner)
-	if err != nil {
-		return err
-	}
-	if err := rn.Send(&h, text); err != nil {
-		return err
-	}
-	if err := s.Ledger.AddEvent(id, core.EventSent, text); err != nil {
-		return err
-	}
-	w, err := s.Ledger.Get(id)
-	if err != nil {
-		return err
-	}
-	if w.State != core.StateRunning {
-		if _, err := s.Ledger.Transition(id, core.StateRunning); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.sendTo(id, text)
 }
 
 // tui runs the terminal UI: `wd tui [id]` opens the board, or the work item's
