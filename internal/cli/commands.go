@@ -770,13 +770,13 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 		spawned = append(spawned, handleWithAttach{Handle: h, Attach: hint})
 		lines = append(lines, fmt.Sprintf("%s  %s", h.Session, hint))
 	}
-	if epic.State != core.StateRunning {
+	if len(spawned) > 0 && epic.State != core.StateRunning {
 		if _, err := c.Ledger.Transition(epic.ID, core.StateRunning); err != nil {
 			return err
 		}
 	}
 	if !flag(a, "wait") {
-		lines = append(lines, fmt.Sprintf("%d task(s) running on %s", len(children), cwd))
+		lines = append(lines, fmt.Sprintf("%d task(s) spawned on %s", len(spawned), cwd))
 		return c.out(map[string]any{"ok": true, "spawned": spawned}, strings.Join(lines, "\n"))
 	}
 	if !c.JSON && len(lines) > 0 {

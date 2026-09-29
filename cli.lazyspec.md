@@ -80,6 +80,13 @@ work's brief lists its decisions and its resolved concerns' decisions under
 With `--json`, a command writes exactly one JSON document to stdout — no
 progress lines, no document per spawned session.
 
+## Epic Run Spawns Only Children Not Yet Under Way
+`wd epic run` spawns the open children that are queued or briefed, or
+running with no session. Children in review, needs-input, blocked or
+soft-done, and running children with a session, keep their state and
+session. It reports how many it spawned; a run that spawns none leaves the
+epic's state as it was.
+
 ## A Claim Names Someone
 `wd claim <id>` on work with no session, and `wd claim <id> ""`, exit 1
 with the claim usage and leave the claim as it was.

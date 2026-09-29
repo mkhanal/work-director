@@ -670,6 +670,83 @@ func TestCommandsOnUnknownWorkFailNamingIt(t *testing.T) {
 	}
 }
 
+func TestEpicRunSpawnsOnlyChildrenNotYetUnderWay(t *testing.T) {
+	f := newCLIFixture(t)
+	epic, t2, t3 := f.ids["epic"], f.ids["t2"], f.ids["t3"]
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	defer l.Close()
+	child := func(parent, title string, path ...core.State) string {
+		t.Helper()
+		w, err := l.Add("sample-app", title, ledger.AddOptions{Parent: &parent})
+		if err != nil {
+			t.Fatalf("add %s: %v", title, err)
+		}
+		for _, s := range path {
+			if s == core.StateSoftDone {
+				if _, err := l.AddEvent(w.ID, core.EventReport, "DONE"); err != nil {
+					t.Fatalf("report %s: %v", title, err)
+				}
+				_, err = l.SoftDone(w.ID, false)
+			} else {
+				_, err = l.Transition(w.ID, s)
+			}
+			if err != nil {
+				t.Fatalf("%s → %s: %v", title, s, err)
+			}
+		}
+		return w.ID
+	}
+	underWay := []string{
+		t2,
+		child(epic, "In review", core.StateRunning, core.StateReview),
+		child(epic, "Waiting on a human", core.StateRunning, core.StateNeedsInput),
+		child(epic, "Blocked", core.StateBlocked),
+		child(epic, "Soft done", core.StateRunning, core.StateReview, core.StateSoftDone),
+	}
+	briefed := child(epic, "Briefed", core.StateBriefed)
+	before := map[string]core.Work{}
+	for _, id := range underWay {
+		if before[id], err = l.Get(id); err != nil {
+			t.Fatalf("get %s: %v", id, err)
+		}
+	}
+
+	out := f.runOK(t, "epic", "run", epic)
+	if !strings.Contains(out, "2 task(s) spawned") {
+		t.Fatalf("epic run = %q, want 2 task(s) spawned", out)
+	}
+	for _, id := range underWay {
+		w, err := l.Get(id)
+		if err != nil {
+			t.Fatalf("get %s: %v", id, err)
+		}
+		if w.State != before[id].State || strOrEmpty(w.Session) != strOrEmpty(before[id].Session) {
+			t.Errorf("%s = %s session %v, want %s session %v untouched", id, w.State, w.Session, before[id].State, before[id].Session)
+		}
+	}
+	for _, id := range []string{t3, briefed} {
+		if w, err := l.Get(id); err != nil || w.State != core.StateRunning || w.Session == nil {
+			t.Errorf("%s = %+v, %v; want running with a session", id, w, err)
+		}
+	}
+
+	idle, err := l.Add("sample-app", "Nothing to start", ledger.AddOptions{Kind: core.WorkEpic})
+	if err != nil {
+		t.Fatalf("add epic: %v", err)
+	}
+	child(idle.ID, "Blocked alone", core.StateBlocked)
+	out = f.runOK(t, "epic", "run", idle.ID, "--json")
+	if !strings.Contains(out, `"spawned": []`) {
+		t.Fatalf("epic run = %s, want nothing spawned", out)
+	}
+	if w, err := l.Get(idle.ID); err != nil || w.State != core.StateQueued {
+		t.Fatalf("epic = %+v, %v; want it left queued", w, err)
+	}
+}
+
 func TestAClaimNamesSomeone(t *testing.T) {
 	f := newCLIFixture(t)
 	id := jsonString(t, f.runOK(t, "add", "sample-app", "Unclaimed", "--json"), "id")
