@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -36,8 +37,14 @@ type Ledger struct {
 	db *sql.DB
 }
 
+// Pragmas are per connection, so they ride on the DSN and apply to every
+// connection the pool opens. busy_timeout lets parallel wd processes wait for
+// the write lock; immediate transactions take it up front, so a
+// read-then-write never fails on a snapshot another writer moved.
+const dsnParams = "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_txlock=immediate"
+
 func New(path string) (*Ledger, error) {
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", path+dsnParams)
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +110,49 @@ func newId() (string, error) {
 
 type rowScanner interface{ Scan(dest ...any) error }
 
+type queryer interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func (l *Ledger) inTx(f func(tx *sql.Tx) error) error {
+	tx, err := l.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := f(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func noWork(id string) error {
+	return fmt.Errorf("no work %s; wd status for known work items", id)
+}
+
+// updateWork runs an UPDATE of one work row and fails when id matches none.
+func updateWork(e execer, id, query string, args ...any) error {
+	res, err := e.Exec(query, args...)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return noWork(id)
+	}
+	return nil
+}
+
+const workColumns = `id, project, title, detail, kind, state, runner, session, ref, cwd,
+	created, updated, parent, heading, claim, impact`
+
 func nullStr(ns sql.NullString) *string {
 	if !ns.Valid {
 		return nil
@@ -121,8 +171,12 @@ func scanWork(s rowScanner) (core.Work, error) {
 	if err != nil {
 		return core.Work{}, err
 	}
-	w.Kind = core.WorkKind(kind)
-	w.State = core.State(state)
+	if w.Kind, err = core.ParseWorkKind(kind); err != nil {
+		return core.Work{}, fmt.Errorf("work %s: %w", w.ID, err)
+	}
+	if w.State, err = core.ParseState(state); err != nil {
+		return core.Work{}, fmt.Errorf("work %s: %w", w.ID, err)
+	}
 	w.Runner = nullStr(runner)
 	w.Session = nullStr(session)
 	w.Ref = nullStr(ref)
@@ -137,10 +191,13 @@ func scanWork(s rowScanner) (core.Work, error) {
 func scanEvent(s rowScanner) (core.Event, error) {
 	var e core.Event
 	var kind string
-	if err := s.Scan(&e.ID, &e.Work, &kind, &e.Body, &e.At); err != nil {
+	err := s.Scan(&e.ID, &e.Work, &kind, &e.Body, &e.At)
+	if err != nil {
 		return core.Event{}, err
 	}
-	e.Kind = core.EventKind(kind)
+	if e.Kind, err = core.ParseEventKind(kind); err != nil {
+		return core.Event{}, fmt.Errorf("event %d: %w", e.ID, err)
+	}
 	return e, nil
 }
 
@@ -148,12 +205,15 @@ func scanFeedback(s rowScanner) (core.Feedback, error) {
 	var f core.Feedback
 	var source string
 	var project, card sql.NullString
-	if err := s.Scan(&f.ID, &f.Text, &project, &card, &source, &f.At); err != nil {
+	err := s.Scan(&f.ID, &f.Text, &project, &card, &source, &f.At)
+	if err != nil {
 		return core.Feedback{}, err
 	}
 	f.Project = nullStr(project)
 	f.Card = nullStr(card)
-	f.Source = core.FeedbackSource(source)
+	if f.Source, err = core.ParseFeedbackSource(source); err != nil {
+		return core.Feedback{}, fmt.Errorf("feedback %d: %w", f.ID, err)
+	}
 	return f, nil
 }
 
@@ -172,12 +232,17 @@ func scanWorktree(s rowScanner) (core.Worktree, error) {
 	var w core.Worktree
 	var kind, state string
 	var branch sql.NullString
-	if err := s.Scan(&w.ID, &w.Work, &w.Path, &branch, &kind, &state, &w.Created); err != nil {
+	err := s.Scan(&w.ID, &w.Work, &w.Path, &branch, &kind, &state, &w.Created)
+	if err != nil {
 		return core.Worktree{}, err
 	}
 	w.Branch = nullStr(branch)
-	w.Kind = core.WorktreeKind(kind)
-	w.State = core.WorktreeState(state)
+	if w.Kind, err = core.ParseWorktreeKind(kind); err != nil {
+		return core.Worktree{}, fmt.Errorf("worktree %d: %w", w.ID, err)
+	}
+	if w.State, err = core.ParseWorktreeState(state); err != nil {
+		return core.Worktree{}, fmt.Errorf("worktree %d: %w", w.ID, err)
+	}
 	return w, nil
 }
 
@@ -213,24 +278,27 @@ func (l *Ledger) Add(project, title string, opts AddOptions) (core.Work, error) 
 		return core.Work{}, err
 	}
 	t := now()
-	_, err = l.db.Exec(
-		`INSERT INTO work (id, project, title, detail, kind, state, parent, heading, created, updated)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, project, title, opts.Detail, string(kind), string(core.StateQueued), parent, opts.Heading, t, t)
+	err = l.inTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec(
+			`INSERT INTO work (id, project, title, detail, kind, state, parent, heading, created, updated)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, project, title, opts.Detail, string(kind), string(core.StateQueued), parent, opts.Heading, t, t); err != nil {
+			return err
+		}
+		return addEvent(tx, id, core.EventState, string(core.StateQueued), t)
+	})
 	if err != nil {
-		return core.Work{}, err
-	}
-	if err := l.addEvent(id, core.EventState, string(core.StateQueued)); err != nil {
 		return core.Work{}, err
 	}
 	return l.Get(id)
 }
 
-func (l *Ledger) Get(id string) (core.Work, error) {
-	w, err := scanWork(l.db.QueryRow(`SELECT id, project, title, detail, kind, state, runner, session, ref, cwd,
-		created, updated, parent, heading, claim, impact FROM work WHERE id = ?`, id))
-	if err == sql.ErrNoRows {
-		return core.Work{}, fmt.Errorf("no work %s; wd status for known work items", id)
+func (l *Ledger) Get(id string) (core.Work, error) { return getWork(l.db, id) }
+
+func getWork(q queryer, id string) (core.Work, error) {
+	w, err := scanWork(q.QueryRow(`SELECT `+workColumns+` FROM work WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return core.Work{}, noWork(id)
 	}
 	if err != nil {
 		return core.Work{}, err
@@ -252,8 +320,7 @@ type ListFilter struct {
 }
 
 func (l *Ledger) List(filter ListFilter) ([]core.Work, error) {
-	rows, err := l.db.Query(`SELECT id, project, title, detail, kind, state, runner, session, ref, cwd,
-		created, updated, parent, heading, claim, impact FROM work ORDER BY created`)
+	rows, err := l.db.Query(`SELECT ` + workColumns + ` FROM work ORDER BY created`)
 	if err != nil {
 		return nil, err
 	}
@@ -277,8 +344,7 @@ func (l *Ledger) List(filter ListFilter) ([]core.Work, error) {
 
 // Children of an epic, oldest first.
 func (l *Ledger) Tasks(epicID string) ([]core.Work, error) {
-	rows, err := l.db.Query(`SELECT id, project, title, detail, kind, state, runner, session, ref, cwd,
-		created, updated, parent, heading, claim, impact FROM work WHERE parent = ? ORDER BY created`, epicID)
+	rows, err := l.db.Query(`SELECT `+workColumns+` FROM work WHERE parent = ? ORDER BY created`, epicID)
 	if err != nil {
 		return nil, err
 	}
@@ -295,17 +361,20 @@ func (l *Ledger) Tasks(epicID string) ([]core.Work, error) {
 }
 
 func (l *Ledger) Transition(id string, to core.State) (core.Work, error) {
-	w, err := l.Get(id)
+	err := l.inTx(func(tx *sql.Tx) error {
+		w, err := getWork(tx, id)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains(core.Transitions[w.State], to) {
+			return core.IllegalTransition{From: w.State, To: to}
+		}
+		if _, err := tx.Exec(`UPDATE work SET state = ? WHERE id = ?`, string(to), id); err != nil {
+			return err
+		}
+		return addEvent(tx, id, core.EventState, string(to), now())
+	})
 	if err != nil {
-		return core.Work{}, err
-	}
-	if !slices.Contains(core.Transitions[w.State], to) {
-		return core.Work{}, core.IllegalTransition{From: w.State, To: to}
-	}
-	if _, err := l.db.Exec(`UPDATE work SET state = ?, updated = ? WHERE id = ?`, string(to), now(), id); err != nil {
-		return core.Work{}, err
-	}
-	if err := l.addEvent(id, core.EventState, string(to)); err != nil {
 		return core.Work{}, err
 	}
 	return l.Get(id)
@@ -319,18 +388,16 @@ type SessionInfo struct {
 }
 
 func (l *Ledger) SetSession(id string, s SessionInfo) error {
-	_, err := l.db.Exec(`UPDATE work SET runner = ?, session = ?, ref = ?, cwd = ?, updated = ? WHERE id = ?`,
+	return updateWork(l.db, id, `UPDATE work SET runner = ?, session = ?, ref = ?, cwd = ?, updated = ? WHERE id = ?`,
 		s.Runner, s.Session, s.Ref, s.Cwd, now(), id)
-	return err
 }
 
 func (l *Ledger) SetCwd(id, cwd string) error {
-	_, err := l.db.Exec(`UPDATE work SET cwd = ?, updated = ? WHERE id = ?`, cwd, now(), id)
-	return err
+	return updateWork(l.db, id, `UPDATE work SET cwd = ?, updated = ? WHERE id = ?`, cwd, now(), id)
 }
 
 func (l *Ledger) SetClaim(id string, claim *string) (core.Work, error) {
-	if _, err := l.db.Exec(`UPDATE work SET claim = ?, updated = ? WHERE id = ?`, claim, now(), id); err != nil {
+	if err := updateWork(l.db, id, `UPDATE work SET claim = ?, updated = ? WHERE id = ?`, claim, now(), id); err != nil {
 		return core.Work{}, err
 	}
 	return l.Get(id)
@@ -338,7 +405,7 @@ func (l *Ledger) SetClaim(id string, claim *string) (core.Work, error) {
 
 func (l *Ledger) SetImpact(id string, paths []string) (core.Work, error) {
 	impact := strings.Join(paths, "\n")
-	if _, err := l.db.Exec(`UPDATE work SET impact = ?, updated = ? WHERE id = ?`, impact, now(), id); err != nil {
+	if err := updateWork(l.db, id, `UPDATE work SET impact = ?, updated = ? WHERE id = ?`, impact, now(), id); err != nil {
 		return core.Work{}, err
 	}
 	return l.Get(id)
@@ -346,24 +413,16 @@ func (l *Ledger) SetImpact(id string, paths []string) (core.Work, error) {
 
 // addEvent records the event and moves the work's updated to it: updated is
 // the work's last activity, which staleness is measured from.
-func (l *Ledger) addEvent(work string, kind core.EventKind, body string) error {
-	tx, err := l.db.Begin()
-	if err != nil {
+func addEvent(tx *sql.Tx, work string, kind core.EventKind, body, at string) error {
+	if err := updateWork(tx, work, `UPDATE work SET updated = ? WHERE id = ?`, at, work); err != nil {
 		return err
 	}
-	defer tx.Rollback()
-	at := now()
-	if _, err := tx.Exec(`INSERT INTO event (work, kind, body, at) VALUES (?, ?, ?, ?)`, work, string(kind), body, at); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`UPDATE work SET updated = ? WHERE id = ?`, at, work); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err := tx.Exec(`INSERT INTO event (work, kind, body, at) VALUES (?, ?, ?, ?)`, work, string(kind), body, at)
+	return err
 }
 
 func (l *Ledger) AddEvent(work string, kind core.EventKind, body string) error {
-	return l.addEvent(work, kind, body)
+	return l.inTx(func(tx *sql.Tx) error { return addEvent(tx, work, kind, body, now()) })
 }
 
 func (l *Ledger) Events(work string, kind *core.EventKind) ([]core.Event, error) {
@@ -423,16 +482,38 @@ func (l *Ledger) AddConcern(work, text string) (core.Concern, error) {
 }
 
 func (l *Ledger) ResolveConcern(id int, decision string) (core.Concern, error) {
-	c, err := scanConcern(l.db.QueryRow(
-		`UPDATE concern SET resolved = 1, decision = ?, resolved_at = ? WHERE id = ?
-		 RETURNING id, work, text, resolved, decision, at, resolved_at`, decision, now(), id))
+	var c core.Concern
+	err := l.inTx(func(tx *sql.Tx) error {
+		at := now()
+		var err error
+		c, err = scanConcern(tx.QueryRow(
+			`UPDATE concern SET resolved = 1, decision = ?, resolved_at = ? WHERE id = ? AND resolved = 0
+			 RETURNING id, work, text, resolved, decision, at, resolved_at`, decision, at, id))
+		if errors.Is(err, sql.ErrNoRows) {
+			return unresolvable(tx, id)
+		}
+		if err != nil {
+			return err
+		}
+		return addEvent(tx, c.Work, core.EventNote, fmt.Sprintf("concern %d resolved: %s", id, decision), at)
+	})
 	if err != nil {
-		return core.Concern{}, fmt.Errorf("no concern %d", id)
-	}
-	if err := l.addEvent(c.Work, core.EventNote, fmt.Sprintf("concern %d resolved: %s", id, decision)); err != nil {
 		return core.Concern{}, err
 	}
 	return c, nil
+}
+
+// unresolvable says why concern id matched no open concern.
+func unresolvable(q queryer, id int) error {
+	var resolved int
+	err := q.QueryRow(`SELECT resolved FROM concern WHERE id = ?`, id).Scan(&resolved)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("no concern %d", id)
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("concern %d already resolved", id)
 }
 
 func (l *Ledger) Concerns(work *string) ([]core.Concern, error) {
@@ -459,6 +540,9 @@ func (l *Ledger) Concerns(work *string) ([]core.Concern, error) {
 }
 
 func (l *Ledger) OpenConcerns(epicID string) ([]core.Concern, error) {
+	if _, err := l.Get(epicID); err != nil {
+		return nil, err
+	}
 	tasks, err := l.Tasks(epicID)
 	if err != nil {
 		return nil, err
@@ -518,8 +602,11 @@ func (l *Ledger) SetWorktreeState(id int, state core.WorktreeState) (core.Worktr
 	wt, err := scanWorktree(l.db.QueryRow(
 		`UPDATE worktree SET state = ? WHERE id = ?
 		 RETURNING id, work, path, branch, kind, state, created`, string(state), id))
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		return core.Worktree{}, fmt.Errorf("no worktree %d", id)
+	}
+	if err != nil {
+		return core.Worktree{}, err
 	}
 	return wt, nil
 }
@@ -567,12 +654,17 @@ func (l *Ledger) SoftDone(id string, codeChanged bool) (core.Work, error) {
 	if err != nil {
 		return core.Work{}, err
 	}
+	evs, err := l.Events(id, nil)
+	if err != nil {
+		return core.Work{}, err
+	}
 	last := func(k core.EventKind) *core.Event {
-		evs, err := l.Events(id, &k)
-		if err != nil || len(evs) == 0 {
-			return nil
+		for i := len(evs) - 1; i >= 0; i-- {
+			if evs[i].Kind == k {
+				return &evs[i]
+			}
 		}
-		return &evs[len(evs)-1]
+		return nil
 	}
 	var missing []string
 	if core.IsEpic(w.Kind) {

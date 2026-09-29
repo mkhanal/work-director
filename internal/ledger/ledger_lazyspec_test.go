@@ -187,6 +187,13 @@ func TestLedger(t *testing.T) {
 			if got := move(t, l, w.ID, core.StateRunning); got.State != core.StateRunning {
 				t.Fatalf("state = %q, want running", got.State)
 			}
+			move(t, l, w.ID, core.StateReview)
+			l.AddEvent(w.ID, core.EventReport, "DONE")
+			l.AddEvent(w.ID, core.EventVerify, "pass")
+			softDone(t, l, w.ID, false)
+			if got := move(t, l, w.ID, core.StateBlocked); got.State != core.StateBlocked {
+				t.Fatalf("soft-done: state = %q, want blocked", got.State)
+			}
 		})
 		t.Run("done and dropped are terminal", func(t *testing.T) {
 			l := newTestLedger(t)
