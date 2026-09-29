@@ -34,6 +34,7 @@ func TestServe(t *testing.T) {
 	t.Run("Work Items Serve Over HTTP", workItemsServeOverHTTP)
 	t.Run("Actions Dispatch To The CLI", actionsDispatchToTheCLI)
 	t.Run("WebSocket Serves Live Events", webSocketServesLiveEvents)
+	t.Run("A Client That Stops Reading Never Delays The Others", aClientThatStopsReadingNeverDelaysTheOthers)
 	t.Run("Empty Collections Serialize As Empty Arrays", emptyCollectionsSerializeAsEmptyArrays)
 	t.Run("Errors Return JSON", errorsReturnJSON)
 }
@@ -319,6 +320,66 @@ func webSocketServesLiveEvents(t *testing.T) {
 	requireJSON(t, resp, http.StatusBadRequest, &refused)
 	if refused["error"] == "" {
 		t.Fatal("plain GET /ws error = empty, want why the upgrade was refused")
+	}
+}
+
+func aClientThatStopsReadingNeverDelaysTheOthers(t *testing.T) {
+	l, err := ledger.New(filepath.Join(t.TempDir(), "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	t.Cleanup(func() { l.Close() })
+	w, err := l.Add("p", "Work", ledger.AddOptions{})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	srv := New(l, "/bin/echo")
+	addr, _, err := srv.Start(0)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	// Never read: once its socket buffers fill, every write to it blocks.
+	dialWS(t, addr)
+	healthy := dialWS(t, addr)
+	var board struct {
+		Type string `json:"type"`
+	}
+	readWSJSON(t, healthy, &board)
+
+	// Far more than a loopback socket buffers, so writes to the stalled
+	// client block long before the last event is sent.
+	const events = 128
+	body := strings.Repeat("x", 256<<10)
+	for i := 0; i < events; i++ {
+		if err := l.AddEvent(w.ID, core.EventNote, fmt.Sprintf("%d %s", i, body)); err != nil {
+			t.Fatalf("event %d: %v", i, err)
+		}
+	}
+	// Well inside the write timeout a blocked broadcast would wait out.
+	if err := healthy.conn.SetReadDeadline(time.Now().Add(wsWriteTimeout / 2)); err != nil {
+		t.Fatalf("deadline: %v", err)
+	}
+	for i := 0; i < events; i++ {
+		var msg struct {
+			Data core.Event `json:"data"`
+		}
+		readWSJSON(t, healthy, &msg)
+		if want := fmt.Sprintf("%d ", i); !strings.HasPrefix(msg.Data.Body, want) {
+			t.Fatalf("event %d body starts %q, want %q", i, msg.Data.Body[:8], want)
+		}
+	}
+
+	// Reading from the stalled client would unstall it, so watch the hub.
+	for deadline := time.Now().Add(3 * wsWriteTimeout); ; time.Sleep(20 * time.Millisecond) {
+		srv.hub.mu.Lock()
+		n := len(srv.hub.conns)
+		srv.hub.mu.Unlock()
+		if n == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d clients still connected, want the stalled one dropped", n)
+		}
 	}
 }
 

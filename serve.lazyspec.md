@@ -39,6 +39,10 @@ action is a wrapper over the CLI.
 not one gets a `{"type": "error", "error": "..."}` reply. A plain `GET /ws`
 that is no upgrade returns 400 with `{"error": "..."}`.
 
+## A Client That Stops Reading Never Delays The Others
+Every other client receives each board and event message as promptly as if
+the stalled client were not connected. The stalled client is disconnected.
+
 ## Empty Collections Serialize As Empty Arrays
 A command that returns no rows emits `[]` for the collection, never null.
 
