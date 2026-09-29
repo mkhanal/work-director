@@ -1,9 +1,14 @@
+> **lazyspec.** Humans edit freely. Agents change this only through
+> `/lazyspec`, with its tests, in one edit.
+>
+> Each `##` heading is one requirement. Its test repeats that heading
+> as its own name — to find it, search the tests for that text.
+
 # CLI rail (Go)
 
-The Go CLI is a port of the TypeScript CLI (`packages/wd/src/cli.ts`): same
-commands, flags and `--json` schema, same error messages and exit codes. The
-`--json` rail is the contract column consumers (TUI, serve, coordinators,
-executors) read: same keys, same value types.
+The CLI's commands, flags, `--json` schema, error messages and exit codes are
+its contract. The `--json` rail is the contract column consumers (TUI, serve,
+coordinators, executors) read: same keys, same value types.
 
 ## Work Items Serialize With The Wire Schema
 Work objects carry exactly the keys id, project, title, detail, kind, state,

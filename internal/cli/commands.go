@@ -1766,7 +1766,7 @@ func (c *Cli) scan(rest []string) error {
 		if err != nil {
 			return err
 		}
-		c.out(map[string]any{"path": path}, fmt.Sprintf("wrote global candidate card %s → %s\nreview it, then `bun run build` when adopted", cand.Card.ID, path))
+		c.out(map[string]any{"path": path}, fmt.Sprintf("wrote global candidate card %s → %s\nreview it, then `go run ./cmd/taste` when adopted", cand.Card.ID, path))
 		return nil
 	}
 	var b strings.Builder

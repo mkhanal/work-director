@@ -1,6 +1,5 @@
 // Package serve is the loopback HTTP and WebSocket adapter over the core
-// and ledger. It is a port of the TypeScript wd ui (packages/wd/src/ui.ts):
-// same JSON endpoints, same board data, same action dispatch. It binds to
+// and ledger. It binds to
 // 127.0.0.1 only — a local adapter for native clients, not a remote server.
 package serve
 

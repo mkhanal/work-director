@@ -1,7 +1,12 @@
+> **lazyspec.** Humans edit freely. Agents change this only through
+> `/lazyspec`, with its tests, in one edit.
+>
+> Each `##` heading is one requirement. Its test repeats that heading
+> as its own name — to find it, search the tests for that text.
+
 # Runners (Go)
 
-The Go runners keep the behaviour of the TypeScript runners they port
-(`packages/wd/src/runner/`): same commands, session discovery, transcript
+The runners own each provider's commands, session discovery, transcript
 parsing and error messages. The three foundation adapters are code; every other
 provider is a TOML file of commands under `~/.work-director/runners/`.
 

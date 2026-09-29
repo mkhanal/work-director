@@ -1,7 +1,6 @@
 // Package brief composes the briefs executors receive: the standalone brief,
 // the epic-slice brief and the epic spawn brief, plus the task-block
-// rendering. It is a port of packages/wd/src/brief.ts with the same text,
-// the same card selection and the same human-hours rejection.
+// rendering.
 package brief
 
 import (

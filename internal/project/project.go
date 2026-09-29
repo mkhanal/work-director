@@ -1,7 +1,6 @@
 // Package project parses and renders the director's per-project files under
 // ~/.work-director: frontmatter fields, the template `wd projects add`
-// writes, and the runner-list flag. It is a port of
-// packages/wd/src/project.ts with the same fields, defaults and errors.
+// writes, and the runner-list flag.
 package project
 
 import (

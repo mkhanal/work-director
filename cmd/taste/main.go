@@ -1,7 +1,7 @@
 // Command taste builds the taste plugin: rule cards under taste/cards become
 // plugin/skills/taste-*/SKILL.md, plugin/constitution.md and the dist
-// artifacts. It is the Go rewrite of `bun run build`; the files it writes
-// are generated and never hand-edited.
+// artifacts. The files it writes are
+// generated and never hand-edited.
 package main
 
 import (

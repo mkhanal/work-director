@@ -1,9 +1,14 @@
+> **lazyspec.** Humans edit freely. Agents change this only through
+> `/lazyspec`, with its tests, in one edit.
+>
+> Each `##` heading is one requirement. Its test repeats that heading
+> as its own name — to find it, search the tests for that text.
+
 # Serve (Go)
 
 The Go serve adapter is a loopback HTTP and WebSocket server over the core
-and ledger. It is a port of the TypeScript `wd ui` (`packages/wd/src/ui.ts`):
-same JSON endpoints, same board data, same action dispatch. It binds to
-127.0.0.1 only — it is a local adapter for native clients, not a remote
+and ledger: JSON endpoints for the board, live events and action dispatch. It
+binds to 127.0.0.1 only — it is a local adapter for native clients, not a remote
 server.
 
 ## The Server Binds To Loopback

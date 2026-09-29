@@ -1,9 +1,15 @@
+> **lazyspec.** Humans edit freely. Agents change this only through
+> `/lazyspec`, with its tests, in one edit.
+>
+> Each `##` heading is one requirement. Its test repeats that heading
+> as its own name — to find it, search the tests for that text.
+
 # TUI (Go)
 
 The Go TUI is the terminal adapter over the core and the ledger (`wd tui [id]`):
-it replaces the TypeScript `wd ui` web board with a stateless terminal UI. It
-reads the ledger and the runners' own transcript stores, and keeps no state of
-its own — every frame is rendered from a fresh read.
+a stateless terminal UI. It reads the ledger and the runners' own transcript
+stores, and keeps no state of its own — every frame is rendered from a fresh
+read.
 
 ## The Board Renders The Ledger
 The board lists every goal and epic with its per-state task rollup, then the

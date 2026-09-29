@@ -15,7 +15,7 @@ case "$1 $2" in
     printf '%s\n' \
       '{"type":"user","message":{"content":"go"}}' \
       '{"type":"assistant","message":{"content":[{"type":"text","text":"PLAN: claimed and scoped"}]}}' \
-      '{"type":"assistant","message":{"content":[{"type":"text","text":"STATUS: DONE\\nFILES: none\\nVERIFY: bun test -> 0\\nPR: none\\nNOTES: done in testbed"}]}}' \
+      '{"type":"assistant","message":{"content":[{"type":"text","text":"STATUS: DONE\\nFILES: none\\nVERIFY: test -f README.md -> 0\\nPR: none\\nNOTES: done in the fixture"}]}}' \
       > "$sdir/$sid.jsonl"
     echo "backgrounded · $bgid · $3";;
   "--bg --resume") echo "backgrounded · $(cat "$WD_FAKE_STATE/bgid")";;

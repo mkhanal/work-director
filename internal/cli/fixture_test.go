@@ -12,7 +12,7 @@ import (
 )
 
 // This file holds the CLI's own fixture: a ledger seeded through the Go
-// library (no TypeScript), a sample git repo for worktree commands, and fake
+// library, a sample git repo for worktree commands, and fake
 // runners. Tests assert the --json schema, key values, error messages and
 // exit codes — the contract column consumers read.
 
@@ -33,7 +33,7 @@ func repoRoot(t *testing.T) string {
 		t.Fatalf("getwd: %v", err)
 	}
 	root := filepath.Clean(filepath.Join(wd, "..", ".."))
-	if st, err := os.Stat(filepath.Join(root, "packages", "wd", "src", "cli.ts")); err != nil || st.IsDir() {
+	if st, err := os.Stat(filepath.Join(root, "go.mod")); err != nil || st.IsDir() {
 		t.Fatalf("repo root not found at %s", root)
 	}
 	return root
@@ -73,7 +73,7 @@ func newCLIFixture(t *testing.T) *cliFixture {
 		}
 	}
 	// Runner spec files (planner, advisor, myagent) for the spec-file runners.
-	if err := copyDirRecursive(filepath.Join(repoRoot(t), "testbed", "specs"), filepath.Join(f.wdHome, "runners")); err != nil {
+	if err := copyDirRecursive(filepath.Join("testdata", "specs"), filepath.Join(f.wdHome, "runners")); err != nil {
 		t.Fatalf("copy specs: %v", err)
 	}
 	f.seedLedger(t)
@@ -179,7 +179,7 @@ func (f *cliFixture) seedLedger(t *testing.T) {
 	if _, err := l.Transition(t1.ID, core.StateReview); err != nil {
 		t.Fatalf("transition: %v", err)
 	}
-	if err := l.AddEvent(t1.ID, core.EventVerify, "pass\nbun test → 0"); err != nil {
+	if err := l.AddEvent(t1.ID, core.EventVerify, "pass\ntest -f README.md → 0"); err != nil {
 		t.Fatalf("verify event: %v", err)
 	}
 	if err := l.AddEvent(t1.ID, core.EventPr, "https://github.com/x/sample-app/pull/1"); err != nil {
@@ -205,7 +205,7 @@ func (f *cliFixture) seedLedger(t *testing.T) {
 
 func (f *cliFixture) seedProject(t *testing.T) {
 	t.Helper()
-	proj := "---\npath: " + f.sample + "\nrunner: claude\nmode: ask\nstack: [ts]\nworkflows: [/lazyspec]\nverify: [bun test]\ninstructions_file: AGENTS.md\ndefault_branch: main\n---\nA fixture repo.\n"
+	proj := "---\npath: " + f.sample + "\nrunner: claude\nmode: ask\nstack: [ts]\nworkflows: [/lazyspec]\nverify: [test -f README.md]\ninstructions_file: AGENTS.md\ndefault_branch: main\n---\nA fixture repo.\n"
 	if err := os.WriteFile(filepath.Join(f.wdHome, "projects", "sample-app.md"), []byte(proj), 0o644); err != nil {
 		t.Fatalf("write project: %v", err)
 	}
@@ -213,7 +213,7 @@ func (f *cliFixture) seedProject(t *testing.T) {
 
 func (f *cliFixture) seedGitRepo(t *testing.T) {
 	t.Helper()
-	if err := copyDirRecursive(filepath.Join(repoRoot(t), "testbed", "sample-app"), f.sample); err != nil {
+	if err := copyDirRecursive(filepath.Join("testdata", "sample-app"), f.sample); err != nil {
 		t.Fatalf("copy sample: %v", err)
 	}
 	gitRun(t, f.sample, "init", "-b", "main", "-q")
@@ -230,9 +230,8 @@ func (f *cliFixture) seedGitRepo(t *testing.T) {
 
 func (f *cliFixture) seedRunners(t *testing.T) {
 	t.Helper()
-	root := repoRoot(t)
 	for _, r := range []string{"claude", "opencode", "codex", "myagent", "planner", "advisor"} {
-		data, err := os.ReadFile(filepath.Join(root, "testbed", "runners", r))
+		data, err := os.ReadFile(filepath.Join("testdata", "runners", r))
 		if err != nil {
 			t.Fatalf("read runner %s: %v", r, err)
 		}

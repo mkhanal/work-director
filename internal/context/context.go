@@ -1,7 +1,6 @@
 // Package context answers "where is the executor standing": the repo top,
 // linked worktree path, current branch and dirty files, plus the one-line
-// rendering the CLI prints. It is a port of packages/wd/src/context.ts with
-// the same git commands and the same output.
+// rendering the CLI prints.
 package context
 
 import (

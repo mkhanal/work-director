@@ -40,8 +40,8 @@ and inserts with explicit columns, so the four extra nullable columns and the
 two extra tables are invisible to it: a Go-migrated ledger opens and runs in
 the TS wd unchanged. The one-way door is data, not schema — rows written with
 epic features (a task under an epic, a claim, an impact, a concern, a
-worktree) are ignored by a pre-epic TS wd but never lost. Keep the TS wd
-installed until the Go wd has run a full epic; rolling back is
+worktree) are ignored by a pre-epic TS wd but never lost. The TS wd is no
+longer in this repository; rolling back is checking out `369a51e` and running
 `bun run packages/wd/src/cli.ts <command>` against the same file.
 
 ## Operational notes
