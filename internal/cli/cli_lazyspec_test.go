@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -689,6 +690,127 @@ func TestCommandsOnUnknownWorkFailNamingIt(t *testing.T) {
 		if code, _, errStr := f.run(t, args...); code != 1 || !strings.Contains(errStr, "no work nope") {
 			t.Errorf("wd %s: exit %d, stderr %q, want 1 and no work nope", strings.Join(args, " "), code, errStr)
 		}
+	}
+}
+
+func TestProjectsAddNeverWritesAFileItCannotParse(t *testing.T) {
+	f := newCLIFixture(t)
+	errStr := f.runFail(t, "projects", "add", "bogus-mode", f.sample, "--mode", "bogus", "--lazyspec", "n")
+	if !strings.Contains(errStr, "bogus") {
+		t.Fatalf("stderr = %q, want the bad mode named", errStr)
+	}
+	if _, err := os.Stat(filepath.Join(f.wdHome, "projects", "bogus-mode.md")); !os.IsNotExist(err) {
+		t.Fatalf("project file left behind: %v", err)
+	}
+	f.runOK(t, "status")
+}
+
+func TestAttachRecordsTheRefAndCwdItIsGiven(t *testing.T) {
+	f := newCLIFixture(t)
+	t3 := f.ids["t3"]
+	out := f.runOK(t, "attach", t3, "ses_ref", "--ref", "r1", "--cwd", f.sample, "--json")
+	assertHasKey(t, out, `"ref": "r1"`)
+	assertHasKey(t, out, `"cwd": "`+f.sample+`"`)
+	out = f.runOK(t, "status", "--json")
+	var rows []core.Work
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("status --json: %v", err)
+	}
+	for _, w := range rows {
+		if w.ID == t3 && (strOrEmpty(w.Ref) != "r1" || strOrEmpty(w.Cwd) != f.sample || strOrEmpty(w.Session) != "ses_ref") {
+			t.Fatalf("%s = ref %v cwd %v session %v, want r1, %s, ses_ref", t3, w.Ref, w.Cwd, w.Session, f.sample)
+		}
+	}
+}
+
+func TestSetCannotSkipTheSoftDoneGate(t *testing.T) {
+	f := newCLIFixture(t)
+	t2 := f.ids["t2"]
+	f.runOK(t, "set", t2, "review")
+	errStr := f.runFail(t, "set", t2, "soft-done")
+	if !strings.Contains(errStr, "not ready for soft-done") {
+		t.Fatalf("stderr = %q, want the soft-done gate", errStr)
+	}
+	if out := f.runOK(t, "status", "--json"); !strings.Contains(out, `"id": "`+t2+`"`) || strings.Contains(out, `"state": "soft-done"`) {
+		t.Fatalf("status = %s, want %s still in review", out, t2)
+	}
+}
+
+func TestVerifyWithNoCommandsFailsWithoutRecording(t *testing.T) {
+	f := newCLIFixture(t)
+	f.runOK(t, "projects", "add", "unverified", f.sample, "--lazyspec", "n")
+	id := jsonString(t, f.runOK(t, "add", "unverified", "Unchecked", "--json"), "id")
+	if errStr := f.runFail(t, "verify", id); !strings.Contains(errStr, "no verify commands") {
+		t.Fatalf("stderr = %q, want no verify commands", errStr)
+	}
+	if out := f.runOK(t, "events", id, "--json"); strings.Contains(out, `"kind": "verify"`) {
+		t.Fatalf("a verify event was recorded: %s", out)
+	}
+}
+
+func TestAnAdoptedCardLeavesThePromotionCandidates(t *testing.T) {
+	f := newCLIFixture(t)
+	root := t.TempDir()
+	card := filepath.Join(root, "taste", "cards", "judgment", "proj-rule.md")
+	if err := os.MkdirAll(filepath.Dir(card), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	text := "---\nid: proj-rule\ntitle: A rule\ncategory: judgment\nscope: [project:sample-app]\nkind: practice\nstatus: adopted\nalways: false\nenforce: []\nevidence: []\n---\nKeep it small.\n"
+	if err := os.WriteFile(card, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := f.env(t, f.bin)
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "WD_ROOT=") {
+			env[i] = "WD_ROOT=" + root
+		}
+	}
+	run := func(args ...string) (int, string, string) {
+		t.Helper()
+		return f.runEnv(t, env, args...)
+	}
+	promoted := func() []string {
+		t.Helper()
+		code, out, errStr := run("scan", "--json")
+		if code != 0 {
+			t.Fatalf("scan exited %d: %s", code, errStr)
+		}
+		var res struct {
+			Promotion []struct {
+				Card struct {
+					ID string `json:"id"`
+				} `json:"card"`
+			} `json:"promotion"`
+		}
+		if err := json.Unmarshal([]byte(out), &res); err != nil {
+			t.Fatalf("scan --json: %v\n%s", err, out)
+		}
+		var ids []string
+		for _, p := range res.Promotion {
+			ids = append(ids, p.Card.ID)
+		}
+		return ids
+	}
+	if ids := promoted(); len(ids) != 1 || ids[0] != "proj-rule" {
+		t.Fatalf("promotion candidates = %v, want [proj-rule]", ids)
+	}
+	if code, _, errStr := run("scan", "--adopt", "proj-rule"); code != 0 {
+		t.Fatalf("adopt exited %d: %s", code, errStr)
+	}
+	global := filepath.Join(root, "taste", "cards", "judgment", "proj-rule-global.md")
+	written, err := os.ReadFile(global)
+	if err != nil {
+		t.Fatalf("global candidate: %v", err)
+	}
+	if ids := promoted(); len(ids) != 0 {
+		t.Fatalf("promotion candidates after adopting = %v, want none", ids)
+	}
+	code, _, errStr := run("scan", "--adopt", "proj-rule")
+	if code != 1 || !strings.Contains(errStr, "no promotion candidate proj-rule") {
+		t.Fatalf("second adopt: exit %d, stderr %q; want 1 with no promotion candidate", code, errStr)
+	}
+	if again, err := os.ReadFile(global); err != nil || string(again) != string(written) {
+		t.Fatalf("global candidate changed by the second adopt: %v", err)
 	}
 }
 

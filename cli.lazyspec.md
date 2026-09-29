@@ -80,6 +80,29 @@ work's brief lists its decisions and its resolved concerns' decisions under
 With `--json`, a command writes exactly one JSON document to stdout — no
 progress lines, no document per spawned session.
 
+## Projects Add Never Writes A File It Cannot Parse
+`wd projects add` with a value its project file cannot hold (an unknown
+mode, say) exits 1 naming it and writes no file, so every later command
+still loads the projects.
+
+## Attach Records The Ref And Cwd It Is Given
+`wd attach <id> <session> --ref <ref> --cwd <dir>` records that session,
+ref and cwd on the work item.
+
+## Set Cannot Skip The Soft Done Gate
+`wd set <id> soft-done` passes the same readiness gate as `wd soft-done`:
+work that is not ready exits 1 with the not-ready message and keeps its
+state.
+
+## Verify With No Commands Fails Without Recording
+`wd verify` on a project that lists no verify commands exits 1 saying so and
+records no verify event.
+
+## An Adopted Card Leaves The Promotion Candidates
+After `wd scan --adopt <card>` writes the global candidate, `wd scan` exits 0
+without listing that card, and adopting it again exits 1 with `no promotion
+candidate <card>`, leaving the written candidate as it was.
+
 ## Epic Run Spawns Only Children Not Yet Under Way
 `wd epic run` spawns the open children that are queued or briefed, or
 running with no session. Children in review, needs-input, blocked or
