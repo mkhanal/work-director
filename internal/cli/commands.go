@@ -1029,16 +1029,21 @@ func (c *Cli) report(rest []string) error {
 		last = texts[len(texts)-1]
 	}
 	status := matchStatus(last)
+	runnerStatus, err := r.Status(h)
+	if err != nil {
+		return err
+	}
+	if status == "" {
+		return fail("no report filed for %s: the last message of %s session %s has no STATUS line (runner %s). "+
+			"The report is the executor's done checkpoint; wait for it, then run wd report again.",
+			id, h.Runner, h.Session, runnerStatus)
+	}
 	w, err := c.Ledger.Get(id)
 	if err != nil {
 		return err
 	}
-	if status != "" && w.State != core.StateDone && w.State != core.StateSoftDone {
-		body := status + "\n" + last
-		if status == "DONE" {
-			body = "DONE\n" + last
-		}
-		if _, err := c.Ledger.AddEvent(id, core.EventReport, body); err != nil {
+	if w.State != core.StateDone && w.State != core.StateSoftDone {
+		if _, err := c.Ledger.AddEvent(id, core.EventReport, status+"\n"+last); err != nil {
 			return err
 		}
 		if w.State == core.StateRunning {
@@ -1053,17 +1058,12 @@ func (c *Cli) report(rest []string) error {
 			}
 		}
 	}
-	runnerStatus, err := r.Status(h)
-	if err != nil {
-		return err
-	}
 	messages := sliceLastN(texts, n)
 	if messages == nil {
 		messages = []string{}
 	}
-	report := status
-	return c.out(map[string]any{"status": runnerStatus, "report": report, "messages": messages},
-		fmt.Sprintf("%s%s\n%s", runnerStatus, orStatus(status), strings.Join(messages, "\n---\n")))
+	return c.out(map[string]any{"status": runnerStatus, "report": status, "messages": messages},
+		fmt.Sprintf("%s · %s\n%s", runnerStatus, status, strings.Join(messages, "\n---\n")))
 }
 
 var statusRe = regexp.MustCompile(`STATUS:\s*(DONE|BLOCKED|NEEDS-INPUT)`)
@@ -1074,13 +1074,6 @@ func matchStatus(last string) string {
 		return ""
 	}
 	return m[1]
-}
-
-func orStatus(status string) string {
-	if status == "" {
-		return ""
-	}
-	return " · " + status
 }
 
 func (c *Cli) verify(rest []string) error {

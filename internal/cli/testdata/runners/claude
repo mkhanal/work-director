@@ -9,7 +9,7 @@ case "$1 $2" in
     sid=$(printf 'ses_%06x' "$n")
     echo "$bgid" > "$WD_FAKE_STATE/bgid"
     echo "$sid" > "$WD_FAKE_STATE/sid"
-    slug=$(echo "$PWD" | sed 's/[^A-Za-z0-9-]/-/g')
+    slug=${PWD//[^A-Za-z0-9-]/-}
     sdir="$HOME/.claude/projects/$slug"
     mkdir -p "$sdir"
     printf '%s\n' \
