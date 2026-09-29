@@ -33,6 +33,20 @@ null.
 Undetected runners and a directory outside any repo are reported, never a
 failure: `wd doctor` exits 0.
 
+## Runner List Shows Which Runners Are Detected
+`wd runner list` shows every registered runner, whether it is built in, and
+whether it is detected with its path; `--json` emits runner, command,
+builtin, detected, path.
+
+## Models Covers Only Detected Runners
+`wd models` lists models for detected runners only; naming an undetected
+runner fails with the not-detected guidance.
+
+## Spawning To An Undetected Runner Fails Before Anything Changes
+`wd spawn` and `wd epic plan|spawn|run` to an undetected runner exit 1 with
+the not-detected guidance; the work item's state and worktrees stay as they
+were.
+
 ## Errors And Exit Codes Match
 Usage errors, illegal transitions, not-ready refusals and unknown runners
 print the same message and exit 1; a failing verify exits 1 after recording.

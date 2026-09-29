@@ -310,6 +310,28 @@ attach = "myagent attach {session}"
 		}
 	})
 
+	t.Run("Only A Detected Runner Resolves For Spawning", func(t *testing.T) {
+		only := t.TempDir()
+		if err := os.Symlink(filepath.Join(bin, "claude"), filepath.Join(only, "claude")); err != nil {
+			t.Fatalf("link claude: %v", err)
+		}
+		t.Setenv("PATH", only)
+		if _, err := DetectedRunner("claude"); err != nil {
+			t.Fatalf("claude on PATH: %v", err)
+		}
+		for _, name := range []string{"codex", "myagent"} {
+			_, err := DetectedRunner(name)
+			if err == nil {
+				t.Fatalf("%s resolved with its command off PATH", name)
+			}
+			for _, want := range []string{name, "not found on PATH", "wd runner init"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("%s error %q does not contain %q", name, err, want)
+				}
+			}
+		}
+	})
+
 	t.Run("A Runner Can Be Defined By A File Of Commands", func(t *testing.T) {
 		t.Run("a ~/.work-director/runners/*.toml drives spawn, send, status, transcript, models", func(t *testing.T) {
 			known, err := AllRunnerNames()

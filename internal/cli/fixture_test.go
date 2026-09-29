@@ -391,3 +391,16 @@ func gitOnlyPath(t *testing.T) string {
 	}
 	return dir
 }
+
+// pathWith is a PATH holding git, the named fake runners and /bin (for the
+// fakes' bash) — no host-installed runner resolves.
+func (f *cliFixture) pathWith(t *testing.T, runners ...string) string {
+	t.Helper()
+	dir := gitOnlyPath(t)
+	for _, r := range runners {
+		if err := os.Symlink(filepath.Join(f.bin, r), filepath.Join(dir, r)); err != nil {
+			t.Fatalf("link %s: %v", r, err)
+		}
+	}
+	return dir + string(os.PathListSeparator) + "/bin"
+}

@@ -117,14 +117,22 @@ func expandHome(path string) string {
 }
 
 func (c *Cli) models(rest []string) error {
-	known, err := runner.AllRunnerNames()
-	if err != nil {
-		return err
-	}
 	var names []string
 	if len(rest) == 0 {
-		names = known
+		avail, err := runner.Availabilities()
+		if err != nil {
+			return err
+		}
+		for _, a := range avail {
+			if a.Detected {
+				names = append(names, a.Runner)
+			}
+		}
 	} else {
+		known, err := runner.AllRunnerNames()
+		if err != nil {
+			return err
+		}
 		name, err := oneOf(known, rest[0], "runner")
 		if err != nil {
 			return err
@@ -133,7 +141,7 @@ func (c *Cli) models(rest []string) error {
 	}
 	rows := map[string][]string{}
 	for _, r := range names {
-		rn, err := runner.RunnerNamed(r)
+		rn, err := runner.DetectedRunner(r)
 		if err != nil {
 			return err
 		}
@@ -163,20 +171,18 @@ func (c *Cli) runner(rest []string) error {
 	}
 	switch sub {
 	case "list":
-		known, err := runner.AllRunnerNames()
+		avail, err := runner.Availabilities()
 		if err != nil {
 			return err
 		}
-		builtin := map[string]bool{"claude": true, "opencode": true, "codex": true, "ao": true}
-		table := make([]string, 0, len(known))
-		for _, r := range known {
-			where := runner.SpecDir()
-			if builtin[r] {
-				where = "built-in"
-			}
-			table = append(table, r+"\t"+where)
+		list := make([]RunnerListing, 0, len(avail))
+		table := make([]string, 0, len(avail))
+		for _, a := range avail {
+			l := RunnerListing{Availability: a, Builtin: runner.IsBuiltin(a.Runner)}
+			list = append(list, l)
+			table = append(table, renderRunnerListing(l))
 		}
-		c.out(known, strings.Join(table, "\n"))
+		c.out(list, strings.Join(table, "\n"))
 		return nil
 	case "add":
 		if len(rest) < 3 {
@@ -209,6 +215,38 @@ func (c *Cli) runner(rest []string) error {
 		return nil
 	}
 	return fail("usage: wd runner (list | add <name> <file.toml> | init <name>)")
+}
+
+// detectedRunners resolves every named runner to spawn to, so an undetected
+// one fails before any worktree or ledger change.
+func detectedRunners(names []string) (map[string]runner.Runner, error) {
+	out := make(map[string]runner.Runner, len(names))
+	for _, name := range names {
+		r, err := runner.DetectedRunner(name)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = r
+	}
+	return out, nil
+}
+
+// RunnerListing is one row of `wd runner list`: a registered runner's
+// availability and whether it is built in or a spec file.
+type RunnerListing struct {
+	runner.Availability
+	Builtin bool `json:"builtin"`
+}
+
+func renderRunnerListing(l RunnerListing) string {
+	where := runner.SpecDir()
+	if l.Builtin {
+		where = "built-in"
+	}
+	if l.Detected {
+		return l.Runner + "\t" + where + "\tdetected " + *l.Path
+	}
+	return l.Runner + "\t" + where + "\tnot detected (" + l.Command + " not on PATH)"
 }
 
 func matchesName(s string) bool {
@@ -313,6 +351,10 @@ func (c *Cli) spawn(rest []string) error {
 		return err
 	}
 	runnerName := strOr(a, "runner", p.Runner)
+	rn, err := runner.DetectedRunner(runnerName)
+	if err != nil {
+		return err
+	}
 	cwd := p.Path
 	var runnerWorktree *bool
 	if w.Parent != nil {
@@ -341,10 +383,6 @@ func (c *Cli) spawn(rest []string) error {
 		if _, err := c.Ledger.Transition(id, core.StateBriefed); err != nil {
 			return err
 		}
-	}
-	rn, err := runner.RunnerNamed(runnerName)
-	if err != nil {
-		return err
 	}
 	agent := str(a, "agent")
 	if agent == nil {
@@ -465,7 +503,7 @@ func (c *Cli) epicPlan(cmd string, epic core.Work) error {
 		return err
 	}
 	runnerName := strOr(a, "runner", p.Runner)
-	rn, err := runner.RunnerNamed(runnerName)
+	rn, err := runner.DetectedRunner(runnerName)
 	if err != nil {
 		return err
 	}
@@ -547,6 +585,10 @@ func (c *Cli) epicSpawn(cmd string, epic core.Work) error {
 	if err != nil {
 		return err
 	}
+	detected, err := detectedRunners(runners)
+	if err != nil {
+		return err
+	}
 	count, err := strconv.Atoi(strOr(a, "count", "1"))
 	if err != nil || count < 1 {
 		return fail("--count must be a positive integer")
@@ -576,10 +618,7 @@ func (c *Cli) epicSpawn(cmd string, epic core.Work) error {
 				name = fmt.Sprintf("worker %d/%d", i, count)
 			}
 		}
-		rn, err := runner.RunnerNamed(runnerName)
-		if err != nil {
-			return err
-		}
+		rn := detected[runnerName]
 		agent := str(a, "agent")
 		if agent == nil {
 			agent = p.Agent
@@ -640,6 +679,10 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 	if err != nil {
 		return err
 	}
+	detected, err := detectedRunners(runners)
+	if err != nil {
+		return err
+	}
 	cwd, err := c.ensureSharedWorktree(epic, p)
 	if err != nil {
 		return err
@@ -684,10 +727,7 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 			continue
 		}
 		runnerName := runners[i%len(runners)]
-		rn, err := runner.RunnerNamed(runnerName)
-		if err != nil {
-			return err
-		}
+		rn := detected[runnerName]
 		if err := c.Ledger.SetCwd(child.ID, cwd); err != nil {
 			return err
 		}
