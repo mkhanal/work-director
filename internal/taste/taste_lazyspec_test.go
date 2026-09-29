@@ -190,6 +190,9 @@ func TestConstitutionHoldsOnlyAlwaysCardsAndStaysUnderTheLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%d multi-byte characters are within the limit: %v", ConstitutionLimit, err)
 	}
+	if len(text) <= ConstitutionLimit {
+		t.Fatalf("constitution is %d bytes; the case needs more bytes than the limit to prove characters are counted", len(text))
+	}
 }
 
 func TestAnEnforceIdAbsentFromThePresetsFailsTheBuild(t *testing.T) {
