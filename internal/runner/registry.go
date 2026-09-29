@@ -46,7 +46,7 @@ var (
 )
 
 func specs() ([]checkedSpec, error) {
-	dir, err := specDir()
+	dir, err := SpecDir()
 	if err != nil {
 		return nil, err
 	}

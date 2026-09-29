@@ -12,23 +12,13 @@ import (
 	"time"
 )
 
-// specDir is where runner spec files live: ~/.work-director/runners.
-func specDir() (string, error) {
+// SpecDir is where runner spec files live: ~/.work-director/runners.
+func SpecDir() (string, error) {
 	wd, err := WDHome()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(wd, "runners"), nil
-}
-
-// SpecDir is specDir for callers that cannot yet take its error; it is ""
-// when the home directory cannot be resolved.
-func SpecDir() string {
-	dir, err := specDir()
-	if err != nil {
-		return ""
-	}
-	return dir
 }
 
 // RunnerSpec is one runner file: the commands that drive a provider's CLI.
@@ -184,7 +174,7 @@ func WriteSpec(name, text string) (string, error) {
 		return "", err
 	}
 	spec.Name = name
-	dir, err := specDir()
+	dir, err := SpecDir()
 	if err != nil {
 		return "", err
 	}

@@ -174,12 +174,16 @@ func (c *Cli) runner(rest []string) error {
 		if err != nil {
 			return err
 		}
+		specDir, err := runner.SpecDir()
+		if err != nil {
+			return err
+		}
 		list := make([]RunnerListing, 0, len(avail))
 		table := make([]string, 0, len(avail))
 		for _, a := range avail {
 			l := RunnerListing{Availability: a, Builtin: runner.IsBuiltin(a.Runner)}
 			list = append(list, l)
-			table = append(table, renderRunnerListing(l))
+			table = append(table, renderRunnerListing(l, specDir))
 		}
 		c.out(list, strings.Join(table, "\n"))
 		return nil
@@ -203,8 +207,12 @@ func (c *Cli) runner(rest []string) error {
 			return fail("usage: wd runner init <name>")
 		}
 		name := rest[1]
-		path := filepath.Join(runner.SpecDir(), name+".toml")
-		if err := os.MkdirAll(runner.SpecDir(), 0o755); err != nil {
+		dir, err := runner.SpecDir()
+		if err != nil {
+			return err
+		}
+		path := filepath.Join(dir, name+".toml")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
 		if err := os.WriteFile(path, []byte(runner.SpecTemplate(name)), 0o644); err != nil {
@@ -237,8 +245,8 @@ type RunnerListing struct {
 	Builtin bool `json:"builtin"`
 }
 
-func renderRunnerListing(l RunnerListing) string {
-	where := runner.SpecDir()
+func renderRunnerListing(l RunnerListing, specDir string) string {
+	where := specDir
 	if l.Builtin {
 		where = "built-in"
 	}

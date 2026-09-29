@@ -113,13 +113,9 @@ type Cli struct {
 
 // Run parses args, opens the ledger and projects, and dispatches the command.
 func Run(args []string) error {
-	home := os.Getenv("HOME")
-	if home == "" {
-		home = "."
-	}
-	wdHome := os.Getenv("WD_HOME")
-	if wdHome == "" {
-		wdHome = filepath.Join(home, ".work-director")
+	wdHome, err := runner.WDHome()
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(wdHome, 0o755); err != nil {
 		return err
