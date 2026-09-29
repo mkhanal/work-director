@@ -3,6 +3,7 @@
 package open
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,14 +22,20 @@ type OpenTarget struct {
 
 var targetRe = regexp.MustCompile(`^(.*[^:]):(\d+)$`)
 
-// ParseTarget resolves `<path>:<line>` against baseDir; no colon match is a
-// plain path.
+// ParseTarget resolves a relative `<path>:<line>` against baseDir; an
+// absolute path stays as given, and no colon match is a plain path.
 func ParseTarget(file, baseDir string) OpenTarget {
+	resolve := func(p string) string {
+		if filepath.IsAbs(p) {
+			return p
+		}
+		return filepath.Join(baseDir, p)
+	}
 	if m := targetRe.FindStringSubmatch(file); m != nil {
 		line, _ := strconv.Atoi(m[2])
-		return OpenTarget{Path: filepath.Join(baseDir, m[1]), Line: &line}
+		return OpenTarget{Path: resolve(m[1]), Line: &line}
 	}
-	return OpenTarget{Path: filepath.Join(baseDir, file)}
+	return OpenTarget{Path: resolve(file)}
 }
 
 // Editor is the terminal host's editor: a label, the command, and the args
@@ -40,29 +47,32 @@ type Editor struct {
 }
 
 // DetectEditor finds the host's editor, in order of preference: VS Code
-// (reuse-window), then $VISUAL/$EDITOR.
-func DetectEditor() *Editor {
+// (reuse-window), then $VISUAL/$EDITOR. No editor is nil; a variable set to
+// only whitespace is an error.
+func DetectEditor() (*Editor, error) {
 	if _, err := exec.LookPath("code"); err == nil {
 		return &Editor{Label: "Visual Studio Code", Cmd: "code", Args: func(t OpenTarget) []string {
 			if t.Line == nil {
 				return []string{"--reuse-window", t.Path}
 			}
 			return []string{"--reuse-window", "--goto", t.Path + ":" + strconv.Itoa(*t.Line)}
-		}}
+		}}, nil
 	}
-	v := os.Getenv("VISUAL")
+	name, v := "VISUAL", os.Getenv("VISUAL")
 	if v == "" {
-		v = os.Getenv("EDITOR")
+		name, v = "EDITOR", os.Getenv("EDITOR")
 	}
-	if v != "" {
-		parts := strings.Fields(v)
-		cmd := parts[0]
-		rest := parts[1:]
-		return &Editor{Label: v, Cmd: cmd, Args: func(t OpenTarget) []string {
-			return append(append([]string{}, rest...), t.Path)
-		}}
+	if v == "" {
+		return nil, nil
 	}
-	return nil
+	parts := strings.Fields(v)
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("$%s is blank; set it to an editor command or unset it", name)
+	}
+	rest := parts[1:]
+	return &Editor{Label: v, Cmd: parts[0], Args: func(t OpenTarget) []string {
+		return append(append([]string{}, rest...), t.Path)
+	}}, nil
 }
 
 // OpenLink renders an iTerm2/kitty-style clickable file link (OSC-8), so a
@@ -88,11 +98,7 @@ func lineFrag(t OpenTarget) string {
 
 // OpenInEditor opens the target in the editor, reporting success.
 func OpenInEditor(editor Editor, t OpenTarget) (bool, error) {
-	cwd := filepath.Dir(t.Path)
-	if cwd == "" {
-		cwd = "/"
-	}
-	r, err := runner.Run(append([]string{editor.Cmd}, editor.Args(t)...), cwd)
+	r, err := runner.Run(append([]string{editor.Cmd}, editor.Args(t)...), filepath.Dir(t.Path))
 	if err != nil {
 		return false, err
 	}

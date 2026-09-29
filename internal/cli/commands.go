@@ -1404,7 +1404,10 @@ func (c *Cli) open(rest []string) error {
 	target := open.ParseTarget(fileArg, base)
 	link := open.OpenLink(target)
 	result := map[string]any{"path": target.Path, "line": target.Line, "editor": nil}
-	editor := open.DetectEditor()
+	editor, err := open.DetectEditor()
+	if err != nil {
+		return err
+	}
 	if editor == nil {
 		c.out(result, fmt.Sprintf("%s\nno editor on this host — click the link or open %s manually", link, target.Path))
 		return nil
