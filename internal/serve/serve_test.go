@@ -33,7 +33,7 @@ func TestWebSocketClosesWhenTheBoardFails(t *testing.T) {
 		t.Fatalf("close ledger: %v", err)
 	}
 	client := dialWS(t, addr)
-	f, err := client.readFrame()
+	f, err := readFrame(client.conn)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}

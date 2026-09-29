@@ -347,13 +347,13 @@ func dialWS(t *testing.T, addr string) *wsConn {
 	if !bytes.HasPrefix(head, []byte("HTTP/1.1 101 ")) {
 		t.Fatalf("handshake response = %q, want 101", head)
 	}
-	return newWSConn(nc)
+	return newWSConn(nc, wsWriteTimeout)
 }
 
 // readWSJSON reads one text frame from c and decodes it into v.
 func readWSJSON(t *testing.T, c *wsConn, v any) {
 	t.Helper()
-	frame, err := c.readFrame()
+	frame, err := readFrame(c.conn)
 	if err != nil {
 		t.Fatalf("read frame: %v", err)
 	}
