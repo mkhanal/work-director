@@ -1200,6 +1200,9 @@ func (c *Cli) set(rest []string) error {
 	if state == core.StateSoftDone {
 		return c.softDone(rest[:1])
 	}
+	if state == core.StateDone {
+		return c.done(rest[:1])
+	}
 	after, err := c.Ledger.Transition(id, state)
 	if err != nil {
 		if _, ok := err.(core.IllegalTransition); ok {
@@ -1222,7 +1225,21 @@ func (c *Cli) done(rest []string) error {
 		}
 		return err
 	}
-	return c.out(after, "done")
+	removed, kept, err := c.releaseWorktrees(after)
+	if err != nil {
+		return err
+	}
+	lines := []string{"done"}
+	for _, wt := range removed {
+		lines = append(lines, "removed worktree "+wt.Path)
+	}
+	for _, k := range kept {
+		if _, err := c.Ledger.AddConcern(id, fmt.Sprintf("%s. Run wd worktree remove %s once that is resolved.", k, id)); err != nil {
+			return err
+		}
+		lines = append(lines, k.String())
+	}
+	return c.out(after, strings.Join(lines, "\n"))
 }
 
 // statusRow is one wd status row: the work item and whether it is stale.
@@ -1547,6 +1564,7 @@ func (c *Cli) worktree(rest []string) error {
 			Path:   path,
 			Branch: str(a, "branch"),
 			Kind:   core.WorktreePrivate,
+			Origin: core.OriginAttached,
 		})
 		if err != nil {
 			return err
@@ -1554,9 +1572,36 @@ func (c *Cli) worktree(rest []string) error {
 		return c.out(wt, fmt.Sprintf("attached private worktree %d → %s", wt.ID, wt.Path))
 	}
 	if len(rest) < 2 {
-		return fail("usage: wd worktree (attach <id> <path> | list <id>)")
+		return fail("usage: wd worktree (attach <id> <path> | list <id> | remove <id>)")
 	}
 	id := rest[1]
+	if sub == "remove" {
+		w, err := c.Ledger.Get(id)
+		if err != nil {
+			return err
+		}
+		if w.State != core.StateDone {
+			return fail("work %s is %s; wd removes its worktrees only once it is done", id, w.State)
+		}
+		removed, kept, err := c.releaseWorktrees(w)
+		if err != nil {
+			return err
+		}
+		var lines []string
+		for _, wt := range removed {
+			lines = append(lines, "removed worktree "+wt.Path)
+		}
+		if len(kept) > 0 {
+			for _, k := range kept {
+				lines = append(lines, k.String())
+			}
+			return fail("%s", strings.Join(lines, "\n"))
+		}
+		if len(lines) == 0 {
+			lines = append(lines, "no worktrees to remove")
+		}
+		return c.out(removed, strings.Join(lines, "\n"))
+	}
 	if sub == "list" {
 		if _, err := c.Ledger.Get(id); err != nil {
 			return err
@@ -1575,7 +1620,7 @@ func (c *Cli) worktree(rest []string) error {
 		}
 		return c.out(wts, text)
 	}
-	return fail("usage: wd worktree <attach|list>")
+	return fail("usage: wd worktree <attach|list|remove>")
 }
 
 func (c *Cli) merge(rest []string) error {
