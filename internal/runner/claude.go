@@ -3,7 +3,9 @@ package runner
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,7 +28,7 @@ func agents(cwd string) ([]agentRow, error) {
 		return nil, err
 	}
 	if r.Code != 0 {
-		return []agentRow{}, nil
+		return nil, &RunnerError{Runner: "claude", Detail: "agents failed: " + stderrOrStdout(r)}
 	}
 	var rows []agentRow
 	if err := json.Unmarshal([]byte(r.Stdout), &rows); err != nil {
@@ -71,18 +73,21 @@ func (claudeRunner) Spawn(o SpawnOptions) (Handle, error) {
 		return Handle{}, &RunnerError{Runner: "claude", Detail: "spawn failed: " + stderrOrStdout(r)}
 	}
 	ref := m[1]
-	row, ok := waitFor(func() (*agentRow, bool) {
+	row, ok, err := waitFor(func() (*agentRow, bool, error) {
 		rows, err := agents(o.Cwd)
 		if err != nil {
-			return nil, false
+			return nil, false, err
 		}
 		for i, a := range rows {
 			if a.ID == ref {
-				return &rows[i], true
+				return &rows[i], true, nil
 			}
 		}
-		return nil, false
+		return nil, false, nil
 	}, 15*time.Second, 500*time.Millisecond)
+	if err != nil {
+		return Handle{}, err
+	}
 	if !ok {
 		return Handle{}, &RunnerError{Runner: "claude", Detail: fmt.Sprintf("session %s not listed by claude agents", ref)}
 	}
@@ -126,10 +131,17 @@ func (claudeRunner) Status(h Handle) (RunnerStatus, error) {
 }
 
 func (claudeRunner) Transcript(h Handle) ([]string, error) {
-	file := filepath.Join(home(), ".claude", "projects", projectSlug(h.Cwd), h.Session+".jsonl")
-	text, err := os.ReadFile(file)
+	home, err := os.UserHomeDir()
 	if err != nil {
+		return nil, err
+	}
+	file := filepath.Join(home, ".claude", "projects", projectSlug(h.Cwd), h.Session+".jsonl")
+	text, err := os.ReadFile(file)
+	if errors.Is(err, fs.ErrNotExist) {
 		return []string{}, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	var out []string
 	for _, line := range strings.Split(string(text), "\n") {

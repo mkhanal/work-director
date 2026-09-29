@@ -36,13 +36,10 @@ func calls(t *testing.T, bin string) string {
 // waitForCall waits for a detached process to record its argv.
 func waitForCall(t *testing.T, bin, substr string) {
 	t.Helper()
-	_, ok := waitFor(func() (string, bool) {
-		if strings.Contains(calls(t, bin), substr) {
-			return substr, true
-		}
-		return "", false
+	_, ok, err := waitFor(func() (string, bool, error) {
+		return substr, strings.Contains(calls(t, bin), substr), nil
 	}, 5*time.Second, 20*time.Millisecond)
-	if !ok {
+	if err != nil || !ok {
 		t.Fatalf("call %q never reached calls.log", substr)
 	}
 }
@@ -70,13 +67,16 @@ esac`)
   models) echo 'anthropic/claude-opus-5'; echo 'openai/gpt-5.2';;
 esac`)
 	writeFake(t, bin, "codex", `case "$1" in
-  exec) echo '{"type":"thread","session_id":"codex-abc123","thread":{"messages":[]}}';;
+  exec) case "$*" in
+      *resume*) echo '{"type":"rollup","session_id":"codex-abc123","rollup":{"summary":"PONG"}}';;
+      *) echo '{"type":"thread","session_id":"codex-abc123","thread":{"messages":[{"role":"assistant","content":[{"type":"text","text":"READY"}]}]}}';;
+    esac;;
   debug) echo 'codex/opus-5'; echo 'codex/sonnet-4-5';;
 esac`)
 	writeFake(t, bin, "myagent", `case "$1" in
   run) echo "session=victory-001";;
   send) echo ok;;
-  status) echo 'state: waiting';;
+  status) [ "$2" = dead ] && { echo 'no such session' >&2; exit 3; }; echo 'state: waiting';;
   export) echo 'row one'; echo 'row two';;
   models) echo 'victory/1';;
 esac`)
@@ -106,12 +106,20 @@ status = "myagent status {session}"
 running = 'state: *running'
 waiting = 'state: *waiting'
 exited = 'state: *exited'
-transcript = "myagent export {session}"
+transcript = "myagent export {session} {slug_cwd}"
 models = "myagent models"
 attach = "myagent attach {session}"
 `
 	if err := os.WriteFile(filepath.Join(specDir, "myagent.toml"), []byte(myagent), 0o644); err != nil {
 		t.Fatalf("write myagent.toml: %v", err)
+	}
+	detached := `spawn = "myagent run --name {name} {brief}"
+detach = true
+session_id = 'session=([A-Za-z0-9-]+)'
+transcript = "cat {log}"
+`
+	if err := os.WriteFile(filepath.Join(specDir, "detached.toml"), []byte(detached), 0o644); err != nil {
+		t.Fatalf("write detached.toml: %v", err)
 	}
 
 	t.Run("Spawning Records Runner Session And Attach Hint", func(t *testing.T) {
@@ -185,6 +193,26 @@ attach = "myagent attach {session}"
 				t.Fatalf("opencode transcript: %v", err)
 			}
 			if !slices.Equal(got, []string{"READY", "PONG"}) {
+				t.Fatalf("transcript = %v, want [READY PONG]", got)
+			}
+		})
+		t.Run("codex reads every turn's recorded stream, from any process", func(t *testing.T) {
+			h, err := codex.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-5 t", Brief: "B"})
+			if err != nil {
+				t.Fatalf("codex spawn: %v", err)
+			}
+			if err := codex.Send(&h, "more"); err != nil {
+				t.Fatalf("codex send: %v", err)
+			}
+			fresh := codexRunner{}
+			got, ok, err := waitFor(func() ([]string, bool, error) {
+				got, err := fresh.Transcript(h)
+				return got, len(got) == 2, err
+			}, 5*time.Second, 20*time.Millisecond)
+			if err != nil {
+				t.Fatalf("codex transcript: %v", err)
+			}
+			if !ok || !slices.Equal(got, []string{"READY", "PONG"}) {
 				t.Fatalf("transcript = %v, want [READY PONG]", got)
 			}
 		})
@@ -308,8 +336,8 @@ attach = "myagent attach {session}"
 				t.Fatalf("allRunnerNames: %v", err)
 			}
 			slices.Sort(known)
-			if !slices.Equal(known, []string{"claude", "codex", "myagent", "opencode"}) {
-				t.Fatalf("runners = %v, want [claude codex myagent opencode]", known)
+			if !slices.Equal(known, []string{"claude", "codex", "detached", "myagent", "opencode"}) {
+				t.Fatalf("runners = %v, want [claude codex detached myagent opencode]", known)
 			}
 			r, err := RunnerNamed("myagent")
 			if err != nil {
@@ -348,12 +376,40 @@ attach = "myagent attach {session}"
 			if !slices.Equal(texts, []string{"row one", "row two"}) {
 				t.Fatalf("transcript = %v, want [row one row two]", texts)
 			}
+			if !strings.Contains(calls(t, bin), "myagent export victory-001 "+projectSlug(cwd)) {
+				t.Fatalf("calls.log missing {slug_cwd} in transcript:\n%s", calls(t, bin))
+			}
+			dead := Handle{Runner: "myagent", Session: "dead", Cwd: cwd}
+			if _, err := r.Status(dead); err == nil || !strings.Contains(err.Error(), "no such session") {
+				t.Fatalf("status of a failing command = %v, want its stderr", err)
+			}
 			models, err := r.Models()
 			if err != nil {
 				t.Fatalf("myagent models: %v", err)
 			}
 			if !slices.Equal(models, []string{"victory/1"}) {
 				t.Fatalf("models = %v, want [victory/1]", models)
+			}
+		})
+		t.Run("a detached spec reads the session's log through {log}, from any process", func(t *testing.T) {
+			r, err := RunnerNamed("detached")
+			if err != nil {
+				t.Fatalf("RunnerNamed: %v", err)
+			}
+			h, err := r.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-9 t", Brief: "B"})
+			if err != nil {
+				t.Fatalf("detached spawn: %v", err)
+			}
+			fresh, err := RunnerNamed("detached")
+			if err != nil {
+				t.Fatalf("RunnerNamed: %v", err)
+			}
+			texts, err := fresh.Transcript(h)
+			if err != nil {
+				t.Fatalf("detached transcript: %v", err)
+			}
+			if !slices.Equal(texts, []string{"session=victory-001"}) {
+				t.Fatalf("transcript = %v, want the spawn log", texts)
 			}
 		})
 		t.Run("an unknown runner name fails loudly with guidance", func(t *testing.T) {
