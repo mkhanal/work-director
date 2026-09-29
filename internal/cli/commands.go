@@ -30,7 +30,7 @@ func (c *Cli) projects(rest []string) error {
 	}
 	if sub == "add" {
 		if len(rest) < 3 {
-			return fail("usage: wd projects add <name> <path> [--runner claude|opencode|codex|ao] [--mode ask|auto] [--model id] [--lazyspec y|n] [--verify cmd]")
+			return fail("usage: wd projects add <name> <path> [--runner claude|opencode|codex] [--mode ask|auto] [--model id] [--lazyspec y|n] [--verify cmd]")
 		}
 		name, path := rest[1], rest[2]
 		if _, ok := c.Projects[name]; ok {
@@ -339,7 +339,7 @@ func (c *Cli) brief(rest []string) error {
 func (c *Cli) spawn(rest []string) error {
 	a := c.Args
 	if len(rest) == 0 {
-		return fail("usage: wd spawn <id> [--runner claude|opencode|codex|ao|myagent…] [--model id] [--worktree]")
+		return fail("usage: wd spawn <id> [--runner claude|opencode|codex|myagent…] [--model id] [--worktree]")
 	}
 	id := rest[0]
 	w, err := c.Ledger.Get(id)
@@ -474,7 +474,7 @@ func (c *Cli) epicLike(cmd string, rest []string) error {
 		return c.epicPlan(cmd, *epic)
 	case "spawn":
 		if epic == nil {
-			return fail("usage: wd %s spawn <id> [--count n] [--model id] [--runner claude|opencode|codex|ao|claude,opencode,…]", cmd)
+			return fail("usage: wd %s spawn <id> [--count n] [--model id] [--runner claude|opencode|codex|claude,opencode,…]", cmd)
 		}
 		return c.epicSpawn(cmd, *epic)
 	case "run":

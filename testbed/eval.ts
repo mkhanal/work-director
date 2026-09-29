@@ -87,8 +87,8 @@ check('tasks --all shows both done', (await wd(['tasks', epicId, '--all'])).incl
 
 console.log('mixed-provider epic sessions');
 const mixEpic = await wd(['add', 'sample-app', 'Mixed providers on one branch', '--kind', 'epic']);
-const mixOut = await wd(['epic', 'spawn', mixEpic, '--count', '4', '--runner', 'claude,opencode,ao,codex']);
-check('one spawn parses sessions across claude + opencode + ao + codex', mixOut.includes('ses_op') && mixOut.includes('ao-ses') && mixOut.includes('codex-s') && (mixOut.match(/ses_/g) ?? []).length >= 2, mixOut);
+const mixOut = await wd(['epic', 'spawn', mixEpic, '--count', '3', '--runner', 'claude,opencode,codex']);
+check('one spawn parses sessions across claude + opencode + codex', mixOut.includes('ses_op') && mixOut.includes('codex-s') && (mixOut.match(/ses_/g) ?? []).length >= 2, mixOut);
 const modelsOut = await wd(['models', 'opencode']);
 check('wd models lists models from the provider CLI, not a registry', modelsOut.includes('anthropic/claude-opus-5') && modelsOut.includes('openai/gpt-5.2'), modelsOut);
 const allModelsOut = await wd(['models']);

@@ -1,6 +1,6 @@
 # work-director
 
-A head-of-engineering agent for many repos. It holds roadmap, taste and work status in one place, hands whole tasks to separate executor sessions (Claude Code, opencode, codex, or Agent Orchestrator), verifies their work, gates pull requests, and turns your corrections into rules that travel to every repo and team without polluting any repo's own instructions.
+A head-of-engineering agent for many repos. It holds roadmap, taste and work status in one place, hands whole tasks to separate executor sessions (Claude Code, opencode or codex), verifies their work, gates pull requests, and turns your corrections into rules that travel to every repo and team without polluting any repo's own instructions.
 
 Two products, one source:
 
@@ -11,7 +11,7 @@ Two products, one source:
 
 The director is lazy by design — it honours each project's own skills, hooks and agent files
 — and adds only three things: **every work item has a status** (view many ways, all `--json`);
-**claude, opencode, codex and AO coordinate on one shared branch** (claims, impacts, conflicts,
+**claude, opencode and codex coordinate on one shared branch** (claims, impacts, conflicts,
 concerns, verify-gated merges, even one command that parcels sessions across providers; the
 model for a run is chosen live from the provider's own CLI via `wd models`, never a registry); and
 **learning that injects direction** (global rules at runtime via the plugin, project-level
@@ -49,7 +49,7 @@ claude                                                        # in this repo: th
 ```
 
 `wd` is one static binary (Go, CGO disabled) — no runtime dependencies, nothing to build.
-`wd doctor` reports which registered runners (claude, opencode, codex, ao, your spec files)
+`wd doctor` reports which registered runners (claude, opencode, codex, your spec files)
 are detected on PATH and whether this directory is a repo. A missing runner is information:
 install the ones you use. Outside a repo it offers `git init`; running it is your call.
 
@@ -58,7 +58,7 @@ One work item:
 ```
 wd add my-app "Make pnpm typecheck pass" --detail "..."
 wd models <runner>            # live model list from the provider's own CLI (not a registry)
-wd spawn <id> --worktree --model fable  # claude --bg / opencode run / codex exec / ao spawn, brief injected
+wd spawn <id> --worktree --model fable  # claude --bg / opencode run / codex exec, brief injected
 wd runner init <name>         # any other provider = one TOML command file, no code change
 wd attach <id> <session>      # bind a conversation started OUTSIDE the director (its own LLM) to this item
 wd context <id>               # cwd, worktree, branch + an OSC-8 link that opens it in your editor

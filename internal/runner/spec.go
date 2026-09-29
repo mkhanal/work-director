@@ -105,6 +105,7 @@ attach = "cd {cwd} && ` + name + ` -s {session}"
 # status: omit to report liveness only; include to classify output by these regexes
 # (exited, then waiting, then running). transcript/models return one item per line.
 # session_id is required: the first match in spawn output names the session.
+# A spawn line without {model} refuses a spawn that names a model.
 `
 }
 
@@ -190,6 +191,9 @@ func (r *specRunnerAdapter) placeholders(h Handle, text string) map[string]strin
 func (r *specRunnerAdapter) Spawn(o SpawnOptions) (Handle, error) {
 	if r.spec.Spawn == "" || r.spec.SessionID == "" {
 		return Handle{}, &RunnerError{Runner: r.spec.Name, Detail: "spec needs spawn and session_id"}
+	}
+	if o.Model != nil && !strings.Contains(r.spec.Spawn, "{model}") {
+		return Handle{}, &RunnerError{Runner: r.spec.Name, Detail: "model " + *o.Model + ": spawn line has no {model} placeholder"}
 	}
 	common := map[string]string{
 		"cwd": o.Cwd, "name": o.Name, "name20": name20(o.Name), "brief": o.Brief,

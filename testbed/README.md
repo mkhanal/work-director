@@ -9,7 +9,7 @@ hand with a real claude/opencode session. Everything under `testbed/run/` is gen
 testbed/
   sample-app/     a tiny real app the director manages (bun test passes)
   projects/       project file for it, with the path token TESTBED/ resolved by setup
-  runners/        fake claude/opencode/codex/ao so the eval needs no LLMs
+  runners/        fake claude/opencode/codex so the eval needs no LLMs
   specs/          one-file runner specs, copied into WD_HOME/runners at setup
   lib.ts          shared paths + setup(); eval.ts, setup.ts
   eval.ts         offline end-to-end: drives the real wd CLI through the whole epic flow

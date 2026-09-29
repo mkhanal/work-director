@@ -8,14 +8,13 @@ import (
 	"sync"
 )
 
-// The four foundation adapters are code: claude's two-step session resolve,
+// The three foundation adapters are code: claude's two-step session resolve,
 // opencode/codex staged session discovery and their transcript stores needed
 // logic. Every *other* provider is a file of commands (see `wd runner init`).
 var builtin = map[string]Runner{
 	"claude":   claude,
 	"opencode": opencode,
 	"codex":    codex,
-	"ao":       ao,
 }
 
 // IsBuiltin reports whether name is one of the foundation adapters rather

@@ -73,11 +73,6 @@ esac`)
   exec) echo '{"type":"thread","session_id":"codex-abc123","thread":{"messages":[]}}';;
   debug) echo 'codex/opus-5'; echo 'codex/sonnet-4-5';;
 esac`)
-	writeFake(t, bin, "ao", `case "$1" in
-  spawn) echo "spawned session scratch-1 (idle) [prompt 58 B, system 7883 B]";;
-  send) echo ok;;
-  session) echo '{"session":{"id":"scratch-1","activity":{"state":"idle"},"isTerminated":false,"status":"idle"}}';;
-esac`)
 	writeFake(t, bin, "myagent", `case "$1" in
   run) echo "session=victory-001";;
   send) echo ok;;
@@ -195,34 +190,6 @@ attach = "myagent attach {session}"
 		})
 	})
 
-	t.Run("The Ao Adapter Spawns With The Brief As Prompt", func(t *testing.T) {
-		t.Run("prompt, 20-char name, harness mapping, send flags, status", func(t *testing.T) {
-			h, err := ao.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-3 a very long display name here", Brief: "B", Agent: strPtr("claude")})
-			if err != nil {
-				t.Fatalf("ao spawn: %v", err)
-			}
-			if h.Session != "scratch-1" {
-				t.Fatalf("session = %q, want scratch-1", h.Session)
-			}
-			if !strings.Contains(calls(t, bin), "ao spawn --name wd-3 a very long dis --prompt B --harness claude-code") {
-				t.Fatalf("calls.log missing ao spawn:\n%s", calls(t, bin))
-			}
-			if err := ao.Send(&h, "more"); err != nil {
-				t.Fatalf("ao send: %v", err)
-			}
-			if !strings.Contains(calls(t, bin), "ao send --session scratch-1 --message more") {
-				t.Fatalf("calls.log missing ao send:\n%s", calls(t, bin))
-			}
-			status, err := ao.Status(h)
-			if err != nil {
-				t.Fatalf("ao status: %v", err)
-			}
-			if status != StatusIdle {
-				t.Fatalf("status = %q, want idle", status)
-			}
-		})
-	})
-
 	t.Run("A Runner Forwards The Chosen Model", func(t *testing.T) {
 		t.Run("claude passes --model on spawn", func(t *testing.T) {
 			if _, err := claude.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-1 t", Brief: "B", Model: strPtr("fable")}); err != nil {
@@ -244,8 +211,12 @@ attach = "myagent attach {session}"
 				t.Fatalf("calls.log missing codex model spawn:\n%s", calls(t, bin))
 			}
 		})
-		t.Run("ao fails loud because its command line cannot take a model", func(t *testing.T) {
-			_, err := ao.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-3 t", Brief: "B", Model: strPtr("fable")})
+		t.Run("a spec runner whose spawn line has no {model} fails loud", func(t *testing.T) {
+			r, err := RunnerNamed("myagent")
+			if err != nil {
+				t.Fatalf("RunnerNamed: %v", err)
+			}
+			_, err = r.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-3 t", Brief: "B", Model: strPtr("fable")})
 			if err == nil || !strings.Contains(err.Error(), "model") {
 				t.Fatalf("err = %v, want a loud model refusal", err)
 			}
@@ -269,15 +240,13 @@ attach = "myagent attach {session}"
 				t.Fatalf("codex models = %v", got)
 			}
 		})
-		t.Run("claude and ao have no CLI list and return none, never a guess", func(t *testing.T) {
-			for name, r := range map[string]Runner{"claude": claude, "ao": ao} {
-				got, err := r.Models()
-				if err != nil {
-					t.Fatalf("%s models: %v", name, err)
-				}
-				if !slices.Equal(got, []string{}) {
-					t.Fatalf("%s models = %v, want none", name, got)
-				}
+		t.Run("claude has no CLI list and returns none, never a guess", func(t *testing.T) {
+			got, err := claude.Models()
+			if err != nil {
+				t.Fatalf("claude models: %v", err)
+			}
+			if !slices.Equal(got, []string{}) {
+				t.Fatalf("claude models = %v, want none", got)
 			}
 		})
 	})
@@ -303,7 +272,7 @@ attach = "myagent attach {session}"
 				t.Errorf("%s = %+v, want detected in %s", name, a, only)
 			}
 		}
-		for _, name := range []string{"opencode", "codex", "ao"} {
+		for _, name := range []string{"opencode", "codex"} {
 			if a, ok := got[name]; !ok || a.Detected || a.Path != nil || a.Command != name {
 				t.Errorf("%s = %+v (listed %v), want not detected", name, a, ok)
 			}
@@ -339,8 +308,8 @@ attach = "myagent attach {session}"
 				t.Fatalf("allRunnerNames: %v", err)
 			}
 			slices.Sort(known)
-			if !slices.Equal(known, []string{"ao", "claude", "codex", "myagent", "opencode"}) {
-				t.Fatalf("runners = %v, want [ao claude codex myagent opencode]", known)
+			if !slices.Equal(known, []string{"claude", "codex", "myagent", "opencode"}) {
+				t.Fatalf("runners = %v, want [claude codex myagent opencode]", known)
 			}
 			r, err := RunnerNamed("myagent")
 			if err != nil {

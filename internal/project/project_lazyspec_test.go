@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func knownRunners() ([]string, error) { return []string{"claude", "opencode", "codex", "ao"}, nil }
+func knownRunners() ([]string, error) { return []string{"claude", "opencode", "codex"}, nil }
 
 func TestProject(t *testing.T) {
 	t.Run("Parse Project Reads The Frontmatter Fields", func(t *testing.T) {

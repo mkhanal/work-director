@@ -164,9 +164,9 @@ func TestCommandsComputeTheSameStatesAndValues(t *testing.T) {
 	assertHasKey(t, out, `"kind": "shared"`)
 	assertHasKey(t, out, `"state": "active"`)
 
-	// runner list: the four built-ins plus the spec-file runners.
+	// runner list: the three built-ins plus the spec-file runners.
 	out = f.runOK(t, "runner", "list", "--json")
-	for _, r := range []string{"claude", "opencode", "codex", "ao", "myagent", "planner", "advisor"} {
+	for _, r := range []string{"claude", "opencode", "codex", "myagent", "planner", "advisor"} {
 		assertHasKey(t, out, `"`+r+`"`)
 	}
 
@@ -217,7 +217,7 @@ func TestRunnerListShowsWhichRunnersAreDetected(t *testing.T) {
 		got[r["runner"].(string)] = r
 	}
 	want := map[string][2]bool{ // runner: {builtin, detected}
-		"claude": {true, true}, "opencode": {true, false}, "codex": {true, false}, "ao": {true, false},
+		"claude": {true, true}, "opencode": {true, false}, "codex": {true, false},
 		"myagent": {false, true}, "planner": {false, false}, "advisor": {false, false},
 	}
 	for name, w := range want {
