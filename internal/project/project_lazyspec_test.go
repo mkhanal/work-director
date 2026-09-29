@@ -39,6 +39,17 @@ func TestProject(t *testing.T) {
 		}
 	})
 
+	t.Run("A Tilde Path Fails When The Home Directory Is Unknown", func(t *testing.T) {
+		t.Setenv("HOME", "")
+		for _, raw := range []string{"~", "~/repo"} {
+			p, err := ParseProject("---\npath: "+raw+"\nrunner: claude\n---\n", "/home/proj.md")
+			pe, ok := err.(*ProjectError)
+			if !ok || pe.Path != "/home/proj.md" {
+				t.Fatalf("path %q: project = %+v, err = %v, want ProjectError naming /home/proj.md", raw, p, err)
+			}
+		}
+	})
+
 	t.Run("A Missing Field Fails Naming The File And Field", func(t *testing.T) {
 		_, err := ParseProject("---\nrunner: claude\n---\n", "/home/proj.md")
 		pe, ok := err.(*ProjectError)

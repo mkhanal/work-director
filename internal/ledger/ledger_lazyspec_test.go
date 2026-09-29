@@ -187,6 +187,13 @@ func TestLedger(t *testing.T) {
 			if got := move(t, l, w.ID, core.StateRunning); got.State != core.StateRunning {
 				t.Fatalf("state = %q, want running", got.State)
 			}
+			move(t, l, w.ID, core.StateReview)
+			l.AddEvent(w.ID, core.EventReport, "DONE")
+			l.AddEvent(w.ID, core.EventVerify, "pass")
+			softDone(t, l, w.ID, false)
+			if got := move(t, l, w.ID, core.StateBlocked); got.State != core.StateBlocked {
+				t.Fatalf("soft-done: state = %q, want blocked", got.State)
+			}
 		})
 		t.Run("done and dropped are terminal", func(t *testing.T) {
 			l := newTestLedger(t)
@@ -203,7 +210,8 @@ func TestLedger(t *testing.T) {
 		if _, err := l.db.Exec(`UPDATE work SET updated = '2026-01-01T00:00:00.000Z' WHERE id = ?`, w.ID); err != nil {
 			t.Fatalf("backdate: %v", err)
 		}
-		wantNoErr(t, l.AddEvent(w.ID, core.EventNote, "still alive"))
+		_, err := l.AddEvent(w.ID, core.EventNote, "still alive")
+		wantNoErr(t, err)
 		ev, err := l.Events(w.ID, nil)
 		wantNoErr(t, err)
 		got, err := l.Get(w.ID)
@@ -232,6 +240,28 @@ func TestLedger(t *testing.T) {
 		}
 		l.AddEvent(w.ID, core.EventReport, "DONE\nok")
 		l.AddEvent(w.ID, core.EventVerify, "pass\nok")
+		if got := softDone(t, l, w.ID, false); got.State != core.StateSoftDone {
+			t.Fatalf("state = %q, want soft-done", got.State)
+		}
+	})
+
+	t.Run("Soft Done Is Reached Only Through Its Gate", func(t *testing.T) {
+		l := newTestLedger(t)
+		w := add(t, l, "p", "t", AddOptions{})
+		for _, s := range []core.State{core.StateBriefed, core.StateRunning, core.StateReview} {
+			move(t, l, w.ID, s)
+		}
+		before := allEvents(t, l, w.ID, nil)
+		if _, err := l.Transition(w.ID, core.StateSoftDone); err == nil {
+			t.Fatal("Transition moved work to soft-done without its gate")
+		}
+		got, err := l.Get(w.ID)
+		wantNoErr(t, err)
+		if got.State != core.StateReview || len(allEvents(t, l, w.ID, nil)) != len(before) {
+			t.Fatalf("state = %q with %d events, want review unchanged", got.State, len(allEvents(t, l, w.ID, nil)))
+		}
+		l.AddEvent(w.ID, core.EventReport, "DONE")
+		l.AddEvent(w.ID, core.EventVerify, "pass")
 		if got := softDone(t, l, w.ID, false); got.State != core.StateSoftDone {
 			t.Fatalf("state = %q, want soft-done", got.State)
 		}
@@ -324,6 +354,30 @@ func TestLedger(t *testing.T) {
 		if cs := allOpenConcerns(t, l, epic.ID); len(cs) != 0 {
 			t.Fatalf("open concerns = %v, want none", cs)
 		}
+		if _, err := l.ResolveConcern(c.ID, "undo it"); err == nil {
+			t.Fatal("resolving a resolved concern succeeded")
+		}
+		cs, err := l.Concerns(&task.ID)
+		wantNoErr(t, err)
+		if len(cs) != 1 || cs[0].Decision == nil || *cs[0].Decision != decision {
+			t.Fatalf("concerns = %+v, want the first decision kept", cs)
+		}
+	})
+
+	t.Run("Events Concerns And Worktrees Belong To Existing Work", func(t *testing.T) {
+		l := newTestLedger(t)
+		const noWork = "no work nope; wd status for known work items"
+		_, err := l.AddEvent("nope", core.EventNote, "x")
+		wantErr(t, err, noWork)
+		_, err = l.AddConcern("nope", "x")
+		wantErr(t, err, noWork)
+		_, err = l.AddWorktree("nope", WorktreeInfo{Path: "/tmp/wt", Kind: core.WorktreePrivate})
+		wantErr(t, err, noWork)
+		var rows int
+		wantNoErr(t, l.db.QueryRow(`SELECT (SELECT COUNT(*) FROM event) + (SELECT COUNT(*) FROM concern) + (SELECT COUNT(*) FROM worktree)`).Scan(&rows))
+		if rows != 0 {
+			t.Fatalf("%d rows stored for unknown work, want 0", rows)
+		}
 	})
 
 	t.Run("Worktrees Track Path Branch And State", func(t *testing.T) {
@@ -343,6 +397,35 @@ func TestLedger(t *testing.T) {
 		}
 	})
 
+	t.Run("An Epic Has At Most One Active Shared Worktree", func(t *testing.T) {
+		l := newTestLedger(t)
+		epic := add(t, l, "p", "epic", AddOptions{Kind: core.WorkEpic})
+		other := add(t, l, "p", "other", AddOptions{Kind: core.WorkEpic})
+		first, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/first", Kind: core.WorktreeShared})
+		wantNoErr(t, err)
+		if _, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/second", Kind: core.WorktreeShared}); err == nil {
+			t.Fatal("a second active shared worktree was stored")
+		}
+		if _, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/private", Kind: core.WorktreePrivate}); err != nil {
+			t.Fatalf("private worktree beside the shared one: %v", err)
+		}
+		if _, err := l.AddWorktree(other.ID, WorktreeInfo{Path: "/wt/other", Kind: core.WorktreeShared}); err != nil {
+			t.Fatalf("another epic's shared worktree: %v", err)
+		}
+		_, err = l.SetWorktreeState(first.ID, core.WorktreeMerged)
+		wantNoErr(t, err)
+		second, err := l.AddWorktree(epic.ID, WorktreeInfo{Path: "/wt/second", Kind: core.WorktreeShared})
+		if err != nil {
+			t.Fatalf("shared worktree after the first merged: %v", err)
+		}
+		if _, err := l.SetWorktreeState(first.ID, core.WorktreeActive); err == nil {
+			t.Fatal("a merged shared worktree became active beside another")
+		}
+		if ws := allWorktrees(t, l, epic.ID); len(ws) != 3 || ws[2].ID != second.ID {
+			t.Fatalf("worktrees = %v, want first, private and second", ws)
+		}
+	})
+
 	t.Run("Conflicts Surface When Claimed Tasks Overlap", func(t *testing.T) {
 		l := newTestLedger(t)
 		epic := add(t, l, "p", "E", AddOptions{Kind: core.WorkEpic})
@@ -356,9 +439,12 @@ func TestLedger(t *testing.T) {
 		if len(got) != 1 || got[0].A != a.ID || got[0].B != b.ID || !slices.Equal(got[0].Paths, []string{"a/b"}) {
 			t.Fatalf("conflicts = %v, want one overlap on a/b", got)
 		}
-		for _, s := range []core.State{core.StateBriefed, core.StateRunning, core.StateReview, core.StateSoftDone, core.StateDone} {
+		for _, s := range []core.State{core.StateBriefed, core.StateRunning, core.StateReview} {
 			move(t, l, b.ID, s)
 		}
+		l.AddEvent(b.ID, core.EventReport, "DONE")
+		softDone(t, l, b.ID, false)
+		move(t, l, b.ID, core.StateDone)
 		if got := allConflicts(t, l, epic.ID); len(got) != 0 {
 			t.Fatalf("conflicts = %v, want none once a task is done", got)
 		}
@@ -383,7 +469,8 @@ func TestLedger(t *testing.T) {
 		move(t, l, task.ID, core.StateBriefed)
 		move(t, l, task.ID, core.StateRunning)
 		move(t, l, task.ID, core.StateReview)
-		move(t, l, task.ID, core.StateSoftDone)
+		l.AddEvent(task.ID, core.EventReport, "DONE")
+		softDone(t, l, task.ID, false)
 		move(t, l, task.ID, core.StateDone)
 		if got := softDone(t, l, epic.ID, true); got.State != core.StateSoftDone {
 			t.Fatalf("state = %q, want soft-done", got.State)
@@ -551,7 +638,7 @@ CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT,
 			t.Fatalf("feedback = %v, want the seeded row", fb)
 		}
 
-		// The schema grew in place: four nullable columns, two new tables.
+		// The schema grew in place: four nullable columns and new tables.
 		after := workColumns(t, openDirect(t, path))
 		if len(after) != 16 {
 			t.Fatalf("migrated schema has %d work columns, want 16", len(after))
@@ -567,7 +654,7 @@ CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT,
 				t.Fatalf("column %s changed: %v -> %v", name, want, got)
 			}
 		}
-		for _, tbl := range []string{"concern", "worktree"} {
+		for _, tbl := range []string{"concern", "worktree", "filed"} {
 			if _, err := openDirect(t, path).Query("SELECT COUNT(*) FROM " + tbl); err != nil {
 				t.Fatalf("table %s missing after migration: %v", tbl, err)
 			}

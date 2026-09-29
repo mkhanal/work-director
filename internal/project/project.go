@@ -65,9 +65,6 @@ func ParseProject(text, path string) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(runner) == "" {
-		return nil, &ProjectError{Path: path, Detail: "missing field runner"}
-	}
 	pathField, err := need("path")
 	if err != nil {
 		return nil, err
@@ -79,14 +76,15 @@ func ParseProject(text, path string) (*Project, error) {
 	if mode != ModeAsk && mode != ModeAuto {
 		return nil, &ProjectError{Path: path, Detail: "unknown mode " + string(mode)}
 	}
-	agent, hasAgent := fields["agent"]
-	model, hasModel := fields["model"]
-	if strings.HasPrefix(pathField, "~") {
-		pathField = os.Getenv("HOME") + pathField[1:]
+	agent := fields["agent"]
+	model := fields["model"]
+	repo, err := ExpandHome(pathField)
+	if err != nil {
+		return nil, &ProjectError{Path: path, Detail: err.Error()}
 	}
 	p := &Project{
 		Name:             strings.TrimSuffix(filepath.Base(path), ".md"),
-		Path:             pathField,
+		Path:             repo,
 		Runner:           runner,
 		Mode:             mode,
 		Stack:            taste.List(fields["stack"]),
@@ -102,13 +100,26 @@ func ParseProject(text, path string) (*Project, error) {
 	if p.DefaultBranch == "" {
 		p.DefaultBranch = "main"
 	}
-	if hasAgent {
+	if agent != "" {
 		p.Agent = &agent
 	}
-	if hasModel && model != "" {
+	if model != "" {
 		p.Model = &model
 	}
 	return p, nil
+}
+
+// ExpandHome expands a leading ~ or ~/ to the user's home directory, and
+// fails when that directory cannot be resolved; ~user paths stay as given.
+func ExpandHome(path string) (string, error) {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("expand %s: %w", path, err)
+	}
+	return home + path[1:], nil
 }
 
 // ProjectTemplate is the file `wd projects add` writes: concrete frontmatter,

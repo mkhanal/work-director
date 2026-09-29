@@ -21,6 +21,10 @@ Adding an event moves the work's `updated` to that event's time.
 ## Soft Done Requires A Done Report And A Passing Verify
 From `review`, `SoftDone` refuses (NotReady listing what is missing) until the latest report starts with DONE and the latest verify starts with pass.
 
+## Soft Done Is Reached Only Through Its Gate
+`Transition` to soft-done fails and changes nothing; only `SoftDone` moves
+work there.
+
 ## Code Changes Need A Pull Request Before Soft Done
 With `codeChanged` true, `SoftDone` also requires a `pr` event.
 
@@ -31,10 +35,14 @@ With `codeChanged` true, `SoftDone` also requires a `pr` event.
 `Add` with a parent requires the parent to exist and be an epic; an epic or goal itself cannot have a parent.
 
 ## Concerns Resolve With A Decision
-`AddConcern` records an unresolved concern; `ResolveConcern` marks it resolved with the decision and files a note event.
+`AddConcern` records an unresolved concern; `ResolveConcern` marks it resolved with the decision and files a note event; resolving it again fails and keeps the first decision.
 
 ## Worktrees Track Path Branch And State
 `AddWorktree` records an active worktree; `SetWorktreeState` moves it to merged or abandoned.
+
+## An Epic Has At Most One Active Shared Worktree
+`AddWorktree` and `SetWorktreeState` refuse a second active shared worktree
+for the same work; a merged or abandoned one no longer counts.
 
 ## Conflicts Surface When Claimed Tasks Overlap
 `Conflicts` pairs concurrently claimed, non-terminal tasks of an epic whose impact paths overlap, listing the overlapping paths.
@@ -50,3 +58,7 @@ Work added to a file-backed ledger is still there after closing and reopening it
 
 ## Migration Is Additive Only
 Migration adds nullable columns and creates missing tables; it never drops, renames or rewrites a column or table, so a ledger migrated by the Go wd stays readable by the TypeScript wd, and opening an already-migrated ledger changes nothing.
+
+## Events Concerns And Worktrees Belong To Existing Work
+`AddEvent`, `AddConcern` and `AddWorktree` for a work id that does not exist
+fail and store nothing.

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"time"
 
@@ -92,35 +93,15 @@ func (s *tuiSource) sessionView(id string) (*tui.SessionView, error) {
 
 // Send continues the work item's recorded session, mirroring `wd send`.
 func (s *tuiSource) Send(id, text string) error {
-	h, err := s.handle(id)
-	if err != nil {
-		return err
-	}
-	rn, err := runner.RunnerNamed(h.Runner)
-	if err != nil {
-		return err
-	}
-	if err := rn.Send(&h, text); err != nil {
-		return err
-	}
-	if err := s.Ledger.AddEvent(id, core.EventSent, text); err != nil {
-		return err
-	}
-	w, err := s.Ledger.Get(id)
-	if err != nil {
-		return err
-	}
-	if w.State != core.StateRunning {
-		if _, err := s.Ledger.Transition(id, core.StateRunning); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.sendTo(id, text)
 }
 
 // tui runs the terminal UI: `wd tui [id]` opens the board, or the work item's
 // detail view when an id is given.
-func (c *Cli) tui(rest []string) error {
+func (c *Cli) tui(rest []string) (err error) {
+	if c.JSON {
+		return fail("wd tui draws the terminal and has no --json document; read the board with wd status --json")
+	}
 	var id string
 	if len(rest) > 0 {
 		id = rest[0]
@@ -129,7 +110,7 @@ func (c *Cli) tui(rest []string) error {
 	if err != nil {
 		return err
 	}
-	defer term.Close()
+	defer func() { err = errors.Join(err, term.Close()) }()
 	app := tui.New(&tuiSource{Cli: c}, term, 2*time.Second)
 	if id != "" {
 		app.Open(id)

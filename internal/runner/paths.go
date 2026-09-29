@@ -5,16 +5,15 @@ import (
 	"path/filepath"
 )
 
-// home is $HOME, matching the TS `process.env.HOME ?? ”`.
-func home() string {
-	h, _ := os.LookupEnv("HOME")
-	return h
-}
-
-// WDHome is $WD_HOME when set, else ~/.work-director.
-func WDHome() string {
-	if h, ok := os.LookupEnv("WD_HOME"); ok {
-		return h
+// WDHome is $WD_HOME when set and non-empty, else ~/.work-director. A host
+// with no home directory has nowhere to keep director state, so that fails.
+func WDHome() (string, error) {
+	if h := os.Getenv("WD_HOME"); h != "" {
+		return h, nil
 	}
-	return filepath.Join(home(), ".work-director")
+	h, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(h, ".work-director"), nil
 }

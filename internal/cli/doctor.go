@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"wd/internal/context"
@@ -26,7 +27,11 @@ func (c *Cli) doctor(rest []string) error {
 	if err != nil {
 		return err
 	}
-	ws, err := context.WorkspaceContext(mustGetwd())
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	ws, err := context.WorkspaceContext(wd)
 	if err != nil {
 		return err
 	}
@@ -35,8 +40,7 @@ func (c *Cli) doctor(rest []string) error {
 		hint := initHint
 		report.Init = &hint
 	}
-	c.out(report, renderDoctor(report))
-	return nil
+	return c.out(report, renderDoctor(report))
 }
 
 // renderDoctor prints one line per runner, then the workspace line and, with

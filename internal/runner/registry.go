@@ -37,7 +37,7 @@ func builtinNames() []string {
 // different WD_HOME values do not collide.
 type specsCache struct {
 	at   string
-	list []RunnerSpec
+	list []checkedSpec
 }
 
 var (
@@ -45,8 +45,11 @@ var (
 	cache   *specsCache
 )
 
-func specs() ([]RunnerSpec, error) {
-	dir := SpecDir()
+func specs() ([]checkedSpec, error) {
+	dir, err := SpecDir()
+	if err != nil {
+		return nil, err
+	}
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
 	if cache == nil || cache.at != dir {

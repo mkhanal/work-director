@@ -16,6 +16,10 @@ in the path against `$HOME`, defaults mode to auto, instructions file to
 AGENTS.md and default branch to main, and parses the stack, workflows and
 verify lists.
 
+## A Tilde Path Fails When The Home Directory Is Unknown
+A path starting `~` or `~/` fails with a ProjectError naming the file when
+the home directory cannot be resolved.
+
 ## A Missing Field Fails Naming The File And Field
 A project file without frontmatter, or without the runner or path field,
 fails with a ProjectError naming the file and what is missing.

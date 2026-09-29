@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -15,7 +16,9 @@ type Source interface {
 // Terminal is the TUI's input and output boundary.
 type Terminal interface {
 	Size() (width, height int, err error)
+	// Keys closes when input stops; Err then says why.
 	Keys() <-chan Key
+	Err() error
 	Write(lines []string) error
 	Close() error
 }
@@ -65,7 +68,10 @@ func (a *App) Run() error {
 			return err
 		}
 		select {
-		case k := <-a.keys:
+		case k, ok := <-a.keys:
+			if !ok {
+				return fmt.Errorf("terminal input: %w", a.term.Err())
+			}
 			if !a.handle(k, s) {
 				return nil
 			}

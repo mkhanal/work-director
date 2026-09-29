@@ -6,6 +6,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"wd/internal/core"
@@ -132,24 +133,54 @@ type Model struct {
 }
 
 // BoardFrame renders the board screen: the goal rows with their rollups, then
-// the standalone work, then the key help.
+// the standalone work, then the key help. Rows beyond the terminal's height
+// scroll so the selected row stays on screen.
 func BoardFrame(b Board, m Model) []string {
-	var out []string
-	out = append(out, fmt.Sprintf("wd · board · %s", b.Home))
-	out = append(out, "")
-	var goals, standalone []string
-	for i, r := range b.Rows {
-		if r.Epic {
-			goals = append(goals, boardRow(r, m, i)...)
-		} else {
-			standalone = append(standalone, boardRow(r, m, i)...)
+	var body []string
+	selStart, selEnd := -1, -1
+	for _, sec := range []struct {
+		title string
+		epic  bool
+	}{{"Goals", true}, {"Standalone", false}} {
+		titled := false
+		for i, r := range b.Rows {
+			if r.Epic != sec.epic {
+				continue
+			}
+			if !titled {
+				body = append(body, sec.title)
+				titled = true
+			}
+			if i == m.Selected {
+				selStart = len(body)
+			}
+			body = append(body, boardRow(r, m, i)...)
+			if i == m.Selected {
+				selEnd = len(body)
+			}
 		}
 	}
-	out = append(out, section("Goals", goals)...)
-	out = append(out, section("Standalone", standalone)...)
-	out = append(out, "")
-	out = append(out, "[j/k] move · [enter] open · [q] quit")
-	return out
+	out := []string{fmt.Sprintf("wd · board · %s", b.Home), ""}
+	out = append(out, scroll(body, m.Height-len(out)-2, selStart, selEnd)...)
+	return append(out, "", footer(m))
+}
+
+// scroll windows lines to at most height rows, keeping lines[lo:hi] (the
+// selection) in view, and its first line when it is taller than the window.
+// A negative lo means no selection.
+func scroll(lines []string, height, lo, hi int) []string {
+	height = max(height, 0)
+	if len(lines) <= height {
+		return lines
+	}
+	start := 0
+	if hi > height {
+		start = hi - height
+	}
+	if lo >= 0 && lo < start {
+		start = lo
+	}
+	return lines[start:min(start+height, len(lines))]
 }
 
 // boardRow renders one selection-marked board row with its meta lines.
@@ -165,20 +196,15 @@ func boardRow(r BoardRow, m Model, i int) []string {
 		meta += " · " + r.Rollup.String()
 	}
 	lines = append(lines, meta)
-	if w.Runner != nil {
-		ref := w.Ref
-		if ref == nil {
-			ref = w.Session
-		}
-		if ref != nil {
-			lines = append(lines, fmt.Sprintf("  %s:%s", *w.Runner, *ref))
-		}
+	if w.Runner != nil && w.Session != nil {
+		lines = append(lines, fmt.Sprintf("  %s:%s", *w.Runner, *w.Session))
 	}
 	return lines
 }
 
 // DetailFrame renders the detail screen: the work item's ledger — tasks,
-// events, concerns — and, when it has a session, the live transcript.
+// events, concerns — and, when it has a session, the live transcript. The
+// sections share the terminal's height (see share).
 func DetailFrame(d Detail, m Model) []string {
 	w := d.Work
 	out := []string{
@@ -189,46 +215,88 @@ func DetailFrame(d Detail, m Model) []string {
 	}
 	budget := m.Height - len(out) - 2 // blank + footer
 	if m.Status != "" {
-		budget--
+		budget -= 2
 	}
-	if budget < 0 {
-		budget = 0
+	panels := []panel{
+		{title: "Tasks", rows: taskRows(d.Tasks), rank: 3},
+		{title: "Events", rows: eventRows(d.Events), rank: 2, newest: true},
+		{title: "Concerns", rows: concernRows(d.Concerns), rank: 0},
 	}
-	used := 0
-	for _, sec := range []struct {
-		title string
-		rows  []string
-	}{
-		{"Tasks", taskRows(d.Tasks)},
-		{"Events", eventRows(d.Events)},
-		{"Concerns", concernRows(d.Concerns)},
-	} {
-		if used >= budget {
-			break
-		}
-		rows := sec.rows
-		if room := budget - used - 1; len(rows) > room {
-			rows = rows[:max(room, 0)]
-		}
-		if len(rows) == 0 {
-			continue
-		}
-		out = append(out, sec.title)
-		out = append(out, rows...)
-		used += 1 + len(rows)
+	if d.Session != nil {
+		panels = append(panels, panel{title: "Live transcript · " + sessionLabel(d.Session), rows: transcriptRows(d.Session, m.Width), rank: 1, newest: true})
 	}
-	if d.Session != nil && used < budget {
-		rows := transcriptRows(d.Session, m.Width)
-		if room := budget - used - 1; len(rows) > room {
-			rows = rows[max(len(rows)-room, 0):]
-		}
-		out = append(out, "Live transcript · "+sessionLabel(d.Session))
-		out = append(out, rows...)
+	for _, p := range share(panels, budget) {
+		out = append(out, p.title)
+		out = append(out, p.rows...)
 	}
 	if m.Status != "" {
 		out = append(out, "", m.Status)
 	}
 	out = append(out, "", footer(m))
+	return out
+}
+
+// panel is one titled detail section. rank orders which panels keep a place
+// when the height cannot fit them all (0 first); newest panels keep their last
+// rows when cut.
+type panel struct {
+	title  string
+	rows   []string
+	rank   int
+	newest bool
+}
+
+// share fits the non-empty panels into height rows: by rank, each claims its
+// title and one row; the rest is dealt one row per round to the panels with
+// rows left, so short panels show whole and long ones split the remainder.
+// A cut panel's title says how many rows it shows.
+func share(panels []panel, height int) []panel {
+	var live []panel
+	for _, p := range panels {
+		if len(p.rows) > 0 {
+			live = append(live, p)
+		}
+	}
+	order := make([]int, len(live))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int { return live[a].rank - live[b].rank })
+	shown := make([]int, len(live))
+	left := height
+	for _, i := range order {
+		if left < 2 {
+			break
+		}
+		shown[i] = 1
+		left -= 2
+	}
+	for dealt := true; dealt && left > 0; {
+		dealt = false
+		for _, i := range order {
+			if left > 0 && shown[i] > 0 && shown[i] < len(live[i].rows) {
+				shown[i]++
+				left--
+				dealt = true
+			}
+		}
+	}
+	var out []panel
+	for i, p := range live {
+		n := shown[i]
+		if n == 0 {
+			continue
+		}
+		if n < len(p.rows) {
+			p.title += fmt.Sprintf(" · %d of %d", n, len(p.rows))
+			if p.newest {
+				p.rows = p.rows[len(p.rows)-n:]
+			} else {
+				p.rows = p.rows[:n]
+			}
+		}
+		out = append(out, p)
+	}
 	return out
 }
 
@@ -299,14 +367,6 @@ func footer(m Model) string {
 		return "[s]end · [b]ack · [q] quit"
 	}
 	return "[j/k] move · [enter] open · [q] quit"
-}
-
-// section renders a titled section, omitted when it has no rows.
-func section(title string, rows []string) []string {
-	if len(rows) == 0 {
-		return nil
-	}
-	return append([]string{title}, rows...)
 }
 
 // wrap breaks text into lines of at most width runes.

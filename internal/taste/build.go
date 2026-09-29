@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 const ConstitutionLimit = 2000
@@ -85,9 +86,13 @@ func LoadPresets(presetsDir string) (*Presets, error) {
 	}
 	p := &Presets{Biome: map[string]bool{}, Eslint: map[string]bool{}}
 	for group, raw := range biome.Linter.Rules {
+		// recommended is biome's one boolean switch among the rule groups.
+		if group == "recommended" {
+			continue
+		}
 		var rules map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &rules); err != nil {
-			continue
+			return nil, fmt.Errorf("biome.json rule group %s: %w", group, err)
 		}
 		for name := range rules {
 			p.Biome[group+"/"+name] = true
@@ -161,8 +166,8 @@ func RenderConstitution(cards []Card) (string, error) {
 		}
 	}
 	text := "# Taste\nFull cards: /taste-* skills.\n" + strings.Join(lines, "\n") + "\n"
-	if len(text) > ConstitutionLimit {
-		return "", fmt.Errorf("constitution is %d chars, limit %d", len(text), ConstitutionLimit)
+	if n := utf8.RuneCountInString(text); n > ConstitutionLimit {
+		return "", fmt.Errorf("constitution is %d chars, limit %d", n, ConstitutionLimit)
 	}
 	return text, nil
 }
@@ -198,21 +203,21 @@ type BuildResult struct {
 }
 
 // Build renders the distributable cards into the plugin skills, the
-// constitution and the dist artifacts. It fails when an enforce id is absent
-// from the presets or the constitution exceeds its limit.
+// constitution and the dist artifacts. It fails when any loaded card's enforce
+// id is absent from the presets or the constitution exceeds its limit.
 func Build(p BuildPaths) (*BuildResult, error) {
 	loaded, err := LoadCards(p.CardsDir)
 	if err != nil {
 		return nil, err
 	}
-	cards := Distributable(loaded)
 	presets, err := LoadPresets(p.PresetsDir)
 	if err != nil {
 		return nil, err
 	}
-	if missing := MissingEnforcements(cards, presets); len(missing) > 0 {
+	if missing := MissingEnforcements(loaded, presets); len(missing) > 0 {
 		return nil, fmt.Errorf("enforce ids absent from presets:\n%s", strings.Join(missing, "\n"))
 	}
+	cards := Distributable(loaded)
 	constitution, err := RenderConstitution(cards)
 	if err != nil {
 		return nil, err
@@ -242,8 +247,10 @@ func Build(p BuildPaths) (*BuildResult, error) {
 		}
 		skills = append(skills, "taste-"+string(category))
 	}
-	if err := os.MkdirAll(p.DistDir, 0o755); err != nil {
-		return nil, err
+	for _, dir := range []string{p.PluginDir, p.DistDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, err
+		}
 	}
 	if err := os.WriteFile(filepath.Join(p.PluginDir, "constitution.md"), []byte(constitution), 0o644); err != nil {
 		return nil, err

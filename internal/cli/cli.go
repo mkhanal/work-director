@@ -5,14 +5,19 @@ package cli
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"wd/internal/brief"
+	"wd/internal/coordinator"
 	"wd/internal/core"
 	"wd/internal/ledger"
 	"wd/internal/project"
@@ -20,20 +25,22 @@ import (
 	"wd/internal/taste"
 )
 
-// stringFlags are the CLI's --key value flags. A bare --key consumes the next
-// token as its value, matching Node's parseArgs with strict: false.
-var stringFlags = map[string]bool{
+// valueFlags are the CLI's --key value flags, given as --key value or
+// --key=value; every other --key is a switch and takes no value.
+var valueFlags = map[string]bool{
 	"runner": true, "model": true, "mode": true, "agent": true, "count": true,
 	"tail": true, "stack": true, "workflow": true, "verify": true, "lazyspec": true,
 	"kind": true, "epic": true, "heading": true, "detail": true, "project": true,
 	"branch": true, "adopt": true, "source": true, "card": true, "only": true,
-	"timeout": true, "port": true,
+	"timeout": true, "port": true, "ref": true, "cwd": true,
 }
 
-// Args is one parsed command line: positionals and flags.
+// Args is one parsed command line: positionals, value flags (never empty)
+// and switches.
 type Args struct {
 	Positional []string
-	Flags      map[string]any
+	Values     map[string]string
+	Switches   map[string]bool
 }
 
 // normalize moves single-dash tokens past --, where parseArgs keeps them
@@ -53,36 +60,44 @@ func normalize(argv []string) []string {
 	return append(rest, append([]string{"--"}, singles...)...)
 }
 
-func parse(argv []string) Args {
-	var positional []string
-	flags := map[string]any{}
+// parse splits argv into positionals, value flags and switches. A value flag
+// with no value, or an empty one, and a switch given a value both fail.
+func parse(argv []string) (Args, error) {
+	a := Args{Values: map[string]string{}, Switches: map[string]bool{}}
 	after := false
 	toks := normalize(argv)
 	for i := 0; i < len(toks); i++ {
 		t := toks[i]
 		if after {
-			positional = append(positional, t)
+			a.Positional = append(a.Positional, t)
 			continue
 		}
 		if t == "--" {
 			after = true
 			continue
 		}
-		if strings.HasPrefix(t, "--") {
-			key, val, hasVal := strings.Cut(t[2:], "=")
-			if hasVal {
-				flags[key] = val
-			} else if stringFlags[key] && i+1 < len(toks) {
-				i++
-				flags[key] = toks[i]
-			} else {
-				flags[key] = true
-			}
+		if !strings.HasPrefix(t, "--") {
+			a.Positional = append(a.Positional, t)
 			continue
 		}
-		positional = append(positional, t)
+		key, val, hasVal := strings.Cut(t[2:], "=")
+		if !valueFlags[key] {
+			if hasVal {
+				return Args{}, fail("--%s takes no value", key)
+			}
+			a.Switches[key] = true
+			continue
+		}
+		if !hasVal && i+1 < len(toks) && !strings.HasPrefix(toks[i+1], "--") {
+			i++
+			val = toks[i]
+		}
+		if val == "" {
+			return Args{}, fail("--%s needs a value", key)
+		}
+		a.Values[key] = val
 	}
-	return Args{Positional: positional, Flags: flags}
+	return a, nil
 }
 
 // failError is a user-facing failure: the message is the whole output.
@@ -110,13 +125,13 @@ type Cli struct {
 
 // Run parses args, opens the ledger and projects, and dispatches the command.
 func Run(args []string) error {
-	home := os.Getenv("HOME")
-	if home == "" {
-		home = "."
+	parsed, err := parse(args)
+	if err != nil {
+		return err
 	}
-	wdHome := os.Getenv("WD_HOME")
-	if wdHome == "" {
-		wdHome = filepath.Join(home, ".work-director")
+	wdHome, err := runner.WDHome()
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(wdHome, 0o755); err != nil {
 		return err
@@ -147,8 +162,8 @@ func Run(args []string) error {
 		Worktrees:   worktreesDir,
 		Ledger:      l,
 		Projects:    projects,
-		Args:        parse(args),
-		JSON:        flag(parse(args), "json"),
+		Args:        parsed,
+		JSON:        flag(parsed, "json"),
 		Stdout:      os.Stdout,
 		Stderr:      os.Stderr,
 	}
@@ -162,137 +177,98 @@ func tasteCardsDir() (string, error) {
 	if r := os.Getenv("WD_ROOT"); r != "" {
 		return filepath.Join(r, "taste", "cards"), nil
 	}
-	searched := []string{executableDir(), mustGetwd()}
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	searched := []string{filepath.Dir(exe), wd}
 	for _, base := range searched {
-		if base == "" {
+		dir := filepath.Join(base, "taste", "cards")
+		st, err := os.Stat(dir)
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		dir := filepath.Join(base, "taste", "cards")
-		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+		if err != nil {
+			return "", err
+		}
+		if st.IsDir() {
 			return dir, nil
 		}
 	}
 	return "", fail("taste cards not found: no taste/cards in %s; set WD_ROOT to the work-director checkout", strings.Join(searched, " or "))
 }
 
-func executableDir() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	return filepath.Dir(exe)
-}
+const usage = "wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve|doctor> [--json]"
 
-func mustGetwd() string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	return wd
+// commands maps each wd command to its handler, given the arguments after it.
+var commands = map[string]func(c *Cli, rest []string) error{
+	"projects":  (*Cli).projects,
+	"models":    (*Cli).models,
+	"runner":    (*Cli).runner,
+	"add":       (*Cli).add,
+	"tasks":     (*Cli).tasks,
+	"brief":     (*Cli).brief,
+	"spawn":     (*Cli).spawn,
+	"epic":      func(c *Cli, rest []string) error { return c.epicLike("epic", rest) },
+	"goal":      func(c *Cli, rest []string) error { return c.epicLike("goal", rest) },
+	"send":      (*Cli).send,
+	"attach":    (*Cli).attach,
+	"report":    (*Cli).report,
+	"verify":    (*Cli).verify,
+	"decide":    (*Cli).decide,
+	"pr":        (*Cli).pr,
+	"soft-done": (*Cli).softDone,
+	"set":       (*Cli).set,
+	"done":      (*Cli).done,
+	"status":    (*Cli).status,
+	"context":   (*Cli).contextCmd,
+	"open":      (*Cli).open,
+	"claim":     (*Cli).claim,
+	"impact":    (*Cli).impact,
+	"conflict":  (*Cli).conflict,
+	"worktree":  (*Cli).worktree,
+	"merge":     (*Cli).merge,
+	"concern":   (*Cli).concern,
+	"scan":      (*Cli).scan,
+	"events":    (*Cli).events,
+	"feedback":  (*Cli).feedback,
+	"distill":   (*Cli).distill,
+	"tui":       (*Cli).tui,
+	"serve":     (*Cli).serve,
+	"doctor":    (*Cli).doctor,
 }
 
 func (c *Cli) dispatch() error {
-	a := c.Args
-	if len(a.Positional) == 0 {
-		return fail("wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|pr|soft-done|set|done|status|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve|doctor> [--json]")
+	if len(c.Args.Positional) == 0 {
+		return fail("%s", usage)
 	}
-	cmd, rest := a.Positional[0], a.Positional[1:]
-	switch cmd {
-	case "projects":
-		return c.projects(rest)
-	case "models":
-		return c.models(rest)
-	case "runner":
-		return c.runner(rest)
-	case "add":
-		return c.add(rest)
-	case "tasks":
-		return c.tasks(rest)
-	case "brief":
-		return c.brief(rest)
-	case "spawn":
-		return c.spawn(rest)
-	case "epic", "goal":
-		return c.epicLike(cmd, rest)
-	case "send":
-		return c.send(rest)
-	case "attach":
-		return c.attach(rest)
-	case "report":
-		return c.report(rest)
-	case "verify":
-		return c.verify(rest)
-	case "pr":
-		return c.pr(rest)
-	case "soft-done":
-		return c.softDone(rest)
-	case "set":
-		return c.set(rest)
-	case "done":
-		return c.done(rest)
-	case "status":
-		return c.status(rest)
-	case "context":
-		return c.contextCmd(rest)
-	case "open":
-		return c.open(rest)
-	case "claim":
-		return c.claim(rest)
-	case "impact":
-		return c.impact(rest)
-	case "conflict":
-		return c.conflict(rest)
-	case "worktree":
-		return c.worktree(rest)
-	case "merge":
-		return c.merge(rest)
-	case "concern":
-		return c.concern(rest)
-	case "scan":
-		return c.scan(rest)
-	case "events":
-		return c.events(rest)
-	case "feedback":
-		return c.feedback(rest)
-	case "distill":
-		return c.distill(rest)
-	case "tui":
-		return c.tui(rest)
-	case "serve":
-		return c.serve(rest)
-	case "doctor":
-		return c.doctor(rest)
+	run, ok := commands[c.Args.Positional[0]]
+	if !ok {
+		return fail("%s", usage)
 	}
-	return fail("wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|pr|soft-done|set|done|status|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve|doctor> [--json]")
+	return run(c, c.Args.Positional[1:])
 }
 
 // out prints the command's result: indented JSON on the --json rail, else text.
-func (c *Cli) out(v any, text string) {
+func (c *Cli) out(v any, text string) error {
 	if c.JSON {
-		c.jsonOut(v)
-		return
+		enc := json.NewEncoder(c.Stdout)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		return enc.Encode(v)
 	}
-	fmt.Fprintln(c.Stdout, text)
+	_, err := fmt.Fprintln(c.Stdout, text)
+	return err
 }
 
-func (c *Cli) jsonOut(v any) {
-	enc := json.NewEncoder(c.Stdout)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	enc.Encode(v)
-}
-
-func (c *Cli) jsonLine(v any) {
-	enc := json.NewEncoder(c.Stdout)
-	enc.SetEscapeHTML(false)
-	enc.Encode(v)
-}
-
+// str is the --k value flag, nil when absent.
 func str(a Args, k string) *string {
-	if v, ok := a.Flags[k]; ok {
-		if s, ok := v.(string); ok && s != "" {
-			return &s
-		}
+	if v, ok := a.Values[k]; ok {
+		return &v
 	}
 	return nil
 }
@@ -304,18 +280,37 @@ func strOr(a Args, k, def string) string {
 	return def
 }
 
-func flag(a Args, k string) bool {
-	_, ok := a.Flags[k]
-	return ok
+// positiveInt is the --k flag as a positive integer, def when absent.
+func positiveInt(a Args, k string, def int) (int, error) {
+	s := str(a, k)
+	if s == nil {
+		return def, nil
+	}
+	n, err := strconv.Atoi(*s)
+	if err != nil || n < 1 {
+		return 0, fail("--%s must be a positive integer", k)
+	}
+	return n, nil
 }
 
-func oneOf(values []string, x, what string) (string, error) {
-	for _, v := range values {
-		if v == x {
-			return x, nil
+func flag(a Args, k string) bool { return a.Switches[k] }
+
+// oneOf parses x as one of values, failing with the list.
+func oneOf[T ~string](values []T, x, what string) (T, error) {
+	names := make([]string, len(values))
+	for i, v := range values {
+		if string(v) == x {
+			return v, nil
 		}
+		names[i] = string(v)
 	}
-	return "", fail("unknown %s %s; one of %s", what, x, strings.Join(values, ", "))
+	return "", fail("unknown %s %s; one of %s", what, x, strings.Join(names, ", "))
+}
+
+// settableStates are the states `wd set` accepts, in the order it lists them.
+var settableStates = []core.State{
+	core.StateQueued, core.StateBriefed, core.StateRunning, core.StateNeedsInput, core.StateReview,
+	core.StateSoftDone, core.StateDone, core.StateBlocked, core.StateDropped,
 }
 
 func kindPtr(k core.EventKind) *core.EventKind { return &k }
@@ -354,42 +349,56 @@ func (c *Cli) handle(id string) (runner.Handle, error) {
 	if err != nil {
 		return runner.Handle{}, err
 	}
-	runnerName := w.Runner
-	if runnerName == nil {
-		runnerName = &p.Runner
+	h, ok, err := coordinator.Handle(c.Ledger, w, p)
+	if err != nil {
+		return runner.Handle{}, err
 	}
-	session := w.Session
-	if session == nil {
-		session = w.Claim
-	}
-	if session == nil {
+	if !ok {
 		return runner.Handle{}, fail("work %s has no session or claim", id)
 	}
-	var shared *string
-	if w.Parent != nil {
-		wts, err := c.Ledger.Worktrees(*w.Parent)
-		if err != nil {
-			return runner.Handle{}, err
+	return h, nil
+}
+
+// sendTo continues work's recorded session with text and moves the work to
+// running. Work that cannot return to running is refused before anything is
+// sent.
+func (c *Cli) sendTo(id, text string) error {
+	w, err := c.Ledger.Get(id)
+	if err != nil {
+		return err
+	}
+	if w.State != core.StateRunning && !slices.Contains(core.Transitions[w.State], core.StateRunning) {
+		return fail("%s", core.IllegalTransition{From: w.State, To: core.StateRunning}.Error())
+	}
+	h, err := c.handle(id)
+	if err != nil {
+		return err
+	}
+	r, err := runner.RunnerNamed(h.Runner)
+	if err != nil {
+		return err
+	}
+	if err := coordinator.Send(c.Ledger, id, r, h, text); err != nil {
+		return err
+	}
+	if _, err := c.Ledger.AddEvent(id, core.EventSent, text); err != nil {
+		return err
+	}
+	if w.State != core.StateRunning {
+		if _, err := c.Ledger.Transition(id, core.StateRunning); err != nil {
+			return err
 		}
-		for _, wt := range wts {
-			if wt.Kind == core.WorktreeShared && wt.State == core.WorktreeActive {
-				shared = &wt.Path
-			}
-		}
 	}
-	cwd := w.Cwd
-	if cwd == nil {
-		cwd = shared
-	}
-	if cwd == nil {
-		cwd = &p.Path
-	}
-	return runner.Handle{Runner: *runnerName, Session: *session, Ref: w.Ref, Cwd: *cwd}, nil
+	return nil
 }
 
 // cycle gathers the brief context for work: decisions, history, roadmap.
 func (c *Cli) cycle(id string) (brief.Context, error) {
-	notes, err := c.Ledger.Events(id, kindPtr(core.EventNote))
+	decided, err := c.Ledger.Events(id, kindPtr(core.EventDecision))
+	if err != nil {
+		return brief.Context{}, err
+	}
+	concerns, err := c.Ledger.Concerns(&id)
 	if err != nil {
 		return brief.Context{}, err
 	}
@@ -406,8 +415,13 @@ func (c *Cli) cycle(id string) (brief.Context, error) {
 		return brief.Context{}, err
 	}
 	var decisions []string
-	for _, e := range notes {
+	for _, e := range decided {
 		decisions = append(decisions, e.Body)
+	}
+	for _, cx := range concerns {
+		if cx.Decision != nil {
+			decisions = append(decisions, *cx.Decision)
+		}
 	}
 	var history []string
 	for _, e := range reports {
@@ -601,9 +615,15 @@ func isTTY(f *os.File) bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }
 
-func (c *Cli) ask(q string) string {
-	fmt.Fprint(c.Stdout, q)
-	reader := bufio.NewReader(os.Stdin)
-	line, _ := reader.ReadString('\n')
-	return strings.TrimRight(line, "\n")
+// ask prompts on stderr, so stdout stays the command's one result, and reads
+// one line of stdin; a last line without a newline is still the answer.
+func (c *Cli) ask(q string) (string, error) {
+	if _, err := fmt.Fprint(c.Stderr, q); err != nil {
+		return "", err
+	}
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && !(errors.Is(err, io.EOF) && line != "") {
+		return "", fmt.Errorf("read answer: %w", err)
+	}
+	return strings.TrimRight(line, "\n"), nil
 }

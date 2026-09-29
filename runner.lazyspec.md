@@ -22,6 +22,11 @@ provider is a TOML file of commands under `~/.work-director/runners/`.
 ## A Transcript Follows Its Session Into A Worktree
 `transcript` finds a session by its id wherever the runner's store now keeps it, so a session that moved into a worktree after spawn still reports.
 
+## A Transcript Skips A Line Still Being Written
+Reading a runner's jsonl store, `transcript` skips a final line with no
+newline yet, which the executor is still writing, and fails on a complete
+line that does not parse.
+
 ## A Runner Forwards The Chosen Model
 Providers whose CLI takes a `--model` flag get it on spawn, forwarded as-is; a runner whose command line cannot take one fails loud instead of dropping the choice.
 
@@ -40,3 +45,8 @@ when that command is on PATH. Not detected is a fact, never an error.
 Resolving a runner to spawn fails when its command is not on PATH. The
 error names the runner and its command, says it was not found on PATH, and
 points at `wd runner init` for a provider that is not built in.
+
+## A Runner File That Cannot Work Is Rejected When Added
+A runner file whose regexes do not compile, or whose commands use a
+placeholder that command cannot fill, fails `wd runner add` naming the regex
+or placeholder, and is never written.

@@ -36,13 +36,10 @@ func calls(t *testing.T, bin string) string {
 // waitForCall waits for a detached process to record its argv.
 func waitForCall(t *testing.T, bin, substr string) {
 	t.Helper()
-	_, ok := waitFor(func() (string, bool) {
-		if strings.Contains(calls(t, bin), substr) {
-			return substr, true
-		}
-		return "", false
+	_, ok, err := waitFor(func() (string, bool, error) {
+		return substr, strings.Contains(calls(t, bin), substr), nil
 	}, 5*time.Second, 20*time.Millisecond)
-	if !ok {
+	if err != nil || !ok {
 		t.Fatalf("call %q never reached calls.log", substr)
 	}
 }
@@ -70,13 +67,16 @@ esac`)
   models) echo 'anthropic/claude-opus-5'; echo 'openai/gpt-5.2';;
 esac`)
 	writeFake(t, bin, "codex", `case "$1" in
-  exec) echo '{"type":"thread","session_id":"codex-abc123","thread":{"messages":[]}}';;
+  exec) case "$*" in
+      *resume*) echo '{"type":"rollup","session_id":"codex-abc123","rollup":{"summary":"PONG"}}';;
+      *) echo '{"type":"thread","session_id":"codex-abc123","thread":{"messages":[{"role":"assistant","content":[{"type":"text","text":"READY"}]}]}}';;
+    esac;;
   debug) echo 'codex/opus-5'; echo 'codex/sonnet-4-5';;
 esac`)
 	writeFake(t, bin, "myagent", `case "$1" in
   run) echo "session=victory-001";;
   send) echo ok;;
-  status) echo 'state: waiting';;
+  status) [ "$2" = dead ] && { echo 'no such session' >&2; exit 3; }; echo 'state: waiting';;
   export) echo 'row one'; echo 'row two';;
   models) echo 'victory/1';;
 esac`)
@@ -89,6 +89,7 @@ esac`)
 		`{"type":"user","message":{"content":"go"}}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"READY"}]}}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"STATUS: DONE"}]}}`,
+		``,
 	}, "\n")
 	if err := os.WriteFile(filepath.Join(claudeDir, testSID+".jsonl"), []byte(transcript), 0o644); err != nil {
 		t.Fatalf("write transcript: %v", err)
@@ -106,12 +107,20 @@ status = "myagent status {session}"
 running = 'state: *running'
 waiting = 'state: *waiting'
 exited = 'state: *exited'
-transcript = "myagent export {session}"
+transcript = "myagent export {session} {slug_cwd}"
 models = "myagent models"
 attach = "myagent attach {session}"
 `
 	if err := os.WriteFile(filepath.Join(specDir, "myagent.toml"), []byte(myagent), 0o644); err != nil {
 		t.Fatalf("write myagent.toml: %v", err)
+	}
+	detached := `spawn = "myagent run --name {name} {brief}"
+detach = true
+session_id = 'session=([A-Za-z0-9-]+)'
+transcript = "cat {log}"
+`
+	if err := os.WriteFile(filepath.Join(specDir, "detached.toml"), []byte(detached), 0o644); err != nil {
+		t.Fatalf("write detached.toml: %v", err)
 	}
 
 	t.Run("Spawning Records Runner Session And Attach Hint", func(t *testing.T) {
@@ -188,6 +197,26 @@ attach = "myagent attach {session}"
 				t.Fatalf("transcript = %v, want [READY PONG]", got)
 			}
 		})
+		t.Run("codex reads every turn's recorded stream, from any process", func(t *testing.T) {
+			h, err := codex.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-5 t", Brief: "B"})
+			if err != nil {
+				t.Fatalf("codex spawn: %v", err)
+			}
+			if err := codex.Send(&h, "more"); err != nil {
+				t.Fatalf("codex send: %v", err)
+			}
+			fresh := codexRunner{}
+			got, ok, err := waitFor(func() ([]string, bool, error) {
+				got, err := fresh.Transcript(h)
+				return got, len(got) == 2, err
+			}, 5*time.Second, 20*time.Millisecond)
+			if err != nil {
+				t.Fatalf("codex transcript: %v", err)
+			}
+			if !ok || !slices.Equal(got, []string{"READY", "PONG"}) {
+				t.Fatalf("transcript = %v, want [READY PONG]", got)
+			}
+		})
 	})
 
 	t.Run("A Transcript Follows Its Session Into A Worktree", func(t *testing.T) {
@@ -205,6 +234,55 @@ attach = "myagent attach {session}"
 		}
 		if !slices.Equal(got, []string{"READY", "STATUS: DONE"}) {
 			t.Fatalf("transcript = %v, want [READY STATUS: DONE]", got)
+		}
+	})
+
+	t.Run("A Transcript Skips A Line Still Being Written", func(t *testing.T) {
+		codexDir := filepath.Join(home, ".work-director", "codex")
+		if err := os.MkdirAll(codexDir, 0o755); err != nil {
+			t.Fatalf("mkdir codex: %v", err)
+		}
+		cases := []struct {
+			runner   Runner
+			handle   Handle
+			log      string
+			complete string
+			torn     string
+		}{
+			{
+				runner:   claude,
+				handle:   Handle{Runner: "claude", Session: "5e1f2a3b-0c4d-4e5f-8a6b-7c8d9e0f1a2b", Cwd: cwd},
+				log:      filepath.Join(claudeDir, "5e1f2a3b-0c4d-4e5f-8a6b-7c8d9e0f1a2b.jsonl"),
+				complete: `{"type":"assistant","message":{"content":[{"type":"text","text":"READY"}]}}`,
+				torn:     `{"type":"assistant","message":{"content":[{"type":"te`,
+			},
+			{
+				runner:   codex,
+				handle:   Handle{Runner: "codex", Session: "codex-torn123", Cwd: cwd},
+				log:      filepath.Join(codexDir, "codex-torn123.1.jsonl"),
+				complete: `{"type":"thread","thread":{"messages":[{"role":"assistant","content":[{"type":"text","text":"READY"}]}]}}`,
+				torn:     `{"type":"thread","thread":{"messages":[{"role":"assi`,
+			},
+		}
+		for _, c := range cases {
+			t.Run(c.runner.Name(), func(t *testing.T) {
+				if err := os.WriteFile(c.log, []byte(c.complete+"\n"+c.torn), 0o644); err != nil {
+					t.Fatalf("write log: %v", err)
+				}
+				got, err := c.runner.Transcript(c.handle)
+				if err != nil {
+					t.Fatalf("transcript mid-write: %v", err)
+				}
+				if !slices.Equal(got, []string{"READY"}) {
+					t.Fatalf("transcript mid-write = %v, want [READY]", got)
+				}
+				if err := os.WriteFile(c.log, []byte(c.complete+"\n"+c.torn+"\n"), 0o644); err != nil {
+					t.Fatalf("write log: %v", err)
+				}
+				if got, err := c.runner.Transcript(c.handle); err == nil {
+					t.Fatalf("transcript with a malformed complete line = %v, want a parse error", got)
+				}
+			})
 		}
 	})
 
@@ -326,8 +404,8 @@ attach = "myagent attach {session}"
 				t.Fatalf("allRunnerNames: %v", err)
 			}
 			slices.Sort(known)
-			if !slices.Equal(known, []string{"claude", "codex", "myagent", "opencode"}) {
-				t.Fatalf("runners = %v, want [claude codex myagent opencode]", known)
+			if !slices.Equal(known, []string{"claude", "codex", "detached", "myagent", "opencode"}) {
+				t.Fatalf("runners = %v, want [claude codex detached myagent opencode]", known)
 			}
 			r, err := RunnerNamed("myagent")
 			if err != nil {
@@ -366,6 +444,13 @@ attach = "myagent attach {session}"
 			if !slices.Equal(texts, []string{"row one", "row two"}) {
 				t.Fatalf("transcript = %v, want [row one row two]", texts)
 			}
+			if !strings.Contains(calls(t, bin), "myagent export victory-001 "+projectSlug(cwd)) {
+				t.Fatalf("calls.log missing {slug_cwd} in transcript:\n%s", calls(t, bin))
+			}
+			dead := Handle{Runner: "myagent", Session: "dead", Cwd: cwd}
+			if _, err := r.Status(dead); err == nil || !strings.Contains(err.Error(), "no such session") {
+				t.Fatalf("status of a failing command = %v, want its stderr", err)
+			}
 			models, err := r.Models()
 			if err != nil {
 				t.Fatalf("myagent models: %v", err)
@@ -374,11 +459,49 @@ attach = "myagent attach {session}"
 				t.Fatalf("models = %v, want [victory/1]", models)
 			}
 		})
+		t.Run("a detached spec reads the session's log through {log}, from any process", func(t *testing.T) {
+			r, err := RunnerNamed("detached")
+			if err != nil {
+				t.Fatalf("RunnerNamed: %v", err)
+			}
+			h, err := r.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-9 t", Brief: "B"})
+			if err != nil {
+				t.Fatalf("detached spawn: %v", err)
+			}
+			fresh, err := RunnerNamed("detached")
+			if err != nil {
+				t.Fatalf("RunnerNamed: %v", err)
+			}
+			texts, err := fresh.Transcript(h)
+			if err != nil {
+				t.Fatalf("detached transcript: %v", err)
+			}
+			if !slices.Equal(texts, []string{"session=victory-001"}) {
+				t.Fatalf("transcript = %v, want the spawn log", texts)
+			}
+		})
 		t.Run("an unknown runner name fails loudly with guidance", func(t *testing.T) {
 			_, err := RunnerNamed("cursor")
 			if err == nil || !strings.Contains(err.Error(), "cursor") {
 				t.Fatalf("err = %v, want a loud unknown-runner failure", err)
 			}
 		})
+	})
+
+	t.Run("A Runner File That Cannot Work Is Rejected When Added", func(t *testing.T) {
+		base := `spawn = "x run {brief}"` + "\n" + `session_id = 'session=(\w+)'` + "\n"
+		for _, c := range []struct{ name, text, want string }{
+			{"badregex", base + `status = "x status {session}"` + "\n" + `running = '(unclosed'` + "\n", "running"},
+			{"badplaceholder", base + `send = "x send {brief}"` + "\n", "{brief}"},
+			{"badsession", `spawn = "x"` + "\n" + `session_id = '(bad'` + "\n", "session_id"},
+		} {
+			_, err := WriteSpec(c.name, c.text)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("%s: err = %v, want it to name %s", c.name, err, c.want)
+			}
+			if _, err := os.Stat(filepath.Join(specDir, c.name+".toml")); !os.IsNotExist(err) {
+				t.Errorf("%s: written anyway (%v)", c.name, err)
+			}
+		}
 	})
 }

@@ -5,6 +5,7 @@ package core
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -139,6 +140,13 @@ type Worktree struct {
 	Created string        `json:"created"`
 }
 
+// TranscriptMark is a point in a session's transcript: the session and how
+// many entries it held.
+type TranscriptMark struct {
+	Session string
+	Entries int
+}
+
 type Conflict struct {
 	A     string   `json:"a"`
 	B     string   `json:"b"`
@@ -151,10 +159,49 @@ var Transitions = map[State][]State{
 	StateRunning:    {StateNeedsInput, StateReview, StateBlocked, StateDropped},
 	StateNeedsInput: {StateRunning, StateBlocked, StateDropped},
 	StateReview:     {StateSoftDone, StateRunning, StateBlocked, StateDropped},
-	StateSoftDone:   {StateDone, StateRunning, StateDropped},
+	StateSoftDone:   {StateDone, StateRunning, StateBlocked, StateDropped},
 	StateBlocked:    {StateQueued, StateRunning, StateDone, StateDropped},
 	StateDone:       {},
 	StateDropped:    {},
+}
+
+var (
+	WorkKinds       = []WorkKind{WorkTask, WorkEvolution, WorkWorkflow, WorkGoal, WorkEpic}
+	EventKinds      = []EventKind{EventState, EventReport, EventVerify, EventPr, EventNote, EventSent, EventSpawn, EventAttach, EventQuestion, EventAnswer, EventDecision}
+	FeedbackSources = []FeedbackSource{FeedbackDirector, FeedbackNote, FeedbackAttached}
+	WorktreeKinds   = []WorktreeKind{WorktreeShared, WorktreePrivate}
+	WorktreeStates  = []WorktreeState{WorktreeActive, WorktreeMerged, WorktreeAbandoned}
+)
+
+func parse[T ~string](what string, known []T, s string) (T, error) {
+	if !slices.Contains(known, T(s)) {
+		return "", fmt.Errorf("unknown %s %q", what, s)
+	}
+	return T(s), nil
+}
+
+// ParseState accepts exactly the states Transitions lists.
+func ParseState(s string) (State, error) {
+	if _, ok := Transitions[State(s)]; !ok {
+		return "", fmt.Errorf("unknown work state %q", s)
+	}
+	return State(s), nil
+}
+
+func ParseWorkKind(s string) (WorkKind, error) { return parse("work kind", WorkKinds, s) }
+
+func ParseEventKind(s string) (EventKind, error) { return parse("event kind", EventKinds, s) }
+
+func ParseFeedbackSource(s string) (FeedbackSource, error) {
+	return parse("feedback source", FeedbackSources, s)
+}
+
+func ParseWorktreeKind(s string) (WorktreeKind, error) {
+	return parse("worktree kind", WorktreeKinds, s)
+}
+
+func ParseWorktreeState(s string) (WorktreeState, error) {
+	return parse("worktree state", WorktreeStates, s)
 }
 
 // StaleAfter is how long open work may go without a state change or event

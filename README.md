@@ -49,6 +49,8 @@ claude                                                        # in this repo: th
 ```
 
 `wd` is one static binary (Go, CGO disabled) — no runtime dependencies, nothing to build.
+Briefs and `wd scan` read the taste cards in a work-director checkout: `wd` finds them beside
+its binary or in the working directory, else set `WD_ROOT` to the checkout.
 `wd doctor` reports which registered runners (claude, opencode, codex, your spec files)
 are detected on PATH and whether this directory is a repo. A missing runner is information:
 install the ones you use. Outside a repo it offers `git init`; running it is your call.
@@ -82,6 +84,7 @@ wd epic spawn <e> --count 3       # N parallel sessions on one shared worktree (
 wd claim <task> <session> ; wd impact <task> <+path> ; wd conflict <e>   # who touches what, spot overlap
 wd worktree attach <task> <path> ; wd merge <task>  # on-demand workspaces; merge folds back after passing verify + clean conflicts
 wd concern add <task> "..." ; wd concern resolve <n> "<decision>"        # the decision queue
+wd decide <id> "<decision>"       # record a decision in one line; briefs and ASK: answers read it
 wd scan --adopt <candidate>       # promote a project rule to a global candidate card
 ```
 
@@ -90,9 +93,10 @@ the rest open for another conversation; the coordinator drives every open task, 
 `wd attach`ed from a provider session started outside the director, and answers their `ASK:`
 questions from recorded decisions instead of guessing. Simple goals run in one go (`wd epic spawn`).
 
-Goals are first-class entry points, not conversations. `wd ui` opens a zero-dependency board
-(localhost:8787) listing every goal with a rolled-up goal-level status; each action on the board
-runs through the real `wd` CLI, so the board can never drift from the CLI.
+Goals are first-class entry points, not conversations. `wd tui` is the terminal board: every
+goal with a rolled-up goal-level status, and each item's ledger and live transcript. `wd serve`
+exposes the same board as JSON and a WebSocket event stream on 127.0.0.1:8787 for native
+clients; each action runs through the real `wd` CLI, so a board can never drift from the CLI.
 
 A task's `soft-done` needs only its DONE report; the **epic** closes when every task is done,
 its DONE report is in, verify passes and a PR is recorded. Lazyspec is the repo's own fact:

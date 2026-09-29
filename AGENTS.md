@@ -46,7 +46,8 @@ which session drives it.
   only in chat. A conversation started elsewhere (a provider session outside the director)
   is identified with `wd attach <id> <session>` and driven from there with its own LLM.
 - Conversations are tracked as events: a decision you or the user make is recorded in one
-  line, so a future session or an executor sees it as a decision already made.
+  line (`wd decide <id> "<decision>"`), so a future session or an executor sees it as a
+  decision already made.
 - Carry the same thin coordination contract executors get. Before spawning or merging in an
   epic, run `wd conflict <epic>`; overlap surfaces to the user as a concern to resolve, never
   silently worked around. Executors report clashes the same way and you enforce it.

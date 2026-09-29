@@ -3,6 +3,11 @@ package cli
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -22,7 +27,6 @@ import (
 // key values, error messages and exit codes.
 
 func TestWorkItemsSerializeWithTheWireSchema(t *testing.T) {
-	strPtr := func(s string) *string { return &s }
 	w := core.Work{
 		ID: "abc12345", Project: "p", Title: "T", Detail: "D",
 		Kind: core.WorkTask, State: core.StateRunning,
@@ -44,7 +48,6 @@ func TestWorkItemsSerializeWithTheWireSchema(t *testing.T) {
 }
 
 func TestLedgerObjectsKeepTheirColumnNames(t *testing.T) {
-	strPtr := func(s string) *string { return &s }
 	assertKeys(t, core.Event{ID: 1, Work: "w", Kind: core.EventReport, Body: "b", At: "a"},
 		[]string{"id", "work", "kind", "body", "at"})
 	assertKeys(t, core.Feedback{ID: 1, Text: "t", Project: strPtr("p"), Card: strPtr("c"), Source: core.FeedbackDirector, At: "a"},
@@ -416,6 +419,83 @@ func (f *cliFixture) backdate(t *testing.T, id string, age time.Duration) {
 	}
 }
 
+// rowCount is the number of work, event, concern and worktree rows in the
+// fixture's ledger.
+func (f *cliFixture) rowCount(t *testing.T) int {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	defer db.Close()
+	var n int
+	if err := db.QueryRow(`SELECT (SELECT COUNT(*) FROM work) + (SELECT COUNT(*) FROM event) +
+		(SELECT COUNT(*) FROM concern) + (SELECT COUNT(*) FROM worktree)`).Scan(&n); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	return n
+}
+
+func TestADecisionIsRecordedInOneLineAndReachesTheBrief(t *testing.T) {
+	f := newCLIFixture(t)
+	id := f.ids["standalone"]
+
+	out := f.runOK(t, "decide", id, "use", "sqlite", "everywhere", "--json")
+	var decided core.Event
+	if err := json.Unmarshal([]byte(out), &decided); err != nil {
+		t.Fatalf("decide --json: %v\n%s", err, out)
+	}
+	if decided.Kind != core.EventDecision || decided.Body != "use sqlite everywhere" || decided.Work != id {
+		t.Fatalf("decide recorded %+v, want the decision use sqlite everywhere on %s", decided, id)
+	}
+	if errStr := f.runFail(t, "decide", "nope", "x"); !strings.Contains(errStr, "no work nope") {
+		t.Fatalf("decide on unknown work: stderr %q", errStr)
+	}
+
+	out = f.runOK(t, "concern", "add", id, "which queue?", "--json")
+	f.runOK(t, "concern", "resolve", jsonNumber(t, out, "id"), "use the outbox table")
+	f.runOK(t, "pr", id, "https://example.test/pr-leak")
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	others := map[core.EventKind]string{
+		core.EventReport: "report-leak", core.EventSent: "sent-leak", core.EventNote: "note-leak",
+		core.EventQuestion: "question-leak", core.EventAnswer: "answer-leak",
+	}
+	for kind, body := range others {
+		if _, err := l.AddEvent(id, kind, body); err != nil {
+			t.Fatalf("add %s: %v", kind, err)
+		}
+	}
+	l.Close()
+
+	brief := f.runOK(t, "brief", id)
+	start := strings.Index(brief, "Decisions already made")
+	if start < 0 {
+		t.Fatalf("brief has no decisions section:\n%s", brief)
+	}
+	lines := strings.Split(brief[start:], "\n")
+	end := 1
+	for end < len(lines) && strings.HasPrefix(lines[end], "- ") {
+		end++
+	}
+	section := strings.Join(lines[:end], "\n")
+	for _, want := range []string{"- use sqlite everywhere", "- use the outbox table"} {
+		if !strings.Contains(section, want) {
+			t.Fatalf("decisions section missing %q:\n%s", want, section)
+		}
+	}
+	for _, leak := range []string{"resolved:", "pr-leak", "report-leak", "sent-leak", "note-leak", "question-leak", "answer-leak"} {
+		if strings.Contains(section, leak) {
+			t.Fatalf("decisions section carries %q, which is no decision:\n%s", leak, section)
+		}
+	}
+	if end != 3 {
+		t.Fatalf("decisions section lists %d items, want the 2 decisions:\n%s", end-1, section)
+	}
+}
+
 func TestErrorsAndExitCodesMatch(t *testing.T) {
 	f := newCLIFixture(t)
 	epic, t1 := f.ids["epic"], f.ids["t1"]
@@ -446,6 +526,28 @@ func TestErrorsAndExitCodesMatch(t *testing.T) {
 		if !strings.Contains(errStr, c.want) {
 			t.Errorf("wd %s: stderr %q does not contain %q", strings.Join(c.args, " "), errStr, c.want)
 		}
+	}
+
+	f.runOK(t, "projects", "add", "failing", f.sample, "--verify", "false", "--lazyspec", "n")
+	id := jsonString(t, f.runOK(t, "add", "failing", "Checked", "--json"), "id")
+	if errStr := f.runFail(t, "verify", id); !strings.Contains(errStr, "verify failed for "+id) {
+		t.Fatalf("failing verify: stderr %q, want verify failed for %s", errStr, id)
+	}
+	var verifies []core.Event
+	if err := json.Unmarshal([]byte(f.runOK(t, "events", id, "--json")), &verifies); err != nil {
+		t.Fatalf("events --json: %v", err)
+	}
+	recorded := 0
+	for _, e := range verifies {
+		if e.Kind == core.EventVerify {
+			recorded++
+			if !strings.HasPrefix(e.Body, "fail\n") {
+				t.Fatalf("verify event = %q, want the failure recorded", e.Body)
+			}
+		}
+	}
+	if recorded != 1 {
+		t.Fatalf("verify events = %d, want the failed verify recorded once", recorded)
 	}
 }
 
@@ -503,4 +605,542 @@ func jsonNumber(t *testing.T, out, key string) string {
 	}
 	t.Fatalf("key %s not a number in %s", key, out)
 	return ""
+}
+
+func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
+	f := newCLIFixture(t)
+	epic, planEpic, t2, t3, standalone := f.ids["epic"], f.ids["planEpic"], f.ids["t2"], f.ids["t3"], f.ids["standalone"]
+	waited := jsonString(t, f.runOK(t, "add", "sample-app", "Waited on", "--epic", epic, "--json"), "id")
+	attached := jsonString(t, f.runOK(t, "add", "sample-app", "Attached", "--json"), "id")
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "A goal", "--json"), "id")
+	ready := jsonString(t, f.runOK(t, "add", "sample-app", "Ready", "--epic", epic, "--json"), "id")
+	f.runOK(t, "set", ready, "running")
+	f.runOK(t, "set", ready, "review")
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	if _, err := l.AddEvent(ready, core.EventReport, "DONE\nSTATUS: DONE"); err != nil {
+		t.Fatalf("report: %v", err)
+	}
+	l.Close()
+	spec := filepath.Join(t.TempDir(), "added.toml")
+	if err := os.WriteFile(spec, []byte("spawn = \"added run {brief}\"\nsession_id = 'session=(\\w+)'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oneDocument := func(args []string, out string) {
+		t.Helper()
+		dec := json.NewDecoder(strings.NewReader(out))
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			t.Errorf("wd %s: %v in %q", strings.Join(args, " "), err, out)
+			return
+		}
+		if dec.More() {
+			t.Errorf("wd %s: more than one document in %q", strings.Join(args, " "), out)
+		}
+	}
+	env := f.envWithPath(t, f.pathWith(t, "claude", "opencode", "codex", "planner"))
+	covered := map[string]bool{}
+	for _, args := range [][]string{
+		{"projects"}, {"projects", "list"},
+		{"projects", "add", "second", f.sample, "--lazyspec", "n"},
+		{"projects", "add", "third", f.sample, "--lazyspec", "y"},
+		{"models", "opencode"},
+		{"runner", "list"}, {"runner", "init", "fresh"}, {"runner", "add", "added", spec},
+		{"add", "sample-app", "Fresh task"},
+		{"tasks", epic},
+		{"brief", t3},
+		{"spawn", standalone},
+		{"report", standalone},
+		{"verify", standalone},
+		{"pr", standalone, "https://example.test/pr/1"},
+		{"soft-done", ready},
+		{"done", ready},
+		{"epic", "plan", planEpic, "--runner", "planner"},
+		{"epic", "spawn", planEpic, "--count", "2", "--runner", "claude,opencode"},
+		{"epic", "run", epic, "--only", t3},
+		{"epic", "run", epic, "--only", waited, "--wait", "--timeout", "1"},
+		{"epic", "review", epic},
+		{"epic", "status", epic},
+		{"goal", "status", goal},
+		{"send", t2, "hello"},
+		{"attach", attached, "ses_outside"},
+		{"decide", t2, "use", "sqlite"},
+		{"set", attached, "blocked"},
+		{"status"}, {"status", "--all"},
+		{"context"}, {"context", "sample-app"}, {"context", t2},
+		{"open", "README.md"}, {"open", t2, "README.md"},
+		{"claim", t3, "me"}, {"claim", t3, "--drop"},
+		{"impact", t3, "+src/x"}, {"impact", t3, "--clear"},
+		{"conflict", epic},
+		{"worktree", "list", epic}, {"worktree", "attach", t3, filepath.Join(f.dir, "elsewhere")},
+		{"verify", t2}, {"merge", t2},
+		{"concern", "add", t3, "a worry"}, {"concern", "list"}, {"concern", "list", epic},
+		{"concern", "resolve", "2", "settled"},
+		{"scan"},
+		{"events", t2},
+		{"feedback", "add", "a note"}, {"feedback"}, {"feedback", "list"},
+		{"distill"},
+		{"doctor"},
+	} {
+		covered[args[0]] = true
+		args = append(args, "--json")
+		code, out, errStr := f.runEnv(t, env, args...)
+		if code != 0 {
+			t.Errorf("wd %s exited %d: %s", strings.Join(args, " "), code, errStr)
+			continue
+		}
+		oneDocument(args, out)
+	}
+	covered["serve"] = true
+	oneDocument([]string{"serve", "--json"}, f.serveOutput(t, "--json"))
+	covered["tui"] = true
+	if code, out, errStr := f.run(t, "tui", "--json"); code != 1 || out != "" || !strings.Contains(errStr, "--json") {
+		t.Errorf("wd tui --json: exit %d, stdout %q, stderr %q; want 1 refusing --json with nothing on stdout", code, out, errStr)
+	}
+	for cmd := range commands {
+		if !covered[cmd] {
+			t.Errorf("wd %s --json is not exercised", cmd)
+		}
+	}
+}
+
+// serveOutput runs wd serve on a free port until it has announced its
+// address, then stops it and returns everything it wrote to stdout.
+func (f *cliFixture) serveOutput(t *testing.T, args ...string) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("find a free port: %v", err)
+	}
+	port := strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
+	ln.Close()
+	cmd := exec.Command(f.goBin, append([]string{"serve", "--port", port}, args...)...)
+	cmd.Env = f.env(t, f.bin)
+	cmd.Dir = f.dir
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start serve: %v", err)
+	}
+	var out []byte
+	buf := make([]byte, 4096)
+	for !strings.Contains(string(out), "127.0.0.1:"+port) {
+		n, err := stdout.Read(buf)
+		out = append(out, buf[:n]...)
+		if err != nil {
+			t.Fatalf("serve stopped before announcing its address: %v\n%s", err, out)
+		}
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("stop serve: %v", err)
+	}
+	rest, err := io.ReadAll(stdout)
+	if err != nil {
+		t.Fatalf("read serve output: %v", err)
+	}
+	cmd.Wait()
+	return string(append(out, rest...))
+}
+
+func TestCommandsOnUnknownWorkFailNamingIt(t *testing.T) {
+	f := newCLIFixture(t)
+	before := f.rowCount(t)
+	defer func() {
+		if after := f.rowCount(t); after != before {
+			t.Fatalf("ledger rows %d → %d, want nothing recorded", before, after)
+		}
+	}()
+	for _, args := range [][]string{
+		{"brief", "nope"}, {"spawn", "nope"}, {"send", "nope", "x"}, {"attach", "nope", "ses_x"},
+		{"report", "nope"}, {"verify", "nope"}, {"decide", "nope", "x"}, {"pr", "nope", "http://x"},
+		{"soft-done", "nope"}, {"set", "nope", "blocked"}, {"done", "nope"}, {"claim", "nope", "me"},
+		{"impact", "nope", "+src"}, {"merge", "nope"}, {"events", "nope"}, {"tasks", "nope"},
+		{"conflict", "nope"}, {"epic", "status", "nope"}, {"concern", "add", "nope", "x"},
+		{"concern", "list", "nope"}, {"worktree", "attach", "nope", f.sample}, {"worktree", "list", "nope"},
+		{"add", "sample-app", "x", "--epic", "nope"}, {"epic", "plan", "nope"}, {"epic", "spawn", "nope"},
+		{"epic", "run", "nope"}, {"epic", "review", "nope"}, {"epic", "run", f.ids["epic"], "--only", "nope"},
+		{"epic", "run", f.ids["epic"], "--only", f.ids["t3"] + ",nope"},
+	} {
+		if code, _, errStr := f.run(t, args...); code != 1 || !strings.Contains(errStr, "no work nope") {
+			t.Errorf("wd %s: exit %d, stderr %q, want 1 and no work nope", strings.Join(args, " "), code, errStr)
+		}
+	}
+}
+
+func TestProjectsAddNeverWritesAFileItCannotParse(t *testing.T) {
+	f := newCLIFixture(t)
+	for i, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{f.sample, "--mode", "bogus"}, "unknown mode bogus"},
+		{[]string{f.sample, "--model", "m\nmode: ask"}, `--model "m\nmode: ask"`},
+		{[]string{f.sample, "--model", "m\nno key here"}, `--model "m\nno key here"`},
+		{[]string{f.sample, "--runner", " claude"}, `--runner " claude"`},
+		{[]string{f.sample, "--stack", "go\nts"}, `--stack "go\nts"`},
+		{[]string{f.sample, "--workflow", "/lazyspec\n---"}, `--workflow "/lazyspec\n---"`},
+		{[]string{f.sample, "--verify", "go test\nverify: true"}, `--verify "go test\nverify: true"`},
+		{[]string{f.sample + "\nmode: ask"}, `path "` + f.sample + `\nmode: ask"`},
+	} {
+		name := "held" + strconv.Itoa(i)
+		code, _, errStr := f.run(t, append([]string{"projects", "add", name}, append(c.args, "--lazyspec", "n")...)...)
+		if code != 1 || !strings.Contains(errStr, c.want) {
+			t.Errorf("projects add %q: exit %d, stderr %q; want 1 naming %s", c.args, code, errStr, c.want)
+		}
+		if _, err := os.Stat(filepath.Join(f.wdHome, "projects", name+".md")); !os.IsNotExist(err) {
+			t.Errorf("projects add %q: project file left behind: %v", c.args, err)
+		}
+	}
+	f.runOK(t, "status")
+}
+
+func TestAttachRecordsTheRefAndCwdItIsGiven(t *testing.T) {
+	f := newCLIFixture(t)
+	t3 := f.ids["t3"]
+	out := f.runOK(t, "attach", t3, "ses_ref", "--ref", "r1", "--cwd", f.sample, "--json")
+	assertHasKey(t, out, `"ref": "r1"`)
+	assertHasKey(t, out, `"cwd": "`+f.sample+`"`)
+	out = f.runOK(t, "status", "--json")
+	var rows []core.Work
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("status --json: %v", err)
+	}
+	for _, w := range rows {
+		if w.ID == t3 && (strOrEmpty(w.Ref) != "r1" || strOrEmpty(w.Cwd) != f.sample || strOrEmpty(w.Session) != "ses_ref") {
+			t.Fatalf("%s = ref %v cwd %v session %v, want r1, %s, ses_ref", t3, w.Ref, w.Cwd, w.Session, f.sample)
+		}
+	}
+}
+
+func TestSetCannotSkipTheSoftDoneGate(t *testing.T) {
+	f := newCLIFixture(t)
+	t2, t3 := f.ids["t2"], f.ids["t3"]
+	f.runOK(t, "set", t2, "review")
+	f.runOK(t, "set", t3, "running")
+	f.runOK(t, "set", t3, "review")
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	defer l.Close()
+	if _, err := l.AddEvent(t3, core.EventReport, "DONE\nSTATUS: DONE"); err != nil {
+		t.Fatalf("report: %v", err)
+	}
+
+	errStr := f.runFail(t, "set", t2, "soft-done")
+	if !strings.Contains(errStr, "not ready for soft-done") {
+		t.Fatalf("stderr = %q, want the soft-done gate", errStr)
+	}
+	out := f.runOK(t, "set", t3, "soft-done", "--json")
+	assertHasKey(t, out, `"state": "soft-done"`)
+	for id, want := range map[string]core.State{t2: core.StateReview, t3: core.StateSoftDone} {
+		w, err := l.Get(id)
+		if err != nil {
+			t.Fatalf("get %s: %v", id, err)
+		}
+		if w.State != want {
+			t.Errorf("%s = %s, want %s", id, w.State, want)
+		}
+	}
+}
+
+func TestVerifyWithNoCommandsIsRefusedWithoutRecording(t *testing.T) {
+	f := newCLIFixture(t)
+	f.runOK(t, "projects", "add", "unverified", f.sample, "--lazyspec", "n")
+	id := jsonString(t, f.runOK(t, "add", "unverified", "Unchecked", "--json"), "id")
+	if errStr := f.runFail(t, "verify", id); !strings.Contains(errStr, "no verify commands") {
+		t.Fatalf("stderr = %q, want no verify commands", errStr)
+	}
+	if out := f.runOK(t, "events", id, "--json"); strings.Contains(out, `"kind": "verify"`) {
+		t.Fatalf("a verify event was recorded: %s", out)
+	}
+}
+
+func TestAnAdoptedCardLeavesThePromotionCandidates(t *testing.T) {
+	f := newCLIFixture(t)
+	root := t.TempDir()
+	card := filepath.Join(root, "taste", "cards", "judgment", "proj-rule.md")
+	if err := os.MkdirAll(filepath.Dir(card), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	text := "---\nid: proj-rule\ntitle: A rule\ncategory: judgment\nscope: [project:sample-app]\nkind: practice\nstatus: adopted\nalways: false\nenforce: []\nevidence: []\n---\nKeep it small.\n"
+	if err := os.WriteFile(card, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := f.env(t, f.bin)
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "WD_ROOT=") {
+			env[i] = "WD_ROOT=" + root
+		}
+	}
+	run := func(args ...string) (int, string, string) {
+		t.Helper()
+		return f.runEnv(t, env, args...)
+	}
+	promoted := func() []string {
+		t.Helper()
+		code, out, errStr := run("scan", "--json")
+		if code != 0 {
+			t.Fatalf("scan exited %d: %s", code, errStr)
+		}
+		var res struct {
+			Promotion []struct {
+				Card struct {
+					ID string `json:"id"`
+				} `json:"card"`
+			} `json:"promotion"`
+		}
+		if err := json.Unmarshal([]byte(out), &res); err != nil {
+			t.Fatalf("scan --json: %v\n%s", err, out)
+		}
+		var ids []string
+		for _, p := range res.Promotion {
+			ids = append(ids, p.Card.ID)
+		}
+		return ids
+	}
+	if ids := promoted(); len(ids) != 1 || ids[0] != "proj-rule" {
+		t.Fatalf("promotion candidates = %v, want [proj-rule]", ids)
+	}
+	if code, _, errStr := run("scan", "--adopt", "proj-rule"); code != 0 {
+		t.Fatalf("adopt exited %d: %s", code, errStr)
+	}
+	global := filepath.Join(root, "taste", "cards", "judgment", "proj-rule-global.md")
+	written, err := os.ReadFile(global)
+	if err != nil {
+		t.Fatalf("global candidate: %v", err)
+	}
+	if ids := promoted(); len(ids) != 0 {
+		t.Fatalf("promotion candidates after adopting = %v, want none", ids)
+	}
+	code, _, errStr := run("scan", "--adopt", "proj-rule")
+	if code != 1 || !strings.Contains(errStr, "no promotion candidate proj-rule") {
+		t.Fatalf("second adopt: exit %d, stderr %q; want 1 with no promotion candidate", code, errStr)
+	}
+	if again, err := os.ReadFile(global); err != nil || string(again) != string(written) {
+		t.Fatalf("global candidate changed by the second adopt: %v", err)
+	}
+}
+
+func TestEpicRunSpawnsOnlyChildrenNotYetUnderWay(t *testing.T) {
+	f := newCLIFixture(t)
+	epic, t2, t3 := f.ids["epic"], f.ids["t2"], f.ids["t3"]
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	defer l.Close()
+	child := func(parent, title string, path ...core.State) string {
+		t.Helper()
+		w, err := l.Add("sample-app", title, ledger.AddOptions{Parent: &parent})
+		if err != nil {
+			t.Fatalf("add %s: %v", title, err)
+		}
+		for _, s := range path {
+			if s == core.StateSoftDone {
+				if _, err := l.AddEvent(w.ID, core.EventReport, "DONE"); err != nil {
+					t.Fatalf("report %s: %v", title, err)
+				}
+				_, err = l.SoftDone(w.ID, false)
+			} else {
+				_, err = l.Transition(w.ID, s)
+			}
+			if err != nil {
+				t.Fatalf("%s → %s: %v", title, s, err)
+			}
+		}
+		return w.ID
+	}
+	claimed := child(epic, "Claimed by an outside session", core.StateRunning)
+	if _, err := l.SetClaim(claimed, strPtr("ses_outside")); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	underWay := []string{
+		t2,
+		claimed,
+		child(epic, "In review", core.StateRunning, core.StateReview),
+		child(epic, "Waiting on a human", core.StateRunning, core.StateNeedsInput),
+		child(epic, "Blocked", core.StateBlocked),
+		child(epic, "Soft done", core.StateRunning, core.StateReview, core.StateSoftDone),
+	}
+	briefed := child(epic, "Briefed", core.StateBriefed)
+	bare := child(epic, "Running with no session or claim", core.StateRunning)
+	before := map[string]core.Work{}
+	for _, id := range underWay {
+		if before[id], err = l.Get(id); err != nil {
+			t.Fatalf("get %s: %v", id, err)
+		}
+	}
+
+	out := f.runOK(t, "epic", "run", epic)
+	if !strings.Contains(out, "3 task(s) spawned") {
+		t.Fatalf("epic run = %q, want 3 task(s) spawned", out)
+	}
+	for _, id := range underWay {
+		w, err := l.Get(id)
+		if err != nil {
+			t.Fatalf("get %s: %v", id, err)
+		}
+		was := before[id]
+		if w.State != was.State || strOrEmpty(w.Session) != strOrEmpty(was.Session) || strOrEmpty(w.Claim) != strOrEmpty(was.Claim) {
+			t.Errorf("%s = %s session %v claim %v, want %s session %v claim %v untouched", id, w.State, w.Session, w.Claim, was.State, was.Session, was.Claim)
+		}
+	}
+	for _, id := range []string{t3, briefed, bare} {
+		if w, err := l.Get(id); err != nil || w.State != core.StateRunning || w.Session == nil {
+			t.Errorf("%s = %+v, %v; want running with a session", id, w, err)
+		}
+	}
+
+	idle, err := l.Add("sample-app", "Nothing to start", ledger.AddOptions{Kind: core.WorkEpic})
+	if err != nil {
+		t.Fatalf("add epic: %v", err)
+	}
+	child(idle.ID, "Blocked alone", core.StateBlocked)
+	out = f.runOK(t, "epic", "run", idle.ID, "--json")
+	if !strings.Contains(out, `"spawned": []`) {
+		t.Fatalf("epic run = %s, want nothing spawned", out)
+	}
+	if w, err := l.Get(idle.ID); err != nil || w.State != core.StateQueued {
+		t.Fatalf("epic = %+v, %v; want it left queued", w, err)
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
+func TestSendAndReportReachAChildWhereItsEpicsPassDoes(t *testing.T) {
+	f := newCLIFixture(t)
+	bin := t.TempDir()
+	recorder := "#!/usr/bin/env bash\nmkdir -p \"$WD_FAKE_STATE\"\n" +
+		"printf '%s|%s|%s|%s\\n' \"$1\" \"$2\" \"$3\" \"$PWD\" >> \"$WD_FAKE_STATE/recorder.log\"\n" +
+		"case \"$2\" in status) echo 'state: waiting';; export) echo 'STATUS: DONE';; *) echo ok;; esac\n"
+	if err := os.WriteFile(filepath.Join(bin, "recorder"), []byte(recorder), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"rec-epic", "rec-project"} {
+		spec := fmt.Sprintf("name = %[1]q\nspawn = \"recorder %[1]s run {brief}\"\nsession_id = 'session=(\\S+)'\n"+
+			"send = \"recorder %[1]s send {session} {text}\"\nstatus = \"recorder %[1]s status {session}\"\n"+
+			"running = 'state: *running'\nwaiting = 'state: *waiting'\nexited = 'state: *exited'\n"+
+			"transcript = \"recorder %[1]s export {session}\"\nattach = \"recorder %[1]s attach {session}\"\n", name)
+		if err := os.WriteFile(filepath.Join(f.wdHome, "runners", name+".toml"), []byte(spec), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := f.env(t, bin+string(os.PathListSeparator)+f.bin)
+	run := func(args ...string) string {
+		t.Helper()
+		code, out, errStr := f.runEnv(t, env, args...)
+		if code != 0 {
+			t.Fatalf("wd %s exited %d: %s", strings.Join(args, " "), code, errStr)
+		}
+		return out
+	}
+	run("projects", "add", "recorded", f.sample, "--runner", "rec-project", "--lazyspec", "n")
+	child := func(epic, claim string) string {
+		t.Helper()
+		id := jsonString(t, run("add", "recorded", "Child of "+epic, "--epic", epic, "--json"), "id")
+		run("claim", id, claim)
+		run("set", id, "running")
+		return id
+	}
+	bare := jsonString(t, run("add", "recorded", "Epic of its project", "--kind", "epic", "--json"), "id")
+	own := jsonString(t, run("add", "recorded", "Epic with its own runner", "--kind", "epic", "--json"), "id")
+	run("attach", own, "ses_epic", "--runner", "rec-epic")
+	shared := filepath.Join(f.dir, "shared")
+	if err := os.MkdirAll(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	if _, err := l.AddWorktree(own, ledger.WorktreeInfo{Path: shared, Kind: core.WorktreeShared}); err != nil {
+		t.Fatalf("shared worktree: %v", err)
+	}
+	l.Close()
+
+	for _, c := range []struct {
+		epic, claim, runner, dir string
+	}{
+		{bare, "ses_bare", "rec-project", f.sample},
+		{own, "ses_own", "rec-epic", shared},
+	} {
+		id := child(c.epic, c.claim)
+		log := filepath.Join(f.dir, "fake-state", "recorder.log")
+		reached := func(what string, args ...string) {
+			t.Helper()
+			if err := os.Remove(log); err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			run(args...)
+			data, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatalf("%s: nothing reached a runner: %v", what, err)
+			}
+			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+				parts := strings.Split(line, "|")
+				if len(parts) != 4 || parts[0] != c.runner || parts[2] != c.claim || parts[3] != c.dir {
+					t.Errorf("%s reached %q, want %s %s in %s", what, line, c.runner, c.claim, c.dir)
+				}
+			}
+		}
+		reached("wd send", "send", id, "hello")
+		reached("wd epic review", "epic", "review", c.epic)
+		reached("wd report", "report", id)
+	}
+}
+
+func TestAClaimNamesSomeone(t *testing.T) {
+	f := newCLIFixture(t)
+	id := jsonString(t, f.runOK(t, "add", "sample-app", "Unclaimed", "--json"), "id")
+	for _, args := range [][]string{{"claim", id}, {"claim", id, ""}} {
+		if errStr := f.runFail(t, args...); !strings.Contains(errStr, "usage: wd claim") {
+			t.Errorf("wd %q: stderr %q, want claim usage", args, errStr)
+		}
+	}
+	t2 := f.ids["t2"]
+	f.runFail(t, "claim", t2, "")
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	defer l.Close()
+	for id, want := range map[string]string{id: "", t2: "ses_y"} {
+		w, err := l.Get(id)
+		if err != nil {
+			t.Fatalf("get %s: %v", id, err)
+		}
+		if strOrEmpty(w.Claim) != want || (want == "" && w.Claim != nil) {
+			t.Errorf("%s claim = %v, want it left as %q", id, w.Claim, want)
+		}
+	}
+}
+
+func TestFlagsThatDoNotParseFail(t *testing.T) {
+	f := newCLIFixture(t)
+	epic, t2, t3 := f.ids["epic"], f.ids["t2"], f.ids["t3"]
+	for _, c := range []struct {
+		args []string
+		flag string
+	}{
+		{[]string{"report", t2, "--tail", "x"}, "--tail"},
+		{[]string{"report", t2, "--tail="}, "--tail"},
+		{[]string{"report", t2, "--tail"}, "--tail"},
+		{[]string{"attach", t3, "ses_x", "--ref"}, "--ref"},
+		{[]string{"attach", t3, "ses_x", "--ref", "--cwd", f.sample}, "--ref"},
+		{[]string{"attach", t3, "ses_x", "--ref", "--json"}, "--ref"},
+		{[]string{"attach", t3, "ses_x", "--cwd", "--json"}, "--cwd"},
+		{[]string{"status", "--json=x"}, "--json"},
+		{[]string{"epic", "run", epic, "--wait", "--timeout", "30m"}, "--timeout"},
+		{[]string{"epic", "spawn", f.ids["planEpic"], "--count", "0"}, "--count"},
+		{[]string{"serve", "--port", "http"}, "--port"},
+	} {
+		if errStr := f.runFail(t, c.args...); !strings.Contains(errStr, c.flag) {
+			t.Errorf("wd %s: stderr %q, want %s named", strings.Join(c.args, " "), errStr, c.flag)
+		}
+	}
 }

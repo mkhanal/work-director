@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"errors"
+	"io"
 	"os"
 	"strings"
 	"unicode/utf8"
@@ -36,6 +38,8 @@ type terminal struct {
 	old  *unix.Termios
 	keys chan Key
 	done chan struct{}
+	// err is why input stopped; written before keys closes.
+	err error
 }
 
 // NewTerminal opens the TUI's terminal and starts reading keys.
@@ -67,16 +71,28 @@ func (t *terminal) raw() error {
 	return unix.IoctlSetTermios(fd, tcsets, &raw)
 }
 
-// read parses input bytes into keys until the terminal closes.
+// read parses input into keys until input fails, then closes keys. A failure
+// caused by Close is not an error.
 func (t *terminal) read() {
-	b := make([]byte, 1)
+	err := t.decode()
+	select {
+	case <-t.done:
+	default:
+		t.err = err
+	}
+	close(t.keys)
+}
+
+// decode parses input bytes into keys until a read fails.
+func (t *terminal) decode() error {
 	for {
-		if !t.readByte(b) {
-			return
+		b, err := t.readByte()
+		if err != nil {
+			return err
 		}
-		switch b[0] {
+		switch b {
 		case 0x1b:
-			t.escape()
+			err = t.escape()
 		case '\r', '\n':
 			t.send(Key{Kind: KeyEnter})
 		case 0x03:
@@ -84,30 +100,32 @@ func (t *terminal) read() {
 		case 0x7f, 0x08:
 			t.send(Key{Kind: KeyBackspace})
 		default:
-			if b[0] >= 0x20 && b[0] < 0x7f {
-				t.send(Key{Kind: KeyRune, Rune: rune(b[0])})
-				continue
+			if b >= 0x20 && b < 0x7f {
+				t.send(Key{Kind: KeyRune, Rune: rune(b)})
+			} else if b >= 0x80 {
+				err = t.readUTF8(b)
 			}
-			if b[0] >= 0x80 {
-				t.readUTF8(b[0])
-			}
+		}
+		if err != nil {
+			return err
 		}
 	}
 }
 
 // readUTF8 reads the rest of a multi-byte rune.
-func (t *terminal) readUTF8(first byte) {
-	n := runeLen(first)
-	buf := make([]byte, n)
-	buf[0] = first
-	for i := 1; i < n; i++ {
-		if !t.readByte(buf[i:]) {
-			return
+func (t *terminal) readUTF8(first byte) error {
+	buf := []byte{first}
+	for len(buf) < runeLen(first) {
+		b, err := t.readByte()
+		if err != nil {
+			return err
 		}
+		buf = append(buf, b)
 	}
 	if r, _ := utf8.DecodeRune(buf); r != utf8.RuneError {
 		t.send(Key{Kind: KeyRune, Rune: r})
 	}
+	return nil
 }
 
 // runeLen is the length of a UTF-8 sequence by its leading byte.
@@ -122,41 +140,70 @@ func runeLen(b byte) int {
 	}
 }
 
-// escape reads the rest of an escape sequence with a short deadline: arrows
-// and friends, or a bare Escape.
-func (t *terminal) escape() {
-	t.setDeadline(true)
-	defer t.setDeadline(false)
-	b := make([]byte, 1)
-	if !t.readByte(b) || b[0] != '[' {
-		t.send(Key{Kind: KeyEscape})
-		return
+// escape reads the rest of an escape sequence with a short deadline, so a
+// bare Escape is told apart from the start of a sequence.
+func (t *terminal) escape() error {
+	if err := t.setDeadline(true); err != nil {
+		return err
 	}
-	if !t.readByte(b) {
-		t.send(Key{Kind: KeyEscape})
-		return
+	var readErr error
+	k, ok := escapeKey(func() (byte, bool) {
+		if readErr != nil {
+			return 0, false
+		}
+		b, err := t.readByte()
+		// With the deadline on, a timeout reads as io.EOF.
+		if err != nil && !errors.Is(err, io.EOF) {
+			readErr = err
+		}
+		return b, err == nil
+	})
+	if err := errors.Join(readErr, t.setDeadline(false)); err != nil {
+		return err
 	}
-	var k Key
-	switch b[0] {
+	if ok {
+		t.send(k)
+	}
+	return nil
+}
+
+// escapeKey parses the bytes after ESC; next reports false when no byte
+// arrives in time. A lone ESC, or ESC followed by anything but '[', is
+// Escape. A CSI sequence (ESC [, parameter bytes 0x30–0x3F, intermediate
+// bytes 0x20–0x2F, a final byte 0x40–0x7E) is consumed whole: final A–D are
+// the arrows, anything else — or a sequence cut short — yields no key.
+func escapeKey(next func() (byte, bool)) (Key, bool) {
+	b, ok := next()
+	if !ok || b != '[' {
+		return Key{Kind: KeyEscape}, true
+	}
+	if b, ok = next(); !ok {
+		return Key{Kind: KeyEscape}, true
+	}
+	for b >= 0x20 && b <= 0x3f {
+		if b, ok = next(); !ok {
+			return Key{}, false
+		}
+	}
+	switch b {
 	case 'A':
-		k = Key{Kind: KeyUp}
+		return Key{Kind: KeyUp}, true
 	case 'B':
-		k = Key{Kind: KeyDown}
+		return Key{Kind: KeyDown}, true
 	case 'C':
-		k = Key{Kind: KeyRight}
+		return Key{Kind: KeyRight}, true
 	case 'D':
-		k = Key{Kind: KeyLeft}
-	default:
-		k = Key{Kind: KeyEscape}
+		return Key{Kind: KeyLeft}, true
 	}
-	t.send(k)
+	return Key{}, false
 }
 
 // setDeadline switches the input between blocking reads and 100ms reads.
-func (t *terminal) setDeadline(on bool) {
-	cur, err := unix.IoctlGetTermios(int(t.in.Fd()), tcgets)
+func (t *terminal) setDeadline(on bool) error {
+	fd := int(t.in.Fd())
+	cur, err := unix.IoctlGetTermios(fd, tcgets)
 	if err != nil {
-		return
+		return err
 	}
 	if on {
 		cur.Cc[unix.VMIN] = 0
@@ -165,16 +212,20 @@ func (t *terminal) setDeadline(on bool) {
 		cur.Cc[unix.VMIN] = 1
 		cur.Cc[unix.VTIME] = 0
 	}
-	unix.IoctlSetTermios(int(t.in.Fd()), tcsets, cur)
+	return unix.IoctlSetTermios(fd, tcsets, cur)
 }
 
-// readByte reads one byte, reporting whether one arrived.
-func (t *terminal) readByte(b []byte) bool {
-	n, err := t.in.Read(b)
-	if err != nil || n == 0 {
-		return false
+// readByte reads one byte.
+func (t *terminal) readByte() (byte, error) {
+	var b [1]byte
+	n, err := t.in.Read(b[:])
+	if n == 1 {
+		return b[0], nil
 	}
-	return true
+	if err == nil {
+		err = io.EOF
+	}
+	return 0, err
 }
 
 // send pushes a key to the app, dropping it when the terminal is closing.
@@ -197,7 +248,12 @@ func (t *terminal) Size() (int, int, error) {
 // Keys returns the channel of input events.
 func (t *terminal) Keys() <-chan Key { return t.keys }
 
-// Write draws one frame: cursor home, the lines, then clear to the end.
+// Err is why input stopped; valid once Keys is closed.
+func (t *terminal) Err() error { return t.err }
+
+// Write draws one frame: cursor home, the lines, then clear to the end. No
+// newline follows the last line: a frame as tall as the terminal must not
+// scroll it.
 func (t *terminal) Write(lines []string) error {
 	w, _, err := t.Size()
 	if err != nil {
@@ -205,9 +261,11 @@ func (t *terminal) Write(lines []string) error {
 	}
 	var b strings.Builder
 	b.WriteString("\x1b[H")
-	for _, l := range lines {
+	for i, l := range lines {
+		if i > 0 {
+			b.WriteString("\r\n")
+		}
 		b.WriteString(fit(l, w))
-		b.WriteString("\r\n")
 	}
 	b.WriteString("\x1b[J")
 	_, err = t.out.WriteString(b.String())
@@ -216,12 +274,13 @@ func (t *terminal) Write(lines []string) error {
 
 // Close restores the terminal and stops reading.
 func (t *terminal) Close() error {
+	var restore error
 	if t.old != nil {
-		unix.IoctlSetTermios(int(t.in.Fd()), tcsets, t.old)
+		restore = unix.IoctlSetTermios(int(t.in.Fd()), tcsets, t.old)
 		t.old = nil
 	}
 	close(t.done)
-	return t.in.Close()
+	return errors.Join(restore, t.in.Close())
 }
 
 // fit truncates one line to the terminal's width.

@@ -153,17 +153,66 @@ type PassResult struct {
 	Waiting   []string `json:"waiting"`
 }
 
-var askRe = regexp.MustCompile(`ASK:\s*(.+)`)
-var statusRe = regexp.MustCompile(`STATUS:\s*(DONE|BLOCKED)`)
+var askRe = regexp.MustCompile(`ASK:\s*(\S.*)`)
+var statusRe = regexp.MustCompile(`STATUS:\s*(DONE|BLOCKED|NEEDS-INPUT)`)
 
-// CoordinateOnce runs one coordination pass over the epic's children:
-// answer known questions, escalate unknown ones to needs-input, harvest
-// DONE/BLOCKED reports. It does not spawn. A nil resolve uses the runner
-// registry.
-func CoordinateOnce(epic core.Work, l *ledger.Ledger, resolve func(name string) (runner.Runner, error)) (PassResult, error) {
-	if resolve == nil {
-		resolve = runner.RunnerNamed
+// Handle is work's live session: its runner (else its epic's, else the
+// project's), its session (else its claim), and its directory (its own cwd,
+// else its epic's active shared worktree, else the project's path). ok is
+// false when work has neither session nor claim.
+func Handle(l *ledger.Ledger, w core.Work, p *project.Project) (runner.Handle, bool, error) {
+	session := w.Session
+	if session == nil {
+		session = w.Claim
 	}
+	if session == nil {
+		return runner.Handle{}, false, nil
+	}
+	runnerName := p.Runner
+	cwd := p.Path
+	if w.Parent != nil {
+		epic, err := l.Get(*w.Parent)
+		if err != nil {
+			return runner.Handle{}, false, err
+		}
+		if epic.Runner != nil {
+			runnerName = *epic.Runner
+		}
+		wts, err := l.Worktrees(epic.ID)
+		if err != nil {
+			return runner.Handle{}, false, err
+		}
+		for _, wt := range wts {
+			if wt.Kind == core.WorktreeShared && wt.State == core.WorktreeActive {
+				cwd = wt.Path
+			}
+		}
+	}
+	if w.Runner != nil {
+		runnerName = *w.Runner
+	}
+	if w.Cwd != nil {
+		cwd = *w.Cwd
+	}
+	return runner.Handle{Runner: runnerName, Session: *session, Ref: w.Ref, Cwd: cwd}, true, nil
+}
+
+// Send continues work's session and records the ref the runner returns, so a
+// status check reaches the process now serving the session. Only the ref is
+// recorded: a runner and directory work does not set itself keep following
+// its epic.
+func Send(l *ledger.Ledger, id string, r runner.Runner, h runner.Handle, text string) error {
+	if err := r.Send(&h, text); err != nil {
+		return err
+	}
+	return l.SetRef(id, h.Ref)
+}
+
+// CoordinateOnce runs one coordination pass over the epic's children: answer
+// known questions, escalate unknown ones and NEEDS-INPUT reports to
+// needs-input, harvest DONE/BLOCKED reports. A question or report already
+// filed is not acted on again. It does not spawn.
+func CoordinateOnce(epic core.Work, p *project.Project, l *ledger.Ledger, resolve func(name string) (runner.Runner, error)) (PassResult, error) {
 	children, err := l.Tasks(epic.ID)
 	if err != nil {
 		return PassResult{}, err
@@ -179,29 +228,18 @@ func CoordinateOnce(epic core.Work, l *ledger.Ledger, resolve func(name string) 
 		if w.State != core.StateRunning && w.State != core.StateNeedsInput {
 			continue
 		}
-		session := w.Session
-		if session == nil {
-			session = w.Claim
+		h, ok, err := Handle(l, w, p)
+		if err != nil {
+			return PassResult{}, err
 		}
-		if session == nil {
+		if !ok {
 			res.Waiting = append(res.Waiting, w.ID)
 			continue
 		}
-		cwd, err := childCwd(w, epic, l)
+		r, err := resolve(h.Runner)
 		if err != nil {
 			return PassResult{}, err
 		}
-		runnerName := "claude"
-		if w.Runner != nil {
-			runnerName = *w.Runner
-		} else if epic.Runner != nil {
-			runnerName = *epic.Runner
-		}
-		r, err := resolve(runnerName)
-		if err != nil {
-			return PassResult{}, err
-		}
-		h := runner.Handle{Runner: runnerName, Session: *session, Ref: w.Ref, Cwd: cwd}
 		texts, err := r.Transcript(h)
 		if err != nil {
 			return PassResult{}, err
@@ -210,80 +248,103 @@ func CoordinateOnce(epic core.Work, l *ledger.Ledger, resolve func(name string) 
 		if len(texts) > 0 {
 			last = texts[len(texts)-1]
 		}
+		// The transcript keeps ending in a question or report until the
+		// executor writes again, so the entry already filed is not acted on
+		// twice; the same words in a later entry or another session are new.
+		at := core.TranscriptMark{Session: h.Session, Entries: len(texts)}
+		prev, ok, err := l.Filed(w.ID)
+		if err != nil {
+			return PassResult{}, err
+		}
+		filed := ok && prev == at
+		seen := func() {
+			if w.State == core.StateNeedsInput {
+				res.Escalated = append(res.Escalated, w.ID)
+			} else {
+				res.Waiting = append(res.Waiting, w.ID)
+			}
+		}
+		escalate := func() error {
+			if w.State != core.StateNeedsInput {
+				if _, err := l.Transition(w.ID, core.StateNeedsInput); err != nil {
+					return err
+				}
+			}
+			res.Escalated = append(res.Escalated, w.ID)
+			return nil
+		}
 		if ask := askRe.FindStringSubmatch(last); ask != nil {
+			if filed {
+				seen()
+				continue
+			}
 			question := strings.TrimSpace(ask[1])
-			if err := l.AddEvent(w.ID, core.EventQuestion, question); err != nil {
+			if err := l.File(w.ID, core.EventQuestion, question, at); err != nil {
 				return PassResult{}, err
 			}
 			answer, err := KnownAnswer(question, epic, children, l)
 			if err != nil {
 				return PassResult{}, err
 			}
-			if answer != "" {
-				if err := r.Send(&h, answer); err != nil {
+			if answer == "" {
+				if err := escalate(); err != nil {
 					return PassResult{}, err
 				}
-				if err := l.AddEvent(w.ID, core.EventAnswer, answer); err != nil {
-					return PassResult{}, err
-				}
-				if w.State == core.StateNeedsInput {
-					if _, err := l.Transition(w.ID, core.StateRunning); err != nil {
-						return PassResult{}, err
-					}
-				}
-				res.Answered = append(res.Answered, w.ID)
 				continue
 			}
-			if w.State != core.StateNeedsInput {
-				if _, err := l.Transition(w.ID, core.StateNeedsInput); err != nil {
-					return PassResult{}, err
-				}
+			if err := Send(l, w.ID, r, h, answer); err != nil {
+				return PassResult{}, err
 			}
-			res.Escalated = append(res.Escalated, w.ID)
-			continue
-		}
-		if status := statusRe.FindStringSubmatch(last); status != nil {
+			if _, err := l.AddEvent(w.ID, core.EventAnswer, answer); err != nil {
+				return PassResult{}, err
+			}
 			if w.State == core.StateNeedsInput {
 				if _, err := l.Transition(w.ID, core.StateRunning); err != nil {
 					return PassResult{}, err
 				}
 			}
-			if err := l.AddEvent(w.ID, core.EventReport, status[1]+"\n"+last); err != nil {
+			res.Answered = append(res.Answered, w.ID)
+			continue
+		}
+		status := statusRe.FindStringSubmatch(last)
+		if status == nil {
+			res.Waiting = append(res.Waiting, w.ID)
+			continue
+		}
+		report := status[1] + "\n" + last
+		if status[1] == "NEEDS-INPUT" {
+			if filed {
+				seen()
+				continue
+			}
+			if err := l.File(w.ID, core.EventReport, report, at); err != nil {
 				return PassResult{}, err
 			}
-			to := core.StateReview
-			if status[1] == "BLOCKED" {
-				to = core.StateBlocked
-			}
-			if _, err := l.Transition(w.ID, to); err != nil {
+			if err := escalate(); err != nil {
 				return PassResult{}, err
-			}
-			if status[1] == "DONE" {
-				res.Reviewed = append(res.Reviewed, w.ID)
-			} else {
-				res.Blocked = append(res.Blocked, w.ID)
 			}
 			continue
 		}
-		res.Waiting = append(res.Waiting, w.ID)
-	}
-	return res, nil
-}
-
-// childCwd is the child's own cwd, else the epic's active shared worktree,
-// else ".".
-func childCwd(w core.Work, epic core.Work, l *ledger.Ledger) (string, error) {
-	if w.Cwd != nil {
-		return *w.Cwd, nil
-	}
-	worktrees, err := l.Worktrees(epic.ID)
-	if err != nil {
-		return "", err
-	}
-	for _, wt := range worktrees {
-		if wt.Kind == core.WorktreeShared && wt.State == core.WorktreeActive {
-			return wt.Path, nil
+		if w.State == core.StateNeedsInput {
+			if _, err := l.Transition(w.ID, core.StateRunning); err != nil {
+				return PassResult{}, err
+			}
+		}
+		if _, err := l.AddEvent(w.ID, core.EventReport, report); err != nil {
+			return PassResult{}, err
+		}
+		to := core.StateReview
+		if status[1] == "BLOCKED" {
+			to = core.StateBlocked
+		}
+		if _, err := l.Transition(w.ID, to); err != nil {
+			return PassResult{}, err
+		}
+		if status[1] == "DONE" {
+			res.Reviewed = append(res.Reviewed, w.ID)
+		} else {
+			res.Blocked = append(res.Blocked, w.ID)
 		}
 	}
-	return ".", nil
+	return res, nil
 }

@@ -4,7 +4,6 @@
 package serve
 
 import (
-	"bufio"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/binary"
@@ -13,11 +12,40 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
+	"time"
 )
 
 // wsGUID is the WebSocket protocol GUID from RFC 6455.
 const wsGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+// maxMessage caps one inbound message, whether one frame or assembled from
+// fragments, so a declared length is refused before it is allocated.
+const maxMessage = 1 << 20
+
+// wsWriteTimeout bounds one frame write, so a client that stops reading is
+// dropped.
+const wsWriteTimeout = 5 * time.Second
+
+// wsQueue bounds the frames waiting to be written to one client; a client
+// that falls this far behind is dropped.
+const wsQueue = 1024
+
+// Close status codes from RFC 6455 section 7.4.1.
+const (
+	closeNormal   uint16 = 1000
+	closeProtocol uint16 = 1002
+	closeTooBig   uint16 = 1009
+	closeInternal uint16 = 1011
+)
+
+var (
+	errTooBig   = fmt.Errorf("message exceeds %d bytes", maxMessage)
+	errProtocol = errors.New("websocket protocol violation")
+	errClosed   = errors.New("connection closed")
+	errBehind   = fmt.Errorf("client fell %d frames behind", wsQueue)
+)
 
 // wsOpCode is a WebSocket frame opcode.
 type wsOpCode byte
@@ -38,48 +66,56 @@ type wsFrame struct {
 	payload []byte
 }
 
-// wsConn is one WebSocket connection: the underlying connection, a writer
-// lock (WebSocket frames are written from multiple goroutines), and a
-// closed flag.
+// wsConn is one WebSocket connection. Frames from the handler and the
+// broadcaster go into a bounded queue that one writer drains in order, so no
+// sender waits on the network. mu guards closed and every send on out.
 type wsConn struct {
-	conn   net.Conn
-	wmu    sync.Mutex
-	closed bool
+	conn         net.Conn
+	writeTimeout time.Duration
+	mu           sync.Mutex
+	closed       bool
+	out          chan []byte
 }
 
-// wsUpgrade performs the WebSocket handshake on an HTTP connection and
-// returns the upgraded connection. It fails when the request is not a
-// valid WebSocket upgrade.
-func wsUpgrade(w http.ResponseWriter, r *http.Request) (*wsConn, error) {
-	if r.Header.Get("Upgrade") != "websocket" {
-		return nil, errors.New("not a websocket upgrade")
+// newWSConn wraps nc and starts its writer, which runs until the connection
+// is closed or dropped.
+func newWSConn(nc net.Conn, writeTimeout time.Duration) *wsConn {
+	c := &wsConn{conn: nc, writeTimeout: writeTimeout, out: make(chan []byte, wsQueue)}
+	go c.writeLoop()
+	return c
+}
+
+// wsKey returns the Sec-WebSocket-Key of a valid upgrade request.
+func wsKey(r *http.Request) (string, error) {
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return "", errors.New("not a websocket upgrade")
 	}
 	key := r.Header.Get("Sec-WebSocket-Key")
 	if key == "" {
-		return nil, errors.New("missing Sec-WebSocket-Key")
+		return "", errors.New("missing Sec-WebSocket-Key")
 	}
-	hj, ok := w.(http.Hijacker)
-	if !ok {
-		return nil, errors.New("connection not hijackable")
-	}
+	return key, nil
+}
+
+// wsHandshake hijacks the connection and completes the upgrade. On error
+// the connection is already closed.
+func wsHandshake(hj http.Hijacker, key string) (*wsConn, error) {
 	nc, brw, err := hj.Hijack()
 	if err != nil {
 		return nil, err
 	}
-	accept := wsAccept(key)
 	_, err = fmt.Fprintf(brw, "HTTP/1.1 101 Switching Protocols\r\n"+
 		"Upgrade: websocket\r\n"+
 		"Connection: Upgrade\r\n"+
-		"Sec-WebSocket-Accept: %s\r\n\r\n", accept)
+		"Sec-WebSocket-Accept: %s\r\n\r\n", wsAccept(key))
+	if err == nil {
+		err = brw.Flush()
+	}
 	if err != nil {
 		nc.Close()
 		return nil, err
 	}
-	if err := brw.Flush(); err != nil {
-		nc.Close()
-		return nil, err
-	}
-	return &wsConn{conn: nc}, nil
+	return newWSConn(nc, wsWriteTimeout), nil
 }
 
 // wsAccept computes the Sec-WebSocket-Accept value from the client key.
@@ -89,11 +125,11 @@ func wsAccept(key string) string {
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 
-// readFrame reads one WebSocket frame from the connection. It returns
-// io.EOF when the client closes the connection cleanly.
-func (c *wsConn) readFrame() (wsFrame, error) {
+// readFrame reads one WebSocket frame, refusing one longer than maxMessage
+// before reading its payload.
+func readFrame(r io.Reader) (wsFrame, error) {
 	var hdr [2]byte
-	if _, err := io.ReadFull(c.conn, hdr[:]); err != nil {
+	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		return wsFrame{}, err
 	}
 	fin := hdr[0]&0x80 != 0
@@ -103,25 +139,28 @@ func (c *wsConn) readFrame() (wsFrame, error) {
 	switch length {
 	case 126:
 		var ext [2]byte
-		if _, err := io.ReadFull(c.conn, ext[:]); err != nil {
+		if _, err := io.ReadFull(r, ext[:]); err != nil {
 			return wsFrame{}, err
 		}
 		length = uint64(binary.BigEndian.Uint16(ext[:]))
 	case 127:
 		var ext [8]byte
-		if _, err := io.ReadFull(c.conn, ext[:]); err != nil {
+		if _, err := io.ReadFull(r, ext[:]); err != nil {
 			return wsFrame{}, err
 		}
 		length = binary.BigEndian.Uint64(ext[:])
 	}
+	if length > maxMessage {
+		return wsFrame{}, errTooBig
+	}
 	var mask [4]byte
 	if masked {
-		if _, err := io.ReadFull(c.conn, mask[:]); err != nil {
+		if _, err := io.ReadFull(r, mask[:]); err != nil {
 			return wsFrame{}, err
 		}
 	}
 	payload := make([]byte, length)
-	if _, err := io.ReadFull(c.conn, payload); err != nil {
+	if _, err := io.ReadFull(r, payload); err != nil {
 		return wsFrame{}, err
 	}
 	if masked {
@@ -132,45 +171,45 @@ func (c *wsConn) readFrame() (wsFrame, error) {
 	return wsFrame{fin: fin, opcode: opcode, payload: payload}, nil
 }
 
-// writeFrame writes one WebSocket frame to the connection. Server frames
-// are never masked.
-func (c *wsConn) writeFrame(opcode wsOpCode, payload []byte) error {
-	c.wmu.Lock()
-	defer c.wmu.Unlock()
-	if c.closed {
-		return errors.New("connection closed")
-	}
-	return c.writeFrameLocked(opcode, payload)
-}
-
-// writeFrameLocked writes one frame; the caller holds wmu.
-func (c *wsConn) writeFrameLocked(opcode wsOpCode, payload []byte) error {
-	var hdr []byte
-	hdr = append(hdr, byte(0x80|opcode))
+// encodeFrame encodes one unmasked frame.
+func encodeFrame(opcode wsOpCode, payload []byte) []byte {
+	frame := []byte{byte(0x80 | opcode)}
 	switch {
 	case len(payload) < 126:
-		hdr = append(hdr, byte(len(payload)))
+		frame = append(frame, byte(len(payload)))
 	case len(payload) < 65536:
-		hdr = append(hdr, 126, byte(len(payload)>>8), byte(len(payload)))
+		frame = append(frame, 126, byte(len(payload)>>8), byte(len(payload)))
 	default:
-		hdr = append(hdr, 127)
 		var ext [8]byte
 		binary.BigEndian.PutUint64(ext[:], uint64(len(payload)))
-		hdr = append(hdr, ext[:]...)
+		frame = append(append(frame, 127), ext[:]...)
 	}
-	if _, err := c.conn.Write(hdr); err != nil {
-		return err
-	}
-	_, err := c.conn.Write(payload)
-	return err
+	return append(frame, payload...)
 }
 
-// writeText writes a text frame to the connection.
-func (c *wsConn) writeText(text string) error {
-	return c.writeFrame(opText, []byte(text))
+// send queues one encoded frame without waiting. A full queue drops the
+// connection.
+func (c *wsConn) send(frame []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return errClosed
+	}
+	select {
+	case c.out <- frame:
+		return nil
+	default:
+		c.dropLocked()
+		return errBehind
+	}
 }
 
-// writeJSON writes a JSON-encoded text frame to the connection.
+// writeFrame queues one unmasked frame.
+func (c *wsConn) writeFrame(opcode wsOpCode, payload []byte) error {
+	return c.send(encodeFrame(opcode, payload))
+}
+
+// writeJSON queues a JSON-encoded text frame.
 func (c *wsConn) writeJSON(v any) error {
 	data, err := jsonMarshal(v)
 	if err != nil {
@@ -179,42 +218,129 @@ func (c *wsConn) writeJSON(v any) error {
 	return c.writeFrame(opText, data)
 }
 
-// close sends a close frame and marks the connection closed.
-func (c *wsConn) close() {
-	c.wmu.Lock()
-	defer c.wmu.Unlock()
-	if c.closed {
-		return
+// writeLoop writes queued frames in order, each within the write timeout,
+// and closes the connection once the queue is closed and drained. A failed
+// write drops the connection.
+func (c *wsConn) writeLoop() {
+	for frame := range c.out {
+		if err := c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout)); err != nil {
+			c.drop()
+			return
+		}
+		if _, err := c.conn.Write(frame); err != nil {
+			c.drop()
+			return
+		}
 	}
-	c.closed = true
-	// The peer may already be gone; the close frame is a courtesy.
-	c.writeFrameLocked(opClose, nil)
 	c.conn.Close()
 }
 
-// readLoop reads frames from the connection, dispatching control frames
-// and passing message frames to the handler. It returns when the
-// connection closes or an error occurs.
-func (c *wsConn) readLoop(onMessage func([]byte) error) {
-	for {
-		frame, err := c.readFrame()
-		if err != nil {
-			return
+// drop closes the connection at once, discarding queued frames and sending
+// no close frame.
+func (c *wsConn) drop() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.dropLocked()
+}
+
+// dropLocked is drop; the caller holds mu.
+func (c *wsConn) dropLocked() {
+	if !c.closed {
+		c.closed = true
+		close(c.out)
+	}
+	c.conn.Close()
+}
+
+// close queues a close frame whose status code and reason come from why
+// (nil is a normal close) after the frames already queued; the writer then
+// closes the connection. A full queue drops it instead. Later calls do
+// nothing.
+func (c *wsConn) close(why error) {
+	payload := binary.BigEndian.AppendUint16(nil, closeCode(why))
+	if why != nil {
+		// A close reason is at most 123 bytes of UTF-8.
+		reason := why.Error()
+		if len(reason) > 123 {
+			reason = strings.ToValidUTF8(reason[:123], "")
 		}
-		switch frame.opcode {
+		payload = append(payload, reason...)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
+	select {
+	case c.out <- encodeFrame(opClose, payload):
+		c.closed = true
+		close(c.out)
+	default:
+		c.dropLocked()
+	}
+}
+
+func closeCode(why error) uint16 {
+	switch {
+	case why == nil:
+		return closeNormal
+	case errors.Is(why, errTooBig):
+		return closeTooBig
+	case errors.Is(why, errProtocol):
+		return closeProtocol
+	default:
+		return closeInternal
+	}
+}
+
+// readLoop answers pings, assembles fragmented messages and passes each
+// complete message to onMessage until the peer closes, a read fails or
+// onMessage fails; then it closes the connection with the matching status.
+func (c *wsConn) readLoop(onMessage func([]byte) error) {
+	c.close(c.readMessages(onMessage))
+}
+
+// readMessages returns nil when the peer closes, else why reading stopped.
+func (c *wsConn) readMessages(onMessage func([]byte) error) error {
+	var msg []byte
+	fragmented := false
+	for {
+		f, err := readFrame(c.conn)
+		if err != nil {
+			return err
+		}
+		switch f.opcode {
 		case opPing:
-			if err := c.writeFrame(opPong, frame.payload); err != nil {
-				return
+			if err := c.writeFrame(opPong, f.payload); err != nil {
+				return err
 			}
+			continue
 		case opPong:
-			// ignore
+			continue
 		case opClose:
-			c.close()
-			return
+			return nil
 		case opText, opBinary:
-			if err := onMessage(frame.payload); err != nil {
-				return
+			if fragmented {
+				return fmt.Errorf("%w: new message inside a fragmented one", errProtocol)
 			}
+			msg = f.payload
+		case opContinuation:
+			if !fragmented {
+				return fmt.Errorf("%w: continuation without a message", errProtocol)
+			}
+			msg = append(msg, f.payload...)
+		default:
+			return fmt.Errorf("%w: opcode %#x", errProtocol, byte(f.opcode))
+		}
+		if len(msg) > maxMessage {
+			return errTooBig
+		}
+		fragmented = !f.fin
+		if fragmented {
+			continue
+		}
+		if err := onMessage(msg); err != nil {
+			return err
 		}
 	}
 }
@@ -230,11 +356,17 @@ func newWSHub() *wsHub {
 	return &wsHub{conns: map[*wsConn]bool{}}
 }
 
-// add registers a connection with the hub.
-func (h *wsHub) add(c *wsConn) {
+// join runs first, then registers c, under the hub lock: no broadcast
+// reaches c before first's message, and none is missed between them. first
+// must only queue its message, so the hub never waits on c's network.
+func (h *wsHub) join(c *wsConn, first func() error) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if err := first(); err != nil {
+		return err
+	}
 	h.conns[c] = true
+	return nil
 }
 
 // remove unregisters a connection from the hub.
@@ -244,28 +376,21 @@ func (h *wsHub) remove(c *wsConn) {
 	delete(h.conns, c)
 }
 
-// broadcast sends a JSON message to every connected client. A client that
-// cannot be written to is closed, which ends its handler and unregisters it.
-func (h *wsHub) broadcast(v any) {
+// broadcast queues v for every client without waiting on any; a client that
+// is closed or too far behind is removed. It fails only when v cannot be
+// encoded.
+func (h *wsHub) broadcast(v any) error {
+	data, err := jsonMarshal(v)
+	if err != nil {
+		return err
+	}
+	frame := encodeFrame(opText, data)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for c := range h.conns {
-		if err := c.writeJSON(v); err != nil {
-			c.close()
+		if err := c.send(frame); err != nil {
+			delete(h.conns, c)
 		}
 	}
-}
-
-// count returns the number of connected clients.
-func (h *wsHub) count() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return len(h.conns)
-}
-
-// bufioReadWriter pairs a buffered reader and writer for the WebSocket
-// handshake.
-type bufioReadWriter struct {
-	*bufio.Reader
-	*bufio.Writer
+	return nil
 }

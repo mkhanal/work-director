@@ -108,18 +108,22 @@ func Run(cmd []string, cwd string) (RunResult, error) {
 	return res, nil
 }
 
-// waitFor polls probe every `every` until it returns ok or the deadline
-// passes; the zero value and false mean "never appeared".
-func waitFor[T any](probe func() (T, bool), timeout time.Duration, every time.Duration) (T, bool) {
+// waitFor polls probe every `every` until it returns ok, returns an error, or
+// the deadline passes; the zero value and false mean "never appeared".
+func waitFor[T any](probe func() (T, bool, error), timeout time.Duration, every time.Duration) (T, bool, error) {
+	var zero T
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if v, ok := probe(); ok {
-			return v, true
+		v, ok, err := probe()
+		if err != nil {
+			return zero, false, err
+		}
+		if ok {
+			return v, true, nil
 		}
 		time.Sleep(every)
 	}
-	var zero T
-	return zero, false
+	return zero, false, nil
 }
 
 // alive reports whether the process exists (signal 0 probes without killing).
@@ -128,7 +132,7 @@ func alive(pid int) bool {
 }
 
 // pidOf parses a handle's string ref; a missing or non-numeric ref is not a
-// live process (the TS Number(h.ref) is NaN then, and alive(NaN) is false).
+// live process.
 func pidOf(ref *string) (int, bool) {
 	if ref == nil {
 		return 0, false
@@ -145,7 +149,7 @@ func pidRef(pid int) *string {
 	return &s
 }
 
-// stderrOrStdout matches the TS `r.stderr || r.stdout` error detail.
+// stderrOrStdout is a failed command's detail: stderr, else stdout.
 func stderrOrStdout(r RunResult) string {
 	if r.Stderr != "" {
 		return r.Stderr
@@ -162,6 +166,14 @@ func lines(text string) []string {
 		}
 	}
 	return out
+}
+
+// jsonlRecords are a live jsonl store's complete lines. The executor may be
+// part way through writing the last line, so a line is a record only once
+// its newline is written.
+func jsonlRecords(text string) []string {
+	records := strings.Split(text, "\n")
+	return records[:len(records)-1]
 }
 
 var slugRe = regexp.MustCompile(`[^A-Za-z0-9-]`)
@@ -182,8 +194,8 @@ func logName(s string) string {
 
 // name20 truncates a display name to 20 characters (the {name20} spec placeholder).
 func name20(s string) string {
-	if len(s) > 20 {
-		return s[:20]
+	if r := []rune(s); len(r) > 20 {
+		return string(r[:20])
 	}
 	return s
 }

@@ -69,4 +69,67 @@ cards run from any directory.
 
 ## Errors And Exit Codes Match
 Usage errors, illegal transitions, not-ready refusals and unknown runners
-print the same message and exit 1; a failing verify exits 1 after recording.
+print the same message and exit 1. A verify whose commands ran and failed
+exits 1 after recording the failed verify.
+
+## A Decision Is Recorded In One Line And Reaches The Brief
+`wd decide <id> <text>` records a `decision` event on existing work. The
+work's brief lists its decisions and its resolved concerns' decisions under
+"Decisions already made", and nothing else there.
+
+## Every Json Command Writes One Document
+With `--json`, every command writes exactly one JSON document to stdout — no
+progress lines, no document per spawned session. `wd tui`, which draws the
+terminal, refuses `--json` and writes nothing to stdout.
+
+## Projects Add Never Writes A File It Cannot Parse
+`wd projects add` with a path or flag value its project file cannot hold —
+an unknown mode, a line break, a value that would read back changed — exits
+1 naming it and writes no file, so every later command still loads the
+projects.
+
+## Attach Records The Ref And Cwd It Is Given
+`wd attach <id> <session> --ref <ref> --cwd <dir>` records that session,
+ref and cwd on the work item.
+
+## Set Cannot Skip The Soft Done Gate
+`wd set <id> soft-done` passes the same readiness gate as `wd soft-done`:
+work that is not ready exits 1 with the not-ready message and keeps its
+state.
+
+## Verify With No Commands Is Refused Without Recording
+`wd verify` on a project that lists no verify commands is a refusal, not a
+failed verify: it runs nothing, exits 1 saying so and records no verify
+event.
+
+## An Adopted Card Leaves The Promotion Candidates
+After `wd scan --adopt <card>` writes the global candidate, `wd scan` exits 0
+without listing that card, and adopting it again exits 1 with `no promotion
+candidate <card>`, leaving the written candidate as it was.
+
+## Epic Run Spawns Only Children Not Yet Under Way
+`wd epic run` spawns the open children that are queued or briefed, or
+running with neither session nor claim. Children in review, needs-input,
+blocked or soft-done, and running children with a session or a claim, keep
+their state, session and claim. It reports how many it spawned; a run that spawns none leaves the
+epic's state as it was.
+
+## Send And Report Reach A Child Where Its Epic's Pass Does
+`wd send` and `wd report` on a child with no session of its own reach its
+claim, with its epic's runner else its project's, in its epic's active
+shared worktree else the project's path: the session `wd epic review`
+coordinates with.
+
+## A Claim Names Someone
+`wd claim <id>` on work with no session, and `wd claim <id> ""`, exit 1
+with the claim usage and leave the claim as it was.
+
+## Commands On Unknown Work Fail Naming It
+Every command given a work id that does not exist — reading or writing —
+exits 1 with `no work <id>` and records nothing.
+
+## Flags That Do Not Parse Fail
+A value flag with no value (`--tail=`, or `--ref` last or before another
+flag), a switch given a value (`--json=x`), and a numeric flag that is not a
+positive integer (`--tail`, `--timeout`, `--port`, `--count`) exit 1 naming
+the flag; none falls back to its default.
