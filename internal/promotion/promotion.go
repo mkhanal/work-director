@@ -63,14 +63,17 @@ func PromotionCandidates(cards []taste.Card, feedback []core.Feedback) []Promoti
 }
 
 // AdoptCard writes a global candidate card (never adopted in one step) from a
-// project card and its evidence, and returns the path written.
+// project card and its evidence, and returns the path written. The candidate
+// is <id>-global beside the project card, which stays as it is; an existing
+// candidate is never overwritten.
 func AdoptCard(card taste.Card, evidence []string, cardsDir string) (string, error) {
 	dir := filepath.Join(cardsDir, string(card.Category))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
+	id := card.ID + "-global"
 	text := `---
-id: ` + card.ID + `
+id: ` + id + `
 title: ` + card.Title + `
 category: ` + string(card.Category) + `
 scope: [global]
@@ -82,8 +85,16 @@ evidence: [` + strings.Join(evidence, ", ") + `]
 ---
 ` + card.Body + `
 `
-	path := filepath.Join(dir, card.ID+".md")
-	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+	path := filepath.Join(dir, id+".md")
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.WriteString(text); err != nil {
+		f.Close()
+		return "", err
+	}
+	if err := f.Close(); err != nil {
 		return "", err
 	}
 	return path, nil
