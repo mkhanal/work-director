@@ -2,8 +2,8 @@ package cli
 
 import (
 	"database/sql"
-	"fmt"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
