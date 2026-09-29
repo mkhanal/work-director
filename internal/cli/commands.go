@@ -1903,10 +1903,10 @@ func (c *Cli) serve(rest []string) error {
 	}
 	cliPath := filepath.Join(executableDir(), "wd")
 	srv := serve.New(c.Ledger, c.Root, cliPath)
-	addr, err := srv.Start(port)
+	addr, failed, err := srv.Start(port)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(c.Stdout, "serve: http://%s\n", addr)
-	select {}
+	return <-failed
 }

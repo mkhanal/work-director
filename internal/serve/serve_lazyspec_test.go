@@ -1,11 +1,17 @@
 package serve
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"wd/internal/core"
 	"wd/internal/ledger"
@@ -22,9 +28,19 @@ func newTestServer(t *testing.T) *Server {
 	return New(l, dir, "")
 }
 
-func TestServerBindsToLoopback(t *testing.T) {
+func TestServe(t *testing.T) {
+	t.Run("The Server Binds To Loopback", serverBindsToLoopback)
+	t.Run("JSON Endpoints Serve The Board", jsonEndpointsServeTheBoard)
+	t.Run("Work Items Serve Over HTTP", workItemsServeOverHTTP)
+	t.Run("Actions Dispatch To The CLI", actionsDispatchToTheCLI)
+	t.Run("WebSocket Serves Live Events", webSocketServesLiveEvents)
+	t.Run("Empty Collections Serialize As Empty Arrays", emptyCollectionsSerializeAsEmptyArrays)
+	t.Run("Errors Return JSON", errorsReturnJSON)
+}
+
+func serverBindsToLoopback(t *testing.T) {
 	s := newTestServer(t)
-	addr, err := s.Start(0)
+	addr, _, err := s.Start(0)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -33,7 +49,7 @@ func TestServerBindsToLoopback(t *testing.T) {
 	}
 }
 
-func TestJSONEndpointsServeTheBoard(t *testing.T) {
+func jsonEndpointsServeTheBoard(t *testing.T) {
 	s := newTestServer(t)
 	epic, err := s.ledger.Add("p", "Goal", ledger.AddOptions{Kind: core.WorkEpic})
 	if err != nil {
@@ -69,7 +85,7 @@ func TestJSONEndpointsServeTheBoard(t *testing.T) {
 	}
 }
 
-func TestWorkItemsServeOverHTTP(t *testing.T) {
+func workItemsServeOverHTTP(t *testing.T) {
 	s := newTestServer(t)
 	w, err := s.ledger.Add("p", "Work", ledger.AddOptions{})
 	if err != nil {
@@ -91,7 +107,7 @@ func TestWorkItemsServeOverHTTP(t *testing.T) {
 	}
 }
 
-func TestActionsDispatchToTheCLI(t *testing.T) {
+func actionsDispatchToTheCLI(t *testing.T) {
 	s := newTestServer(t)
 	s.cliPath = "/bin/echo"
 	srv := httptest.NewServer(http.HandlerFunc(s.handleAction))
@@ -116,7 +132,111 @@ func TestActionsDispatchToTheCLI(t *testing.T) {
 	}
 }
 
-func TestEmptyCollectionsSerializeAsEmptyArrays(t *testing.T) {
+func webSocketServesLiveEvents(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ledger.db")
+	l, err := ledger.New(path)
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	t.Cleanup(func() { l.Close() })
+	w, err := l.Add("p", "Work", ledger.AddOptions{})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := l.AddEvent(w.ID, core.EventNote, "before serve"); err != nil {
+		t.Fatalf("event before serve: %v", err)
+	}
+	addr, _, err := New(l, dir, "/bin/echo").Start(0)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	client := dialWS(t, addr)
+
+	var board struct {
+		Type string `json:"type"`
+	}
+	readWSJSON(t, client, &board)
+	if board.Type != "board" {
+		t.Fatalf("first message type = %q, want board", board.Type)
+	}
+
+	other, err := ledger.New(path)
+	if err != nil {
+		t.Fatalf("second ledger handle: %v", err)
+	}
+	t.Cleanup(func() { other.Close() })
+	if err := other.AddEvent(w.ID, core.EventNote, "from another wd process"); err != nil {
+		t.Fatalf("event from other process: %v", err)
+	}
+
+	var msg struct {
+		Type string     `json:"type"`
+		Data core.Event `json:"data"`
+	}
+	readWSJSON(t, client, &msg)
+	if msg.Type != "event" {
+		t.Fatalf("message type = %q, want event", msg.Type)
+	}
+	if msg.Data.Work != w.ID || msg.Data.Body != "from another wd process" {
+		t.Fatalf("event = %+v, want the event added by the other process", msg.Data)
+	}
+
+	if err := client.writeText(`{"type":"action","argv":["hello"]}`); err != nil {
+		t.Fatalf("send action: %v", err)
+	}
+	var action struct {
+		Type   string `json:"type"`
+		Code   int    `json:"code"`
+		Stdout string `json:"stdout"`
+	}
+	readWSJSON(t, client, &action)
+	if action.Type != "action" || action.Code != 0 || action.Stdout != "hello" {
+		t.Fatalf("action reply = %+v, want the CLI's output", action)
+	}
+}
+
+// dialWS opens a WebSocket client connection to the server at addr.
+func dialWS(t *testing.T, addr string) *wsConn {
+	t.Helper()
+	nc, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { nc.Close() })
+	if err := nc.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("deadline: %v", err)
+	}
+	fmt.Fprintf(nc, "GET /ws HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"+
+		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n", addr)
+	// Byte by byte: a buffered reader would swallow the start of the first frame.
+	var head []byte
+	for !bytes.HasSuffix(head, []byte("\r\n\r\n")) {
+		var b [1]byte
+		if _, err := io.ReadFull(nc, b[:]); err != nil {
+			t.Fatalf("handshake: %v (read %q)", err, head)
+		}
+		head = append(head, b[0])
+	}
+	if !bytes.HasPrefix(head, []byte("HTTP/1.1 101 ")) {
+		t.Fatalf("handshake response = %q, want 101", head)
+	}
+	return &wsConn{conn: nc}
+}
+
+// readWSJSON reads one text frame from c and decodes it into v.
+func readWSJSON(t *testing.T, c *wsConn, v any) {
+	t.Helper()
+	frame, err := c.readFrame()
+	if err != nil {
+		t.Fatalf("read frame: %v", err)
+	}
+	if err := json.Unmarshal(frame.payload, v); err != nil {
+		t.Fatalf("decode %q: %v", frame.payload, err)
+	}
+}
+
+func emptyCollectionsSerializeAsEmptyArrays(t *testing.T) {
 	s := newTestServer(t)
 	srv := httptest.NewServer(http.HandlerFunc(s.handleWork))
 	defer srv.Close()
@@ -137,7 +257,7 @@ func TestEmptyCollectionsSerializeAsEmptyArrays(t *testing.T) {
 	}
 }
 
-func TestErrorsReturnJSON(t *testing.T) {
+func errorsReturnJSON(t *testing.T) {
 	s := newTestServer(t)
 	srv := httptest.NewServer(http.HandlerFunc(s.handleGoal))
 	defer srv.Close()

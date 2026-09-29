@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"wd/internal/core"
 	"wd/internal/ledger"
@@ -23,12 +24,12 @@ const DefaultPort = 8787
 // ledger. It serves the board, work items, events and actions, and
 // broadcasts live events to WebSocket clients.
 type Server struct {
-	addr   string
-	ledger *ledger.Ledger
-	root   string
+	addr    string
+	ledger  *ledger.Ledger
+	root    string
 	cliPath string
-	hub    *wsHub
-	mu     sync.Mutex
+	hub     *wsHub
+	mu      sync.Mutex
 }
 
 // New creates a serve server over the given ledger. root is the repo root
@@ -42,15 +43,21 @@ func New(l *ledger.Ledger, root, cliPath string) *Server {
 	}
 }
 
-// Start binds the server to 127.0.0.1:port and serves until the process
-// exits. It returns the bound address.
-func (s *Server) Start(port int) (string, error) {
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	ln, err := net.Listen("tcp", addr)
+// Start binds the server to 127.0.0.1:port, serves HTTP and broadcasts
+// every event added to the ledger, by any process, to WebSocket clients.
+// It returns the bound address and a channel that receives the error that
+// stopped serving.
+func (s *Server) Start(port int) (string, <-chan error, error) {
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	s.addr = addr
+	last, err := s.ledger.LastEventID()
+	if err != nil {
+		ln.Close()
+		return "", nil, err
+	}
+	s.addr = ln.Addr().String()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/board", s.handleBoard)
 	mux.HandleFunc("/api/goals", s.handleGoals)
@@ -60,8 +67,33 @@ func (s *Server) Start(port int) (string, error) {
 	mux.HandleFunc("/api/action", s.handleAction)
 	mux.HandleFunc("/ws", s.handleWS)
 	mux.HandleFunc("/", s.handleRoot)
-	go http.Serve(ln, mux)
-	return addr, nil
+	failed := make(chan error, 2)
+	go func() { failed <- http.Serve(ln, mux) }()
+	go func() { failed <- s.broadcastEvents(last) }()
+	return s.addr, failed, nil
+}
+
+// eventPoll is how often the ledger is read for new events. Events are
+// written by other wd processes, which sqlite cannot notify across.
+const eventPoll = 250 * time.Millisecond
+
+// broadcastEvents sends every ledger event with an id above last to all
+// WebSocket clients, in id order, until reading the ledger fails.
+func (s *Server) broadcastEvents(last int) error {
+	tick := time.NewTicker(eventPoll)
+	defer tick.Stop()
+	sent := last
+	for {
+		<-tick.C
+		events, err := s.ledger.EventsAfter(sent)
+		if err != nil {
+			return err
+		}
+		for _, e := range events {
+			s.hub.broadcast(map[string]any{"type": "event", "data": e})
+			sent = e.ID
+		}
+	}
 }
 
 // handleRoot serves the root path and 404s everything else.
@@ -123,10 +155,10 @@ func (s *Server) handleGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, map[string]any{
-		"epic":    epic,
-		"tasks":   children,
-		"rollup":  goalRollup(children),
-		"events":  events,
+		"epic":   epic,
+		"tasks":  children,
+		"rollup": goalRollup(children),
+		"events": events,
 	})
 }
 
