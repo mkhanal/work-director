@@ -97,7 +97,6 @@ func fail(format string, args ...any) error {
 // Cli holds one invocation's state: the parsed args, the ledger, the projects
 // and the directories the CLI owns.
 type Cli struct {
-	Root        string
 	Home        string
 	ProjectsDir string
 	Worktrees   string
@@ -143,7 +142,6 @@ func Run(args []string) error {
 		return err
 	}
 	c := &Cli{
-		Root:        findRoot(),
 		Home:        wdHome,
 		ProjectsDir: projectsDir,
 		Worktrees:   worktreesDir,
@@ -157,21 +155,24 @@ func Run(args []string) error {
 	return c.dispatch()
 }
 
-// findRoot locates the repo root (where taste/cards lives): $WD_ROOT, else
-// the executable's directory, else the working directory.
-func findRoot() string {
+// tasteCardsDir locates the taste cards of the work-director checkout:
+// $WD_ROOT/taste/cards, else taste/cards beside the executable or in the
+// working directory.
+func tasteCardsDir() (string, error) {
 	if r := os.Getenv("WD_ROOT"); r != "" {
-		return r
+		return filepath.Join(r, "taste", "cards"), nil
 	}
-	for _, base := range []string{executableDir(), mustGetwd()} {
+	searched := []string{executableDir(), mustGetwd()}
+	for _, base := range searched {
 		if base == "" {
 			continue
 		}
-		if st, err := os.Stat(filepath.Join(base, "taste", "cards")); err == nil && st.IsDir() {
-			return base
+		dir := filepath.Join(base, "taste", "cards")
+		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+			return dir, nil
 		}
 	}
-	return "."
+	return "", fail("taste cards not found: no taste/cards in %s; set WD_ROOT to the work-director checkout", strings.Join(searched, " or "))
 }
 
 func executableDir() string {
@@ -426,7 +427,11 @@ func (c *Cli) briefFor(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cards, err := taste.LoadCards(filepath.Join(c.Root, "taste", "cards"))
+	cardsDir, err := tasteCardsDir()
+	if err != nil {
+		return "", err
+	}
+	cards, err := taste.LoadCards(cardsDir)
 	if err != nil {
 		return "", err
 	}
