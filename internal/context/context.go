@@ -4,12 +4,13 @@
 package context
 
 import (
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
-
-	"wd/internal/core"
-	"wd/internal/ledger"
-	"wd/internal/runner"
 )
 
 // Workspace is the director's view of a directory: which repo it is in,
@@ -22,36 +23,93 @@ type Workspace struct {
 	Changed []string `json:"changed"`
 }
 
+type gitResult struct {
+	code   int
+	stdout string
+	stderr string
+}
+
+// git runs git in dir under the C locale, so its messages can be matched. A
+// non-zero exit is a result; failing to run git at all is an error.
+func git(dir string, args ...string) (gitResult, error) {
+	c := exec.Command("git", args...)
+	c.Dir = dir
+	c.Env = append(os.Environ(), "LC_ALL=C")
+	var stdout, stderr bytes.Buffer
+	c.Stdout = &stdout
+	c.Stderr = &stderr
+	err := c.Run()
+	r := gitResult{stdout: stdout.String(), stderr: strings.TrimSpace(stderr.String())}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		r.code = exitErr.ExitCode()
+		return r, nil
+	}
+	if err != nil {
+		return gitResult{}, fmt.Errorf("git in %s: %w", dir, err)
+	}
+	return r, nil
+}
+
+// gitOK runs a git probe that must succeed and returns its stdout.
+func gitOK(dir string, args ...string) (string, error) {
+	r, err := git(dir, args...)
+	if err != nil {
+		return "", err
+	}
+	if r.code != 0 {
+		return "", fmt.Errorf("git %s in %s: exit %d: %s", strings.Join(args, " "), dir, r.code, r.stderr)
+	}
+	return r.stdout, nil
+}
+
 // WorkspaceContext probes dir with git: repo top, worktree list, branch and
-// status. A directory outside any repo yields a Workspace with Repo nil.
+// status. A directory outside any repo yields a Workspace with Repo nil; a
+// directory or git binary that cannot be used is an error.
 func WorkspaceContext(dir string) (Workspace, error) {
-	git := func(args ...string) (int, string) {
-		r, err := runner.Run(append([]string{"git"}, args...), dir)
-		if err != nil {
-			return 1, ""
+	r, err := git(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return Workspace{}, err
+	}
+	if r.code != 0 {
+		if strings.Contains(r.stderr, "not a git repository") {
+			return Workspace{Dir: dir, Changed: []string{}}, nil
 		}
-		return r.Code, strings.TrimSpace(r.Stdout)
+		return Workspace{}, fmt.Errorf("git rev-parse --show-toplevel in %s: exit %d: %s", dir, r.code, r.stderr)
 	}
-	topCode, top := git("rev-parse", "--show-toplevel", "--quiet")
-	if topCode != 0 || top == "" {
-		return Workspace{Dir: dir, Changed: []string{}}, nil
+	top := strings.TrimSpace(r.stdout)
+	list, err := gitOK(dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return Workspace{}, err
 	}
-	_, list := git("worktree", "list", "--porcelain")
-	mainRoot := ""
-	if blocks := strings.Split(list, "\n\n"); len(blocks) > 0 {
-		mainRoot = firstWorktree(blocks[0])
+	mainRoot := firstWorktree(strings.Split(list, "\n\n")[0])
+	branch, err := gitOK(dir, "branch", "--show-current")
+	if err != nil {
+		return Workspace{}, err
 	}
-	branchCode, branch := git("branch", "--show-current")
-	_, short := git("rev-parse", "--short", "HEAD")
+	branch = strings.TrimSpace(branch)
 	var actual *string
-	if branchCode == 0 && branch != "" {
+	if branch != "" {
 		actual = &branch
-	} else if short == "" {
-		actual = nil
 	} else {
-		actual = ptr("detached " + short)
+		// Detached HEAD, or no commits yet: --verify --quiet exits 1, silently,
+		// when HEAD names no commit.
+		head, err := git(dir, "rev-parse", "--short", "--verify", "--quiet", "HEAD")
+		if err != nil {
+			return Workspace{}, err
+		}
+		switch head.code {
+		case 0:
+			actual = ptr("detached " + strings.TrimSpace(head.stdout))
+		case 1:
+		default:
+			return Workspace{}, fmt.Errorf("git rev-parse HEAD in %s: exit %d: %s", dir, head.code, head.stderr)
+		}
 	}
-	_, status := git("status", "--porcelain")
+	status, err := gitOK(dir, "status", "--porcelain")
+	if err != nil {
+		return Workspace{}, err
+	}
 	changed := []string{}
 	for _, s := range strings.Split(status, "\n") {
 		if s != "" {
@@ -90,34 +148,4 @@ func ContextLine(w Workspace) string {
 		branch = *w.Branch
 	}
 	return "dir: " + w.Dir + " · branch: " + branch + where + " · " + strconv.Itoa(len(w.Changed)) + " changed"
-}
-
-// EffectiveCwd is the directory an executor works in: its registered cwd, else
-// the epic's shared worktree, else ".".
-func EffectiveCwd(w core.Work, l *ledger.Ledger) string {
-	if w.Cwd != nil {
-		return *w.Cwd
-	}
-	shared := func(workID string) *string {
-		wts, err := l.Worktrees(workID)
-		if err != nil {
-			return nil
-		}
-		for _, wt := range wts {
-			if wt.Kind == core.WorktreeShared && wt.State == core.WorktreeActive {
-				return &wt.Path
-			}
-		}
-		return nil
-	}
-	if core.IsEpic(w.Kind) {
-		if p := shared(w.ID); p != nil {
-			return *p
-		}
-	} else if w.Parent != nil {
-		if p := shared(*w.Parent); p != nil {
-			return *p
-		}
-	}
-	return "."
 }
