@@ -98,6 +98,7 @@ type fakeTerm struct {
 	keys   chan Key
 	frames [][]string
 	closed bool
+	err    error
 }
 
 func newFakeTerm(script []Key) *fakeTerm {
@@ -109,7 +110,8 @@ func newFakeTerm(script []Key) *fakeTerm {
 }
 
 func (f *fakeTerm) Size() (int, int, error) { return 80, 24, nil }
-func (f *fakeTerm) Keys() <-chan Key       { return f.keys }
+func (f *fakeTerm) Keys() <-chan Key        { return f.keys }
+func (f *fakeTerm) Err() error              { return f.err }
 func (f *fakeTerm) Write(lines []string) error {
 	f.frames = append(f.frames, lines)
 	return nil
@@ -139,6 +141,24 @@ func frameText(frames [][]string) string {
 	return strings.Join(frames[len(frames)-1], "\n")
 }
 
+// longDetail is an epic whose event history alone overflows a 24-row terminal.
+func longDetail() Detail {
+	d := Detail{
+		Work:     core.Work{ID: "abc12345", Project: "work-director", Title: "Rewrite the core", Kind: core.WorkEpic, State: core.StateRunning},
+		Tasks:    []core.Work{{ID: "task0001", Title: "Port dashboards", State: core.StateBriefed}},
+		Concerns: []core.Concern{{Text: "metabase rate limits sync"}},
+		Session: &SessionView{
+			Handle:   runner.Handle{Runner: "claude", Session: "ses_000001"},
+			Status:   runner.StatusRunning,
+			Messages: []string{"Here is the plan", "Step one", "latest message"},
+		},
+	}
+	for i := 1; i <= 30; i++ {
+		d.Events = append(d.Events, core.Event{Kind: core.EventReport, Body: fmt.Sprintf("event %d", i)})
+	}
+	return d
+}
+
 func TestTui(t *testing.T) {
 	t.Run("The Board Renders The Ledger", func(t *testing.T) {
 		t.Run("goals with rollups, then standalone open work", func(t *testing.T) {
@@ -159,7 +179,8 @@ func TestTui(t *testing.T) {
 			transition(t, l, finished.ID, core.StateReview)
 			transition(t, l, finished.ID, core.StateSoftDone)
 			transition(t, l, finished.ID, core.StateDone)
-			if err := l.SetSession(epic.ID, ledger.SessionInfo{Runner: "claude", Session: "ses_epic"}); err != nil {
+			ref := "wd/rewrite-the-core"
+			if err := l.SetSession(epic.ID, ledger.SessionInfo{Runner: "claude", Session: "ses_epic", Ref: &ref}); err != nil {
 				t.Fatalf("set session: %v", err)
 			}
 			items, err := l.List(ledger.ListFilter{})
@@ -202,13 +223,29 @@ func TestTui(t *testing.T) {
 			text := strings.Join(BoardFrame(b, Model{Width: 80, Height: 24}), "\n")
 			assertContains(t, text, "no tasks")
 		})
+		t.Run("more rows than the terminal fits keep the selected row on screen", func(t *testing.T) {
+			var b Board
+			for i := range 30 {
+				b.Rows = append(b.Rows, BoardRow{Work: core.Work{ID: fmt.Sprintf("work%04d", i), Project: "p", Title: fmt.Sprintf("Work %d", i), Kind: core.WorkTask, State: core.StateQueued}})
+			}
+			for _, sel := range []int{0, 15, 29} {
+				lines := BoardFrame(b, Model{Selected: sel, Width: 80, Height: 24})
+				if len(lines) > 24 {
+					t.Fatalf("selected %d: frame is %d lines, taller than the terminal's 24:\n%s", sel, len(lines), strings.Join(lines, "\n"))
+				}
+				assertContains(t, strings.Join(lines, "\n"), fmt.Sprintf("> work%04d", sel))
+				if lines[len(lines)-1] != footer(Model{View: ViewBoard}) {
+					t.Fatalf("selected %d: key help is not the last line:\n%s", sel, strings.Join(lines, "\n"))
+				}
+			}
+		})
 	})
 
 	t.Run("A Detail View Shows One Work Item's Ledger", func(t *testing.T) {
 		t.Run("tasks, events, concerns and the transcript", func(t *testing.T) {
 			d := Detail{
-				Work:   core.Work{ID: "abc12345", Project: "work-director", Title: "Rewrite the core", Kind: core.WorkEpic, State: core.StateRunning},
-				Tasks:  []core.Work{{ID: "task0001", Title: "Port dashboards", State: core.StateBriefed}},
+				Work:  core.Work{ID: "abc12345", Project: "work-director", Title: "Rewrite the core", Kind: core.WorkEpic, State: core.StateRunning},
+				Tasks: []core.Work{{ID: "task0001", Title: "Port dashboards", State: core.StateBriefed}},
 				Events: []core.Event{
 					{Kind: core.EventState, Body: "briefed"},
 					{Kind: core.EventReport, Body: "DONE\nSTATUS: DONE"},
@@ -251,6 +288,21 @@ func TestTui(t *testing.T) {
 			text := strings.Join(DetailFrame(d, Model{View: ViewDetail, Width: 80, Height: 24}), "\n")
 			assertContains(t, text, "export failed: no such session")
 		})
+		t.Run("a long event history leaves room for concerns and the transcript", func(t *testing.T) {
+			d := longDetail()
+			lines := DetailFrame(d, Model{View: ViewDetail, Width: 80, Height: 24})
+			text := strings.Join(lines, "\n")
+			if len(lines) > 24 {
+				t.Fatalf("frame is %d lines, taller than the terminal's 24:\n%s", len(lines), text)
+			}
+			assertContains(t, text, "Port dashboards")
+			assertContains(t, text, "event 30")
+			assertContains(t, text, "metabase rate limits sync")
+			assertContains(t, text, "claude · ses_000001 · running")
+			if strings.Contains(text, "event 1\n") {
+				t.Fatalf("oldest event shown while newer ones were dropped:\n%s", text)
+			}
+		})
 	})
 
 	t.Run("Live Transcripts Refresh From The Runner's Store", func(t *testing.T) {
@@ -277,6 +329,11 @@ func TestTui(t *testing.T) {
 				t.Fatalf("first detail frame shows a message that arrived later:\n%s", strings.Join(frames[1], "\n"))
 			}
 			assertContains(t, frameText(frames), "message 2")
+		})
+		t.Run("the latest message shows under a long event history", func(t *testing.T) {
+			text := strings.Join(DetailFrame(longDetail(), Model{View: ViewDetail, Width: 80, Height: 24}), "\n")
+			assertContains(t, text, "Live transcript")
+			assertContains(t, text, "latest message")
 		})
 	})
 
