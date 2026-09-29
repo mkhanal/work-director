@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"database/sql"
 	"encoding/json"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	_ "modernc.org/sqlite"
 
 	"wd/internal/core"
 	"wd/internal/ledger"
@@ -299,6 +303,78 @@ func assertNotDetected(t *testing.T, errStr, runner string) {
 		if !strings.Contains(errStr, want) {
 			t.Fatalf("stderr %q does not contain %q", errStr, want)
 		}
+	}
+}
+
+func TestStatusMarksWorkStaleAfterThirtyDaysWithoutActivity(t *testing.T) {
+	f := newCLIFixture(t)
+	standalone, t1, t2, t3 := f.ids["standalone"], f.ids["t1"], f.ids["t2"], f.ids["t3"]
+	f.backdate(t, standalone, 31*24*time.Hour)
+	f.backdate(t, t2, 29*24*time.Hour)
+	f.backdate(t, t1, 90*24*time.Hour)
+	f.backdate(t, t3, 40*24*time.Hour)
+	f.runOK(t, "pr", t3, "https://github.com/x/sample-app/pull/2")
+	planEpic := f.ids["planEpic"]
+	f.backdate(t, planEpic, 40*24*time.Hour)
+	f.runOK(t, "set", planEpic, "blocked")
+
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(f.runOK(t, "status", "--json", "--all")), &rows); err != nil {
+		t.Fatalf("status --json: %v", err)
+	}
+	stale := map[string]any{}
+	for _, r := range rows {
+		assertKeys(t, r, []string{
+			"id", "project", "title", "detail", "kind", "state", "runner", "session",
+			"ref", "cwd", "created", "updated", "parent", "heading", "claim", "impact", "stale",
+		})
+		stale[r["id"].(string)] = r["stale"]
+	}
+	for id, want := range map[string]bool{standalone: true, t2: false, t1: false, t3: false, planEpic: false} {
+		if stale[id] != want {
+			t.Errorf("%s stale = %v, want %v", id, stale[id], want)
+		}
+	}
+
+	for _, line := range strings.Split(f.runOK(t, "status"), "\n") {
+		marked := strings.Contains(line, "stale")
+		if strings.HasPrefix(line, standalone) && !marked {
+			t.Errorf("stale row unmarked: %q", line)
+		}
+		if strings.HasPrefix(line, t2) && marked {
+			t.Errorf("fresh row marked stale: %q", line)
+		}
+	}
+}
+
+func TestAHumanClosesQueuedBriefedOrBlockedWork(t *testing.T) {
+	f := newCLIFixture(t)
+	standalone, t2, t3, planEpic := f.ids["standalone"], f.ids["t2"], f.ids["t3"], f.ids["planEpic"]
+	f.runOK(t, "set", t3, "briefed")
+	f.runOK(t, "set", planEpic, "blocked")
+	for _, id := range []string{standalone, t3, planEpic} {
+		out := f.runOK(t, "done", id, "--json")
+		assertHasKey(t, out, `"state": "done"`)
+	}
+	f.runOK(t, "set", t2, "needs-input")
+	code, _, errStr := f.run(t, "done", t2)
+	if code != 1 || !strings.Contains(errStr, "illegal transition needs-input → done") {
+		t.Fatalf("done on needs-input exited %d: %q", code, errStr)
+	}
+}
+
+// backdate sets a work item's last activity to age ago, as a ledger left alone
+// that long would hold it.
+func (f *cliFixture) backdate(t *testing.T, id string, age time.Duration) {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	defer db.Close()
+	at := time.Now().Add(-age).UTC().Format("2006-01-02T15:04:05.000Z07:00")
+	if _, err := db.Exec(`UPDATE work SET updated = ? WHERE id = ?`, at, id); err != nil {
+		t.Fatalf("backdate %s: %v", id, err)
 	}
 }
 
