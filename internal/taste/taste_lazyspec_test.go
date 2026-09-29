@@ -180,6 +180,16 @@ func TestConstitutionHoldsOnlyAlwaysCardsAndStaysUnderTheLimit(t *testing.T) {
 	prefix := "# Taste\nFull cards: /taste-* skills.\n- **Big.** "
 	_, err = RenderConstitution([]Card{*big})
 	wantErr(t, err, fmt.Sprintf("constitution is %d chars, limit %d", len(prefix)+ConstitutionLimit+1, ConstitutionLimit))
+	widePrefix := "# Taste\nFull cards: /taste-* skills.\n- **Wide.** "
+	wide, err := ParseCard(card(map[string]string{"id": "wide", "title": "Wide", "always": "true"},
+		strings.Repeat("é", ConstitutionLimit-len(widePrefix)-1)), "wide")
+	if err != nil {
+		t.Fatalf("parse wide: %v", err)
+	}
+	text, err = RenderConstitution([]Card{*wide})
+	if err != nil {
+		t.Fatalf("%d multi-byte characters are within the limit: %v", ConstitutionLimit, err)
+	}
 }
 
 func TestAnEnforceIdAbsentFromThePresetsFailsTheBuild(t *testing.T) {
@@ -194,6 +204,11 @@ func TestAnEnforceIdAbsentFromThePresetsFailsTheBuild(t *testing.T) {
 	if _, err := Build(f2.paths); err != nil {
 		t.Fatalf("build with known rules: %v", err)
 	}
+	f3 := newFixture(t, map[string]string{
+		"judgment/c.md": card(map[string]string{"id": "c", "status": "candidate", "enforce": "[biome:style/noSuchRule]"}, cardBody),
+	}, map[string]any{"style": map[string]any{"noEnum": "error"}})
+	_, err = Build(f3.paths)
+	wantErr(t, err, "enforce ids absent from presets:\nc: biome:style/noSuchRule")
 }
 
 func TestTheAgentsFragmentIsWrappedInTasteMarkers(t *testing.T) {
