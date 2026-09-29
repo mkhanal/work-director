@@ -608,7 +608,25 @@ func jsonNumber(t *testing.T, out, key string) string {
 
 func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 	f := newCLIFixture(t)
-	waited := jsonString(t, f.runOK(t, "add", "sample-app", "Waited on", "--epic", f.ids["epic"], "--json"), "id")
+	epic, planEpic, t2, t3, standalone := f.ids["epic"], f.ids["planEpic"], f.ids["t2"], f.ids["t3"], f.ids["standalone"]
+	waited := jsonString(t, f.runOK(t, "add", "sample-app", "Waited on", "--epic", epic, "--json"), "id")
+	attached := jsonString(t, f.runOK(t, "add", "sample-app", "Attached", "--json"), "id")
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "A goal", "--json"), "id")
+	ready := jsonString(t, f.runOK(t, "add", "sample-app", "Ready", "--epic", epic, "--json"), "id")
+	f.runOK(t, "set", ready, "running")
+	f.runOK(t, "set", ready, "review")
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	if _, err := l.AddEvent(ready, core.EventReport, "DONE\nSTATUS: DONE"); err != nil {
+		t.Fatalf("report: %v", err)
+	}
+	l.Close()
+	spec := filepath.Join(t.TempDir(), "added.toml")
+	if err := os.WriteFile(spec, []byte("spawn = \"added run {brief}\"\nsession_id = 'session=(\\w+)'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	oneDocument := func(args []string, out string) {
 		t.Helper()
 		dec := json.NewDecoder(strings.NewReader(out))
@@ -621,32 +639,68 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 			t.Errorf("wd %s: more than one document in %q", strings.Join(args, " "), out)
 		}
 	}
+	env := f.envWithPath(t, f.pathWith(t, "claude", "opencode", "codex", "planner"))
+	covered := map[string]bool{}
 	for _, args := range [][]string{
-		{"brief", f.ids["t3"], "--json"},
-		{"projects", "add", "second", f.sample, "--lazyspec", "n", "--json"},
-		{"runner", "init", "fresh", "--json"},
-		{"open", "README.md", "--json"},
-		{"epic", "spawn", f.ids["planEpic"], "--count", "2", "--runner", "claude,opencode", "--json"},
-		{"epic", "run", f.ids["epic"], "--only", f.ids["t3"], "--json"},
-		{"epic", "run", f.ids["epic"], "--only", waited, "--wait", "--timeout", "1", "--json"},
+		{"projects"}, {"projects", "list"},
+		{"projects", "add", "second", f.sample, "--lazyspec", "n"},
+		{"projects", "add", "third", f.sample, "--lazyspec", "y"},
+		{"models", "opencode"},
+		{"runner", "list"}, {"runner", "init", "fresh"}, {"runner", "add", "added", spec},
+		{"add", "sample-app", "Fresh task"},
+		{"tasks", epic},
+		{"brief", t3},
+		{"spawn", standalone},
+		{"report", standalone},
+		{"verify", standalone},
+		{"pr", standalone, "https://example.test/pr/1"},
+		{"soft-done", ready},
+		{"done", ready},
+		{"epic", "plan", planEpic, "--runner", "planner"},
+		{"epic", "spawn", planEpic, "--count", "2", "--runner", "claude,opencode"},
+		{"epic", "run", epic, "--only", t3},
+		{"epic", "run", epic, "--only", waited, "--wait", "--timeout", "1"},
+		{"epic", "review", epic},
+		{"epic", "status", epic},
+		{"goal", "status", goal},
+		{"send", t2, "hello"},
+		{"attach", attached, "ses_outside"},
+		{"decide", t2, "use", "sqlite"},
+		{"set", attached, "blocked"},
+		{"status"}, {"status", "--all"},
+		{"context"}, {"context", "sample-app"}, {"context", t2},
+		{"open", "README.md"}, {"open", t2, "README.md"},
+		{"claim", t3, "me"}, {"claim", t3, "--drop"},
+		{"impact", t3, "+src/x"}, {"impact", t3, "--clear"},
+		{"conflict", epic},
+		{"worktree", "list", epic}, {"worktree", "attach", t3, filepath.Join(f.dir, "elsewhere")},
+		{"verify", t2}, {"merge", t2},
+		{"concern", "add", t3, "a worry"}, {"concern", "list"}, {"concern", "list", epic},
+		{"concern", "resolve", "2", "settled"},
+		{"scan"},
+		{"events", t2},
+		{"feedback", "add", "a note"}, {"feedback"}, {"feedback", "list"},
+		{"distill"},
+		{"doctor"},
 	} {
-		code, out, errStr := f.runEnv(t, noEditorEnv(t, f), args...)
+		covered[args[0]] = true
+		args = append(args, "--json")
+		code, out, errStr := f.runEnv(t, env, args...)
 		if code != 0 {
 			t.Errorf("wd %s exited %d: %s", strings.Join(args, " "), code, errStr)
 			continue
 		}
 		oneDocument(args, out)
 	}
+	covered["serve"] = true
 	oneDocument([]string{"serve", "--json"}, f.serveOutput(t, "--json"))
-	// epic spawn records the runner of the session it records.
-	out := f.runOK(t, "status", "--json")
-	var rows []map[string]any
-	if err := json.Unmarshal([]byte(out), &rows); err != nil {
-		t.Fatalf("decode status: %v", err)
+	covered["tui"] = true
+	if code, out, errStr := f.run(t, "tui", "--json"); code != 1 || out != "" || !strings.Contains(errStr, "--json") {
+		t.Errorf("wd tui --json: exit %d, stdout %q, stderr %q; want 1 refusing --json with nothing on stdout", code, out, errStr)
 	}
-	for _, r := range rows {
-		if r["id"] == f.ids["planEpic"] && r["runner"] != "opencode" {
-			t.Fatalf("epic runner = %v with session %v, want opencode (the last spawn's)", r["runner"], r["session"])
+	for cmd := range commands {
+		if !covered[cmd] {
+			t.Errorf("wd %s --json is not exercised", cmd)
 		}
 	}
 }

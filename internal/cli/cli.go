@@ -204,81 +204,53 @@ func tasteCardsDir() (string, error) {
 
 const usage = "wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve|doctor> [--json]"
 
+// commands maps each wd command to its handler, given the arguments after it.
+var commands = map[string]func(c *Cli, rest []string) error{
+	"projects":  (*Cli).projects,
+	"models":    (*Cli).models,
+	"runner":    (*Cli).runner,
+	"add":       (*Cli).add,
+	"tasks":     (*Cli).tasks,
+	"brief":     (*Cli).brief,
+	"spawn":     (*Cli).spawn,
+	"epic":      func(c *Cli, rest []string) error { return c.epicLike("epic", rest) },
+	"goal":      func(c *Cli, rest []string) error { return c.epicLike("goal", rest) },
+	"send":      (*Cli).send,
+	"attach":    (*Cli).attach,
+	"report":    (*Cli).report,
+	"verify":    (*Cli).verify,
+	"decide":    (*Cli).decide,
+	"pr":        (*Cli).pr,
+	"soft-done": (*Cli).softDone,
+	"set":       (*Cli).set,
+	"done":      (*Cli).done,
+	"status":    (*Cli).status,
+	"context":   (*Cli).contextCmd,
+	"open":      (*Cli).open,
+	"claim":     (*Cli).claim,
+	"impact":    (*Cli).impact,
+	"conflict":  (*Cli).conflict,
+	"worktree":  (*Cli).worktree,
+	"merge":     (*Cli).merge,
+	"concern":   (*Cli).concern,
+	"scan":      (*Cli).scan,
+	"events":    (*Cli).events,
+	"feedback":  (*Cli).feedback,
+	"distill":   (*Cli).distill,
+	"tui":       (*Cli).tui,
+	"serve":     (*Cli).serve,
+	"doctor":    (*Cli).doctor,
+}
+
 func (c *Cli) dispatch() error {
-	a := c.Args
-	if len(a.Positional) == 0 {
+	if len(c.Args.Positional) == 0 {
 		return fail("%s", usage)
 	}
-	cmd, rest := a.Positional[0], a.Positional[1:]
-	switch cmd {
-	case "projects":
-		return c.projects(rest)
-	case "models":
-		return c.models(rest)
-	case "runner":
-		return c.runner(rest)
-	case "add":
-		return c.add(rest)
-	case "tasks":
-		return c.tasks(rest)
-	case "brief":
-		return c.brief(rest)
-	case "spawn":
-		return c.spawn(rest)
-	case "epic", "goal":
-		return c.epicLike(cmd, rest)
-	case "send":
-		return c.send(rest)
-	case "attach":
-		return c.attach(rest)
-	case "report":
-		return c.report(rest)
-	case "verify":
-		return c.verify(rest)
-	case "decide":
-		return c.decide(rest)
-	case "pr":
-		return c.pr(rest)
-	case "soft-done":
-		return c.softDone(rest)
-	case "set":
-		return c.set(rest)
-	case "done":
-		return c.done(rest)
-	case "status":
-		return c.status(rest)
-	case "context":
-		return c.contextCmd(rest)
-	case "open":
-		return c.open(rest)
-	case "claim":
-		return c.claim(rest)
-	case "impact":
-		return c.impact(rest)
-	case "conflict":
-		return c.conflict(rest)
-	case "worktree":
-		return c.worktree(rest)
-	case "merge":
-		return c.merge(rest)
-	case "concern":
-		return c.concern(rest)
-	case "scan":
-		return c.scan(rest)
-	case "events":
-		return c.events(rest)
-	case "feedback":
-		return c.feedback(rest)
-	case "distill":
-		return c.distill(rest)
-	case "tui":
-		return c.tui(rest)
-	case "serve":
-		return c.serve(rest)
-	case "doctor":
-		return c.doctor(rest)
+	run, ok := commands[c.Args.Positional[0]]
+	if !ok {
+		return fail("%s", usage)
 	}
-	return fail("%s", usage)
+	return run(c, c.Args.Positional[1:])
 }
 
 // out prints the command's result: indented JSON on the --json rail, else text.

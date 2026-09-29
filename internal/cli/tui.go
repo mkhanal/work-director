@@ -99,6 +99,9 @@ func (s *tuiSource) Send(id, text string) error {
 // tui runs the terminal UI: `wd tui [id]` opens the board, or the work item's
 // detail view when an id is given.
 func (c *Cli) tui(rest []string) (err error) {
+	if c.JSON {
+		return fail("wd tui draws the terminal and has no --json document; read the board with wd status --json")
+	}
 	var id string
 	if len(rest) > 0 {
 		id = rest[0]

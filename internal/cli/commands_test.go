@@ -139,6 +139,25 @@ func TestCommandsFailLoud(t *testing.T) {
 	})
 }
 
+func TestEpicSpawnRecordsTheRunnerOfItsLastSession(t *testing.T) {
+	f := newCLIFixture(t)
+	planEpic := f.ids["planEpic"]
+	f.runOK(t, "epic", "spawn", planEpic, "--count", "2", "--runner", "claude,opencode")
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(f.runOK(t, "status", "--json")), &rows); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	for _, r := range rows {
+		if r["id"] == planEpic {
+			if r["runner"] != "opencode" || r["session"] != "ses_opabc" {
+				t.Fatalf("epic runner %v session %v, want opencode ses_opabc (the last spawn's)", r["runner"], r["session"])
+			}
+			return
+		}
+	}
+	t.Fatalf("epic %s missing from status", planEpic)
+}
+
 // noEditorEnv is the fixture environment with no editor on PATH, so open
 // never launches the host's own.
 func noEditorEnv(t *testing.T, f *cliFixture) []string {

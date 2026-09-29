@@ -78,8 +78,9 @@ work's brief lists its decisions and its resolved concerns' decisions under
 "Decisions already made", and nothing else there.
 
 ## Every Json Command Writes One Document
-With `--json`, a command writes exactly one JSON document to stdout — no
-progress lines, no document per spawned session.
+With `--json`, every command writes exactly one JSON document to stdout — no
+progress lines, no document per spawned session. `wd tui`, which draws the
+terminal, refuses `--json` and writes nothing to stdout.
 
 ## Projects Add Never Writes A File It Cannot Parse
 `wd projects add` with a path or flag value its project file cannot hold —
