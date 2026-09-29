@@ -542,30 +542,38 @@ func TestCoordinator(t *testing.T) {
 			t.Fatalf("set claim: %v", err)
 		}
 		move(t, l, child.ID, core.StateRunning)
-		fr := &fakeRunner{texts: []string{"READY"}}
-		if _, err := CoordinateOnce(epic, proj, l, resolveFake(fr)); err != nil {
-			t.Fatalf("coordinateOnce: %v", err)
+		reaches := func(stage, runnerName, session, cwd string) {
+			t.Helper()
+			e, err := l.Get(epic.ID)
+			if err != nil {
+				t.Fatalf("get epic: %v", err)
+			}
+			fr := &fakeRunner{texts: []string{"READY"}}
+			if _, err := CoordinateOnce(e, proj, l, resolveFake(fr)); err != nil {
+				t.Fatalf("%s: coordinateOnce: %v", stage, err)
+			}
+			if !slices.Equal(fr.resolved, []string{runnerName}) || !slices.Equal(fr.sessions, []string{session}) || !slices.Equal(fr.cwds, []string{cwd}) {
+				t.Fatalf("%s: reached %v %v in %v, want %s %s in %s", stage, fr.resolved, fr.sessions, fr.cwds, runnerName, session, cwd)
+			}
 		}
-		if !slices.Equal(fr.resolved, []string{"project-runner"}) || !slices.Equal(fr.cwds, []string{"/repo/proj"}) {
-			t.Fatalf("resolved %v in %v, want project-runner in /repo/proj", fr.resolved, fr.cwds)
-		}
-		if err := l.SetSession(epic.ID, ledger.SessionInfo{Runner: "epic-runner", Session: "ses_e", Cwd: "/repo/proj"}); err != nil {
+		reaches("no epic runner, no worktree", "project-runner", "ses_claim", "/repo/proj")
+		if err := l.SetSession(epic.ID, ledger.SessionInfo{Runner: "epic-runner", Session: "ses_e", Cwd: "/epic/own"}); err != nil {
 			t.Fatalf("epic session: %v", err)
 		}
-		if _, err := l.AddWorktree(epic.ID, ledger.WorktreeInfo{Path: "/wt/shared", Kind: core.WorktreeShared}); err != nil {
+		reaches("epic runner, no worktree", "epic-runner", "ses_claim", "/repo/proj")
+		wt, err := l.AddWorktree(epic.ID, ledger.WorktreeInfo{Path: "/wt/shared", Kind: core.WorktreeShared})
+		if err != nil {
 			t.Fatalf("shared worktree: %v", err)
 		}
-		epic, err := l.Get(epic.ID)
-		if err != nil {
-			t.Fatalf("get epic: %v", err)
+		reaches("active shared worktree", "epic-runner", "ses_claim", "/wt/shared")
+		if _, err := l.SetWorktreeState(wt.ID, core.WorktreeMerged); err != nil {
+			t.Fatalf("merge worktree: %v", err)
 		}
-		fr.resolved, fr.cwds = nil, nil
-		if _, err := CoordinateOnce(epic, proj, l, resolveFake(fr)); err != nil {
-			t.Fatalf("coordinateOnce: %v", err)
+		reaches("merged shared worktree", "epic-runner", "ses_claim", "/repo/proj")
+		if err := l.SetSession(child.ID, ledger.SessionInfo{Runner: "own-runner", Session: "ses_own", Cwd: "/own"}); err != nil {
+			t.Fatalf("child session: %v", err)
 		}
-		if !slices.Equal(fr.resolved, []string{"epic-runner"}) || !slices.Equal(fr.cwds, []string{"/wt/shared"}) {
-			t.Fatalf("resolved %v in %v, want epic-runner in /wt/shared", fr.resolved, fr.cwds)
-		}
+		reaches("its own runner and directory", "own-runner", "ses_own", "/own")
 	})
 
 	t.Run("Sending Records The Ref The Runner Returns", func(t *testing.T) {
