@@ -2,6 +2,7 @@ package runner
 
 import (
 	"fmt"
+	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -52,7 +53,6 @@ func specs() ([]RunnerSpec, error) {
 	return cache.list, nil
 }
 
-// allRunnerNames lists the built-ins then every spec file's runner.
 // AllRunnerNames lists the built-ins then every spec file's runner.
 func AllRunnerNames() ([]string, error) {
 	ss, err := specs()
@@ -83,4 +83,45 @@ func RunnerNamed(name string) (Runner, error) {
 	}
 	return nil, fmt.Errorf("no runner named %q; known built-ins: %s. Add ~/.work-director/runners/%s.toml (see wd runner init)",
 		name, strings.Join(builtinNames(), ", "), name)
+}
+
+// Availability is whether one registered runner can be used on this host:
+// detected when its command resolves on PATH, with the resolved path.
+type Availability struct {
+	Runner   string  `json:"runner"`
+	Command  string  `json:"command"`
+	Detected bool    `json:"detected"`
+	Path     *string `json:"path"`
+}
+
+// Availabilities reports every registered runner, built-ins then spec
+// files. An undetected runner is a fact about the host, not an error.
+func Availabilities() ([]Availability, error) {
+	names, err := AllRunnerNames()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Availability, 0, len(names))
+	for _, name := range names {
+		r, err := RunnerNamed(name)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, availability(r))
+	}
+	return out, nil
+}
+
+func availability(r Runner) Availability {
+	a := Availability{Runner: r.Name(), Command: r.Command()}
+	if a.Command == "" {
+		return a
+	}
+	path, err := exec.LookPath(a.Command)
+	if err != nil {
+		return a
+	}
+	a.Detected = true
+	a.Path = &path
+	return a
 }

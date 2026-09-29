@@ -68,6 +68,8 @@ var opencode = opencodeRunner{}
 
 func (opencodeRunner) Name() string { return "opencode" }
 
+func (opencodeRunner) Command() string { return "opencode" }
+
 func (opencodeRunner) Spawn(o SpawnOptions) (Handle, error) {
 	log := filepath.Join(logDir(), fmt.Sprintf("%s-%d.jsonl", logName(o.Name), time.Now().UnixMilli()))
 	args := []string{"opencode", "run", "--format", "json", "--auto", "--title", o.Name}

@@ -282,6 +282,34 @@ attach = "myagent attach {session}"
 		})
 	})
 
+	t.Run("Every Registered Runner Reports Whether It Is Detected", func(t *testing.T) {
+		only := t.TempDir()
+		for _, name := range []string{"claude", "myagent"} {
+			if err := os.Symlink(filepath.Join(bin, name), filepath.Join(only, name)); err != nil {
+				t.Fatalf("link %s: %v", name, err)
+			}
+		}
+		t.Setenv("PATH", only)
+		list, err := Availabilities()
+		if err != nil {
+			t.Fatalf("availabilities: %v", err)
+		}
+		got := map[string]Availability{}
+		for _, a := range list {
+			got[a.Runner] = a
+		}
+		for _, name := range []string{"claude", "myagent"} {
+			if a := got[name]; !a.Detected || a.Path == nil || *a.Path != filepath.Join(only, name) {
+				t.Errorf("%s = %+v, want detected in %s", name, a, only)
+			}
+		}
+		for _, name := range []string{"opencode", "codex", "ao"} {
+			if a, ok := got[name]; !ok || a.Detected || a.Path != nil || a.Command != name {
+				t.Errorf("%s = %+v (listed %v), want not detected", name, a, ok)
+			}
+		}
+	})
+
 	t.Run("A Runner Can Be Defined By A File Of Commands", func(t *testing.T) {
 		t.Run("a ~/.work-director/runners/*.toml drives spawn, send, status, transcript, models", func(t *testing.T) {
 			known, err := AllRunnerNames()

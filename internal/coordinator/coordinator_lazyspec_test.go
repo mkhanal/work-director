@@ -64,6 +64,8 @@ type fakeRunner struct {
 }
 
 func (f *fakeRunner) Name() string { return "fake" }
+
+func (f *fakeRunner) Command() string { return "fake" }
 func (f *fakeRunner) Spawn(o runner.SpawnOptions) (runner.Handle, error) {
 	return runner.Handle{Runner: "fake"}, nil
 }

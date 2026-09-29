@@ -47,6 +47,8 @@ var claude = claudeRunner{}
 
 func (claudeRunner) Name() string { return "claude" }
 
+func (claudeRunner) Command() string { return "claude" }
+
 func (claudeRunner) Spawn(o SpawnOptions) (Handle, error) {
 	permissionMode := "bypassPermissions"
 	if o.PermissionMode != nil {

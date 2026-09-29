@@ -259,13 +259,6 @@ func (f *cliFixture) run(t *testing.T, args ...string) (int, string, string) {
 	return f.runEnv(t, f.env(t, f.bin), args...)
 }
 
-// runBare runs the Go CLI with the system PATH — no fake runners — for
-// commands that probe the environment itself, like setup.
-func (f *cliFixture) runBare(t *testing.T, args ...string) (int, string, string) {
-	t.Helper()
-	return f.runEnv(t, f.env(t, ""), args...)
-}
-
 // env builds the command environment; binDir is prepended to PATH when set.
 func (f *cliFixture) env(t *testing.T, binDir string) []string {
 	t.Helper()
@@ -289,9 +282,16 @@ func (f *cliFixture) env(t *testing.T, binDir string) []string {
 // stderr.
 func (f *cliFixture) runEnv(t *testing.T, env []string, args ...string) (int, string, string) {
 	t.Helper()
+	return f.runAt(t, f.dir, env, args...)
+}
+
+// runAt runs the Go CLI with args under env in dir and returns exit code,
+// stdout, stderr.
+func (f *cliFixture) runAt(t *testing.T, dir string, env []string, args ...string) (int, string, string) {
+	t.Helper()
 	c := exec.Command(f.goBin, args...)
 	c.Env = env
-	c.Dir = f.dir
+	c.Dir = dir
 	var stdout, stderr strings.Builder
 	c.Stdout = &stdout
 	c.Stderr = &stderr
@@ -363,4 +363,31 @@ func copyDirRecursive(src, dst string) error {
 		}
 	}
 	return nil
+}
+
+// envWithPath is the fixture environment with PATH replaced by path.
+func (f *cliFixture) envWithPath(t *testing.T, path string) []string {
+	t.Helper()
+	env := f.env(t, "")
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			env[i] = "PATH=" + path
+		}
+	}
+	return env
+}
+
+// gitOnlyPath is a PATH holding git and nothing else, so no runner CLI
+// resolves whatever the host has installed.
+func gitOnlyPath(t *testing.T) string {
+	t.Helper()
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(git, filepath.Join(dir, "git")); err != nil {
+		t.Fatalf("link git: %v", err)
+	}
+	return dir
 }

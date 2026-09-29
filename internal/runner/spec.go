@@ -168,6 +168,16 @@ type specRunnerAdapter struct {
 
 func (r *specRunnerAdapter) Name() string { return r.spec.Name }
 
+// Command is the first word of the spawn line: a spec names its executable
+// there, before any arguments.
+func (r *specRunnerAdapter) Command() string {
+	fields := strings.Fields(r.spec.Spawn)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
 // placeholders is the map every spec command fills; only the fields the
 // command uses are non-empty.
 func (r *specRunnerAdapter) placeholders(h Handle, text string) map[string]string {

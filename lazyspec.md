@@ -16,5 +16,5 @@
   code it ports. So far: `ledger.lazyspec.md` (internal/ledger), `runner.lazyspec.md`
   (internal/runner), `taste.lazyspec.md` (internal/taste),
   `project.lazyspec.md` (internal/project), `coordinator.lazyspec.md`
-  (internal/coordinator), `install.lazyspec.md` (internal/install),
+  (internal/coordinator), `doctor.lazyspec.md` (internal/cli, `wd doctor`),
   `tui.lazyspec.md` (internal/tui).
