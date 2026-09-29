@@ -58,7 +58,7 @@ func newCLIFixture(t *testing.T) *cliFixture {
 	if err != nil {
 		t.Fatalf("mktemp: %v", err)
 	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	t.Cleanup(func() { os.RemoveAll(dir) })
 	f := &cliFixture{
 		dir:    dir,
 		wdHome: filepath.Join(dir, "wd-home"),

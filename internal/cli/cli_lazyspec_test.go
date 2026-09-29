@@ -363,6 +363,44 @@ func TestAHumanClosesQueuedBriefedOrBlockedWork(t *testing.T) {
 	}
 }
 
+func TestCommandsThatNeedTasteCardsSayWhereTheyLooked(t *testing.T) {
+	f := newCLIFixture(t)
+	standalone := f.ids["standalone"]
+	outside := t.TempDir()
+	var env []string
+	for _, kv := range f.env(t, f.bin) {
+		if !strings.HasPrefix(kv, "WD_ROOT=") {
+			env = append(env, kv)
+		}
+	}
+	for _, args := range [][]string{{"brief", standalone}, {"spawn", standalone}, {"scan"}} {
+		code, _, errStr := f.runAt(t, outside, env, args...)
+		if code != 1 {
+			t.Fatalf("wd %s exited %d, want 1\n%s", strings.Join(args, " "), code, errStr)
+		}
+		for _, want := range []string{"WD_ROOT", filepath.Dir(f.goBin), outside} {
+			if !strings.Contains(errStr, want) {
+				t.Fatalf("wd %s stderr %q does not name %q", strings.Join(args, " "), errStr, want)
+			}
+		}
+	}
+	if code, _, errStr := f.runAt(t, outside, env, "status"); code != 0 {
+		t.Fatalf("status outside the checkout exited %d\n%s", code, errStr)
+	}
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	defer l.Close()
+	w, err := l.Get(standalone)
+	if err != nil {
+		t.Fatalf("get %s: %v", standalone, err)
+	}
+	if w.State != core.StateQueued || w.Session != nil {
+		t.Errorf("%s = state %s session %v, want untouched", standalone, w.State, w.Session)
+	}
+}
+
 // backdate sets a work item's last activity to age ago, as a ledger left alone
 // that long would hold it.
 func (f *cliFixture) backdate(t *testing.T, id string, age time.Duration) {

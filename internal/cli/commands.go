@@ -1749,7 +1749,11 @@ func (c *Cli) concern(rest []string) error {
 func (c *Cli) scan(rest []string) error {
 	a := c.Args
 	adopt := str(a, "adopt")
-	cards, err := taste.LoadCards(c.Root + "/taste/cards")
+	cardsDir, err := tasteCardsDir()
+	if err != nil {
+		return err
+	}
+	cards, err := taste.LoadCards(cardsDir)
 	if err != nil {
 		return err
 	}
@@ -1778,7 +1782,7 @@ func (c *Cli) scan(rest []string) error {
 		for _, f := range cand.Evidence {
 			evidence = append(evidence, strconv.Itoa(f.ID))
 		}
-		path, err := promotion.AdoptCard(cand.Card, evidence, c.Root+"/taste/cards")
+		path, err := promotion.AdoptCard(cand.Card, evidence, cardsDir)
 		if err != nil {
 			return err
 		}
@@ -1918,7 +1922,7 @@ func (c *Cli) serve(rest []string) error {
 		}
 	}
 	cliPath := filepath.Join(executableDir(), "wd")
-	srv := serve.New(c.Ledger, c.Root, cliPath)
+	srv := serve.New(c.Ledger, cliPath)
 	addr, failed, err := srv.Start(port)
 	if err != nil {
 		return err
