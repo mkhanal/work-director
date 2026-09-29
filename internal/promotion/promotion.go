@@ -14,6 +14,7 @@ import (
 
 // PromotionCandidate is a project-scoped adopted card whose evidence
 // recurs: two or more projects, or two or more real-world (attached) feedback.
+// A card whose global card exists is already promoted and never a candidate.
 type PromotionCandidate struct {
 	Card     taste.Card      `json:"card"`
 	Evidence []core.Feedback `json:"evidence"`
@@ -23,9 +24,13 @@ type PromotionCandidate struct {
 
 // PromotionCandidates returns the cards ready to promote, most evidence first.
 func PromotionCandidates(cards []taste.Card, feedback []core.Feedback) []PromotionCandidate {
+	ids := map[string]bool{}
+	for _, card := range cards {
+		ids[card.ID] = true
+	}
 	out := []PromotionCandidate{}
 	for _, card := range cards {
-		if card.Status != taste.StatusAdopted {
+		if card.Status != taste.StatusAdopted || ids[globalID(card.ID)] {
 			continue
 		}
 		projectScoped := false
@@ -71,7 +76,7 @@ func AdoptCard(card taste.Card, evidence []string, cardsDir string) (string, err
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	id := card.ID + "-global"
+	id := globalID(card.ID)
 	text := `---
 id: ` + id + `
 title: ` + card.Title + `
@@ -99,3 +104,6 @@ evidence: [` + strings.Join(evidence, ", ") + `]
 	}
 	return path, nil
 }
+
+// globalID is the id of the global card promoted from a project card.
+func globalID(projectID string) string { return projectID + "-global" }

@@ -20,6 +20,21 @@ func TestParseProjectExpandsOnlyTheUsersHome(t *testing.T) {
 	}
 }
 
+func TestExpandHomeFailsOnlyWhenItNeedsAnUnknownHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	for _, raw := range []string{"~", "~/repo"} {
+		if got, err := ExpandHome(raw); err == nil {
+			t.Fatalf("%s expanded to %q with no home, want an error", raw, got)
+		}
+	}
+	for _, raw := range []string{"/abs/x", "~bob/x", "rel/~"} {
+		got, err := ExpandHome(raw)
+		if err != nil || got != raw {
+			t.Fatalf("%s = %q, %v, want it unchanged", raw, got, err)
+		}
+	}
+}
+
 func TestParseProjectTreatsAnEmptyAgentAsUnset(t *testing.T) {
 	p, err := ParseProject("---\npath: /repo\nrunner: opencode\nagent: \nmodel: \n---\n", "/w/proj.md")
 	if err != nil {

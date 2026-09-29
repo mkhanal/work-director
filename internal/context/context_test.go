@@ -1,6 +1,7 @@
 package context
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -34,5 +35,22 @@ func TestWorkspaceContextTellsNotARepoFromAFailedProbe(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if _, err := WorkspaceContext(repo); err == nil {
 		t.Fatal("a missing git binary reported as no repo")
+	}
+}
+
+func TestWorkspaceContextFailsWhenGitFailsForAnotherReason(t *testing.T) {
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not on PATH")
+	}
+	repo := t.TempDir()
+	if out, err := exec.Command(gitPath, "-C", repo, "init", "-q", "-b", "main").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".git", "config"), []byte("[core\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ws, err := WorkspaceContext(repo); err == nil {
+		t.Fatalf("a repo git cannot read reported as %+v, want an error", ws)
 	}
 }
