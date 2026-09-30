@@ -58,8 +58,7 @@ or any event — is over 30 days old is marked stale on its `wd status` row.
 `--json` rows carry every work key plus `stale`, a boolean.
 
 ## A Human Closes Queued Briefed Or Blocked Work
-`wd done` closes queued, briefed and blocked work directly; running,
-needs-input and review work still refuses with the illegal-transition message.
+`wd done <id> --cancelled "<reason>"` closes queued, briefed and blocked work directly and records the reason as a decision, so a closure that came through the soft-done gate is never later read as a cancellation; closing one of those states without the reason is refused and names the flag; running, needs-input and review work still refuses with the illegal-transition message.
 
 ## An Installed Binary Reads The Rule Cards It Was Built With
 With no `WD_ROOT` and no `taste/cards` beside the binary or in the working
@@ -152,6 +151,21 @@ A task with no epic goes from queued to done through `wd add`, `wd spawn`,
 else writes the ledger. `wd report` on a task with no session files nothing
 and exits 1. A task whose latest report is not DONE is refused by
 `wd soft-done`, even in review with a passing verify and a PR.
+
+## Reflection Rides On The Report And The Epic Pass
+`wd report` on a DONE report and `wd epic review` on children that just reported
+DONE each ask one bounded question of the finished session's transcript, and
+record one event naming the runner, model, tokens and verdicts. `--no-reflect`
+skips it on both. Reflection is not a gate: it does not move the work's state,
+write a card or satisfy the report, verify or pull-request gate, and a
+reflection that cannot run is recorded on the work rather than failing the
+command that triggered it.
+
+## A Supervised Project Proposes Reflection Without Filing It
+In mode `ask` a durable verdict is recorded as an event on the work but is not
+added as feedback, so asking for a conversation's confirmation means something;
+in mode `auto` it is filed with source `attached`. Either way the event is
+recorded, so a declined reflection is as visible as a productive one.
 
 ## Report Files What The Coordinator Would
 `wd report` on running or needs-input work, with or without an epic, files a

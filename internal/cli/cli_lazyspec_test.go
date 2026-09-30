@@ -357,9 +357,28 @@ func TestAHumanClosesQueuedBriefedOrBlockedWork(t *testing.T) {
 	standalone, t2, t3, planEpic := f.ids["standalone"], f.ids["t2"], f.ids["t3"], f.ids["planEpic"]
 	f.runOK(t, "set", t3, "briefed")
 	f.runOK(t, "set", planEpic, "blocked")
+	// A direct close skips the gate on purpose, so it is refused without a
+	// reason and the message names the flag that makes it legitimate.
 	for _, id := range []string{standalone, t3, planEpic} {
-		out := f.runOK(t, "done", id, "--json")
+		code, _, errStr := f.run(t, "done", id)
+		if code != 1 || !strings.Contains(errStr, `--cancelled`) {
+			t.Fatalf("done on %s without a reason exited %d: %q", id, code, errStr)
+		}
+	}
+	for _, id := range []string{standalone, t3, planEpic} {
+		out := f.runOK(t, "done", id, "--cancelled", "superseded by the new plan", "--json")
 		assertHasKey(t, out, `"state": "done"`)
+		// The reason is what later tells a cancellation from a completion.
+		ev := jsonEvents(t, f, id)
+		var found bool
+		for _, e := range ev {
+			if e.Kind == core.EventDecision && strings.Contains(e.Body, "superseded by the new plan") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s has no decision recording the cancellation: %+v", id, ev)
+		}
 	}
 	f.runOK(t, "set", t2, "needs-input")
 	code, _, errStr := f.run(t, "done", t2)
@@ -667,6 +686,16 @@ func assertHasKey(t *testing.T, out, want string) {
 	if !strings.Contains(out, want) {
 		t.Fatalf("output %q does not contain %q", out, want)
 	}
+}
+
+// jsonEvents reads `wd events <id> --json` back as the events it reported.
+func jsonEvents(t *testing.T, f *cliFixture, id string) []core.Event {
+	t.Helper()
+	var ev []core.Event
+	if err := json.Unmarshal([]byte(f.runOK(t, "events", id, "--json")), &ev); err != nil {
+		t.Fatalf("unmarshal events for %s: %v", id, err)
+	}
+	return ev
 }
 
 func jsonString(t *testing.T, out, key string) string {
@@ -1104,8 +1133,10 @@ func strPtr(s string) *string { return &s }
 func TestSendAndReportReachAChildWhereItsEpicsPassDoes(t *testing.T) {
 	f := newCLIFixture(t)
 	bin := t.TempDir()
+	// One call per line, four fields: the third is flattened so a multi-line
+	// brief cannot break the record apart.
 	recorder := "#!/usr/bin/env bash\nmkdir -p \"$WD_FAKE_STATE\"\n" +
-		"printf '%s|%s|%s|%s\\n' \"$1\" \"$2\" \"$3\" \"$PWD\" >> \"$WD_FAKE_STATE/recorder.log\"\n" +
+		"printf '%s|%s|%s|%s\\n' \"$1\" \"$2\" \"$(printf '%s' \"$3\" | tr '\\n| ' '.')\" \"$PWD\" >> \"$WD_FAKE_STATE/recorder.log\"\n" +
 		"case \"$2\" in status) echo 'state: waiting';; export) echo 'STATUS: DONE';; *) echo ok;; esac\n"
 	if err := os.WriteFile(filepath.Join(bin, "recorder"), []byte(recorder), 0o755); err != nil {
 		t.Fatal(err)
@@ -1172,8 +1203,19 @@ func TestSendAndReportReachAChildWhereItsEpicsPassDoes(t *testing.T) {
 			}
 			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 				parts := strings.Split(line, "|")
-				if len(parts) != 4 || parts[0] != c.runner || parts[2] != c.claim || parts[3] != c.dir {
-					t.Errorf("%s reached %q, want %s %s in %s", what, line, c.runner, c.claim, c.dir)
+				if len(parts) != 4 || parts[0] != c.runner || parts[3] != c.dir {
+					t.Errorf("%s reached %q, want the %s runner in %s", what, line, c.runner, c.dir)
+					continue
+				}
+				// Every call runs where the work runs. The calls that
+				// coordinate with the work address its claim; the reflection
+				// call is a separate bounded session of its own, spawned in
+				// the same runner and directory.
+				if parts[1] == "run" {
+					continue
+				}
+				if parts[2] != c.claim {
+					t.Errorf("%s reached %q, want session %s", what, line, c.claim)
 				}
 			}
 		}
@@ -1538,7 +1580,7 @@ func TestDoneRemovesAWorktreeWdMadeOnceItsBranchHasLanded(t *testing.T) {
 	// The task's work merged into the epic's shared branch.
 	commit(t, f.private, "dash.txt", "dashboards\n")
 	gitRun(t, f.shared, "merge", "--no-edit", "-q", f.privBr)
-	if out := f.runOK(t, "set", f.t2, "done"); !strings.Contains(out, "removed worktree "+f.private) {
+	if out := f.runOK(t, "set", f.t2, "done", "--cancelled", "the work landed, so the task is closed"); !strings.Contains(out, "removed worktree "+f.private) {
 		t.Fatalf("set done said %q, want the removed worktree", out)
 	}
 	worktreeGone(t, f.sample, f.private, f.privBr)
@@ -1557,7 +1599,7 @@ func TestDoneRemovesAWorktreeWdMadeOnceItsBranchHasLanded(t *testing.T) {
 	commit(t, clone, "dash.txt", "dashboards\n")
 	gitRun(t, clone, "push", "-q", "origin", "main")
 
-	out := f.runOK(t, "done", f.epic, "--json")
+	out := f.runOK(t, "done", f.epic, "--cancelled", "the goal's pull request landed upstream", "--json")
 	assertHasKey(t, out, `"state": "done"`)
 	worktreeGone(t, f.sample, f.shared, f.sharedBr)
 	if got := f.worktreeStates(t, f.epic)[f.shared]; got != core.WorktreeRemoved {
@@ -1575,7 +1617,7 @@ func TestDoneKeepsAWorktreeThatWouldLoseWork(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(f.private, "draft.txt"), []byte("uncommitted\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	f.runOK(t, "done", f.t2)
+	f.runOK(t, "done", f.t2, "--cancelled", "abandoned with an unmerged draft")
 	worktreeStays(t, f.sample, f.private, f.privBr)
 	if got := f.worktreeStates(t, f.t2)[f.private]; got != core.WorktreeActive {
 		t.Fatalf("private worktree state = %q, want active", got)
@@ -1591,7 +1633,7 @@ func TestDoneKeepsAWorktreeThatWouldLoseWork(t *testing.T) {
 	}
 
 	gitRun(t, f.sample, "worktree", "lock", "--reason", "on a removable drive", f.shared)
-	f.runOK(t, "done", f.epic)
+	f.runOK(t, "done", f.epic, "--cancelled", "abandoning the goal with the shared worktree locked")
 	worktreeStays(t, f.sample, f.shared, f.sharedBr)
 	if cs := f.openConcerns(t, f.epic); len(cs) != 1 || !strings.Contains(cs[0], "it is locked: on a removable drive") {
 		t.Fatalf("concerns = %v, want one naming the lock", cs)
@@ -1604,7 +1646,7 @@ func TestDoneLeavesWorktreesWdDidNotMake(t *testing.T) {
 	path := filepath.Join(f.dir, "own-worktree")
 	gitRun(t, f.sample, "worktree", "add", "-q", "-b", "own", path)
 	f.runOK(t, "worktree", "attach", standalone, path, "--branch", "own")
-	f.runOK(t, "done", standalone)
+	f.runOK(t, "done", standalone, "--cancelled", "closed with a worktree wd did not make")
 	worktreeStays(t, f.sample, path, "own")
 	if got := f.worktreeStates(t, standalone)[path]; got != core.WorktreeActive {
 		t.Fatalf("attached worktree state = %q, want active", got)
@@ -1623,7 +1665,7 @@ func TestWorktreeRemoveRetriesTheWorktreesDoneWorkKept(t *testing.T) {
 	worktreeStays(t, f.sample, f.private, f.privBr)
 
 	commit(t, f.private, "ingest.txt", "unmerged\n")
-	f.runOK(t, "done", f.t2)
+	f.runOK(t, "done", f.t2, "--cancelled", "abandoned holding an unmerged commit")
 	if errStr := f.runFail(t, "worktree", "remove", f.t2); !strings.Contains(errStr, "kept worktree "+f.private) {
 		t.Fatalf("remove with unlanded work said %q", errStr)
 	}
@@ -1634,4 +1676,313 @@ func TestWorktreeRemoveRetriesTheWorktreesDoneWorkKept(t *testing.T) {
 		t.Fatalf("remove said %q, want the removed worktree", out)
 	}
 	worktreeGone(t, f.sample, f.private, f.privBr)
+}
+
+// reflectionFixture builds a fake runner whose sessions answer a reflection
+// with a chosen verdict, so the report trigger and the ask/auto filing split
+// are exercised end to end through the built binary.
+type reflectionFixture struct {
+	*cliFixture
+	log string
+}
+
+// newReflectionFixture adds a spec-file runner that logs every call and
+// answers every export with reply, and registers project projectName in mode.
+func newReflectionFixture(t *testing.T, projectName, mode, reply string) *reflectionFixture {
+	t.Helper()
+	f := newCLIFixture(t)
+	log := filepath.Join(f.dir, "reflection.log")
+	// The executor's own session reports DONE; the reflection session the
+	// director spawns afterwards answers with the verdict under test. One
+	// script, two sessions, so the test exercises the real two-call path.
+	rec := "#!/usr/bin/env bash\nmkdir -p \"$WD_FAKE_STATE\"\n" +
+		"printf '%s|%s|%s\\n' \"$1\" \"$2\" \"$PWD\" >> \"" + log + "\"\n" +
+		"case \"$1\" in\n" +
+		"  run) echo 'session=ses_refl';;\n" +
+		"  status) echo 'state: waiting';;\n" +
+		"  export) if [ \"$2\" = ses_reflect ]; then echo 'STATUS: DONE'; else cat <<'REPLY'\n" +
+		reply + "\nREPLY\nfi;;\n" +
+		"  *) echo ok;;\nesac\n"
+	// Into the fixture's own bin, so pathWith finds it alongside the others.
+	if err := os.WriteFile(filepath.Join(f.bin, "reflector"), []byte(rec), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spec := "name = \"reflector\"\nspawn = \"reflector run {brief}\"\nsession_id = 'session=(\\S+)'\n" +
+		"send = \"reflector send {session} {text}\"\nstatus = \"reflector status {session}\"\n" +
+		"running = 'state: *running'\nwaiting = 'state: *waiting'\nexited = 'state: *exited'\n" +
+		"transcript = \"reflector export {session}\"\nmodels = \"reflector models\"\nattach = \"reflector attach {session}\"\n"
+	if err := os.WriteFile(filepath.Join(f.wdHome, "runners", "reflector.toml"), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := f.env(t, f.bin)
+	run := func(args ...string) string {
+		t.Helper()
+		code, out, errStr := f.runEnv(t, env, args...)
+		if code != 0 {
+			t.Fatalf("wd %s exited %d\n%s\n%s", strings.Join(args, " "), code, out, errStr)
+		}
+		return out
+	}
+	run("projects", "add", projectName, f.sample, "--runner", "reflector", "--mode", mode, "--lazyspec", "n")
+	return &reflectionFixture{cliFixture: f, log: log}
+}
+
+// calls returns the runner ops recorded so far, one string per call.
+func (rf *reflectionFixture) calls(t *testing.T) []string {
+	t.Helper()
+	data, err := os.ReadFile(rf.log)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		return nil
+	}
+	return strings.Split(trimmed, "\n")
+}
+
+// feedback returns the ledger's feedback rows.
+func (rf *reflectionFixture) feedback(t *testing.T) []core.Feedback {
+	t.Helper()
+	l, err := ledger.New(filepath.Join(rf.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	rows, err := l.Feedback()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+// events returns the event bodies recorded for work.
+func (rf *reflectionFixture) events(t *testing.T, id string) []string {
+	t.Helper()
+	evs := rf.eventRows(t, id)
+	out := make([]string, 0, len(evs))
+	for _, e := range evs {
+		out = append(out, e.Body)
+	}
+	return out
+}
+
+// eventKinds returns the kinds recorded for work.
+func (rf *reflectionFixture) eventKinds(t *testing.T, id string) []core.EventKind {
+	t.Helper()
+	evs := rf.eventRows(t, id)
+	out := make([]core.EventKind, 0, len(evs))
+	for _, e := range evs {
+		out = append(out, e.Kind)
+	}
+	return out
+}
+
+// attachedIn returns the attached feedback filed for one project. The fixture's
+// own seed carries attached rows for sample-app, so every assertion here is
+// scoped to the project under test.
+func (rf *reflectionFixture) attachedIn(t *testing.T, project string) []core.Feedback {
+	t.Helper()
+	var out []core.Feedback
+	for _, fb := range rf.feedback(t) {
+		if fb.Source == core.FeedbackAttached && fb.Project != nil && *fb.Project == project {
+			out = append(out, fb)
+		}
+	}
+	return out
+}
+
+func (rf *reflectionFixture) eventRows(t *testing.T, id string) []core.Event {
+	t.Helper()
+	l, err := ledger.New(filepath.Join(rf.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	evs, err := l.Events(id, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return evs
+}
+
+const durableReply = "DURABLE: a gate that cannot fail is not a gate | card: defensive-coding"
+
+// runningWork adds work to the fixture project, claims it and starts it
+// running, so wd report has a session with a DONE report to read.
+func (rf *reflectionFixture) runningWork(t *testing.T, env []string, project string) string {
+	t.Helper()
+	run := func(args ...string) string {
+		t.Helper()
+		code, out, errStr := rf.runEnv(t, env, args...)
+		if code != 0 {
+			t.Fatalf("wd %s exited %d\n%s\n%s", strings.Join(args, " "), code, out, errStr)
+		}
+		return out
+	}
+	id := jsonString(t, run("add", project, "Port the importer", "--json"), "id")
+	// Attaching a session starts the work running, which is what wd report
+	// reads.
+	run("attach", id, "ses_reflect", "--runner", "reflector")
+	return id
+}
+
+func TestReflectionRidesOnTheReportAndTheEpicPass(t *testing.T) {
+	rf := newReflectionFixture(t, "auto-app", "auto", durableReply)
+	env := rf.envWithPath(t, rf.pathWith(t, "reflector"))
+	id := rf.runningWork(t, env, "auto-app")
+
+	// The DONE report triggers exactly one reflection call, in the runner and
+	// directory the work itself runs in.
+	before := len(rf.calls(t))
+	rf.runEnvOK(t, env, "report", id)
+	after := rf.calls(t)
+	if len(after) <= before {
+		t.Fatalf("no reflection call: %v", after)
+	}
+	spawned := false
+	for _, c := range after[before:] {
+		if strings.HasPrefix(c, "run|") {
+			spawned = true
+		}
+	}
+	if !spawned {
+		t.Fatalf("no spawn in the reflection calls: %v", after[before:])
+	}
+
+	// It filed the verdict as attached feedback.
+	filed := rf.attachedIn(t, "auto-app")
+	if len(filed) != 1 {
+		t.Fatalf("filed %d attached rows for auto-app, want 1: %+v", len(filed), filed)
+	}
+	if filed[0].Text != "a gate that cannot fail is not a gate" {
+		t.Fatalf("filed text = %q, want the lesson without the card marker", filed[0].Text)
+	}
+	if filed[0].Card == nil || *filed[0].Card != "defensive-coding" {
+		t.Fatalf("filed card = %v, want defensive-coding", filed[0].Card)
+	}
+
+	// It recorded an event naming the runner, model and the verdict.
+	var body string
+	for _, e := range rf.events(t, id) {
+		if strings.Contains(e, "reflect runner=") {
+			body = e
+		}
+	}
+	if body == "" {
+		t.Fatalf("no reflection event: %v", rf.events(t, id))
+	}
+	for _, want := range []string{"runner=reflector", "durable=1", "durable [defensive-coding]"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("reflection event %q does not name %q", body, want)
+		}
+	}
+
+	// Reflection is not a gate: the work's state is what the report left it,
+	// and it satisfies no later gate — no verify, no PR.
+	w, err := rf.work(t, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.State != core.StateReview {
+		t.Fatalf("state = %q, want review: reflection must not move work state", w.State)
+	}
+	for _, kind := range []core.EventKind{core.EventVerify, core.EventPr} {
+		for _, got := range rf.eventKinds(t, id) {
+			if got == kind {
+				t.Fatalf("reflection recorded a %s event: it must satisfy no gate", kind)
+			}
+		}
+	}
+
+	// --no-reflect skips the call, so a second report files nothing more.
+	before = len(rf.calls(t))
+	rf.runEnvOK(t, env, "report", id, "--no-reflect")
+	if after := rf.calls(t); len(after) > before {
+		for _, c := range after[before:] {
+			if strings.HasPrefix(c, "run|") {
+				t.Fatalf("--no-reflect still spawned a reflection session: %v", after[before:])
+			}
+		}
+	}
+	if got := rf.attachedIn(t, "auto-app"); len(got) != 1 {
+		t.Fatalf("--no-reflect filed %d attached rows, want the 1 already filed: %+v", len(got), got)
+	}
+
+	// The epic pass reflects on the children that just reported DONE, in the
+	// same command that coordinates them.
+	run := func(args ...string) string { return rf.runEnvOK(t, env, args...) }
+	epic := jsonString(t, run("add", "auto-app", "Port the invoicing stack", "--kind", "epic", "--json"), "id")
+	child := jsonString(t, run("add", "auto-app", "Split the parser", "--epic", epic, "--json"), "id")
+	run("attach", child, "ses_reflect", "--runner", "reflector")
+	if out := run("epic", "review", epic, "--json"); !strings.Contains(out, `"reviewed"`) {
+		t.Fatalf("epic review did not review the child: %s", out)
+	}
+	if got := rf.attachedIn(t, "auto-app"); len(got) != 2 {
+		t.Fatalf("the epic pass filed %d attached rows, want 2: %+v", len(got), got)
+	}
+	run("epic", "review", epic, "--no-reflect")
+	if got := rf.attachedIn(t, "auto-app"); len(got) != 2 {
+		t.Fatalf("--no-reflect on the epic pass filed %d, want the 2 already filed: %+v", len(got), got)
+	}
+}
+
+func TestASupervisedProjectProposesReflectionWithoutFilingIt(t *testing.T) {
+	for _, tc := range []struct {
+		mode  string
+		filed bool
+	}{
+		{"ask", false},
+		{"auto", true},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			rf := newReflectionFixture(t, tc.mode+"-app", tc.mode, durableReply)
+			env := rf.envWithPath(t, rf.pathWith(t, "reflector"))
+			id := rf.runningWork(t, env, tc.mode+"-app")
+			rf.runEnvOK(t, env, "report", id)
+
+			filed := len(rf.attachedIn(t, tc.mode+"-app")) > 0
+			if filed != tc.filed {
+				t.Fatalf("mode %s filed attached feedback = %v, want %v", tc.mode, filed, tc.filed)
+			}
+			// The event is recorded either way: a declined reflection is as
+			// visible as a productive one.
+			var body string
+			for _, e := range rf.events(t, id) {
+				if strings.Contains(e, "reflect runner=") {
+					body = e
+				}
+			}
+			if body == "" {
+				t.Fatalf("mode %s recorded no reflection event", tc.mode)
+			}
+			if !strings.Contains(body, "durable=1") {
+				t.Fatalf("mode %s event = %q, want the verdict named", tc.mode, body)
+			}
+		})
+	}
+}
+
+// runEnvOK runs a command expected to succeed under env and returns stdout.
+func (f *cliFixture) runEnvOK(t *testing.T, env []string, args ...string) string {
+	t.Helper()
+	code, out, errStr := f.runEnv(t, env, args...)
+	if code != 0 {
+		t.Fatalf("wd %s exited %d\n%s\n%s", strings.Join(args, " "), code, out, errStr)
+	}
+	return out
+}
+
+// work reads one work row.
+func (f *cliFixture) work(t *testing.T, id string) (core.Work, error) {
+	t.Helper()
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	return l.Get(id)
 }

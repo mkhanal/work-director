@@ -34,7 +34,7 @@ var valueFlags = map[string]bool{
 	"tail": true, "stack": true, "workflow": true, "verify": true, "lazyspec": true,
 	"kind": true, "epic": true, "heading": true, "detail": true, "project": true,
 	"branch": true, "adopt": true, "source": true, "card": true, "only": true,
-	"timeout": true, "port": true, "ref": true, "cwd": true,
+	"timeout": true, "port": true, "ref": true, "cwd": true, "cancelled": true,
 }
 
 // Args is one parsed command line: positionals, value flags (never empty)

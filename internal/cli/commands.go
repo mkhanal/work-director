@@ -891,8 +891,43 @@ func (c *Cli) epicReview(epic core.Work) error {
 	if err != nil {
 		return err
 	}
-	return c.out(res, fmt.Sprintf("answered: %s\nescalated: %s\nreviewed: %s\nblocked: %s\nwaiting: %s",
-		joinOrNone(res.Answered), joinOrNone(res.Escalated), joinOrNone(res.Reviewed), joinOrNone(res.Blocked), joinOrNone(res.Waiting)))
+	// The children that just reported DONE taught something or did not, and
+	// this is the second place their transcript is fresh. Reflecting here
+	// catches a whole pass in one command instead of one report at a time.
+	reflected := []reflectResult{}
+	if !flag(c.Args, "no-reflect") {
+		for _, id := range res.Reviewed {
+			w, err := c.Ledger.Get(id)
+			if err != nil {
+				return err
+			}
+			h, ok, err := coordinator.Handle(c.Ledger, w, p)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+			r, err := runner.DetectedRunner(h.Runner)
+			if err != nil {
+				return err
+			}
+			texts, err := r.Transcript(h)
+			if err != nil {
+				return err
+			}
+			one, err := c.Reflect(w, texts)
+			if err != nil {
+				// A reflection that cannot run is recorded on the child
+				// and does not lose the coordination pass.
+				one = reflectResult{Body: "reflect failed: " + err.Error()}
+			}
+			reflected = append(reflected, one)
+		}
+	}
+	return c.out(map[string]any{"pass": res, "reflect": reflected},
+		fmt.Sprintf("answered: %s\nescalated: %s\nreviewed: %s\nblocked: %s\nwaiting: %s",
+			joinOrNone(res.Answered), joinOrNone(res.Escalated), joinOrNone(res.Reviewed), joinOrNone(res.Blocked), joinOrNone(res.Waiting)))
 }
 
 func joinOrNone(ids []string) string {
@@ -1051,11 +1086,24 @@ func (c *Cli) report(rest []string) error {
 			return err
 		}
 	}
+	// Reflection rides on the report, where the transcript is fresh and the
+	// session has just said its piece. It files feedback and cannot touch the
+	// work's state, so a wrong lesson never moves a gate. A reflection that
+	// cannot run is recorded, not fatal: the report is the valuable result and
+	// must not be lost to a model that would not start.
+	reflected := reflectResult{}
+	if status == "DONE" && !flag(c.Args, "no-reflect") {
+		if r, rerr := c.Reflect(w, texts); rerr != nil {
+			reflected = reflectResult{Body: "reflect failed: " + rerr.Error()}
+		} else {
+			reflected = r
+		}
+	}
 	messages := sliceLastN(texts, n)
 	if messages == nil {
 		messages = []string{}
 	}
-	return c.out(map[string]any{"status": runnerStatus, "report": status, "messages": messages},
+	return c.out(map[string]any{"status": runnerStatus, "report": status, "messages": messages, "reflect": reflected},
 		fmt.Sprintf("%s · %s\n%s", runnerStatus, status, strings.Join(messages, "\n---\n")))
 }
 
@@ -1215,15 +1263,33 @@ func (c *Cli) set(rest []string) error {
 
 func (c *Cli) done(rest []string) error {
 	if len(rest) == 0 {
-		return fail("usage: wd done <id>")
+		return fail("usage: wd done <id> [--cancelled <reason>]")
 	}
 	id := rest[0]
+	w, err := c.Ledger.Get(id)
+	if err != nil {
+		return err
+	}
+	// Closing straight from queued, briefed or blocked skips the report, verify
+	// and pull-request gate on purpose: the work is abandoned, not completed.
+	// That makes the reason the only thing distinguishing it from a real
+	// completion later on, so it is required rather than optional.
+	reason := str(c.Args, "cancelled")
+	direct := core.ClosesDirectly(w.State)
+	if direct && (reason == nil || *reason == "") {
+		return fail("closing %s from %s skips the report, verify and pull-request gate: pass --cancelled \"<reason>\"", id, w.State)
+	}
 	after, err := c.Ledger.Transition(id, core.StateDone)
 	if err != nil {
 		if _, ok := err.(core.IllegalTransition); ok {
 			return fail("%s", err.Error())
 		}
 		return err
+	}
+	if direct {
+		if _, err := c.Ledger.AddEvent(id, core.EventDecision, "cancelled: "+*reason); err != nil {
+			return err
+		}
 	}
 	removed, kept, err := c.releaseWorktrees(after)
 	if err != nil {

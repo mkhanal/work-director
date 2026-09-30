@@ -158,6 +158,20 @@ type TranscriptMark struct {
 	Entries int
 }
 
+// ClosesDirectly reports whether a state may go straight to done without passing
+// the soft-done gate. Work in these states has not run, or has stopped, and is
+// being abandoned rather than completed — a legitimate close that must not be
+// made to fake a report, a passing verify and a pull request. Because it skips
+// the gate on purpose, every direct close records why, so a closure that came
+// through the gate is never later read as a cancellation.
+func ClosesDirectly(s State) bool {
+	switch s {
+	case StateQueued, StateBriefed, StateBlocked:
+		return true
+	}
+	return false
+}
+
 type Conflict struct {
 	A     string   `json:"a"`
 	B     string   `json:"b"`
