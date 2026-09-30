@@ -341,6 +341,11 @@ the way through for a real pull request. Verify and the landing link resolve the
 work's directory the same way, so a goal cannot be verified in one tree and
 linked from another.
 
+The kind of landing is recorded with it — `commit` for a link the tool worked
+out, `pull-request` for a url given — because the command is the only thing that
+knows which it was, and an audit that cannot tell a change that went straight to
+main from one that waited for a merge cannot say whether anything was reviewed.
+
 ## A Run Reports Where A Person Is Still Needed
 A run that stopped without shipping says which questions it settled, which it
 could not, and which work is still open, so the cost of running without a person

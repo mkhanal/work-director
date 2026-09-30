@@ -56,6 +56,19 @@ type Unshipped struct {
 	At     string    `json:"at"`
 }
 
+// Landed is a change that reached somewhere a person can read it, and which kind
+// of place that was. It is in the pass because the audit's real question is not
+// only what the loop decided but whether anything was ever looked at: a commit
+// on main is in the product and a pull request is waiting, and a reader who
+// cannot tell those apart is reading a pass that answers a different question
+// than the one they asked.
+type Landed struct {
+	Work *core.Work       `json:"work"`
+	Kind core.LandingKind `json:"kind"`
+	URL  string           `json:"url"`
+	At   string           `json:"at"`
+}
+
 // Pass is one review, over a project, from a cursor.
 type Pass struct {
 	Project string `json:"project"`
@@ -70,6 +83,7 @@ type Pass struct {
 	Claims          []Claim     `json:"claims"`
 	Cards           []Card      `json:"cards"`
 	Unshipped       []Unshipped `json:"unshipped"`
+	Landed          []Landed    `json:"landed"`
 	// Reversals is how many claims in this pass were undone by another claim
 	// in this pass, counted so a reader can see at a glance that something was
 	// corrected rather than having to spot it.
@@ -80,7 +94,7 @@ type Pass struct {
 // tell "nothing happened" from "nothing was read". Both are honest; only one
 // of them means the loop is idle.
 func (p Pass) Empty() bool {
-	return len(p.Claims) == 0 && len(p.Cards) == 0 && len(p.Unshipped) == 0
+	return len(p.Claims) == 0 && len(p.Cards) == 0 && len(p.Unshipped) == 0 && len(p.Landed) == 0
 }
 
 // From reads a pass for a project, starting at the stored cursors unless the
@@ -88,7 +102,7 @@ func (p Pass) Empty() bool {
 // for a window by hand, and a test. Neither of them moves the cursor; only
 // Acknowledge does.
 func From(l *ledger.Ledger, project string, since *int, sinceFeedback *int) (Pass, error) {
-	p := Pass{Project: project, Claims: []Claim{}, Cards: []Card{}, Unshipped: []Unshipped{}}
+	p := Pass{Project: project, Claims: []Claim{}, Cards: []Card{}, Unshipped: []Unshipped{}, Landed: []Landed{}}
 	var err error
 	if p.Since, err = l.Cursor(project, CursorEvents); err != nil {
 		return Pass{}, err
@@ -157,6 +171,13 @@ func From(l *ledger.Ledger, project string, since *int, sinceFeedback *int) (Pas
 				return Pass{}, err
 			}
 			p.Unshipped = append(p.Unshipped, Unshipped{Work: *work, Reason: e.Body, At: e.At})
+		case core.EventPr:
+			work, err := workOf(l, e.Work)
+			if err != nil {
+				return Pass{}, err
+			}
+			landing := core.ParseLanding(e.Body)
+			p.Landed = append(p.Landed, Landed{Work: work, Kind: landing.Kind, URL: landing.URL, At: e.At})
 		}
 	}
 
@@ -252,6 +273,26 @@ func (p Pass) Render() string {
 		out = append(out, "  taste promoted since:")
 		for _, c := range p.Cards {
 			out = append(out, fmt.Sprintf("    %s · %s", c.Card, oneline(c.Text)))
+		}
+	}
+	if len(p.Landed) > 0 {
+		out = append(out, "  landed:")
+		for _, l := range p.Landed {
+			// A landing whose work is gone is still a landing, and the audit
+			// must not fall over reading it: the event and the link are the
+			// facts, the row is only the caption.
+			id, title := "", "work that is no longer in the ledger"
+			if l.Work != nil {
+				id, title = l.Work.ID, l.Work.Title
+			}
+			// An unknown kind is said to be unknown. A landing filed before
+			// kinds were recorded is a real link, and showing it as one kind or
+			// the other would be a guess about whether anybody reviewed it.
+			kind := string(l.Kind)
+			if kind == "" {
+				kind = "of unknown kind"
+			}
+			out = append(out, fmt.Sprintf("    %s %s · %s", id, oneline(title), oneline(kind+" "+l.URL)))
 		}
 	}
 	if len(p.Unshipped) > 0 {

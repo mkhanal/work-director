@@ -58,3 +58,15 @@ An abandon event appears in the pass with its reason, so a review reads what
 failed to land alongside what was decided. A claim whose work has since left the
 ledger is still listed: reviewing the audit trail must not fall over because the
 thing it was about is no longer there.
+
+## A Pass Says How Each Change Landed
+A landing appears in the pass with which kind of place it reached — a commit
+already in the product, or a pull request waiting on a merge. Both satisfy the
+gate, because the gate asks whether the work landed and not how many people
+looked at it on the way, but they are different facts: an audit that cannot tell
+them apart cannot say whether a change was ever reviewed at all, and that is the
+question a pass about a loop that acts in a person's place most needs answering.
+The kind is recorded when the link is filed, by the one thing that knows it, and
+never inferred from the shape of a url — a landing whose kind is not on the
+record is shown as unknown rather than guessed at. A landing whose work has
+since left the ledger is still listed, with the link and the kind it did have.

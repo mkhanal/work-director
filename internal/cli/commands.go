@@ -614,8 +614,13 @@ func (c *Cli) goalClassify(goal *core.Work, rest []string) error {
 }
 
 // abandonReason computes why a goal counts as abandoned, from what the ledger
-// already holds. A goal with a pull request that has landed is not abandoned,
-// whatever the reason offered: the change reached the product.
+// already holds. A goal with a landing of its own is not abandoned, whatever the
+// reason offered: the change reached the product.
+//
+// Only the goal's own landing counts, and that is the fact this asks for — a
+// commit on main and a pull request waiting to merge are both "the change left
+// here", and a goal with either did not stop at nothing. The kind is not
+// consulted because it does not change the answer, only who reads the record.
 func (c *Cli) abandonReason(w core.Work) (string, error) {
 	events, err := c.Ledger.Events(w.ID, nil)
 	if err != nil {
@@ -1446,8 +1451,14 @@ func (c *Cli) pr(rest []string) error {
 
 // recordPR files where the work landed and returns the url, so a driven run can
 // put the gate through it without a second document on its own output.
+//
+// The kind is recorded because the CLI is the only thing that knows it: a url
+// handed to wd pr is a pull request, and a link worked out from the work's own
+// branch is a commit that is already in the product. An audit that cannot tell
+// them apart cannot say whether a change was ever reviewed, and inferring it
+// from the shape of a url would be guessing at a fact the tool was told.
 func (c *Cli) recordPR(id string, rest []string) (string, error) {
-	url := ""
+	kind, url := core.LandingPullRequest, ""
 	if len(rest) > 0 {
 		url = strings.Join(rest, " ")
 	} else {
@@ -1455,9 +1466,9 @@ func (c *Cli) recordPR(id string, rest []string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		url = landed
+		kind, url = core.LandingCommit, landed
 	}
-	if _, err := c.Ledger.AddEvent(id, core.EventPr, url); err != nil {
+	if _, err := c.Ledger.AddEvent(id, core.EventPr, string(kind)+" "+url); err != nil {
 		return "", err
 	}
 	return url, nil

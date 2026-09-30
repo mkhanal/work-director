@@ -93,6 +93,48 @@ const (
 	FeedbackAttached FeedbackSource = "attached"
 )
 
+// LandingKind is how a change reached somewhere a person can read it. Both
+// satisfy the gate, because the gate asks whether the work landed, not how many
+// people looked at it on the way — but they are different facts, and an audit
+// that cannot tell them apart cannot say whether a change was ever reviewed.
+type LandingKind string
+
+const (
+	// LandingCommit is a commit already pushed: the change is in the product.
+	LandingCommit LandingKind = "commit"
+	// LandingPullRequest is a pull request waiting on a merge.
+	LandingPullRequest LandingKind = "pull-request"
+)
+
+// Landing is a filed landing read back.
+type Landing struct {
+	Kind LandingKind
+	URL  string
+}
+
+// Known says which kind it was. A body filed before the kind was recorded is a
+// bare url: a real link of unknown kind, which is not the same as knowing it
+// was neither.
+func (l Landing) Known() bool { return l.Kind != "" }
+
+// ParseLanding reads a landing body, which is "<kind> <url>" once kinds were
+// recorded and a bare url before. An unrecognised kind reads as unknown rather
+// than as a guess, because a review surface that invented one would be worse
+// than one that admitted it did not look.
+func ParseLanding(body string) Landing {
+	body = strings.TrimSpace(body)
+	kind, url, ok := strings.Cut(body, " ")
+	url = strings.TrimSpace(url)
+	if !ok {
+		return Landing{URL: body}
+	}
+	switch LandingKind(kind) {
+	case LandingCommit, LandingPullRequest:
+		return Landing{Kind: LandingKind(kind), URL: url}
+	}
+	return Landing{URL: body}
+}
+
 type WorktreeKind string
 
 const (
@@ -295,6 +337,7 @@ var (
 	WorkKinds       = []WorkKind{WorkTask, WorkEvolution, WorkWorkflow, WorkGoal, WorkRoadmap, WorkItem}
 	EventKinds      = []EventKind{EventState, EventReport, EventVerify, EventPr, EventNote, EventSent, EventSpawn, EventAttach, EventQuestion, EventAnswer, EventDecision, EventAbandon}
 	FeedbackSources = []FeedbackSource{FeedbackDirector, FeedbackNote, FeedbackAttached}
+	LandingKinds    = []LandingKind{LandingCommit, LandingPullRequest}
 	WorktreeKinds   = []WorktreeKind{WorktreeShared, WorktreePrivate}
 	WorktreeStates  = []WorktreeState{WorktreeActive, WorktreeMerged, WorktreeAbandoned, WorktreeRemoved}
 	WorktreeOrigins = []WorktreeOrigin{OriginDirector, OriginAttached}

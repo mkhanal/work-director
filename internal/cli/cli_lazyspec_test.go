@@ -3019,6 +3019,9 @@ func TestARunThatLandsEveryTaskClosesTheGoal(t *testing.T) {
 	if len(links) != 1 {
 		t.Fatalf("%d goal links, want 1", len(links))
 	}
+	if !strings.HasPrefix(links[0], "commit ") {
+		t.Errorf("goal link = %q, want it recorded as a commit landing", links[0])
+	}
 	if want := headOf(t, f.sample); !strings.HasSuffix(links[0], "/commit/"+want) {
 		t.Errorf("goal link = %q, want the commit the work landed on (%s)", links[0], want)
 	}
@@ -3080,8 +3083,11 @@ func TestTheLandingLinkIsDerivedRatherThanTyped(t *testing.T) {
 	// request, and the tool has no business second-guessing one.
 	given := jsonString(t, f.runOK(t, "add", "sample-app", "A real pull request", "--json"), "id")
 	f.runOK(t, "pr", given, "https://example.test/pr/1")
-	if got := f.bodies(t, given, core.EventPr); len(got) != 1 || got[0] != "https://example.test/pr/1" {
-		t.Errorf("link = %v, want the url given, unedited", got)
+	// The url is recorded unedited, and the kind is the one the command knew: a
+	// url handed to wd pr is a pull request, and nothing downstream has to guess
+	// that from its shape.
+	if got := f.bodies(t, given, core.EventPr); len(got) != 1 || got[0] != "pull-request https://example.test/pr/1" {
+		t.Errorf("link = %v, want the url given with the kind recorded", got)
 	}
 
 	// Pushed: the link is worked out, and it is the commit the work is at.
@@ -3091,6 +3097,11 @@ func TestTheLandingLinkIsDerivedRatherThanTyped(t *testing.T) {
 	links := f.bodies(t, pushed, core.EventPr)
 	if len(links) != 1 {
 		t.Fatalf("%d links, want 1", len(links))
+	}
+	// Recorded as a commit, because that is what it is: the change is already in
+	// the product, and the record says so rather than leaving a reader to notice.
+	if !strings.HasPrefix(links[0], "commit ") {
+		t.Errorf("link = %q, want it recorded as a commit landing", links[0])
 	}
 	if want := headOf(t, f.sample); !strings.HasSuffix(links[0], "/commit/"+want) {
 		t.Errorf("link = %q, want the commit at %s", links[0], want)

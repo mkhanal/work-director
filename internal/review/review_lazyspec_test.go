@@ -337,3 +337,82 @@ func ledgerFor(t *testing.T) *ledger.Ledger {
 	t.Cleanup(func() { l.Close() })
 	return l
 }
+
+// An audit that cannot tell a change that went straight to main from one that
+// waited for a merge cannot say whether anything was reviewed — which is the
+// question a pass about a loop that acts in a person's place most needs
+// answering. The kind is what the filing command knew, never guessed from a url.
+func TestAPassSaysHowEachChangeLanded(t *testing.T) {
+	_, p := newPass(t, func(l *ledger.Ledger) {
+		landed, err := l.Add("p", "Landed on main", ledger.AddOptions{})
+		if err != nil {
+			t.Fatalf("add landed: %v", err)
+		}
+		if _, err := l.AddEvent(landed.ID, core.EventPr, "commit https://github.test/o/r/commit/abc123"); err != nil {
+			t.Fatalf("file commit landing: %v", err)
+		}
+		reviewed, err := l.Add("p", "Waited for review", ledger.AddOptions{})
+		if err != nil {
+			t.Fatalf("add reviewed: %v", err)
+		}
+		if _, err := l.AddEvent(reviewed.ID, core.EventPr, "pull-request https://github.test/o/r/pull/7"); err != nil {
+			t.Fatalf("file pull request landing: %v", err)
+		}
+		legacy, err := l.Add("p", "Filed before kinds", ledger.AddOptions{})
+		if err != nil {
+			t.Fatalf("add legacy: %v", err)
+		}
+		if _, err := l.AddEvent(legacy.ID, core.EventPr, "https://github.test/o/r/pull/8"); err != nil {
+			t.Fatalf("file legacy landing: %v", err)
+		}
+	})
+	if len(p.Landed) != 3 {
+		t.Fatalf("landed = %+v, want all three landings in the pass", p.Landed)
+	}
+	byTitle := map[string]Landed{}
+	for _, l := range p.Landed {
+		if l.Work != nil {
+			byTitle[l.Work.Title] = l
+		}
+	}
+	// Each landing keeps the kind it was filed with, and the link it names.
+	commit := byTitle["Landed on main"]
+	if commit.Kind != core.LandingCommit || !strings.Contains(commit.URL, "/commit/abc123") {
+		t.Errorf("commit landing = %+v, want the commit and its link", commit)
+	}
+	pr := byTitle["Waited for review"]
+	if pr.Kind != core.LandingPullRequest || !strings.Contains(pr.URL, "/pull/7") {
+		t.Errorf("pull request landing = %+v, want the pull request and its link", pr)
+	}
+	// A landing filed before kinds were recorded is a real link of unknown kind.
+	// Showing it as either kind would be a guess about whether anybody read it.
+	old := byTitle["Filed before kinds"]
+	if old.Kind != "" || !strings.HasPrefix(old.URL, "https://") {
+		t.Errorf("legacy landing = %+v, want the link kept and the kind unknown", old)
+	}
+	// An unrecognised kind reads as unknown rather than as itself, and the body
+	// is kept whole: which token was meant to be the kind is not something the
+	// reader can be told, so the reader gets exactly what was filed.
+	if got := core.ParseLanding("merge-queue https://x.test/1"); got.Known() || got.URL != "merge-queue https://x.test/1" {
+		t.Errorf("ParseLanding of an unknown kind = %+v, want unknown with the body kept as filed", got)
+	}
+	if got := core.ParseLanding("commit https://x.test/c/1"); !got.Known() || got.URL != "https://x.test/c/1" {
+		t.Errorf("ParseLanding of a known kind = %+v, want the kind and the link apart", got)
+	}
+
+	out := p.Render()
+	for _, want := range []string{"landed:", "commit https://github.test/o/r/commit/abc123", "pull-request https://github.test/o/r/pull/7", "of unknown kind"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("render = %q, want it to contain %q", out, want)
+		}
+	}
+
+	// A landing whose row is gone is still a landing. The event and the link are
+	// the facts; the row is only the caption, and reading the audit must not fall
+	// over because the caption has left.
+	gone := Pass{Project: "p", Claims: []Claim{}, Cards: []Card{}, Unshipped: []Unshipped{},
+		Landed: []Landed{{Kind: core.LandingCommit, URL: "https://github.test/o/r/commit/fff"}}}
+	if text := gone.Render(); !strings.Contains(text, "no longer in the ledger") || !strings.Contains(text, "/commit/fff") {
+		t.Errorf("render of a landing with no row = %q, want the link and the kind still shown", text)
+	}
+}
