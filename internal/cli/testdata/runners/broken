@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# A runner whose sessions it cannot read back. It spawns and it sends, and then
+# refuses to export — the shape of failure a loop must not mistake for a goal
+# that did not ship.
+set -u
+case "$1" in
+  run) echo 'session=broken-s00001';;
+  export) echo 'cannot read session broken-s00001' >&2; exit 1;;
+  status) echo 'state: waiting';;
+  send) echo ok;;
+  models) echo 'broken/m1';;
+  *) echo "unhandled broken $*" >&2; exit 1;;
+esac

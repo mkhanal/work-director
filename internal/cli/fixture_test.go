@@ -221,7 +221,7 @@ func (f *cliFixture) seedGitRepo(t *testing.T) {
 
 func (f *cliFixture) seedRunners(t *testing.T) {
 	t.Helper()
-	for _, r := range []string{"claude", "opencode", "codex", "myagent", "planner", "advisor"} {
+	for _, r := range []string{"claude", "opencode", "codex", "myagent", "planner", "advisor", "driven", "broken"} {
 		data, err := os.ReadFile(filepath.Join("testdata", "runners", r))
 		if err != nil {
 			t.Fatalf("read runner %s: %v", r, err)

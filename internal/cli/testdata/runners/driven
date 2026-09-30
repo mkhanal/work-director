@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# One runner playing both parts of a driven goal, because a judgement is made
+# by the project's own model and one model both asking and answering is a smaller
+# thing to reason about than two.
+#
+# Sessions it spawns are judgements (judge-sN): it reads the brief it was given
+# and answers from the settled position shown in it, or refuses when the test
+# seeds judge-decline. The executor's session is attached, not spawned, and asks
+# a question the settled position cannot settle.
+set -u
+state=${WD_FAKE_STATE:?WD_FAKE_STATE needed}
+case "$1" in
+  run)
+    n=$(cat "$state/driven-n" 2>/dev/null || echo 0)
+    n=$((n + 1))
+    echo "$n" > "$state/driven-n"
+    printf '%s\n' "$2" > "$state/judge-brief-$n"
+    printf 'session=judge-s%05x\n' "$n"
+    ;;
+  export)
+    case "$2" in
+      judge-*)
+        if [ -f "$state/judge-decline" ]; then
+          echo 'DECLINE: the settled position does not say'
+          echo 'TOKENS: 900'
+        else
+          echo 'ANSWER: 8080, which is what the project already serves'
+          echo 'TOKENS: 1200'
+        fi
+        ;;
+      *)
+        if [ -f "$state/executor-answered" ]; then
+          echo 'Thanks, that settles it.'
+          echo 'STATUS: DONE'
+        else
+          echo 'I hit a fork nothing in the settled position covers.'
+          echo 'ASK: which port should the server listen on?'
+        fi
+        ;;
+    esac
+    ;;
+  status) echo 'state: waiting';;
+  send)
+    printf '%s\n' "$3" > "$state/executor-answered"
+    printf '%s\n' "$3" > "$state/sent-to-$2"
+    echo ok
+    ;;
+  models) echo 'driven/m1';;
+  *) echo "unhandled driven $*" >&2; exit 1;;
+esac

@@ -38,6 +38,8 @@ var valueFlags = map[string]bool{
 	"heading": true, "detail": true, "project": true,
 	"branch": true, "adopt": true, "source": true, "card": true, "only": true,
 	"timeout": true, "port": true, "ref": true, "cwd": true, "cancelled": true,
+	"turns": true, "judgements": true, "stalled": true, "poll-seconds": true,
+	"deadline": true,
 }
 
 // Args is one parsed command line: positionals, value flags (never empty)
@@ -222,7 +224,7 @@ func tasteCheckout() (string, error) {
 	return "", nil
 }
 
-const usage = "wd <projects|add|tasks|brief|spawn|models|runner|roadmap|goal|goal|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|review|roadmap|abandon|feedback|distill|tui|serve|doctor> [--json]"
+const usage = "wd <projects|add|tasks|brief|spawn|models|runner|roadmap|goal|drive|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|review|abandon|feedback|distill|tui|serve|doctor> [--json]"
 
 // commands maps each wd command to its handler, given the arguments after it.
 var commands = map[string]func(c *Cli, rest []string) error{
@@ -238,6 +240,7 @@ var commands = map[string]func(c *Cli, rest []string) error{
 	// before the rename keeps working.
 	"epic":      func(c *Cli, rest []string) error { return c.goalLike("epic", rest) },
 	"roadmap":   (*Cli).roadmap,
+	"drive":     (*Cli).drive,
 	"abandon":   (*Cli).abandon,
 	"review":    (*Cli).review,
 	"send":      (*Cli).send,

@@ -743,6 +743,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 	// Abandonment is a one-way door, so it gets work of its own rather than
 	// taking one the rest of the census still needs.
 	unshipped := jsonString(t, f.runOK(t, "add", "sample-app", "Never shipped", "--json"), "id")
+	driveGoal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Never driven", "--json"), "id")
 	ready := jsonString(t, f.runOK(t, "add", "sample-app", "Ready", "--epic", epic, "--json"), "id")
 	f.runOK(t, "set", ready, "running")
 	f.runOK(t, "set", ready, "review")
@@ -810,7 +811,9 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"concern", "resolve", "2", "settled"},
 		{"scan"},
 		{"events", t2},
-		{"roadmap"}, {"abandon", unshipped},
+		{"roadmap"},
+		{"drive", driveGoal},
+		{"abandon", unshipped},
 		{"review", "--project", "sample-app"}, {"review", "--ack", "--project", "sample-app"},
 		{"feedback", "add", "a note"}, {"feedback"}, {"feedback", "list"},
 		{"distill"},
@@ -2469,5 +2472,319 @@ func TestAReversalIsANewDecisionNotAnEdit(t *testing.T) {
 	}
 	if errStr := f.runFail(t, "review", "reverse", "abc", "because"); !strings.Contains(errStr, "is not a number") {
 		t.Errorf("reverse a non-numeric id: %q, want it refused", errStr)
+	}
+}
+
+// driveProject writes a project whose executors ask questions nothing in the
+// ledger can answer, so a driven goal meets the supervision case head on. The
+// judgement model and the executor are the same runner, because a judgement is
+// made by the project's own model.
+func driveProject(t *testing.T, f *cliFixture) {
+	t.Helper()
+	path := filepath.Join(f.wdHome, "projects", "driven.md")
+	body := "---\npath: " + f.sample + "\nrunner: driven\nmode: auto\nstack: [go]\nverify: [test -f README.md]\ndefault_branch: main\n---\nA project whose executors ask.\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write project: %v", err)
+	}
+}
+
+// drivenGoal is a goal with one running task that has a session, which is what
+// a coordination pass needs before it can read a transcript and find a question.
+func drivenGoal(t *testing.T, f *cliFixture, title string) (goal, task string) {
+	t.Helper()
+	goal = jsonString(t, f.runOK(t, "goal", "add", "driven", title, "--json"), "id")
+	task = jsonString(t, f.runOK(t, "add", "driven", "Wire the server", "--goal", goal, "--json"), "id")
+	f.runOK(t, "set", task, "running")
+	f.runOK(t, "attach", task, "executor-s1", "--runner", "driven")
+	return goal, task
+}
+
+// judgeAnswer makes the fake model answer the next question, or refuse to. It
+// creates the state directory first: a fake runner writing into a directory
+// that is not there fails its redirect and carries on, which looks exactly like
+// a runner that ran and did nothing.
+func judgeAnswer(t *testing.T, f *cliFixture, answer bool) {
+	t.Helper()
+	dir := filepath.Join(f.dir, "fake-state")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir state: %v", err)
+	}
+	path := filepath.Join(dir, "judge-decline")
+	if answer {
+		if err := os.RemoveAll(path); err != nil {
+			t.Fatalf("clear decline: %v", err)
+		}
+		return
+	}
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("seed decline: %v", err)
+	}
+}
+
+func TestAGoalRunsItsLoopWithNobodyWatching(t *testing.T) {
+	f := newCLIFixture(t)
+	driveProject(t, f)
+	goal, task := drivenGoal(t, f, "Serve on a fixed port")
+	judgeAnswer(t, f, true)
+
+	// One turn is enough to see the whole loop: the pass finds the question,
+	// the model answers it, the answer is recorded and delivered, and the run
+	// stops on its own bound without ever asking whether to carry on.
+	out := f.runOK(t, "drive", goal, "--turns", "2", "--judgements", "1",
+		"--stalled", "0", "--poll-seconds", "1")
+
+	if !strings.Contains(out, "stopped: budget") {
+		t.Errorf("drive = %q, want it to say why it stopped", out)
+	}
+	if !strings.Contains(out, "settled: "+task) {
+		t.Errorf("drive = %q, want the task whose question was settled named", out)
+	}
+
+	// The judgement was recorded as a decision, with the question, the answer,
+	// the model and what it cost — before it reached the executor.
+	var events []struct {
+		Kind     core.EventKind `json:"kind"`
+		Body     string         `json:"body"`
+		Decision *struct {
+			Question string `json:"question"`
+			Answer   string `json:"answer"`
+			Source   string `json:"source"`
+			Model    string `json:"model"`
+			Tokens   int    `json:"tokens"`
+		} `json:"decision"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "events", task, "--json")), &events); err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	claims := 0
+	for _, e := range events {
+		if e.Decision == nil {
+			continue
+		}
+		claims++
+		if e.Decision.Question == "" || e.Decision.Answer == "" {
+			t.Errorf("claim = %+v, want the question and the answer", e.Decision)
+		}
+		if e.Decision.Source != "judge" || e.Decision.Model != "" && e.Decision.Model == " " {
+			t.Errorf("claim = %+v, want it to name that a model decided", e.Decision)
+		}
+		if e.Decision.Tokens != 1200 {
+			t.Errorf("claim tokens = %d, want what the call cost", e.Decision.Tokens)
+		}
+	}
+	if claims != 1 {
+		t.Errorf("claims = %d, want exactly one: a run must not decide the same question twice", claims)
+	}
+	// And the answer reached the executor, which is what makes a judgement worth
+	// anything: a settled question that never lands changes nothing.
+	sent, err := os.ReadFile(filepath.Join(f.dir, "fake-state", "sent-to-executor-s1"))
+	if err != nil {
+		t.Fatalf("the answer never reached the executor: %v\ndrive said:\n%s", err, out)
+	}
+	if !strings.Contains(string(sent), "8080") {
+		t.Errorf("the executor was sent %q, want the judgement", sent)
+	}
+
+	// The brief is the project's settled position and the question quoted as
+	// evidence, so a line in a transcript cannot read as a command.
+	brief, err := os.ReadFile(filepath.Join(f.dir, "fake-state", "judge-brief-1"))
+	if err != nil {
+		t.Fatalf("read brief: %v", err)
+	}
+	// The settled position is what the judgement is made from, so the goal and
+	// the tasks under it are in the brief and not just the question.
+	for _, want := range []string{"which port", "```", "DECLINE:", "Serve on a fixed port", "The settled position:"} {
+		if !strings.Contains(string(brief), want) {
+			t.Errorf("the judgement brief is missing %q:\n%s", want, brief)
+		}
+	}
+
+	// A bound left at zero is not a bound, so a run under one stops on something
+	// else. Here on the deadline, and it says which. A goal of its own, because
+	// the run above came to rest.
+	untouched, _ := drivenGoal(t, f, "Never started")
+	unbounded := f.runOK(t, "drive", untouched, "--turns", "0", "--judgements", "0",
+		"--stalled", "0", "--deadline", "2s", "--poll-seconds", "1", "--json")
+	if !strings.Contains(unbounded, "the deadline passed") {
+		t.Errorf("a run with no turn bound = %s, want it to stop on the deadline it was given", unbounded)
+	}
+}
+
+func TestARunThatDidNotShipEndsTheGoalAbandonedAndSaysWhy(t *testing.T) {
+	f := newCLIFixture(t)
+	driveProject(t, f)
+	goal, task := drivenGoal(t, f, "Serve on a fixed port")
+	judgeAnswer(t, f, true)
+
+	// The model settles the question once, so the second turn finds the
+	// executor reporting DONE and nothing moves after that.
+	out := f.runOK(t, "drive", goal, "--turns", "1", "--judgements", "1", "--stalled", "0", "--poll-seconds", "1")
+	if !strings.Contains(out, "the goal is abandoned") {
+		t.Errorf("drive = %q, want it to say the goal did not ship", out)
+	}
+
+	// The goal came to rest, and it says why: the stop and the reason, with the
+	// unfinished work named.
+	got := f.workRow(t, goal)
+	if got.State != core.StateAbandoned {
+		t.Errorf("goal state = %s, want abandoned", got.State)
+	}
+	var goalEvents []struct {
+		Kind core.EventKind `json:"kind"`
+		Body string         `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "events", goal, "--json")), &goalEvents); err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	var abandon string
+	for _, e := range goalEvents {
+		if e.Kind == core.EventAbandon {
+			abandon = e.Body
+		}
+	}
+	if !strings.HasPrefix(abandon, "no-pr: ") {
+		t.Fatalf("abandon body = %q, want it to name the reason", abandon)
+	}
+	for _, want := range []string{"stopped on", "unfinished: ", task} {
+		if !strings.Contains(abandon, want) {
+			t.Errorf("abandon body = %q, want it to contain %q", abandon, want)
+		}
+	}
+
+	// A task left running under a goal that has come to rest would claim work
+	// is in progress when nothing is driving it.
+	if got := f.workRow(t, task); got.State != core.StateAbandoned {
+		t.Errorf("task state = %s, want abandoned with its goal", got.State)
+	}
+	// A goal that has come to rest has no loop to run, and running one anyway
+	// would report a run that never happened as a run that finished.
+	if errStr := f.runFail(t, "drive", goal); !strings.Contains(errStr, "nothing left to run") {
+		t.Errorf("drive a goal that came to rest: %q, want it refused", errStr)
+	}
+
+	// A run that stopped because the loop could not run ends nothing: the work is
+	// untouched, and ending a goal because a runner could not read a transcript
+	// would throw away real work over a failure that says nothing about it.
+	brokenProject := filepath.Join(f.wdHome, "projects", "unreadable.md")
+	body := "---\npath: " + f.sample + "\nrunner: broken\nmode: auto\nstack: [go]\nverify: [test -f README.md]\ndefault_branch: main\n---\nA project whose sessions cannot be read.\n"
+	if err := os.WriteFile(brokenProject, []byte(body), 0o644); err != nil {
+		t.Fatalf("write project: %v", err)
+	}
+	broken := jsonString(t, f.runOK(t, "goal", "add", "unreadable", "A runner that cannot be read", "--json"), "id")
+	brokenTask := jsonString(t, f.runOK(t, "add", "unreadable", "Wire the server", "--goal", broken, "--json"), "id")
+	f.runOK(t, "set", brokenTask, "running")
+	f.runOK(t, "attach", brokenTask, "broken-s00001", "--runner", "broken")
+	out = f.runOK(t, "drive", broken, "--turns", "2", "--judgements", "1", "--stalled", "0", "--poll-seconds", "1")
+	if !strings.Contains(out, "the goal is untouched") {
+		t.Errorf("a run that could not run = %q, want it to say the work was left alone", out)
+	}
+	if !strings.Contains(out, "cannot read session") {
+		t.Errorf("a run that could not run = %q, want the failure that stopped it", out)
+	}
+	if got := f.workRow(t, broken); got.State == core.StateAbandoned {
+		t.Errorf("goal state = %s, want it untouched: a failed loop is not a goal that did not ship", got.State)
+	}
+	if got := f.workRow(t, brokenTask); got.State == core.StateAbandoned {
+		t.Errorf("task state = %s, want it untouched", got.State)
+	}
+}
+
+func TestARunReportsWhereAPersonIsStillNeeded(t *testing.T) {
+	f := newCLIFixture(t)
+	driveProject(t, f)
+	goal, task := drivenGoal(t, f, "Serve on a fixed port")
+	// The model refuses. An unattended loop must be able to hear no, and a run
+	// that cannot is not making judgements — it is making noise.
+	judgeAnswer(t, f, false)
+
+	out := f.runOK(t, "drive", goal, "--turns", "3", "--judgements", "3", "--stalled", "0", "--poll-seconds", "1")
+	if !strings.Contains(out, "still needing a person:") {
+		t.Errorf("drive = %q, want it to say where a person is still required", out)
+	}
+	if !strings.Contains(out, task+":") {
+		t.Errorf("drive = %q, want the waiting task named with its question", out)
+	}
+	if !strings.Contains(out, "3 turns is the bound") {
+		t.Errorf("drive = %q, want the bound that ran out named", out)
+	}
+
+	// A decline is recorded as a decline and never as a decision: the ledger
+	// must not gain a claim nobody made, and an audit that cannot tell an answer
+	// from a refusal will believe the loop decided things it did not.
+	var events []struct {
+		Kind     core.EventKind `json:"kind"`
+		Body     string         `json:"body"`
+		Decision *struct {
+			Question string `json:"question"`
+		} `json:"decision"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "events", task, "--json")), &events); err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	asked, noted := 0, 0
+	for _, e := range events {
+		if e.Decision != nil {
+			t.Errorf("a refusal was recorded as a decision: %+v", e.Decision)
+		}
+		switch e.Kind {
+		case core.EventQuestion:
+			asked++
+		case core.EventNote:
+			if strings.Contains(e.Body, "decline") {
+				noted++
+			}
+		}
+	}
+	if asked != 1 {
+		t.Errorf("questions filed = %d, want the executor's question recorded once however often it is judged", asked)
+	}
+	if noted != 1 {
+		t.Errorf("declines noted = %d, want one: a question nobody answered is what a later reader needs to see", noted)
+	}
+
+	// The same bill on the JSON rail, addressable rather than printed. A goal of
+	// its own, because the first run came to rest and a goal that has come to
+	// rest has no loop to run.
+	second, secondTask := drivenGoal(t, f, "Also serve on a port")
+	var pass struct {
+		Stop       string `json:"stop"`
+		Why        string `json:"why"`
+		Shipped    bool   `json:"shipped"`
+		Judgements int    `json:"judgements"`
+		Unanswered []struct{ Work, Question string }
+		Unfinished []string `json:"unfinished"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "drive", second, "--turns", "1", "--judgements", "1", "--stalled", "0", "--json")), &pass); err != nil {
+		t.Fatalf("drive --json: %v", err)
+	}
+	task = secondTask
+	if pass.Shipped || pass.Stop != "budget" {
+		t.Errorf("pass = %+v, want a run that admits it did not ship", pass)
+	}
+	if len(pass.Unanswered) != 1 || pass.Unanswered[0].Work != task || pass.Unanswered[0].Question == "" {
+		t.Errorf("unanswered = %+v, want the question and the work waiting on it", pass.Unanswered)
+	}
+	if len(pass.Unfinished) == 0 {
+		t.Errorf("unfinished = %v, want the goal named", pass.Unfinished)
+	}
+
+	// Only a goal has a loop to run, and saying so is better than driving a
+	// task and reporting a run that never happened.
+	if errStr := f.runFail(t, "drive", task); !strings.Contains(errStr, "not a goal") {
+		t.Errorf("drive a task: %q, want it refused", errStr)
+	}
+	if errStr := f.runFail(t, "drive"); !strings.Contains(errStr, "which goal") {
+		t.Errorf("drive with no id: %q, want it to ask which goal", errStr)
+	}
+	// A bound that is not a number is refused rather than read as no bound at
+	// all, which would look like a run with no limits. The bounds are read
+	// before the goal is looked at, so a mistyped bound is reported as one
+	// whatever state the goal is in.
+	third, _ := drivenGoal(t, f, "Another untouched one")
+	if errStr := f.runFail(t, "drive", third, "--turns", "many"); !strings.Contains(errStr, "is not a number") {
+		t.Errorf("--turns many: %q, want a number error", errStr)
+	}
+	if errStr := f.runFail(t, "drive", goal, "--deadline", "soon"); !strings.Contains(errStr, "is not a duration") {
+		t.Errorf("--deadline soon: %q, want a duration error", errStr)
 	}
 }

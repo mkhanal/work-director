@@ -262,3 +262,33 @@ work so it lands in the same stream. The original claim, its body and the
 moment it was recorded are left as they were made, and the original is marked
 with what reversed it. Only a decision can be reversed, and the event must
 exist. Reversing is a decision, so it reads in the audit like one.
+
+## A Goal Runs Its Loop With Nobody Watching
+`wd drive <goal-id> [--turns N] [--judgements N] [--tokens N] [--stalled N]
+[--deadline <duration>] [--json]` runs the goal's loop: each turn coordinates
+its open work, and every question the ledger could not answer goes to one
+bounded model judgement that is recorded as a decision with what it cost before
+the answer reaches the executor waiting on it. It never asks whether to carry
+on, and every bound it runs under can be set from the command line; a bound
+nobody set is a bound nobody can reason about, and the judgement bound defaults
+low because it counts how often the loop acts in a person's place. A question is
+judged from the project's settled position and the model may decline, and a
+decline is recorded as a decline — never as a decision the ledger then believes
+was made. Only a goal can be driven.
+
+## A Run That Did Not Ship Ends The Goal Abandoned, And Says Why
+When a run stops because a bound ran out or nothing moved with work left, `wd
+drive` ends the goal abandoned with the stop and the reason in it, and ends
+every task that was still open with the same words. A task left running under a
+goal that has come to rest would claim work is in progress when nothing is
+driving it, and the board is read as a statement about the world. A run that
+stopped because the loop itself could not run does not end anything: the work
+is untouched, and ending a goal because a runner could not read a transcript
+would throw away real work over a failure that says nothing about it. A run that
+did finish leaves the goal to its own gates rather than writing past them.
+
+## A Run Reports Where A Person Is Still Needed
+A run that stopped without shipping says which questions it settled, which it
+could not, and which work is still open, so the cost of running without a person
+is a list rather than a silence. A goal that was never touched is unfinished, not
+complete: nothing running is not the same as nothing left.

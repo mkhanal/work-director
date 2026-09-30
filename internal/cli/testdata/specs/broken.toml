@@ -1,0 +1,11 @@
+name = "broken"
+spawn = "broken run {brief}"
+session_id = 'session=([A-Za-z0-9-]+)'
+send = "broken send {session} {text}"
+status = "broken status {session}"
+running = 'state: *waiting'
+waiting = 'state: *waiting'
+exited = 'state: *exited'
+transcript = "broken export {session}"
+models = "broken models"
+attach = "cd {cwd} && broken attach {session}"

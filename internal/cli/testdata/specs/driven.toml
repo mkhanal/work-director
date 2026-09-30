@@ -1,0 +1,11 @@
+name = "driven"
+spawn = "driven run {brief}"
+session_id = 'session=([A-Za-z0-9-]+)'
+send = "driven send {session} {text}"
+status = "driven status {session}"
+running = 'state: *waiting'
+waiting = 'state: *waiting'
+exited = 'state: *exited'
+transcript = "driven export {session}"
+models = "driven models"
+attach = "cd {cwd} && driven attach {session}"
