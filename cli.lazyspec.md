@@ -227,3 +227,38 @@ because a reason nobody can verify is not a reason. Abandoned is terminal.
 before the rename keeps working. A goal opened through either says `goal` in
 `status` and `tasks`, and a row stored under the old name reads as a goal
 without being rewritten.
+
+## Review Is A Diff Over What The Loop Decided
+`wd review [--project <name>] [--since <event-id>] [--json]` shows what the
+loop decided since the last acknowledgement, each claim with its question and
+answer, who decided it, which model and what it cost, when it was recorded and
+when it took effect, what has been undone and why, which taste cards were
+promoted under it, and which work stopped without shipping. `--since` reads a
+window by hand without moving anything. With no `--project` and one registered
+project it reads that one; with several it names them rather than guessing,
+because a wrong guess answers a question about what a loop decided with a
+confident lie. An empty pass says so rather than printing nothing.
+
+## Acknowledging A Review Is What Makes The Next One Short
+`wd review --ack` moves the project's cursors to the end of the pass. Reading a
+pass and having seen it are separate acts, so a pass that was read but never
+reached a reader comes round again rather than being skipped. A cursor refuses
+to move backwards.
+
+## A Decision Can Be Recorded In One Line Or In Its Parts
+`wd decide <id> "<text>"` records one line of prose, which is what a person
+types. With `--question` and `--answer` it records the parts a review reads,
+and `--source`, `--runner`, `--model` and `--tokens` fill in what it cost and
+who decided. A claim with no question or no answer is refused, and
+`--effective <when>` records when the answer took hold as distinct from when it
+was written. A reversal needs no reason flag of its own: `wd review reverse
+<event-id> "<reason>"` takes the reason as its argument, and one with no reason
+is refused.
+
+## A Reversal Is A New Decision, Not An Edit
+`wd review reverse <event-id> "<reason>"` records that a decision no longer
+stands as a fresh decision naming the one it undoes, filed against the same
+work so it lands in the same stream. The original claim, its body and the
+moment it was recorded are left as they were made, and the original is marked
+with what reversed it. Only a decision can be reversed, and the event must
+exist. Reversing is a decision, so it reads in the audit like one.

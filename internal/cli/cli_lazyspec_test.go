@@ -52,8 +52,15 @@ func TestWorkItemsSerializeWithTheWireSchema(t *testing.T) {
 }
 
 func TestLedgerObjectsKeepTheirColumnNames(t *testing.T) {
+	// An event carries the moment it was recorded, the moment it took effect
+	// when the two differ, and a structured claim when there is one. The last
+	// two are null rather than absent, so a reader can tell "not separated"
+	// from "recorded the same way".
 	assertKeys(t, core.Event{ID: 1, Work: "w", Kind: core.EventReport, Body: "b", At: "a"},
-		[]string{"id", "work", "kind", "body", "at"})
+		[]string{"id", "work", "kind", "body", "at", "effective", "decision"})
+	// The claim's own shape is the shape a review reads.
+	assertKeys(t, core.Decision{Question: "q", Answer: "a"},
+		[]string{"question", "answer", "source", "runner", "model", "tokens", "reverses", "reversed_by"})
 	assertKeys(t, core.Feedback{ID: 1, Text: "t", Project: strPtr("p"), Card: strPtr("c"), Source: core.FeedbackDirector, At: "a"},
 		[]string{"id", "text", "project", "card", "source", "at"})
 	// resolved_at keeps the ledger's snake_case column name.
@@ -804,6 +811,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"scan"},
 		{"events", t2},
 		{"roadmap"}, {"abandon", unshipped},
+		{"review", "--project", "sample-app"}, {"review", "--ack", "--project", "sample-app"},
 		{"feedback", "add", "a note"}, {"feedback"}, {"feedback", "list"},
 		{"distill"},
 		{"doctor"},
@@ -2223,5 +2231,243 @@ func TestWdEpicIsTheOldSpellingOfWdGoal(t *testing.T) {
 	// And the board agrees it is a goal, not a stray kind.
 	if out := f.runOK(t, "status", "--all", "--json"); !strings.Contains(out, `"id": "`+stored.ID+`"`) || !strings.Contains(out, `"kind": "goal"`) {
 		t.Errorf("status --all = %q, want the old row listed as a goal", out)
+	}
+}
+
+func TestReviewIsADiffOverWhatTheLoopDecided(t *testing.T) {
+	f := newCLIFixture(t)
+	work := jsonString(t, f.runOK(t, "add", "sample-app", "Pick a driver", "--json"), "id")
+
+	// A decision in its parts, with what it cost and when it took hold.
+	f.runOK(t, "decide", work, "use modernc.org/sqlite",
+		"--question", "which sqlite driver", "--answer", "modernc.org/sqlite",
+		"--source", "director", "--runner", "opencode", "--model", "big-pickle",
+		"--tokens", "18400", "--effective", "2026-01-01T00:00:00Z")
+	// And one in a single line, which is what a person types.
+	f.runOK(t, "decide", work, "keep the worktree shared for the goal")
+	// A card promoted under both, which the pass has to carry.
+	f.runOK(t, "feedback", "add", "shared worktrees beat one per task", "--project", "sample-app")
+	// And work that stopped without shipping.
+	unshipped := jsonString(t, f.runOK(t, "add", "sample-app", "Never landed", "--json"), "id")
+	f.runOK(t, "abandon", unshipped)
+
+	out := f.runOK(t, "review", "--project", "sample-app")
+	for _, want := range []string{
+		"which sqlite driver", "modernc.org/sqlite", "big-pickle", "18400 tokens",
+		"keep the worktree shared", "effective", unshipped, "stopped without shipping",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("review = %q, want it to contain %q", out, want)
+		}
+	}
+
+	// The same pass as one document, with the parts addressable.
+	var pass struct {
+		Project string `json:"project"`
+		Since   int    `json:"since"`
+		Claims  []struct {
+			Event struct {
+				ID        int     `json:"id"`
+				At        string  `json:"at"`
+				Effective *string `json:"effective"`
+				Decision  *struct {
+					Question string `json:"question"`
+					Answer   string `json:"answer"`
+					Runner   string `json:"runner"`
+					Model    string `json:"model"`
+					Tokens   int    `json:"tokens"`
+				} `json:"decision"`
+			} `json:"event"`
+			Work *struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"work"`
+			Stands bool `json:"stands"`
+		} `json:"claims"`
+		Cards     []struct{ Card, Text string } `json:"cards"`
+		Unshipped []struct {
+			Work struct{ ID string } `json:"work"`
+		} `json:"unshipped"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "review", "--project", "sample-app", "--json")), &pass); err != nil {
+		t.Fatalf("review --json: %v", err)
+	}
+	if pass.Since != 0 {
+		t.Errorf("since = %d, want 0 on the first pass", pass.Since)
+	}
+	if len(pass.Claims) != 2 {
+		t.Fatalf("claims = %d, want both decisions", len(pass.Claims))
+	}
+	// The structured claim reads as itself, and the prose one is still
+	// reviewable from its body with no claim at all.
+	if pass.Claims[0].Event.Decision == nil || pass.Claims[0].Event.Decision.Model != "big-pickle" || pass.Claims[0].Event.Decision.Tokens != 18400 {
+		t.Errorf("structured claim = %+v, want the parts a review reads", pass.Claims[0].Event.Decision)
+	}
+	if pass.Claims[0].Event.Effective == nil || *pass.Claims[0].Event.Effective == pass.Claims[0].Event.At {
+		t.Errorf("effective = %v, recorded %v; want the two told apart", pass.Claims[0].Event.Effective, pass.Claims[0].Event.At)
+	}
+	if pass.Claims[1].Event.Decision != nil {
+		t.Errorf("one-line claim = %+v, want no payload: a person typed prose", pass.Claims[1].Event.Decision)
+	}
+	for _, c := range pass.Claims {
+		if c.Work == nil || c.Work.ID != work {
+			t.Errorf("claim work = %+v, want the work each decision is about", c.Work)
+		}
+	}
+	if len(pass.Unshipped) != 1 || pass.Unshipped[0].Work.ID != unshipped {
+		t.Errorf("unshipped = %+v, want the abandoned work in the same pass", pass.Unshipped)
+	}
+
+	// --since reads a window by hand and moves nothing.
+	first := pass.Claims[0].Event.ID
+	window := f.runOK(t, "review", "--project", "sample-app", "--since", strconv.Itoa(first), "--json")
+	if strings.Contains(window, "big-pickle") {
+		t.Errorf("windowed review = %q, want it to exclude what came before", window)
+	}
+	if again := jsonNumber(t, f.runOK(t, "review", "--project", "sample-app", "--json"), "since"); again != "0" {
+		t.Errorf("since = %v after a hand-asked window, want it still 0", again)
+	}
+
+	// An empty pass says so rather than printing nothing.
+	f.runOK(t, "review", "--project", "sample-app", "--ack")
+	if out := f.runOK(t, "review", "--project", "sample-app"); !strings.Contains(out, "nothing since event") {
+		t.Errorf("empty review = %q, want it to say nothing has been decided", out)
+	}
+	// And an unknown project is refused by name, not guessed at.
+	if errStr := f.runFail(t, "review", "--project", "nope"); !strings.Contains(errStr, "unknown project nope") {
+		t.Errorf("review an unknown project: %q, want it named", errStr)
+	}
+}
+
+func TestAcknowledgingAReviewIsWhatMakesTheNextOneShort(t *testing.T) {
+	f := newCLIFixture(t)
+	work := jsonString(t, f.runOK(t, "add", "sample-app", "Work", "--json"), "id")
+	f.runOK(t, "decide", work, "first", "--question", "which runner", "--answer", "claude")
+
+	// Reading a pass repeatedly, and acknowledging none of them, changes
+	// nothing: a pass that was read but never seen comes round again.
+	for range 3 {
+		if out := f.runOK(t, "review", "--project", "sample-app"); !strings.Contains(out, "which runner") {
+			t.Fatalf("review = %q, want the same pass every time until it is acknowledged", out)
+		}
+	}
+	if since := jsonNumber(t, f.runOK(t, "review", "--project", "sample-app", "--json"), "since"); since != "0" {
+		t.Fatalf("since = %v after three reads, want 0: reading is not seeing", since)
+	}
+
+	// Acknowledging consumes exactly what was in the pass, not everything that
+	// exists by the time it is called.
+	f.runOK(t, "review", "--project", "sample-app", "--ack")
+	f.runOK(t, "decide", work, "second", "--question", "which model", "--answer", "big-pickle")
+	out := f.runOK(t, "review", "--project", "sample-app")
+	if strings.Contains(out, "which runner") {
+		t.Errorf("review = %q, want only what was decided since the acknowledgement", out)
+	}
+	if !strings.Contains(out, "which model") {
+		t.Errorf("review = %q, want the decision made after it", out)
+	}
+
+	// A window that is not a number is refused rather than read as nothing,
+	// which would look like a quiet ledger.
+	if errStr := f.runFail(t, "review", "--since", "recent", "--project", "sample-app"); !strings.Contains(errStr, "--since \"recent\" is not a number") {
+		t.Errorf("--since recent = %q, want a number error", errStr)
+	}
+}
+
+func TestADecisionCanBeRecordedInOneLineOrInItsParts(t *testing.T) {
+	f := newCLIFixture(t)
+	work := jsonString(t, f.runOK(t, "add", "sample-app", "Work", "--json"), "id")
+
+	// One line is the default and needs no flags at all.
+	f.runOK(t, "decide", work, "one line of prose")
+	// A claim with no question or no answer cannot be reviewed, so it is
+	// refused rather than stored half-formed.
+	if errStr := f.runFail(t, "decide", work, "half", "--answer", "a"); !strings.Contains(errStr, "question") {
+		t.Errorf("a claim with no question: %q, want it refused", errStr)
+	}
+	if errStr := f.runFail(t, "decide", work, "half", "--question", "q"); !strings.Contains(errStr, "answer") {
+		t.Errorf("a claim with no answer: %q, want it refused", errStr)
+	}
+	// A reversal needs no reason flag of its own, and one with no reason is
+	// refused: nobody could read the motive for it.
+	if errStr := f.runFail(t, "review", "reverse", "1"); !strings.Contains(errStr, "says why") {
+		t.Errorf("reverse with no reason: %q, want it refused", errStr)
+	}
+}
+
+func TestAReversalIsANewDecisionNotAnEdit(t *testing.T) {
+	f := newCLIFixture(t)
+	work := jsonString(t, f.runOK(t, "add", "sample-app", "Work", "--json"), "id")
+	original := jsonNumber(t, f.runOK(t, "decide", work, "use postgres",
+		"--question", "which database", "--answer", "postgres", "--json"), "id")
+
+	// The claim stands until something reverses it.
+	if out := f.runOK(t, "review", "--project", "sample-app"); strings.Contains(out, "REVERSED") {
+		t.Errorf("review = %q, want the claim standing before any reversal", out)
+	}
+
+	f.runOK(t, "review", "reverse", original, "the fleet has no postgres")
+
+	out := f.runOK(t, "review", "--project", "sample-app")
+	if !strings.Contains(out, "REVERSED") || !strings.Contains(out, "the fleet has no postgres") {
+		t.Errorf("review = %q, want the reversal and its reason visible", out)
+	}
+	if !strings.Contains(out, "which database") {
+		t.Errorf("review = %q, want the original claim still there: an audit cannot afford to lose it", out)
+	}
+
+	// The original is left exactly as it was made, marked with what undid it.
+	var events []struct {
+		ID       int    `json:"id"`
+		Kind     string `json:"kind"`
+		Body     string `json:"body"`
+		Decision *struct {
+			Answer     string `json:"answer"`
+			Reverses   int    `json:"reverses"`
+			ReversedBy int    `json:"reversed_by"`
+		} `json:"decision"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "events", work, "--json")), &events); err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	claims := []int{}
+	for i, e := range events {
+		if e.Kind == "decision" {
+			claims = append(claims, i)
+		}
+	}
+	if len(claims) != 2 {
+		t.Fatalf("decisions = %d, want the claim and the reversal", len(claims))
+	}
+	originalEvent, reversal := events[claims[0]], events[claims[1]]
+	if originalEvent.Body != "use postgres" || originalEvent.Decision == nil || originalEvent.Decision.Answer != "postgres" {
+		t.Errorf("original = %+v, want the claim as it was made", originalEvent)
+	}
+	if originalEvent.Decision.ReversedBy == 0 {
+		t.Errorf("original reversed_by = 0, want it marked with what undid it")
+	}
+	if reversal.Kind != "decision" || reversal.Decision == nil || reversal.Decision.Reverses == 0 {
+		t.Errorf("reversal = %+v, want a decision naming what it undoes", reversal)
+	}
+
+	// Only a decision can be reversed, and the event has to exist.
+	f.runOK(t, "pr", work, "https://example.test/pr/1")
+	var pr struct{ ID int }
+	if err := json.Unmarshal([]byte(f.runOK(t, "events", work, "--json")), &events); err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	for _, e := range events {
+		if e.Kind == "pr" {
+			pr.ID = e.ID
+		}
+	}
+	if errStr := f.runFail(t, "review", "reverse", strconv.Itoa(pr.ID), "because"); !strings.Contains(errStr, "is a pr, not a decision") {
+		t.Errorf("reverse a pull request: %q, want it refused", errStr)
+	}
+	if errStr := f.runFail(t, "review", "reverse", "9999", "because"); !strings.Contains(errStr, "no event 9999") {
+		t.Errorf("reverse a missing event: %q, want it named", errStr)
+	}
+	if errStr := f.runFail(t, "review", "reverse", "abc", "because"); !strings.Contains(errStr, "is not a number") {
+		t.Errorf("reverse a non-numeric id: %q, want it refused", errStr)
 	}
 }

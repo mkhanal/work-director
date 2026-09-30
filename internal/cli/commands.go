@@ -1308,12 +1308,35 @@ func lastLines(text string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
+// decide records a decision. With no flags it is one line of prose, which is
+// what a person types. With --question it is a structured claim a review can
+// read, and --effective says when the answer took hold as distinct from when it
+// was written: the two genuinely differ when a model answered in one session
+// and the answer settled in a later one.
 func (c *Cli) decide(rest []string) error {
 	if len(rest) < 2 {
-		return fail("usage: wd decide <id> <text>")
+		return fail("usage: wd decide <id> <text> [--question q --answer a --source s --runner r --model m --tokens n --effective <when>]")
 	}
 	id, text := rest[0], strings.Join(rest[1:], " ")
-	e, err := c.Ledger.AddEvent(id, core.EventDecision, text)
+	question := strOr(c.Args, "question", "")
+	answer := strOr(c.Args, "answer", "")
+	if question == "" && answer == "" {
+		e, err := c.Ledger.AddEvent(id, core.EventDecision, text)
+		if err != nil {
+			return err
+		}
+		return c.out(e, "decided: "+e.Body)
+	}
+	d := core.Decision{
+		Question: question,
+		Answer:   answer,
+		Source:   strOr(c.Args, "source", ""),
+		Runner:   strOr(c.Args, "runner", ""),
+		Model:    strOr(c.Args, "model", ""),
+		Tokens:   intOr(c.Args, "tokens", 0),
+	}
+	effective := str(c.Args, "effective")
+	e, err := c.Ledger.Decide(id, text, d, effective)
 	if err != nil {
 		return err
 	}

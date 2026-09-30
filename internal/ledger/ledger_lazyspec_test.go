@@ -775,10 +775,18 @@ CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT,
 				t.Fatalf("column %s changed: %v -> %v", name, want, got)
 			}
 		}
-		for _, tbl := range []string{"concern", "worktree", "filed"} {
+		for _, tbl := range []string{"concern", "worktree", "filed", "cursor"} {
 			if _, err := openDirect(t, path).Query("SELECT COUNT(*) FROM " + tbl); err != nil {
 				t.Fatalf("table %s missing after migration: %v", tbl, err)
 			}
+		}
+		// An event written before effective and payload existed reads with both
+		// absent, not defaulted: only one of "not separated" and "recorded the
+		// same way" is true of an old row.
+		evs, err = l.Events("oldaaaa1", nil)
+		wantNoErr(t, err)
+		if len(evs) != 1 || evs[0].Effective != nil || evs[0].Decision != nil {
+			t.Fatalf("old event = %+v, want it read with no effective time and no claim", evs[0])
 		}
 
 		// New features write into the migrated ledger.
@@ -807,6 +815,45 @@ CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT,
 		}
 		if got := allWorktrees(t, l, epic.ID); len(got) != 1 {
 			t.Fatalf("worktrees after reopen = %v, want 1", got)
+		}
+	})
+
+	t.Run("A Cursor Says How Far A Sweep Has Read, And Only Forwards", func(t *testing.T) {
+		l := newTestLedger(t)
+		add(t, l, "p", "Work", AddOptions{})
+
+		// A cursor that does not exist reads as 0, so a first sweep sees
+		// everything rather than nothing.
+		v, err := l.Cursor("p", "review.events")
+		wantNoErr(t, err)
+		if v != 0 {
+			t.Fatalf("cursor = %d, want 0 on a ledger that has never swept", v)
+		}
+
+		// Forward is the only direction a cursor moves.
+		wantNoErr(t, l.SetCursor("p", "review.events", 12))
+		v, err = l.Cursor("p", "review.events")
+		wantNoErr(t, err)
+		if v != 12 {
+			t.Fatalf("cursor = %d, want 12", v)
+		}
+		wantNoErr(t, l.SetCursor("p", "review.events", 12))
+		wantNoErr(t, l.SetCursor("p", "review.events", 13))
+		err = l.SetCursor("p", "review.events", 12)
+		wantErr(t, err, "cursor p/review.events is at 13; refusing to move it back to 12")
+
+		// Names are independent within a project, and so are projects, so a
+		// sweep that keeps two streams keeps two independent marks.
+		v, err = l.Cursor("p", "review.feedback")
+		wantNoErr(t, err)
+		if v != 0 {
+			t.Errorf("a second cursor = %d, want 0: names are independent", v)
+		}
+		wantNoErr(t, l.SetCursor("other", "review.events", 3))
+		v, err = l.Cursor("other", "review.events")
+		wantNoErr(t, err)
+		if v != 3 {
+			t.Errorf("another project's cursor = %d, want 3: projects are independent", v)
 		}
 	})
 

@@ -33,6 +33,8 @@ var valueFlags = map[string]bool{
 	"runner": true, "model": true, "mode": true, "agent": true, "count": true,
 	"tail": true, "stack": true, "workflow": true, "verify": true, "lazyspec": true,
 	"kind": true, "goal": true, "epic": true, "roadmap": true, "type": true, "reason": true,
+	"question": true, "answer": true, "tokens": true, "effective": true,
+	"since": true, "since-feedback": true, "work": true,
 	"heading": true, "detail": true, "project": true,
 	"branch": true, "adopt": true, "source": true, "card": true, "only": true,
 	"timeout": true, "port": true, "ref": true, "cwd": true, "cancelled": true,
@@ -237,6 +239,7 @@ var commands = map[string]func(c *Cli, rest []string) error{
 	"epic":      func(c *Cli, rest []string) error { return c.goalLike("epic", rest) },
 	"roadmap":   (*Cli).roadmap,
 	"abandon":   (*Cli).abandon,
+	"review":    (*Cli).review,
 	"send":      (*Cli).send,
 	"attach":    (*Cli).attach,
 	"report":    (*Cli).report,
@@ -313,6 +316,21 @@ func positiveInt(a Args, k string, def int) (int, error) {
 		return 0, fail("--%s must be a positive integer", k)
 	}
 	return n, nil
+}
+
+// intOr reads a flag that may be absent and is a number when present. Zero is
+// the answer for absent, because every int flag here counts something where
+// zero means none of it.
+func intOr(a Args, k string, def int) int {
+	s := str(a, k)
+	if s == nil {
+		return def
+	}
+	n, err := strconv.Atoi(*s)
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 func flag(a Args, k string) bool { return a.Switches[k] }

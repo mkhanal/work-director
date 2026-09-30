@@ -7,9 +7,11 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,24 +24,30 @@ const schema = `
 CREATE TABLE IF NOT EXISTS work (id TEXT PRIMARY KEY, project TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
   kind TEXT NOT NULL, state TEXT NOT NULL, runner TEXT, session TEXT, ref TEXT, cwd TEXT, created TEXT NOT NULL, updated TEXT NOT NULL,
   parent TEXT, heading TEXT, claim TEXT, impact TEXT, goal_type TEXT);
-CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), kind TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), kind TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL, effective TEXT, payload TEXT);
 CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT, card TEXT, source TEXT NOT NULL, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS concern (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), text TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, decision TEXT, at TEXT NOT NULL, resolved_at TEXT);
 CREATE TABLE IF NOT EXISTS worktree (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), path TEXT NOT NULL, branch TEXT, kind TEXT NOT NULL, state TEXT NOT NULL, created TEXT NOT NULL, origin TEXT NOT NULL DEFAULT 'attached');
 CREATE TABLE IF NOT EXISTS filed (work TEXT PRIMARY KEY REFERENCES work(id), session TEXT NOT NULL, entries INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS cursor (project TEXT NOT NULL, name TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (project, name));
 CREATE UNIQUE INDEX IF NOT EXISTS worktree_one_active_shared ON worktree(work) WHERE kind = 'shared' AND state = 'active';
 `
 
 // Additive migration for ledgers created before parents, worktree origins,
-// goal types or the epic rename existed. A worktree row with no recorded origin
-// reads as attached, so wd never removes a directory it cannot prove it made. A
-// work row whose kind reads as epic is goal under its old name: the rename
-// happens in Go, not by rewriting rows, so a ledger written before the rename
-// still opens and still says what it meant.
+// goal types, structured decisions or the epic rename existed. A worktree row
+// with no recorded origin reads as attached, so wd never removes a directory it
+// cannot prove it made. A work row whose kind reads as epic is goal under its
+// old name: the rename happens in Go, not by rewriting rows, so a ledger
+// written before the rename still opens and still says what it meant.
 var addedColumns = []struct{ table, col, decl string }{
 	{"work", "parent", "TEXT"}, {"work", "heading", "TEXT"}, {"work", "claim", "TEXT"}, {"work", "impact", "TEXT"},
 	{"work", "goal_type", "TEXT"},
 	{"worktree", "origin", "TEXT NOT NULL DEFAULT 'attached'"},
+	// effective is null on an event whose effective moment is its recorded
+	// moment, and payload is null on an event with no structured claim. Both
+	// are absent rather than defaulted so a reader can tell "not separated"
+	// from "recorded the same way".
+	{"event", "effective", "TEXT"}, {"event", "payload", "TEXT"},
 }
 
 type Ledger struct {
@@ -167,6 +175,8 @@ func updateWork(e execer, id, query string, args ...any) error {
 const workColumns = `id, project, title, detail, kind, state, runner, session, ref, cwd,
 	created, updated, parent, heading, claim, impact, goal_type`
 
+const eventColumns = `id, work, kind, body, at, effective, payload`
+
 func nullStr(ns sql.NullString) *string {
 	if !ns.Valid {
 		return nil
@@ -219,12 +229,21 @@ func scanWork(s rowScanner) (core.Work, error) {
 func scanEvent(s rowScanner) (core.Event, error) {
 	var e core.Event
 	var kind string
-	err := s.Scan(&e.ID, &e.Work, &kind, &e.Body, &e.At)
+	var effective, payload sql.NullString
+	err := s.Scan(&e.ID, &e.Work, &kind, &e.Body, &e.At, &effective, &payload)
 	if err != nil {
 		return core.Event{}, err
 	}
 	if e.Kind, err = core.ParseEventKind(kind); err != nil {
 		return core.Event{}, fmt.Errorf("event %d: %w", e.ID, err)
+	}
+	e.Effective = nullStr(effective)
+	if payload.Valid && payload.String != "" {
+		var d core.Decision
+		if err := json.Unmarshal([]byte(payload.String), &d); err != nil {
+			return core.Event{}, fmt.Errorf("event %d: decision payload: %w", e.ID, err)
+		}
+		e.Decision = &d
 	}
 	return e, nil
 }
@@ -606,11 +625,33 @@ func (l *Ledger) SetImpact(id string, paths []string) (core.Work, error) {
 // addEvent records the event and moves the work's updated to it: updated is
 // the work's last activity, which staleness is measured from.
 func addEvent(tx *sql.Tx, work string, kind core.EventKind, body, at string) (core.Event, error) {
+	return addClaim(tx, work, kind, body, at, nil, nil)
+}
+
+// addClaim records an event that may carry a structured claim and an effective
+// moment distinct from when it was written.
+func addClaim(tx *sql.Tx, work string, kind core.EventKind, body, at string, effective *string, d *core.Decision) (core.Event, error) {
 	if err := updateWork(tx, work, `UPDATE work SET updated = ? WHERE id = ?`, at, work); err != nil {
 		return core.Event{}, err
 	}
-	return scanEvent(tx.QueryRow(`INSERT INTO event (work, kind, body, at) VALUES (?, ?, ?, ?)
-		RETURNING id, work, kind, body, at`, work, string(kind), body, at))
+	return scanEvent(tx.QueryRow(`INSERT INTO event (work, kind, body, at, effective, payload) VALUES (?, ?, ?, ?, ?, ?)
+		RETURNING id, work, kind, body, at, effective, payload`,
+		work, string(kind), body, at, effective, marshalDecision(d)))
+}
+
+// marshalDecision renders a claim for storage, or nil when there is none: a
+// decision recorded as one line of prose has no payload and says so.
+func marshalDecision(d *core.Decision) any {
+	if d == nil {
+		return nil
+	}
+	// Round-tripping through the same struct the reader parses is what keeps a
+	// stored claim and a read claim the same shape by construction.
+	raw, err := json.Marshal(d)
+	if err != nil {
+		return nil
+	}
+	return string(raw)
 }
 
 // AddEvent records an event on work and returns it as stored.
@@ -621,6 +662,86 @@ func (l *Ledger) AddEvent(work string, kind core.EventKind, body string) (core.E
 		e, err = addEvent(tx, work, kind, body, now())
 		return err
 	})
+	if err != nil {
+		return core.Event{}, err
+	}
+	return e, nil
+}
+
+// Decide records a decision with its parts and, optionally, the moment it took
+// effect. The effective moment is separate from when it was written because
+// the two genuinely differ: a model can answer a question now and the answer
+// take hold later, and a review needs to know which date a claim is judged
+// against.
+func (l *Ledger) Decide(work, body string, d core.Decision, effective *string) (core.Event, error) {
+	if d.Question == "" || d.Answer == "" {
+		return core.Event{}, fmt.Errorf("a structured decision needs both a question and an answer")
+	}
+	var e core.Event
+	err := l.inTx(func(tx *sql.Tx) error {
+		var err error
+		e, err = addClaim(tx, work, core.EventDecision, body, now(), effective, &d)
+		return err
+	})
+	if err != nil {
+		return core.Event{}, err
+	}
+	return e, nil
+}
+
+// Reverse records that a decision no longer stands, as a new decision naming
+// the one it undoes. The original is left exactly as it was made, and is
+// marked with what reversed it, so a reader sees both the claim and the
+// correction in the order they happened. Editing history would be the other
+// way round and would lose the claim entirely.
+func (l *Ledger) Reverse(work string, target int, reason string) (core.Event, error) {
+	if reason == "" {
+		return core.Event{}, fmt.Errorf("a reversal says why: wd review --reverse <event-id> \"<reason>\"")
+	}
+	var e core.Event
+	err := l.inTx(func(tx *sql.Tx) error {
+		reversed, err := getEvent(tx, target)
+		if err != nil {
+			return err
+		}
+		if reversed.Kind != core.EventDecision {
+			return fmt.Errorf("event %d is a %s, not a decision", target, reversed.Kind)
+		}
+		d := core.Decision{
+			Question: "should decision " + strconv.Itoa(target) + " still stand?",
+			Answer:   "no — " + reason,
+			Reverses: target,
+		}
+		if reversed.Decision != nil {
+			d.Source, d.Runner, d.Model, d.Tokens = reversed.Decision.Source, reversed.Decision.Runner, reversed.Decision.Model, reversed.Decision.Tokens
+		}
+		body := "reverses " + strconv.Itoa(target) + ": " + reason
+		e, err = addClaim(tx, work, core.EventDecision, body, now(), nil, &d)
+		if err != nil {
+			return err
+		}
+		// Mark the original so a review reading only the old event still learns
+		// it no longer stands. The payload is rewritten in place; the body, the
+		// recorded time and the claim itself are not.
+		if reversed.Decision == nil {
+			reversed.Decision = &core.Decision{Question: reversed.Body, Answer: reversed.Body}
+		}
+		marked := *reversed.Decision
+		marked.ReversedBy = e.ID
+		_, err = tx.Exec(`UPDATE event SET payload = ? WHERE id = ?`, marshalDecision(&marked), target)
+		return err
+	})
+	if err != nil {
+		return core.Event{}, err
+	}
+	return e, nil
+}
+
+func getEvent(q queryer, id int) (core.Event, error) {
+	e, err := scanEvent(q.QueryRow(`SELECT `+eventColumns+` FROM event WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return core.Event{}, fmt.Errorf("no event %d; wd review --since 0 lists the whole ledger", id)
+	}
 	if err != nil {
 		return core.Event{}, err
 	}
@@ -655,7 +776,7 @@ func (l *Ledger) Filed(work string) (at core.TranscriptMark, ok bool, err error)
 }
 
 func (l *Ledger) Events(work string, kind *core.EventKind) ([]core.Event, error) {
-	rows, err := l.db.Query(`SELECT id, work, kind, body, at FROM event WHERE work = ? ORDER BY id`, work)
+	rows, err := l.db.Query(`SELECT `+eventColumns+` FROM event WHERE work = ? ORDER BY id`, work)
 	if err != nil {
 		return nil, err
 	}
@@ -677,7 +798,7 @@ func (l *Ledger) Events(work string, kind *core.EventKind) ([]core.Event, error)
 // EventsAfter returns every event, across all work, with an id above after,
 // in id order.
 func (l *Ledger) EventsAfter(after int) ([]core.Event, error) {
-	rows, err := l.db.Query(`SELECT id, work, kind, body, at FROM event WHERE id > ? ORDER BY id`, after)
+	rows, err := l.db.Query(`SELECT `+eventColumns+` FROM event WHERE id > ? ORDER BY id`, after)
 	if err != nil {
 		return nil, err
 	}
@@ -697,6 +818,66 @@ func (l *Ledger) EventsAfter(after int) ([]core.Event, error) {
 func (l *Ledger) LastEventID() (int, error) {
 	var id int
 	err := l.db.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM event`).Scan(&id)
+	return id, err
+}
+
+// Cursor is how far a per-project sweep has read. A periodic review is a diff
+// rather than a dump because the cursor remembers where the last pass stopped,
+// and acknowledging a pass moves it. A cursor that does not exist yet reads as
+// 0, so the first pass sees everything rather than nothing.
+func (l *Ledger) Cursor(project, name string) (int, error) {
+	var v int
+	err := l.db.QueryRow(`SELECT value FROM cursor WHERE project = ? AND name = ?`, project, name).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return v, err
+}
+
+// SetCursor moves a per-project cursor forward. It refuses to move backwards:
+// a cursor is what a sweep has seen, and a sweep that forgets is a sweep that
+// shows the same thing twice and hides what changed since.
+func (l *Ledger) SetCursor(project, name string, value int) error {
+	return l.inTx(func(tx *sql.Tx) error {
+		var cur int
+		err := tx.QueryRow(`SELECT value FROM cursor WHERE project = ? AND name = ?`, project, name).Scan(&cur)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err == nil && value < cur {
+			return fmt.Errorf("cursor %s/%s is at %d; refusing to move it back to %d", project, name, cur, value)
+		}
+		_, err = tx.Exec(`INSERT INTO cursor (project, name, value) VALUES (?, ?, ?)
+			ON CONFLICT (project, name) DO UPDATE SET value = excluded.value`, project, name, value)
+		return err
+	})
+}
+
+// FeedbackAfter returns feedback rows with an id above after, oldest first. A
+// review needs this so a taste card promoted since the last pass ships with
+// the decisions made under it: a card that changed what the loop thinks is
+// part of what the loop decided.
+func (l *Ledger) FeedbackAfter(after int) ([]core.Feedback, error) {
+	rows, err := l.db.Query(`SELECT id, text, project, card, source, at FROM feedback WHERE id > ? ORDER BY id`, after)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []core.Feedback{}
+	for rows.Next() {
+		f, err := scanFeedback(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// LastFeedbackID returns the highest feedback id, or 0 when there is none.
+func (l *Ledger) LastFeedbackID() (int, error) {
+	var id int
+	err := l.db.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM feedback`).Scan(&id)
 	return id, err
 }
 
@@ -1026,4 +1207,15 @@ func (l *Ledger) Distill() ([]core.Candidate, error) {
 		}
 	}
 	return out, nil
+}
+
+// EventWork is the work an event belongs to, so a reversal can be filed against
+// the same stream the claim it undoes is in.
+func (l *Ledger) EventWork(eventID int) (string, error) {
+	var work string
+	err := l.db.QueryRow(`SELECT work FROM event WHERE id = ?`, eventID).Scan(&work)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("no event %d; wd events <work> lists ids", eventID)
+	}
+	return work, err
 }

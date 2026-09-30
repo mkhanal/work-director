@@ -161,7 +161,45 @@ type Event struct {
 	Work string    `json:"work"`
 	Kind EventKind `json:"kind"`
 	Body string    `json:"body"`
-	At   string    `json:"at"`
+	// At is when the event was recorded: the moment the ledger learned it. It
+	// is a fact about the write, and it is always there.
+	At string `json:"at"`
+	// Effective is when the event became the thing in force. It is null when
+	// the two are the same moment, because a null reads as "not separated" and
+	// a reader can tell the two cases apart. Recorded and effective differ when
+	// a decision was made in one session and filed in a later one, and when a
+	// reversal takes effect on a different day from the decision it undoes.
+	Effective *string `json:"effective"`
+	// Decision is the structured claim behind a decision event, parsed at the
+	// boundary. It is null for a decision recorded as one line of prose: the
+	// one-line form is what a person types, and a review that needs structure
+	// can still read the body.
+	Decision *Decision `json:"decision"`
+}
+
+// Decision is a decision with its parts, so a review can show what was asked,
+// what was answered and what it cost rather than one line of prose. Everything
+// but Question and Answer is optional because a human types one line and a
+// model fills in more; a missing field says what it says and nothing more.
+type Decision struct {
+	// Question is what the decision settled. A claim with no question behind it
+	// cannot be reviewed, because there is nothing to judge it against.
+	Question string `json:"question"`
+	// Answer is what was decided.
+	Answer string `json:"answer"`
+	// Source says who decided: a runner name, a model, or the director.
+	Source string `json:"source"`
+	// Runner and Model name what did the deciding, when a model did.
+	Runner string `json:"runner"`
+	Model  string `json:"model"`
+	// Tokens is what the decision cost, when it was a model that spent them.
+	Tokens int `json:"tokens"`
+	// Reverses is the event id this decision undoes. A reversal is a new
+	// decision rather than an edit of the old one, so the audit reads in order
+	// and the original claim stays visible as it was made.
+	Reverses int `json:"reverses"`
+	// ReversedBy is the event id that undid this decision, or 0 while it stands.
+	ReversedBy int `json:"reversed_by"`
 }
 
 type Feedback struct {

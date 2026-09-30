@@ -82,10 +82,18 @@ For a goal, `SoftDone` additionally requires every task done or dropped.
 Work added to a file-backed ledger is still there after closing and reopening it.
 
 ## Old Ledgers Stay Readable
-`New` on a ledger written before parents, goal types or the goal rename — a `work` table without parent, heading, claim, impact or goal_type, and no concern or worktree tables — reads every existing row, adds the missing columns and tables in place, and leaves all stored values untouched. A row whose kind reads as `epic` reads as `goal`: the rename lives in Go rather than in a row rewrite, so a ledger from before it opens and still means what it meant.
+`New` on a ledger written before parents, goal types, structured decisions or the goal rename — a `work` table without parent, heading, claim, impact or goal_type, an `event` table without effective or payload, and no concern, worktree, filed or cursor tables — reads every existing row, adds the missing columns and tables in place, and leaves all stored values untouched. A row whose kind reads as `epic` reads as `goal`: the rename lives in Go rather than in a row rewrite, so a ledger from before it opens and still means what it meant. An event written before effective and payload existed reads with both absent rather than defaulted to a value, because "not separated" and "recorded the same way" are different facts and only one of them is true of an old row.
 
 ## Migration Is Additive Only
 Migration adds columns that are nullable or carry a default and creates missing tables; it never drops, renames or rewrites a column or table, so a ledger migrated by the Go wd stays readable by the TypeScript wd, and opening an already-migrated ledger changes nothing.
+
+## A Cursor Says How Far A Sweep Has Read, And Only Forwards
+`Cursor` reads a named cursor for a project and a cursor that does not exist
+reads as 0, so a first sweep sees everything rather than nothing.
+`SetCursor` moves it forward and refuses to move it backwards: a cursor is what
+a sweep has already shown a reader, and one that forgets shows the same thing
+twice while hiding everything that changed since. Names are independent within
+a project, so a sweep that keeps two streams keeps two independent marks.
 
 ## Events Concerns And Worktrees Belong To Existing Work
 `AddEvent`, `AddConcern` and `AddWorktree` for a work id that does not exist
