@@ -143,7 +143,7 @@ func TestARunStopsOnAConditionTheLedgerAlreadyHolds(t *testing.T) {
 	if res.Open != nil && len(res.Open) != 0 {
 		t.Errorf("open = %v, want nothing open when every task closed", res.Open)
 	}
-	if res.Why != "every task closed" {
+	if res.Why != "every task at rest" {
 		t.Errorf("why = %q, want it to say what held", res.Why)
 	}
 
@@ -466,5 +466,65 @@ func TestNothingMovingIsAStop(t *testing.T) {
 	}
 	if res.Shipped {
 		t.Error("shipped = true on a stall, want false")
+	}
+}
+
+// A dropped task is an ending, not a landing. A run can stop complete and still
+// not have shipped, and a caller that reads the stop as the outcome would close
+// a goal whose work is on the floor.
+func TestARunThatComesToRestWithoutLandingIsNotShipped(t *testing.T) {
+	h := newHarness(t, 1)
+	h.pass = func(int) (Turn, error) { return Turn{}, nil }
+	// The task is dropped rather than finished: the run has nothing left to
+	// drive, and the goal has not shipped.
+	if _, err := h.l.Abandon(h.tasks[0].ID, core.AbandonNoPR, "the run ran out of budget"); err != nil {
+		t.Fatalf("abandon: %v", err)
+	}
+	if h.failed != "" {
+		t.Fatalf("harness: %s", h.failed)
+	}
+	res, err := h.drive(Budget{Turns: 5, Judgements: 1, Stalled: 2})
+	if err != nil {
+		t.Fatalf("Drive: %v", err)
+	}
+	if res.Stop != StopComplete {
+		t.Errorf("stop = %s (%s), want complete: there is nothing left to drive", res.Stop, res.Why)
+	}
+	if res.Shipped {
+		t.Error("shipped = true with a dropped task, want false: the work is on the floor")
+	}
+	if len(res.Unlanded) != 1 || res.Unlanded[0] != h.tasks[0].ID {
+		t.Errorf("unlanded = %v, want the task that ended without landing named", res.Unlanded)
+	}
+	// Nothing is left to drive, so nothing is named as unfinished either: the
+	// two lists answer different questions and must not be conflated.
+	if len(res.Unfinished) != 0 || len(res.Open) != 0 {
+		t.Errorf("unfinished = %v, open = %v, want both empty: the task came to rest", res.Unfinished, res.Open)
+	}
+}
+
+// A gate that refused is the one thing a person is still needed for. A loop that
+// hid it would report a clean run over work it never closed, and the reader of
+// that report has no way to tell.
+func TestAGateThatRefusedIsHeldOnTheRun(t *testing.T) {
+	h := newHarness(t, 1)
+	h.pass = func(int) (Turn, error) { return Turn{}, nil }
+	h.d.Close = func(core.Work) (Closing, error) {
+		return Closing{Closed: []string{}, Blocked: map[string]string{h.tasks[0].ID: "verify"}}, nil
+	}
+	res, err := h.drive(Budget{Turns: 3, Judgements: 1, Stalled: 0})
+	if err != nil {
+		t.Fatalf("Drive: %v", err)
+	}
+	if len(res.Blocked) != 1 || res.Blocked[h.tasks[0].ID] != "verify" {
+		t.Errorf("blocked = %v, want the work and the gate that stopped it", res.Blocked)
+	}
+	// The work never came to rest, so nothing is reported as finished even
+	// though turns passed: the two facts are different and must not blur.
+	if res.Shipped {
+		t.Error("shipped = true with work held at a gate, want false")
+	}
+	if res.Stop != StopBudget {
+		t.Errorf("stop = %s (%s), want the turn bound: nothing came to rest", res.Stop, res.Why)
 	}
 }

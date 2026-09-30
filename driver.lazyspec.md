@@ -13,10 +13,17 @@ driven, and calling that complete would report a run that never ran. `StopBudget
 means a bound ran out with work left. `StopStalled` means nothing moved for the
 bound number of turns. `StopFailed` means the loop could not run, with why.
 Every one of these is a fact about work, not a judgement about it, and every one
-says which fact ran out: "it stopped" is not something a person can act on. Only
-`StopComplete` reports `Shipped`. What the run finished is computed from the
-open set rather than reported by the pass, because a pass moves work between
-states and only the ledger sees a task come to rest.
+says which fact ran out: "it stopped" is not something a person can act on.
+`Shipped` is not the same question as the stop. A run can stop complete and still
+not ship, because a dropped or abandoned task is an ending rather than a landing;
+those are named in `Unlanded`, and a caller must not close a goal as shipped
+while one is on that list. What the run finished is computed from the open set
+rather than reported by the pass, because a pass moves work between states and
+only the ledger sees a task come to rest. `Blocked` is the work a turn found
+ready to close and a gate would not let it past, each naming the gate; it is
+kept across every turn of the run, because a gate that refused is the one thing
+a person is still needed for and hiding it would report a clean run over work
+the loop never closed.
 
 ## A Run Judges A Question In A Person's Place, Up To A Bound
 Each turn runs a coordination pass, and the questions the pass could not answer

@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +27,125 @@ const judgeTimeout = 120 * time.Second
 // ledger or the runners, short enough that a run notices an executor finishing
 // while a person is still watching it.
 const drivePoll = 3 * time.Second
+
+// closeFinished puts the goal's finished work through the gates that are left,
+// and is the task-shaped half of what goalGates does for the goal itself.
+//
+// Each report is tried once. A verify that fails, or a landing link that cannot
+// be worked out, is written on the work as the gate that stopped it and then
+// left alone: re-running a failing build on a loop is how a fleet spends its
+// whole budget proving the same thing, and a gate the loop cannot pass is a
+// question for a person, not a retry. A later report is a new attempt, because
+// new work deserves a new answer.
+func (c *Cli) closeFinished(goal core.Work) (driver.Closing, error) {
+	out := driver.Closing{Closed: []string{}, Blocked: map[string]string{}}
+	tasks, err := c.Ledger.Tasks(goal.ID)
+	if err != nil {
+		return out, err
+	}
+	for _, t := range tasks {
+		if t.State != core.StateReview {
+			continue
+		}
+		ready, stopped, err := c.closeReady(t.ID)
+		if err != nil {
+			return out, err
+		}
+		if !ready {
+			continue
+		}
+		if stopped != "" {
+			out.Blocked[t.ID] = stopped
+			continue
+		}
+		gate, err := c.closeOne(t)
+		if err != nil {
+			return out, err
+		}
+		if gate != "" {
+			out.Blocked[t.ID] = gate
+			continue
+		}
+		out.Closed = append(out.Closed, t.ID)
+	}
+	return out, nil
+}
+
+// closeReady is whether the work is a finished thing waiting to be closed, and
+// if it has already been tried, the gate that stopped it. Readiness is a DONE
+// report and nowhere newer saying otherwise, and "already tried" is a note the
+// last attempt left: both are read off the work rather than kept in the run, so
+// a run that starts over does not forget what the last one found.
+func (c *Cli) closeReady(id string) (ready bool, stopped string, err error) {
+	evs, err := c.Ledger.Events(id, nil)
+	if err != nil {
+		return false, "", err
+	}
+	report := -1
+	for i, e := range evs {
+		if e.Kind == core.EventReport {
+			report = i
+		}
+	}
+	if report < 0 || !strings.HasPrefix(evs[report].Body, "DONE") {
+		return false, "", nil
+	}
+	for _, e := range evs[report+1:] {
+		if e.Kind == core.EventNote {
+			if gate, ok := strings.CutPrefix(e.Body, stoppedAtNote); ok {
+				return true, gate, nil
+			}
+		}
+	}
+	return true, "", nil
+}
+
+// stoppedAtNote marks the note a refused gate leaves, so the note is the
+// machine's own record of why the work is still open rather than prose somebody
+// has to interpret.
+const stoppedAtNote = "drive stopped at "
+
+// closeOne runs the gates for one piece of finished work and returns the gate
+// that stopped it, or "" when it closed.
+func (c *Cli) closeOne(t core.Work) (string, error) {
+	pass, body, _, err := c.runVerify(t.ID)
+	if err != nil {
+		return "", err
+	}
+	if !pass {
+		// The gate is doing its job. What it found goes on the work, because a
+		// loop that reported a clean run over a tree that does not build would
+		// be believed, and believed wrongly is worse than stopped.
+		if _, err := c.Ledger.AddEvent(t.ID, core.EventNote, stoppedAtNote+"verify\n"+body); err != nil {
+			return "", err
+		}
+		return "verify", nil
+	}
+	// A task under a goal needs no landing link of its own: the goal is what
+	// lands, and a task holding its own would claim a place the change is not.
+	if t.Parent == nil {
+		if _, err := c.recordPR(t.ID, nil); err != nil {
+			if _, err := c.Ledger.AddEvent(t.ID, core.EventNote, stoppedAtNote+"pull request\n"+err.Error()); err != nil {
+				return "", err
+			}
+			return "pull request", nil
+		}
+	}
+	if _, err := c.Ledger.SoftDone(t.ID, t.Parent == nil); err != nil {
+		var nr core.NotReady
+		if errors.As(err, &nr) {
+			if _, err := c.Ledger.AddEvent(t.ID, core.EventNote, stoppedAtNote+"soft-done\n"+nr.Error()); err != nil {
+				return "", err
+			}
+			return "soft-done", nil
+		}
+		return "", err
+	}
+	if _, err := c.Ledger.Transition(t.ID, core.StateDone); err != nil {
+		return "", err
+	}
+	return "", nil
+}
 
 // Drive runs a goal's loop with nobody watching. It is the whole replacement
 // for supervision: each turn coordinates the goal's open work, spends a bounded
@@ -66,6 +187,7 @@ func (c *Cli) drive(rest []string) error {
 		Ledger:     c.Ledger,
 		Coordinate: c.driveTurn(goal, p),
 		Judge:      c.judgeOnce(goal, p),
+		Close:      c.closeFinished,
 		Spend:      c.spendJudgement,
 		Send:       c.sendAnswer(p),
 		Poll:       time.Duration(intOr(c.Args, "poll-seconds", int(drivePoll/time.Second))) * time.Second,
@@ -85,7 +207,103 @@ func (c *Cli) drive(rest []string) error {
 			return err
 		}
 	}
-	return c.printDrive(goal, res)
+	// A run that landed every task drives the goal's own gates, because a goal
+	// left in running with all its work shipped is the last thing a person has to
+	// come and do. Where a gate needs a fact the loop cannot have — the work is
+	// not pushed, so there is nowhere to point at — it stops there and says so.
+	// A goal with a dropped or abandoned task is not this case: it came to rest
+	// without shipping, and only a person decides whether that goal was worth
+	// finishing another way.
+	gates := []string{}
+	if res.Shipped {
+		gates, err = c.goalGates(goal, res)
+		if err != nil {
+			return err
+		}
+	}
+	return c.printDrive(goal, res, gates)
+}
+
+// goalGates drives a goal whose work has all landed through its own report,
+// verify, pull request, soft-done and done, and returns the gate it stopped at.
+// Every one of those is machine-checkable, which is the only reason it is safe
+// for a loop with nobody in it to run them at all: a gate that needed taste
+// would be left standing and named.
+func (c *Cli) goalGates(goal core.Work, res driver.Result) ([]string, error) {
+	stopped := func(gate string) ([]string, error) { return []string{gate}, nil }
+	// A goal's own row often still says queued while its tasks are running:
+	// nothing spawns a goal, so nothing has ever moved it. By the time its
+	// work has all landed the goal demonstrably ran, and the transition is
+	// recorded here rather than assumed away — a board that says queued about a
+	// goal whose tasks are all done is a board that is lying.
+	goal, err := c.Ledger.Get(goal.ID)
+	if err != nil {
+		return nil, err
+	}
+	if goal.State == core.StateQueued || goal.State == core.StateBriefed {
+		if goal, err = c.Ledger.Transition(goal.ID, core.StateRunning); err != nil {
+			return nil, err
+		}
+	}
+	report := c.goalReport(goal, res)
+	if _, err := coordinator.FileReport(c.Ledger, goal, "DONE",
+		"DONE\nfiled as text, not read from a session: this goal has no executor session\n"+report); err != nil {
+		return nil, err
+	}
+	pass, verifyBody, _, err := c.runVerify(goal.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !pass {
+		// The gate is doing its job. What it found is written out, because a
+		// loop that reported a clean run over a tree that does not build would
+		// be worse than useless: it would be believed.
+		if !c.JSON {
+			fmt.Fprint(c.Stderr, verifyBody)
+		}
+		return stopped("verify")
+	}
+	url, err := c.recordPR(goal.ID, nil)
+	if err != nil {
+		// Not pushed, no remote, nothing at HEAD: a gate that cannot be checked
+		// stays standing and is named, which is the only honest place to stop.
+		if !c.JSON {
+			fmt.Fprintf(c.Stderr, "the goal could not be linked to a landing: %v\n", err)
+		}
+		return stopped("pull request")
+	}
+	if !c.JSON {
+		fmt.Fprintf(c.Stderr, "landed: %s\n", url)
+	}
+	if _, err := c.Ledger.SoftDone(goal.ID, true); err != nil {
+		return stopped("soft-done")
+	}
+	if _, err := c.Ledger.Transition(goal.ID, core.StateDone); err != nil {
+		return stopped("done")
+	}
+	return nil, nil
+}
+
+// goalReport is the goal's own account of the run that finished it: the shape of
+// the run, and every task that landed under it. It is written from the ledger
+// rather than remembered, so it cannot claim a task the run did not close.
+func (c *Cli) goalReport(goal core.Work, res driver.Result) string {
+	tasks, err := c.Ledger.Tasks(goal.ID)
+	if err != nil {
+		tasks = nil
+	}
+	out := []string{
+		"Goal " + goal.ID + " — " + goal.Title + ".",
+		fmt.Sprintf("Driven with no human present: %d turn(s), %d judgement(s), %d token(s), stopping on %s (%s).",
+			res.Turns, res.Judgements, res.Tokens, res.Stop, res.Why),
+	}
+	if len(tasks) > 0 {
+		out = append(out, "", "Every task landed:")
+		for _, t := range tasks {
+			out = append(out, "- "+t.ID+" "+t.Title)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // driveBudget reads the run's bounds. Every one that is left unset is not a
@@ -331,14 +549,39 @@ func (c *Cli) turnLine(turn int, t driver.Turn, used driver.Budget) {
 	if used.Judgements > 0 {
 		bits = append(bits, fmt.Sprintf("judged %d", used.Judgements))
 	}
+	if n := len(t.Closed); n > 0 {
+		bits = append(bits, fmt.Sprintf("closed %d", n))
+	}
+	if n := len(t.Blocked); n > 0 {
+		bits = append(bits, fmt.Sprintf("held %d", n))
+	}
 	fmt.Fprintln(c.Stderr, strings.Join(bits, " · "))
 }
 
-func (c *Cli) printDrive(goal core.Work, res driver.Result) error {
+// sortedKeys so a map of gates is read in the same order every run. A bill that
+// reorders itself is a bill nobody can compare against last week's.
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (c *Cli) printDrive(goal core.Work, res driver.Result, gates []string) error {
 	out := []string{fmt.Sprintf("%s %s", goal.ID, goal.Title)}
-	if res.Shipped {
-		out = append(out, fmt.Sprintf("shipped in %d turn(s), %d judgement(s), %d tokens", res.Turns, res.Judgements, res.Tokens))
-	} else {
+	switch {
+	case res.Shipped && len(gates) == 0:
+		// Every gate passed and the goal is closed. Nothing is left for a person
+		// to do, which is the whole claim.
+		out = append(out, fmt.Sprintf("shipped and closed: %d turn(s), %d judgement(s), %d tokens",
+			res.Turns, res.Judgements, res.Tokens))
+	case res.Shipped:
+		out = append(out, fmt.Sprintf("every task landed after %d turn(s), %d judgement(s), %d tokens",
+			res.Turns, res.Judgements, res.Tokens))
+		out = append(out, "the goal still owes: "+strings.Join(gates, ", "))
+	default:
 		out = append(out, fmt.Sprintf("stopped: %s — %s", res.Stop, res.Why))
 		out = append(out, fmt.Sprintf("%d turn(s), %d judgement(s), %d tokens", res.Turns, res.Judgements, res.Tokens))
 		if res.Stop == driver.StopFailed {
@@ -362,7 +605,22 @@ func (c *Cli) printDrive(goal core.Work, res driver.Result) error {
 		if len(res.Closed) > 0 {
 			out = append(out, "finished: "+strings.Join(res.Closed, ", "))
 		}
-		if res.Stop != driver.StopFailed {
+		if len(res.Blocked) > 0 {
+			// A gate the loop would not pass, named. Leaving it out would make
+			// the run read as though nothing was in its way, and a person
+			// looking at this output is the last reader before it goes back in
+			// the box.
+			out = append(out, "waiting on a gate:")
+			for _, id := range sortedKeys(res.Blocked) {
+				out = append(out, "  "+id+": "+res.Blocked[id])
+			}
+		}
+		if res.Stop == driver.StopComplete && len(res.Unlanded) > 0 {
+			// Every task came to rest and one of them was not a landing, so
+			// there is nothing left to drive and the goal is not finished. Only
+			// a person knows whether that goal was worth finishing another way.
+			out = append(out, "came to rest without shipping: "+strings.Join(res.Unlanded, ", "))
+		} else if res.Stop != driver.StopFailed {
 			out = append(out, "the goal is abandoned: it did not ship")
 		}
 	}

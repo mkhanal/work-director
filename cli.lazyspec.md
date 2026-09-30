@@ -278,15 +278,15 @@ exist. Reversing is a decision, so it reads in the audit like one.
 ## A Goal Runs Its Loop With Nobody Watching
 `wd drive <goal-id> [--turns N] [--judgements N] [--tokens N] [--stalled N]
 [--deadline <duration>] [--json]` runs the goal's loop: each turn coordinates
-its open work, and every question the ledger could not answer goes to one
-bounded model judgement that is recorded as a decision with what it cost before
-the answer reaches the executor waiting on it. It never asks whether to carry
-on, and every bound it runs under can be set from the command line; a bound
-nobody set is a bound nobody can reason about, and the judgement bound defaults
-low because it counts how often the loop acts in a person's place. A question is
-judged from the project's settled position and the model may decline, and a
-decline is recorded as a decline — never as a decision the ledger then believes
-was made. Only a goal can be driven.
+its open work, closes what has finished, and every question the ledger could not
+answer goes to one bounded model judgement that is recorded as a decision with
+what it cost before the answer reaches the executor waiting on it. It never asks
+whether to carry on, and every bound it runs under can be set from the command
+line; a bound nobody set is a bound nobody can reason about, and the judgement
+bound defaults low because it counts how often the loop acts in a person's
+place. A question is judged from the project's settled position and the model
+may decline, and a decline is recorded as a decline — never as a decision the
+ledger then believes was made. Only a goal can be driven.
 
 ## A Run That Did Not Ship Ends The Goal Abandoned, And Says Why
 When a run stops because a bound ran out or nothing moved with work left, `wd
@@ -296,8 +296,45 @@ goal that has come to rest would claim work is in progress when nothing is
 driving it, and the board is read as a statement about the world. A run that
 stopped because the loop itself could not run does not end anything: the work
 is untouched, and ending a goal because a runner could not read a transcript
-would throw away real work over a failure that says nothing about it. A run that
-did finish leaves the goal to its own gates rather than writing past them.
+would throw away real work over a failure that says nothing about it.
+
+## A Run That Lands Every Task Closes The Goal
+Each turn puts the goal's finished work through the gates that are left, and a
+run that lands every task then puts the goal through its own: the report written
+from the run and the tasks it closed, the project's verify commands in the
+goal's own directory, the landing link, soft-done and done. A goal whose tasks
+are all done sitting in running is the last thing a person has to come and do,
+and a driver that stops there has replaced supervision with a queue.
+
+Each report is tried once. A gate that refuses — a verify that fails, a landing
+link that cannot be worked out — is written on the work naming itself and then
+left alone, and the run names the work and the gate it is held at. Re-running a
+failing build on a loop is how a run spends its whole budget proving the same
+thing, and a gate the loop cannot pass is a question for a person, not a retry.
+A later report is a new attempt, because new work deserves a new answer.
+
+A goal with a dropped or abandoned task came to rest without shipping: nothing
+is left to drive, the run says which task stopped it, and the goal is left
+alone, because only a person knows whether that goal was worth finishing another
+way. A goal whose own row still says queued while its tasks run is moved to
+running at the point its work has all landed — the ledger can justify that
+transition, and a board saying queued about a goal whose work all landed is a
+board that is lying.
+
+## The Landing Link Is Derived Rather Than Typed
+`wd pr <id> <url>` records the url given. `wd pr <id>` works it out: the commit
+the work's own branch is at, on the project's remote, as a permalink. The gate's
+question is whether the work landed somewhere a person can read, and a commit
+already pushed to main answers that as well as a pull request does — it is
+already true, and a gate only a person typing a link can pass is a gate an
+unattended loop cannot pass at all.
+
+The link is given only when the commit is on a remote branch. A permalink to a
+commit nobody has pushed does not open, and a gate satisfied by a dead link is
+not a gate; that work is left unlinked and told so, and `wd pr <id> <url>` is
+the way through for a real pull request. Verify and the landing link resolve the
+work's directory the same way, so a goal cannot be verified in one tree and
+linked from another.
 
 ## A Run Reports Where A Person Is Still Needed
 A run that stopped without shipping says which questions it settled, which it

@@ -2616,9 +2616,15 @@ func TestAGoalRunsItsLoopWithNobodyWatching(t *testing.T) {
 	}
 
 	// A bound left at zero is not a bound, so a run under one stops on something
-	// else. Here on the deadline, and it says which. A goal of its own, because
-	// the run above came to rest.
+	// else. Here on the deadline, and it says which. It needs a goal that can
+	// genuinely not finish: the executor is still asking, with the answered state
+	// cleared, and the model now refuses — so nothing moves and nothing settles,
+	// which is the only state a deadline is the thing that ends.
 	untouched, _ := drivenGoal(t, f, "Never started")
+	if err := os.Remove(filepath.Join(f.dir, "fake-state", "executor-answered")); err != nil {
+		t.Fatalf("clear the answered state: %v", err)
+	}
+	judgeAnswer(t, f, false)
 	unbounded := f.runOK(t, "drive", untouched, "--turns", "0", "--judgements", "0",
 		"--stalled", "0", "--deadline", "2s", "--poll-seconds", "1", "--json")
 	if !strings.Contains(unbounded, "the deadline passed") {
@@ -2923,5 +2929,248 @@ func TestAReportCanBeFiledAsTextAndTheGateIsTheSame(t *testing.T) {
 	}
 	if evs := f.bodies(t, again, core.EventReport); len(evs) != 2 {
 		t.Errorf("%d report events, want both: a second report is a new fact", len(evs))
+	}
+}
+
+// publish gives a repository a remote its branch is actually on, so a commit can
+// be pointed at. A gate that only a link nobody can open can satisfy is not a
+// gate, so the link the tool works out has to be a real place.
+func publish(t *testing.T, repo string) string {
+	t.Helper()
+	bare := repo + "-origin.git"
+	gitRun(t, filepath.Dir(repo), "init", "--bare", "-q", bare)
+	gitRun(t, repo, "remote", "add", "origin", bare)
+	gitRun(t, repo, "push", "-q", "origin", "HEAD")
+	return bare
+}
+
+func headOf(t *testing.T, dir string) string {
+	t.Helper()
+	c := exec.Command("git", "rev-parse", "HEAD")
+	c.Dir = dir
+	out, err := c.Output()
+	if err != nil {
+		t.Fatalf("rev-parse in %s: %v", dir, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestARunThatLandsEveryTaskClosesTheGoal(t *testing.T) {
+	f := newCLIFixture(t)
+	publish(t, f.sample)
+	driveProject(t, f)
+	goal, task := drivenGoal(t, f, "Serve on a fixed port")
+	judgeAnswer(t, f, true)
+
+	// Nothing here waits for a person: the task's question is judged, the answer
+	// is delivered, the executor reports DONE, the task is put through its gates
+	// and then the goal is put through its own.
+	out := f.runOK(t, "drive", goal, "--turns", "8", "--judgements", "2", "--poll-seconds", "1")
+	if !strings.Contains(out, "shipped and closed") {
+		t.Fatalf("drive = %q, want it to say the goal closed itself", out)
+	}
+	if got := f.workRow(t, task).State; got != core.StateDone {
+		t.Errorf("task state = %s, want done: a task that reported DONE has nowhere to sit", got)
+	}
+	if got := f.workRow(t, goal).State; got != core.StateDone {
+		t.Errorf("goal state = %s, want done: a goal whose work all landed is the last thing a person has to do", got)
+	}
+
+	// The goal's report is the run's own account and names what it closed. A
+	// goal that says it shipped without saying what shipped is a claim, not a
+	// record.
+	reports := f.bodies(t, goal, core.EventReport)
+	if len(reports) != 1 {
+		t.Fatalf("%d goal reports, want 1", len(reports))
+	}
+	if !strings.HasPrefix(reports[0], "DONE\n") {
+		t.Errorf("goal report = %q, want it to start with the status the gate reads", reports[0])
+	}
+	for _, want := range []string{task, "Driven with no human present"} {
+		if !strings.Contains(reports[0], want) {
+			t.Errorf("goal report = %q, want it to name %q", reports[0], want)
+		}
+	}
+	if got := f.bodies(t, goal, core.EventVerify); len(got) != 1 || !strings.HasPrefix(got[0], "pass\n") {
+		t.Errorf("goal verify = %v, want one passing verify", got)
+	}
+	links := f.bodies(t, goal, core.EventPr)
+	if len(links) != 1 {
+		t.Fatalf("%d goal links, want 1", len(links))
+	}
+	if want := headOf(t, f.sample); !strings.HasSuffix(links[0], "/commit/"+want) {
+		t.Errorf("goal link = %q, want the commit the work landed on (%s)", links[0], want)
+	}
+
+	// A goal that came to rest has no loop to run, and running one anyway would
+	// report a run that never happened as a run that finished.
+	if errStr := f.runFail(t, "drive", goal); !strings.Contains(errStr, "nothing left to run") {
+		t.Errorf("drive a closed goal = %q, want it refused", errStr)
+	}
+}
+
+// A gate that refuses is written on the work and named by the run, and it is
+// tried once. Re-running a failing build on a loop is how a run spends its whole
+// budget proving the same thing.
+func TestARefusedGateIsHeldOnTheWorkAndTriedOnce(t *testing.T) {
+	f := newCLIFixture(t)
+	publish(t, f.sample)
+	driveProject(t, f)
+	// Its verify cannot pass, so the gate has something to say.
+	path := filepath.Join(f.wdHome, "projects", "driven.md")
+	broken := "---\npath: " + f.sample + "\nrunner: driven\nmode: auto\nstack: [go]\nverify: [test -f NOT-THERE]\ndefault_branch: main\n---\nA project that cannot pass its own verify.\n"
+	if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
+		t.Fatalf("write project: %v", err)
+	}
+	goal, task := drivenGoal(t, f, "Cannot be verified")
+	judgeAnswer(t, f, true)
+
+	out := f.runOK(t, "drive", goal, "--turns", "10", "--judgements", "2", "--poll-seconds", "1")
+	if !strings.Contains(out, "waiting on a gate") || !strings.Contains(out, task) {
+		t.Errorf("drive = %q, want the work and the gate it is held at named", out)
+	}
+	if got := f.workRow(t, task).State; got == core.StateDone {
+		t.Errorf("task state = %s, want it held: the gate said no", got)
+	}
+	notes := f.bodies(t, task, core.EventNote)
+	var stops int
+	for _, n := range notes {
+		if strings.HasPrefix(n, "drive stopped at ") {
+			stops++
+			if !strings.Contains(n, "verify") {
+				t.Errorf("note = %q, want it to name the gate", n)
+			}
+		}
+	}
+	if stops != 1 {
+		t.Errorf("%d stop notes, want 1: a refused gate is tried once, not every turn", stops)
+	}
+	// A goal with a task the gate would not let past has not shipped, and the run
+	// ends it saying so rather than quietly.
+	if got := f.workRow(t, goal).State; got != core.StateAbandoned {
+		t.Errorf("goal state = %s, want abandoned: its work did not land", got)
+	}
+}
+
+func TestTheLandingLinkIsDerivedRatherThanTyped(t *testing.T) {
+	f := newCLIFixture(t)
+
+	// A url given is recorded as given: a real pull request is still a real pull
+	// request, and the tool has no business second-guessing one.
+	given := jsonString(t, f.runOK(t, "add", "sample-app", "A real pull request", "--json"), "id")
+	f.runOK(t, "pr", given, "https://example.test/pr/1")
+	if got := f.bodies(t, given, core.EventPr); len(got) != 1 || got[0] != "https://example.test/pr/1" {
+		t.Errorf("link = %v, want the url given, unedited", got)
+	}
+
+	// Pushed: the link is worked out, and it is the commit the work is at.
+	remote := publish(t, f.sample)
+	pushed := jsonString(t, f.runOK(t, "add", "sample-app", "Landed on main", "--json"), "id")
+	f.runOK(t, "pr", pushed)
+	links := f.bodies(t, pushed, core.EventPr)
+	if len(links) != 1 {
+		t.Fatalf("%d links, want 1", len(links))
+	}
+	if want := headOf(t, f.sample); !strings.HasSuffix(links[0], "/commit/"+want) {
+		t.Errorf("link = %q, want the commit at %s", links[0], want)
+	}
+	if !strings.Contains(links[0], strings.TrimSuffix(remote, ".git")) {
+		t.Errorf("link = %q, want it on the project's own remote %s", links[0], remote)
+	}
+
+	// Not pushed: there is nowhere to point at, and a link to a commit nobody
+	// has pushed does not open. The work is told so and left alone.
+	if err := os.WriteFile(filepath.Join(f.sample, "NEW.md"), []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	gitRun(t, f.sample, "add", ".")
+	gitRun(t, f.sample, "commit", "-qm", "unpushed")
+	unpushed := jsonString(t, f.runOK(t, "add", "sample-app", "Not pushed yet", "--json"), "id")
+	errStr := f.runFail(t, "pr", unpushed)
+	for _, want := range []string{"not pushed", headOf(t, f.sample)[:8], "wd pr " + unpushed} {
+		if !strings.Contains(errStr, want) {
+			t.Errorf("pr on unpushed work = %q, want it to name %q", errStr, want)
+		}
+	}
+	if got := f.bodies(t, unpushed, core.EventPr); len(got) != 0 {
+		t.Errorf("link = %v, want nothing recorded: a dead link is not a landing", got)
+	}
+
+	// No remote at all is the same answer for the same reason.
+	lonely := filepath.Join(f.dir, "lonely")
+	if err := os.MkdirAll(lonely, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	gitRun(t, lonely, "init", "-q", "-b", "main")
+	gitRun(t, lonely, "config", "user.email", "fixture@work-director")
+	gitRun(t, lonely, "config", "user.name", "Fixture")
+	if err := os.WriteFile(filepath.Join(lonely, "README.md"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	gitRun(t, lonely, "add", ".")
+	gitRun(t, lonely, "commit", "-qm", "init")
+	alone := filepath.Join(f.wdHome, "projects", "lonely.md")
+	if err := os.WriteFile(alone, []byte("---\npath: "+lonely+"\nrunner: claude\nmode: auto\nstack: [go]\nverify: [test -f README.md]\ndefault_branch: main\n---\nNo remote.\n"), 0o644); err != nil {
+		t.Fatalf("write project: %v", err)
+	}
+	nowhere := jsonString(t, f.runOK(t, "add", "lonely", "No remote to point at", "--json"), "id")
+	if errStr := f.runFail(t, "pr", nowhere); !strings.Contains(errStr, "no git remote") {
+		t.Errorf("pr with no remote = %q, want it to say there is nowhere to point", errStr)
+	}
+
+	// Both remote forms have to work, because which one a person has is not
+	// something the tool should care about, and a gate that only reads one is a
+	// gate that fails for half the people using it.
+	sha := strings.Repeat("a", 40)
+	for remote, want := range map[string]string{
+		"git@github.com:owner/repo.git":       "https://github.com/owner/repo/commit/" + sha,
+		"ssh://git@gitlab.test:22/owner/repo": "https://gitlab.test/22/owner/repo/commit/" + sha,
+		"https://github.com/owner/repo.git":   "https://github.com/owner/repo/commit/" + sha,
+		"git://github.com/owner/repo.git":     "git://github.com/owner/repo/commit/" + sha,
+	} {
+		if got := commitLink(remote, sha); got != want {
+			t.Errorf("commitLink(%q) = %q, want %q", remote, got, want)
+		}
+	}
+
+	// Verify and the link resolve the work's directory the same way, or a goal
+	// could be verified in one tree and linked from another — which is a gate
+	// that checks one thing and a reader is shown another.
+	verifyPath := filepath.Join(f.wdHome, "projects", "in-tree.md")
+	sharedProject := "---\npath: " + f.sample + "\nrunner: claude\nmode: auto\nstack: [go]\nverify: [pwd]\ndefault_branch: main\n---\nVerify reports where it ran.\n"
+	if err := os.WriteFile(verifyPath, []byte(sharedProject), 0o644); err != nil {
+		t.Fatalf("write project: %v", err)
+	}
+	inTree := jsonString(t, f.runOK(t, "goal", "add", "in-tree", "A goal with its own tree", "--json"), "id")
+	f.runOK(t, "goal", "spawn", inTree, "--runner", "claude")
+	var wts []core.Worktree
+	if err := json.Unmarshal([]byte(f.runOK(t, "worktree", "list", inTree, "--json")), &wts); err != nil {
+		t.Fatalf("worktree list: %v", err)
+	}
+	tree := ""
+	for _, wt := range wts {
+		if wt.Kind == core.WorktreeShared {
+			tree = wt.Path
+		}
+	}
+	if tree == "" {
+		t.Fatalf("worktree list = %v, want the goal's shared tree", wts)
+	}
+	if err := os.WriteFile(filepath.Join(tree, "IN-TREE.md"), []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("write in tree: %v", err)
+	}
+	gitRun(t, tree, "add", ".")
+	gitRun(t, tree, "commit", "-qm", "the goal's own commit")
+	gitRun(t, tree, "push", "-q", "origin", "HEAD")
+	f.runOK(t, "verify", inTree)
+	if got := f.bodies(t, inTree, core.EventVerify); len(got) != 1 || !strings.Contains(got[0], tree) {
+		t.Errorf("verify = %v, want it run in the goal's own tree %s", got, tree)
+	}
+	f.runOK(t, "pr", inTree)
+	if got := f.bodies(t, inTree, core.EventPr); len(got) != 1 || !strings.HasSuffix(got[0], "/commit/"+headOf(t, tree)) {
+		t.Errorf("link = %v, want the goal's own commit %s in its own tree %s", got, headOf(t, tree), tree)
+	}
+	if headOf(t, tree) == headOf(t, f.sample) {
+		t.Fatal("the goal's tree shares the project's commit, so this proves nothing")
 	}
 }

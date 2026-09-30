@@ -66,7 +66,9 @@ wd runner init <name>         # any other provider = one TOML command file, no c
 wd attach <id> <session>      # bind a conversation started OUTSIDE the director (its own LLM) to this item
 wd context <id>               # cwd, worktree, branch + an OSC-8 link that opens it in your editor
 wd report <id>                # files the STATUS report once, moves the item to review/blocked/needs-input
+wd report <id> "<text>"       # or supply the report, for work the director built with no executor to read one from
 wd verify <id>                    # runs the project's verify commands in the executor's worktree
+wd pr <id>                        # records where the work landed: the pushed commit, worked out for you
 wd soft-done <id> && wd done <id> # task: needs only a DONE report; standalone: + passing verify, + PR when code changed
 wd feedback add "..." --card parse-at-boundary ; wd distill
 ```

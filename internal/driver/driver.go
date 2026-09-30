@@ -95,6 +95,11 @@ type Turn struct {
 	Answered   []string   `json:"answered"`
 	Escalated  []string   `json:"escalated"`
 	Unanswered []Question `json:"unanswered"`
+	// Closed is the work this turn moved the rest of the way, and Blocked is the
+	// work that was ready and stopped at a gate, naming which. Neither is a
+	// judgement: both are the ledger's own answer about what it would not pass.
+	Closed  []string          `json:"closed"`
+	Blocked map[string]string `json:"blocked"`
 	// Failed is why the turn could not run. Empty is a turn that ran.
 	Failed string `json:"failed"`
 }
@@ -121,12 +126,22 @@ type Result struct {
 	// Why is the stop in words, the way a reader wants it: which bound ran
 	// out, or that nothing moved.
 	Why string `json:"why"`
-	// Shipped says whether the goal's work reached done. It is false for every
-	// stop but complete, and the caller ends the goal abandoned on a false.
-	Shipped    bool `json:"shipped"`
-	Turns      int  `json:"turns"`
-	Judgements int  `json:"judgements"`
-	Tokens     int  `json:"tokens"`
+	// Shipped says whether the goal's work landed: every task done, not merely
+	// at rest. A goal with a dropped or abandoned task has come to rest without
+	// shipping, and calling that shipped would let the caller close a goal whose
+	// work is on the floor.
+	Shipped bool `json:"shipped"`
+	// Unlanded is the task that stopped a run that came to rest without
+	// shipping, or nil when every task is done.
+	Unlanded []string `json:"unlanded"`
+	// Blocked is the work a turn found ready to close and could not close, each
+	// naming the gate that stopped it. It is the honest bill of a run that did
+	// everything it could: a gate that refuses is not a failure to hide, it is
+	// the one thing a person is still needed for.
+	Blocked    map[string]string `json:"blocked"`
+	Turns      int               `json:"turns"`
+	Judgements int               `json:"judgements"`
+	Tokens     int               `json:"tokens"`
 	// Answered and Unanswered are the questions this run settled and the ones it
 	// could not. Unanswered is the honest list of where a person is still
 	// needed, and it is empty only when the goal shipped.
@@ -147,6 +162,23 @@ type Result struct {
 // verdict and the runner and model that gave it, so the answer is recorded with
 // its provenance rather than as anonymous truth.
 type Judge func(question string, settled []core.Work) (Verdict, error)
+
+// Closing is what one turn did with the work that had finished. Closed is the
+// work it moved the rest of the way, and Blocked is the work that is ready and
+// stopped at a gate, naming which one. A gate the loop cannot pass is not a
+// failure of the run: it is the honest list of what is left, and the loop that
+// hid it would be reporting a clean run over work it never closed.
+type Closing struct {
+	Closed  []string          `json:"closed"`
+	Blocked map[string]string `json:"blocked"`
+}
+
+// Close puts the goal's finished work through the gates that are left, once each.
+// It is a separate step from the coordination pass because the pass reads what
+// the executors said while this acts on it, and a pass that also closed work
+// would be doing two things whose failures mean different things: an executor
+// that has not spoken yet, and a gate that has been tried and refused.
+type Close func(goal core.Work) (Closing, error)
 
 // Driver runs one goal's loop. Everything it does that reaches out — the
 // coordination pass, the judgement, recording the judgement, delivering the
@@ -169,6 +201,10 @@ type Driver struct {
 	// Send hands an answer to the executor waiting on it. Without it an answer
 	// is decided and never delivered, which is worse than not deciding.
 	Send func(work, answer string) error
+	// Close puts work that has finished through the gates that are left. Without
+	// it a task that reported DONE sits in review for ever, and the run that
+	// watched it get there calls a goal finished while its work is unfinished.
+	Close Close
 	// Now is the clock, so a deadline is testable without waiting for one.
 	Now func() time.Time
 	// Poll is how long a turn waits before looking again. Zero polls as fast as
@@ -187,7 +223,7 @@ func (d *Driver) Drive(goal core.Work, b Budget) (Result, error) {
 	if now == nil {
 		now = time.Now
 	}
-	res := Result{Goal: goal.ID, Answered: []string{}, Unanswered: []Question{}, Open: []string{}}
+	res := Result{Goal: goal.ID, Answered: []string{}, Unanswered: []Question{}, Open: []string{}, Blocked: map[string]string{}}
 	spent := Budget{}
 	settled, err := d.settled()
 	if err != nil {
@@ -227,6 +263,14 @@ func (d *Driver) Drive(goal core.Work, b Budget) (Result, error) {
 		res.Judgements, res.Tokens = spent.Judgements, spent.Tokens
 		res.Answered = append(res.Answered, t.Answered...)
 		res.Unanswered = append(res.Unanswered, t.Unanswered...)
+		// A gate that refused is kept, not dropped on the next turn: it is the
+		// same fact every turn, and the run ends holding it.
+		for id, gate := range t.Blocked {
+			if res.Blocked == nil {
+				res.Blocked = map[string]string{}
+			}
+			res.Blocked[id] = gate
+		}
 		if d.OnTurn != nil {
 			d.OnTurn(turn, t, spent)
 		}
@@ -244,7 +288,7 @@ func (d *Driver) Drive(goal core.Work, b Budget) (Result, error) {
 		}
 		res.Unfinished = unfinished
 		if len(unfinished) == 0 {
-			res.Stop, res.Why = StopComplete, "every task closed"
+			res.Stop, res.Why = StopComplete, "every task at rest"
 			break
 		}
 		// Movement is measured on the work itself, not on what a turn reported.
@@ -267,7 +311,36 @@ func (d *Driver) Drive(goal core.Work, b Budget) (Result, error) {
 	}
 	res.Shipped = res.Stop.Shipped()
 	res.Answered, res.Unanswered = unique(res.Answered), uniqueQuestions(res.Unanswered)
+	// Landed is asked of the ledger rather than of the run, because the run
+	// watched tasks leave the open set and cannot tell a task that finished from
+	// one that was dropped. A goal with a dropped piece came to rest without
+	// shipping, and only the task's own state says which.
+	unlanded, err := d.unlanded(goal.ID)
+	if err != nil {
+		return res, err
+	}
+	res.Unlanded = unlanded
+	if len(unlanded) > 0 {
+		res.Shipped = false
+	}
 	return res, nil
+}
+
+// unlanded is every task that came to rest without landing: dropped, or
+// abandoned. Both are endings rather than successes, and a goal with one has not
+// shipped, so the caller must not close it as though it had.
+func (d *Driver) unlanded(goal string) ([]string, error) {
+	tasks, err := d.Ledger.Tasks(goal)
+	if err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for _, t := range tasks {
+		if t.State == core.StateDropped || t.State == core.StateAbandoned {
+			out = append(out, t.ID)
+		}
+	}
+	return out, nil
 }
 
 // turn is one coordination pass, then judgement on whatever it could not
@@ -286,6 +359,18 @@ func (d *Driver) turn(goal core.Work, b, spent Budget, settled []core.Work, put 
 		return t, spent, nil
 	}
 	t.Answered, t.Escalated = pass.Answered, pass.Escalated
+	// Closing runs whatever the pass asked about, because the common case is a
+	// task reporting DONE with no question at all, and a loop that only closed
+	// work while somebody was asking it something would sit on finished work for
+	// ever.
+	if d.Close != nil {
+		c, err := d.Close(goal)
+		if err != nil {
+			t.Failed = "closing finished work: " + err.Error()
+			return t, spent, nil
+		}
+		t.Closed, t.Blocked = c.Closed, c.Blocked
+	}
 	if len(pass.Unanswered) == 0 {
 		return t, spent, nil
 	}

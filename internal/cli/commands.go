@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1321,50 +1322,8 @@ func (c *Cli) verify(rest []string) error {
 		return fail("usage: wd verify <id>")
 	}
 	id := rest[0]
-	w, err := c.Ledger.Get(id)
+	pass, body, results, err := c.runVerify(id)
 	if err != nil {
-		return err
-	}
-	p, err := c.project(w.Project)
-	if err != nil {
-		return err
-	}
-	cwd := w.Cwd
-	if cwd == nil && core.IsGoal(w.Kind) {
-		wts, err := c.Ledger.Worktrees(id)
-		if err != nil {
-			return err
-		}
-		for _, wt := range wts {
-			if wt.Kind == core.WorktreeShared {
-				cwd = &wt.Path
-			}
-		}
-	}
-	if cwd == nil {
-		cwd = &p.Path
-	}
-	if len(p.Verify) == 0 {
-		return fail("project %s lists no verify commands; add them under verify: in its project file", p.Name)
-	}
-	results := []string{}
-	pass := true
-	for _, cmdline := range p.Verify {
-		r, err := runner.Run([]string{"bash", "-lc", cmdline}, *cwd)
-		if err != nil {
-			return err
-		}
-		if r.Code != 0 {
-			pass = false
-		}
-		results = append(results, fmt.Sprintf("%s → %d\n%s", cmdline, r.Code, lastLines(strings.TrimSpace(r.Stdout+r.Stderr), 5)))
-	}
-	body := "fail\n"
-	if pass {
-		body = "pass\n"
-	}
-	body += strings.Join(results, "\n")
-	if _, err := c.Ledger.AddEvent(id, core.EventVerify, body); err != nil {
 		return err
 	}
 	if err := c.out(map[string]any{"pass": pass, "results": results}, body); err != nil {
@@ -1374,6 +1333,49 @@ func (c *Cli) verify(rest []string) error {
 		return fail("verify failed for %s", id)
 	}
 	return nil
+}
+
+// runVerify runs the project's verify commands in the work's own directory and
+// records the result. It is separate from the command so a driven run can put a
+// gate through it without printing a second document into the middle of its own
+// output, which on the JSON rail would be two documents where there must be one.
+func (c *Cli) runVerify(id string) (pass bool, body string, results []string, err error) {
+	w, err := c.Ledger.Get(id)
+	if err != nil {
+		return false, "", nil, err
+	}
+	p, err := c.project(w.Project)
+	if err != nil {
+		return false, "", nil, err
+	}
+	cwd, err := c.workDir(w, p)
+	if err != nil {
+		return false, "", nil, err
+	}
+	if len(p.Verify) == 0 {
+		return false, "", nil, fail("project %s lists no verify commands; add them under verify: in its project file", p.Name)
+	}
+	results = []string{}
+	pass = true
+	for _, cmdline := range p.Verify {
+		r, rerr := runner.Run([]string{"bash", "-lc", cmdline}, cwd)
+		if rerr != nil {
+			return false, "", nil, rerr
+		}
+		if r.Code != 0 {
+			pass = false
+		}
+		results = append(results, fmt.Sprintf("%s → %d\n%s", cmdline, r.Code, lastLines(strings.TrimSpace(r.Stdout+r.Stderr), 5)))
+	}
+	body = "fail\n"
+	if pass {
+		body = "pass\n"
+	}
+	body += strings.Join(results, "\n")
+	if _, err := c.Ledger.AddEvent(id, core.EventVerify, body); err != nil {
+		return false, "", nil, err
+	}
+	return pass, body, results, nil
 }
 
 func lastLines(text string, n int) string {
@@ -1422,15 +1424,146 @@ func (c *Cli) decide(rest []string) error {
 	return c.out(e, "decided: "+e.Body)
 }
 
+// pr records where the work landed. With a URL that is the answer. With no URL
+// it works out the answer: the commit the work's own branch is at, on the
+// project's remote.
+//
+// The gate's real question is "did this land somewhere a person can see it", and
+// a commit the director pushed to main answers it as well as a pull request does
+// — indeed better, because it is already true. Making the tool derive it is what
+// lets the gate be checked without a person present to type a link, which is the
+// only way a loop that runs unattended can pass it.
 func (c *Cli) pr(rest []string) error {
-	if len(rest) < 2 {
-		return fail("usage: wd pr <id> <url>")
+	if len(rest) == 0 {
+		return fail("usage: wd pr <id> [<url>]")
 	}
-	id, url := rest[0], rest[1]
-	if _, err := c.Ledger.AddEvent(id, core.EventPr, url); err != nil {
+	url, err := c.recordPR(rest[0], rest[1:])
+	if err != nil {
 		return err
 	}
-	return c.out(map[string]any{"ok": true}, "recorded")
+	return c.out(map[string]any{"ok": true, "url": url}, "recorded "+url)
+}
+
+// recordPR files where the work landed and returns the url, so a driven run can
+// put the gate through it without a second document on its own output.
+func (c *Cli) recordPR(id string, rest []string) (string, error) {
+	url := ""
+	if len(rest) > 0 {
+		url = strings.Join(rest, " ")
+	} else {
+		landed, err := c.landedAt(id)
+		if err != nil {
+			return "", err
+		}
+		url = landed
+	}
+	if _, err := c.Ledger.AddEvent(id, core.EventPr, url); err != nil {
+		return "", err
+	}
+	return url, nil
+}
+
+// landedAt is the permalink for the commit the work landed on. It is a real
+// place the change can be read, which is the whole of what the pull-request gate
+// asks, and it is only given when the commit is on a remote branch: a permalink
+// to a commit nobody has pushed is a link that does not open, and a gate that
+// can be satisfied by a dead link is not a gate.
+func (c *Cli) landedAt(id string) (string, error) {
+	w, err := c.Ledger.Get(id)
+	if err != nil {
+		return "", err
+	}
+	p, err := c.project(w.Project)
+	if err != nil {
+		return "", err
+	}
+	dir, err := c.workDir(w, p)
+	if err != nil {
+		return "", err
+	}
+	head, err := c.runGit([]string{"-C", dir, "rev-parse", "HEAD"}, dir)
+	if err != nil {
+		return "", err
+	}
+	sha := strings.TrimSpace(head.Stdout)
+	if head.Code != 0 || sha == "" {
+		return "", fail("work %s has no commit to point at: %s has nothing at HEAD", id, dir)
+	}
+	// The remote first, then what it has: "not pushed" and "no remote to push
+	// to" are different problems, and a repository with no remote would
+	// otherwise be told to push somewhere it has never heard of.
+	remote, err := c.runGit([]string{"-C", dir, "remote"}, dir)
+	if err != nil {
+		return "", err
+	}
+	remotes := strings.Fields(remote.Stdout)
+	if len(remotes) == 0 {
+		return "", fail("work %s has no git remote, so there is nowhere to point at. Pass the url: wd pr %s <url>", id, id)
+	}
+	name := remotes[0]
+	if slices.Contains(remotes, "origin") {
+		name = "origin"
+	}
+	// Contained in a remote branch, or not a link anybody can open.
+	contains, err := c.runGit([]string{"-C", dir, "branch", "-r", "--contains", sha}, dir)
+	if err != nil {
+		return "", err
+	}
+	if contains.Code != 0 || strings.TrimSpace(contains.Stdout) == "" {
+		return "", fail("work %s is not pushed: %s is on no remote branch, so there is nowhere to point at. "+
+			"Push it, or pass the url: wd pr %s <url>", id, slice60(sha), id)
+	}
+	url, err := c.runGit([]string{"-C", dir, "remote", "get-url", name}, dir)
+	if err != nil {
+		return "", err
+	}
+	base := strings.TrimSpace(url.Stdout)
+	if base == "" {
+		return "", fail("work %s: remote %s has no url. Pass the url: wd pr %s <url>", id, name, id)
+	}
+	return commitLink(base, sha), nil
+}
+
+// commitLink turns a remote url and a sha into a link a person can open.
+// git@github.com:owner/repo.git and https://github.com/owner/repo both have to
+// work, because which one a person has is not something the tool should care
+// about, and a gate that only reads one form is a gate that fails for half the
+// people using it.
+func commitLink(remote, sha string) string {
+	base := strings.TrimSuffix(strings.TrimSpace(remote), ".git")
+	switch {
+	case strings.HasPrefix(base, "git@"):
+		return "https://" + strings.Replace(base[len("git@"):], ":", "/", 1) + "/commit/" + sha
+	case strings.HasPrefix(base, "ssh://git@"):
+		rest := strings.TrimPrefix(base, "ssh://git@")
+		rest = strings.Replace(rest, ":", "/", 1)
+		return "https://" + rest + "/commit/" + sha
+	case strings.HasPrefix(base, "http://"), strings.HasPrefix(base, "https://"):
+		return base + "/commit/" + sha
+	}
+	return base + "/commit/" + sha
+}
+
+// workDir is the directory work is verified and landed from: its own, else the
+// shared worktree under a goal, else the project. Verify and the landing link
+// must agree about this, or a goal could be verified in one tree and linked from
+// another.
+func (c *Cli) workDir(w core.Work, p *project.Project) (string, error) {
+	if w.Cwd != nil {
+		return *w.Cwd, nil
+	}
+	if core.IsGoal(w.Kind) {
+		wts, err := c.Ledger.Worktrees(w.ID)
+		if err != nil {
+			return "", err
+		}
+		for _, wt := range wts {
+			if wt.Kind == core.WorktreeShared {
+				return wt.Path, nil
+			}
+		}
+	}
+	return p.Path, nil
 }
 
 func (c *Cli) softDone(rest []string) error {

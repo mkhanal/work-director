@@ -126,8 +126,10 @@ wd models                             # detected runners only: whatever each pro
 wd add my-app "Make the import idempotent"
 wd spawn <id> --model fable           # forwards --model to the provider's CLI
 wd report <id>                    # files the STATUS report once, moves it to review/blocked/needs-input
+wd report <id> "<text>"           # or supply it, for work with no executor to read one from
 wd verify <id>                    # runs the project's verify in the executor's worktree
-wd pr <id> <url> && wd soft-done <id> && wd done <id>
+wd pr <id>                        # where it landed: the pushed commit, worked out; <url> for a real pull request
+wd soft-done <id> && wd done <id>
 ```
 
 ### Any other provider is a file, not a code change
