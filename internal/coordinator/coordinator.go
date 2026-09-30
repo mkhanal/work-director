@@ -157,27 +157,26 @@ var statusRe = regexp.MustCompile(`STATUS:\s*(DONE|BLOCKED|NEEDS-INPUT)`)
 // project's), its session (else its claim), and its directory (its own cwd,
 // else its epic's active shared worktree, else the project's path). ok is
 // false when work has neither session nor claim.
-func Handle(l *ledger.Ledger, w core.Work, p *project.Project) (runner.Handle, bool, error) {
-	session := w.Session
-	if session == nil {
-		session = w.Claim
-	}
-	if session == nil {
-		return runner.Handle{}, false, nil
-	}
+// Where resolves the runner and directory a work item is worked in: its own
+// runner else its epic's else the project's, and its own cwd else its epic's
+// active shared worktree else the project path. It is how every command reaches
+// the session a work item actually runs in, so a new call made on a work item's
+// behalf — a reflection, a judgement — runs where that work runs, not where the
+// project lives.
+func Where(l *ledger.Ledger, w core.Work, p *project.Project) (string, string, error) {
 	runnerName := p.Runner
 	cwd := p.Path
 	if w.Parent != nil {
 		epic, err := l.Get(*w.Parent)
 		if err != nil {
-			return runner.Handle{}, false, err
+			return "", "", err
 		}
 		if epic.Runner != nil {
 			runnerName = *epic.Runner
 		}
 		wts, err := l.Worktrees(epic.ID)
 		if err != nil {
-			return runner.Handle{}, false, err
+			return "", "", err
 		}
 		for _, wt := range wts {
 			if wt.Kind == core.WorktreeShared && wt.State == core.WorktreeActive {
@@ -190,6 +189,21 @@ func Handle(l *ledger.Ledger, w core.Work, p *project.Project) (runner.Handle, b
 	}
 	if w.Cwd != nil {
 		cwd = *w.Cwd
+	}
+	return runnerName, cwd, nil
+}
+
+func Handle(l *ledger.Ledger, w core.Work, p *project.Project) (runner.Handle, bool, error) {
+	session := w.Session
+	if session == nil {
+		session = w.Claim
+	}
+	if session == nil {
+		return runner.Handle{}, false, nil
+	}
+	runnerName, cwd, err := Where(l, w, p)
+	if err != nil {
+		return runner.Handle{}, false, err
 	}
 	return runner.Handle{Runner: runnerName, Session: *session, Ref: w.Ref, Cwd: cwd}, true, nil
 }
