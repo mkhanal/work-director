@@ -159,7 +159,7 @@ extends it with a promotion pass over project-scoped cards:
 - a project card whose evidence is ≥2 feedback from **different projects**, or ≥2 `attached`
   feedback (real-world recurrence), graduates to a **promotion candidate**;
 - `wd scan` lists candidates with their evidence; `wd scan --adopt <candidate>` writes a new
-  global candidate card into `taste/cards/<category>/<id>.md`, and `bun run build` regenerates
+  global candidate card into `taste/cards/<category>/<id>.md`, and `go run ./cmd/taste` regenerates
   the plugin so it reaches every repo.
 
 The scan is the incremental, every-few-days command. A scheduler wrapper is a later hook, not
@@ -179,7 +179,8 @@ New and changed `wd` commands (all keep `--json`):
 | `wd epic review <epic>` | one coordination pass: answer / escalate / review / blocked |
 | `wd epic spawn <epic> --count n` | n sessions on the epic's one branch/worktree |
 | `wd attach <id> <session> [--runner r] [--ref x] [--cwd d]` | bind a conversation started outside the director as the item's live session; the coordinator drives it with its own LLM |
-| `wd ui [--port n] [--open]` | zero-dependency goals board (localhost): goal-level status, detail, actions wrapped through the real CLI |
+| `wd serve [--port n]` | loopback board over `net/http`: goal-level status, detail, live events over a WebSocket, actions wrapped through the real CLI |
+| `wd tui [id]` | the same board in the terminal: goals with their rollup, one work item's ledger and its live transcript |
 | `wd claim <task> [session]` | mark a task claimed / `drop` to release |
 | `wd impact <task> <+path\|-path>` | record a claimed area; `--clear` resets |
 | `wd conflict <epic>` | overlap scan across active claims |
@@ -194,16 +195,17 @@ Schema migration is additive-only; existing ledgers and non-epic commands keep w
 
 ## Testing
 
-`bun test`. New lazyspec requirements married to tests in `packages/wd/specs/`, in the existing
-style: hierarchy (`epic` kind, parent/heading, task states, epic completion gate), coordination
-(claim/impact/concern/conflict), promotion (`distill` variants and `scan --adopt`). Smoke-tested
+`go test ./...`. New lazyspec requirements are married to tests in the root `*.lazyspec.md`
+files, in the existing style: hierarchy (`epic` kind, parent/heading, task states, epic
+completion gate), coordination (claim/impact/concern/conflict), promotion (`distill` variants
+and `scan --adopt`); `scripts/lazyspec-check.sh` proves every heading is married. Smoke-tested
 against real `claude --bg` and `opencode run` on one shared-branch epic, recorded in a plan doc.
 
 ## Out of scope
 
 Multi-user. Cloud sessions. Editing any managed repo directly — coordination state lives in the
-ledger and via executors only. The board (`wd ui`) is a wrapper over the CLI by construction:
-every action posts argv to the real `wd`, so the terminal surface owns the behaviour.
+ledger and via executors only. The board (`wd serve`, `wd tui`) is a wrapper over the CLI by
+construction: every action posts argv to the real `wd`, so the terminal surface owns the behaviour.
 
 ## Decisions taken during implementation
 
@@ -226,5 +228,5 @@ Recorded here so they can be revisited as a set, not asked one by one.
 | Partial slices | `wd epic run --only <id,id>` / `--heading <label>` spawns just that slice; leftovers stay open | complex goals run partially across conversations; non-complex ones run in one go (`wd epic spawn`) |
 | `/goal`-equivalent without the provider feature | briefs carry a Goal block; the coordinator answers `ASK:` questions from recorded decisions, escalates unknown ones to `needs-input`, harvests `STATUS: DONE/BLOCKED` | "treat things as goal" must hold even when the provider cannot drive to one; the director *is* the drive |
 | Attach lets any outside conversation in | `wd attach <id> <session>` binds a provider session started outside the director as the item's live session (runner + ref + cwd); `queued → running` is reserved for it and joins the allowed transitions | everything is CLI-driven, so any conversation is identifiable and resumed with the same LLM; pretending only the director's spawns run work would hide real work |
-| The board is a wrapper over the CLI | `wd ui` (Bun.serve, zero deps) lists goals with rolled-up goal-level status; `/api/action` posts argv to the real `wd` | "every capability is a `--json` command" extends to the UI: it can never drift from the CLI, and chat/scripts/UI share one rail |
+| The board is a wrapper over the CLI | `wd serve` (stdlib `net/http` + WebSocket, zero deps) and `wd tui` (terminal) both render the ledger and post argv to the real `wd` | "every capability is a `--json` command" extends to the UI: it can never drift from the CLI, and chat/scripts/UI share one rail |
 | Free-flow gist is a tracked goal | the gist of a conversation lands as an epic or task (`wd add --kind epic`), never only in chat | untracked talk is work lost; the ledger is the memory |
