@@ -1401,6 +1401,22 @@ func (f *cliFixture) eventsOf(t *testing.T, id string, kind core.EventKind) int 
 	return n
 }
 
+// bodies is every event of one kind on work, in the order they were filed.
+func (f *cliFixture) bodies(t *testing.T, id string, kind core.EventKind) []string {
+	t.Helper()
+	var evs []core.Event
+	if err := json.Unmarshal([]byte(f.runOK(t, "events", id, "--json")), &evs); err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range evs {
+		if e.Kind == kind {
+			out = append(out, e.Body)
+		}
+	}
+	return out
+}
+
 // stateOf is work's state through wd status.
 func (f *cliFixture) stateOf(t *testing.T, id string) core.State {
 	t.Helper()
@@ -2786,5 +2802,126 @@ func TestARunReportsWhereAPersonIsStillNeeded(t *testing.T) {
 	}
 	if errStr := f.runFail(t, "drive", goal, "--deadline", "soon"); !strings.Contains(errStr, "is not a duration") {
 		t.Errorf("--deadline soon: %q, want a duration error", errStr)
+	}
+}
+
+func TestAReportCanBeFiledAsTextAndTheGateIsTheSame(t *testing.T) {
+	f := newCLIFixture(t)
+	// Work the director builds in its own session: no executor, no transcript,
+	// and therefore no report to read. Before this there was no way to say the
+	// work was done, so it could never be closed.
+	built := jsonString(t, f.runOK(t, "add", "sample-app", "Built by the director", "--json"), "id")
+	f.runOK(t, "set", built, "running")
+
+	// Told there is nothing to read, and told how to file one anyway. An error
+	// that only says no leaves a person with nowhere to go.
+	errStr := f.runFail(t, "report", built)
+	for _, want := range []string{"no session", "as text", "STATUS: DONE"} {
+		if !strings.Contains(errStr, want) {
+			t.Errorf("report with no session: stderr %q, want it to name %q", errStr, want)
+		}
+	}
+	if got := f.eventsOf(t, built, core.EventReport); got != 0 {
+		t.Errorf("report with no session filed %d reports, want 0", got)
+	}
+
+	// A text with no STATUS line says nothing about what happened, so it files
+	// nothing: the gate is the same gate, not a looser one.
+	if errStr := f.runFail(t, "report", built, "I changed the file and it looks fine."); !strings.Contains(errStr, "no STATUS line") {
+		t.Errorf("a report with no status: stderr %q, want it refused", errStr)
+	}
+	if got := f.eventsOf(t, built, core.EventReport); got != 0 {
+		t.Errorf("a report with no STATUS line filed %d reports, want 0", got)
+	}
+	if got := f.stateOf(t, built); got != core.StateRunning {
+		t.Errorf("a refused report left state %s, want running", got)
+	}
+
+	// Filed, the text moves the work to review and records where it came from,
+	// so a reader comparing two reports need not guess which was read from a
+	// session and which was handed over.
+	out := f.runOK(t, "report", built, "STATUS: DONE\n\nAdded wd drive and its three new packages.", "--no-reflect", "--json")
+	if got := jsonString(t, out, "report"); got != "DONE" {
+		t.Errorf("report = %q, want DONE", got)
+	}
+	if got := jsonString(t, out, "source"); got != "text" {
+		t.Errorf("source = %q, want text: a reader has to know this was not read", got)
+	}
+	if got := f.stateOf(t, built); got != core.StateReview {
+		t.Errorf("state = %s, want review", got)
+	}
+	evs := f.bodies(t, built, core.EventReport)
+	if len(evs) != 1 {
+		t.Fatalf("%d report events, want 1", len(evs))
+	}
+	if !strings.HasPrefix(evs[0], "DONE\n") {
+		t.Errorf("report body = %q, want it to start with the status the gate reads", evs[0])
+	}
+	if !strings.Contains(evs[0], "no executor session") || !strings.Contains(evs[0], "STATUS: DONE") {
+		t.Errorf("report body = %q, want its provenance and the text both on the record", evs[0])
+	}
+
+	// The gate is the same gate. Filing a report is not a way past verify or a
+	// pull request; it is only a way to produce the one thing a session-less work
+	// item had no way to produce.
+	if errStr := f.runFail(t, "soft-done", built); !strings.Contains(errStr, "passing verify") {
+		t.Errorf("soft-done with no verify: stderr %q, want the verify gate still standing", errStr)
+	}
+	f.runOK(t, "verify", built)
+	if errStr := f.runFail(t, "soft-done", built); !strings.Contains(errStr, "pull request") {
+		t.Errorf("soft-done with no pull request: stderr %q, want the pull-request gate still standing", errStr)
+	}
+	f.runOK(t, "pr", built, "https://example.test/pr/built-by-the-director")
+	f.runOK(t, "soft-done", built)
+	if got := jsonString(t, f.runOK(t, "done", built, "--json"), "state"); got != string(core.StateDone) {
+		t.Errorf("state = %q, want done: director-built work must be able to close", got)
+	}
+
+	// BLOCKED is the same road: the text's status names where the work goes,
+	// and a report that is not DONE is still refused at soft-done.
+	stuck := jsonString(t, f.runOK(t, "add", "sample-app", "Blocked by hand", "--json"), "id")
+	f.runOK(t, "set", stuck, "running")
+	if got := jsonString(t, f.runOK(t, "report", stuck, "STATUS: BLOCKED\n\nWaiting on a decision that is not mine to make.", "--no-reflect", "--json"), "report"); got != "BLOCKED" {
+		t.Errorf("report = %q, want BLOCKED", got)
+	}
+	if got := f.stateOf(t, stuck); got != core.StateBlocked {
+		t.Errorf("state = %s, want blocked", got)
+	}
+
+	// Work that does have a session says so, because a report read from a
+	// session and a report handed over are different records and the reader
+	// should not have to work out which one this is.
+	spoken := jsonString(t, f.runOK(t, "add", "sample-app", "Has a session", "--json"), "id")
+	session := jsonString(t, f.runOK(t, "spawn", spoken, "--runner", "claude", "--json"), "session")
+	f.runOK(t, "report", spoken, "STATUS: DONE\n\nCorrecting the transcript.", "--no-reflect", "--json")
+	if evs := f.bodies(t, spoken, core.EventReport); len(evs) != 1 || !strings.Contains(evs[0], "not read from session "+session) {
+		t.Errorf("report body = %v, want it to name the session whose transcript was not read", evs)
+	}
+
+	// Reflection rides on a filed report the same way it rides on a read one,
+	// and it cannot lose the report: a model that will not start is recorded on
+	// the work, not fatal.
+	reflected := jsonString(t, f.runOK(t, "add", "sample-app", "Reflected by hand", "--json"), "id")
+	f.runOK(t, "set", reflected, "running")
+	out = f.runOK(t, "report", reflected, "STATUS: DONE\n\nFiled with reflection on.", "--json")
+	if !strings.Contains(out, `"reflect"`) {
+		t.Errorf("report --json = %s, want the reflect result carried on the rail", out)
+	}
+	if got := f.stateOf(t, reflected); got != core.StateReview {
+		t.Errorf("state = %s, want review: reflection is not a gate and cannot move work back", got)
+	}
+
+	// A report on work already where the report says it belongs files the fact
+	// and moves nothing. Refusing it would lose a record to save a transition
+	// that has nowhere to go.
+	again := jsonString(t, f.runOK(t, "add", "sample-app", "Already in review", "--json"), "id")
+	f.runOK(t, "set", again, "running")
+	f.runOK(t, "report", again, "STATUS: DONE\n\nFirst word on it.", "--no-reflect")
+	f.runOK(t, "report", again, "STATUS: DONE\n\nA second look found one more thing.", "--no-reflect")
+	if got := f.stateOf(t, again); got != core.StateReview {
+		t.Errorf("state = %s, want review", got)
+	}
+	if evs := f.bodies(t, again, core.EventReport); len(evs) != 2 {
+		t.Errorf("%d report events, want both: a second report is a new fact", len(evs))
 	}
 }

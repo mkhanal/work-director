@@ -145,10 +145,22 @@ the flag; none falls back to its default.
 leaves the state as it was. A STATUS line of NEEDS-INPUT files its report and
 exits 0.
 
+## A Report Can Be Filed As Text, And The Gate Is The Same
+`wd report <id> "<text>"` files the text as the report and moves the work to the
+state the text's STATUS line names: DONE to review, BLOCKED to blocked, and
+nowhere if the work is already there. The report is the work author's own
+account of what it did, so a text handed over is the same verdict as one read
+out of a session — and it is the only account work built in the director's own
+session can have, since there is no executor to read one from. The verify and
+pull-request gates are untouched, a text with no STATUS line files nothing, and
+the report names where it came from so a reader comparing two reports need not
+guess which was read and which was filed. A work item with no session is told
+how to file a report rather than only that it has none.
+
 ## A Standalone Task Closes Through The CLI Alone
 A task with no epic goes from queued to done through `wd add`, `wd spawn`,
 `wd report`, `wd verify`, `wd pr`, `wd soft-done` and `wd done`; nothing
-else writes the ledger. `wd report` on a task with no session files nothing
+else writes the ledger. `wd report` with no text and no session files nothing
 and exits 1. A task whose latest report is not DONE is refused by
 `wd soft-done`, even in review with a passing verify and a PR.
 

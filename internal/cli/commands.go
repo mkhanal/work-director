@@ -1160,14 +1160,22 @@ func (c *Cli) attach(rest []string) error {
 func (c *Cli) report(rest []string) error {
 	a := c.Args
 	if len(rest) == 0 {
-		return fail("usage: wd report <id> [--tail n]")
+		return fail("usage: wd report <id> [<text>] [--tail n]")
 	}
 	n, err := positiveInt(a, "tail", 1)
 	if err != nil {
 		return err
 	}
 	id := rest[0]
-	h, err := c.handle(id)
+	if len(rest) > 1 {
+		// The report is the work's own account of what it did. Work the
+		// director builds in its own session has no executor to read one from,
+		// and the report is not a gate on honesty — it is the author's own
+		// verdict, which a person filing it by hand is equally entitled to
+		// give. Verify and pull request stay exactly as they were.
+		return c.filedReport(id, strings.Join(rest[1:], " "))
+	}
+	h, err := c.reportHandle(id)
 	if err != nil {
 		return err
 	}
@@ -1225,6 +1233,77 @@ func (c *Cli) report(rest []string) error {
 	}
 	return c.out(map[string]any{"status": runnerStatus, "report": status, "messages": messages, "reflect": reflected},
 		fmt.Sprintf("%s · %s\n%s", runnerStatus, status, strings.Join(messages, "\n---\n")))
+}
+
+// filedReport files a report whose text is given rather than read from a
+// session, and moves the work to the state the report's status names. It is the
+// same gate by a different road: the report is still the work author's own
+// account, the verify and pull-request gates are untouched, and a text with no
+// STATUS line files nothing at all.
+//
+// The provenance line is on the report because a reader comparing two reports
+// has to be able to tell one read from a session from one handed over, and
+// guessing is worse than knowing.
+func (c *Cli) filedReport(id, text string) error {
+	w, err := c.Ledger.Get(id)
+	if err != nil {
+		return err
+	}
+	status := matchStatus(text)
+	if status == "" {
+		return fail("no report filed for %s: the text has no STATUS line, so it says nothing about what happened. "+
+			"Give the report a line of the form STATUS: DONE (or BLOCKED).", id)
+	}
+	from := "filed as text, not read from a session: this work has no executor session"
+	if session := workSession(w); session != "" {
+		from = "filed as text, not read from session " + session
+	}
+	report := status + "\n" + from + "\n" + text
+	if _, err := coordinator.FileReport(c.Ledger, w, status, report); err != nil {
+		return err
+	}
+	// Reflection rides on the report, and the report is the text here: it is the
+	// finished session's own account either way, and reflecting on a supplied
+	// report teaches the same thing reflecting on a transcript does.
+	reflected := reflectResult{}
+	if status == "DONE" && !flag(c.Args, "no-reflect") {
+		if r, rerr := c.Reflect(w, []string{text}); rerr != nil {
+			reflected = reflectResult{Body: "reflect failed: " + rerr.Error()}
+		} else {
+			reflected = r
+		}
+	}
+	return c.out(map[string]any{"status": "filed", "report": status, "source": "text",
+		"messages": []string{text}, "reflect": reflected},
+		fmt.Sprintf("filed · %s\n%s", status, text))
+}
+
+// workSession is the session or claim serving work, or "" when nothing is: work
+// the director builds in its own session has neither, and that is a fact about
+// the work worth saying out loud rather than leaving a reader to infer.
+func workSession(w core.Work) string {
+	if w.Session != nil && *w.Session != "" {
+		return *w.Session
+	}
+	if w.Claim != nil {
+		return *w.Claim
+	}
+	return ""
+}
+
+// reportHandle resolves the session a report is read from, and when there is
+// none it names the way out instead of only the wall.
+func (c *Cli) reportHandle(id string) (runner.Handle, error) {
+	h, err := c.handle(id)
+	if err == nil {
+		return h, nil
+	}
+	w, gerr := c.Ledger.Get(id)
+	if gerr == nil && workSession(w) == "" {
+		return runner.Handle{}, fail("work %s has no session to read a report from: it was built in the director's own session, "+
+			"so file the report as text — wd report %s \"DONE\nSTATUS: DONE\n<what changed and how it was verified>\"", id, id)
+	}
+	return h, err
 }
 
 var statusRe = regexp.MustCompile(`STATUS:\s*(DONE|BLOCKED|NEEDS-INPUT)`)

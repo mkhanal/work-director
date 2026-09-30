@@ -371,6 +371,19 @@ func Coordinate(w core.Work, known []core.Work, l *ledger.Ledger, r runner.Runne
 		}
 		return escalate()
 	}
+	return FileReport(l, w, status[1], report)
+}
+
+// FileReport files a STATUS report on work and moves it to the state that
+// status names: DONE to review, BLOCKED to blocked. It is the one place a
+// report moves work, whether the report was read from a session's transcript or
+// supplied as text, so a work item built in a session that has no executor
+// cannot reach a different ending than one that has.
+//
+// NEEDS-INPUT is not here: it is not a report that moves work forward, it is an
+// executor saying it cannot go on, and it has to be filed at the transcript
+// point it was found at, so the escalation is a place in the record.
+func FileReport(l *ledger.Ledger, w core.Work, status, report string) (Outcome, error) {
 	if w.State == core.StateNeedsInput {
 		if _, err := l.Transition(w.ID, core.StateRunning); err != nil {
 			return "", err
@@ -379,14 +392,21 @@ func Coordinate(w core.Work, known []core.Work, l *ledger.Ledger, r runner.Runne
 	if _, err := l.AddEvent(w.ID, core.EventReport, report); err != nil {
 		return "", err
 	}
-	if status[1] == "BLOCKED" {
-		if _, err := l.Transition(w.ID, core.StateBlocked); err != nil {
+	target := core.StateReview
+	if status == "BLOCKED" {
+		target = core.StateBlocked
+	}
+	// A work already where the report says it should be does not move. Filing a
+	// report is filing a fact, and a second one is a new fact even when it
+	// changes nothing — refusing it would lose a record to save a transition
+	// that has nowhere to go.
+	if w.State != target {
+		if _, err := l.Transition(w.ID, target); err != nil {
 			return "", err
 		}
-		return Blocked, nil
 	}
-	if _, err := l.Transition(w.ID, core.StateReview); err != nil {
-		return "", err
+	if target == core.StateBlocked {
+		return Blocked, nil
 	}
 	return Reviewed, nil
 }
