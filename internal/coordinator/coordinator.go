@@ -384,7 +384,14 @@ func Coordinate(w core.Work, known []core.Work, l *ledger.Ledger, r runner.Runne
 // executor saying it cannot go on, and it has to be filed at the transcript
 // point it was found at, so the escalation is a place in the record.
 func FileReport(l *ledger.Ledger, w core.Work, status, report string) (Outcome, error) {
-	if w.State == core.StateNeedsInput {
+	// A report is a thing that has finished, so the thing has run. A row that
+	// still says queued or briefed is stale rather than true — nothing spawns
+	// work the director builds itself, so nothing has ever moved it — and a
+	// ledger that refuses to believe a report it was just handed is a ledger
+	// whose state and whose record disagree. Needs-input goes back to running
+	// first because it has already run and stopped, which is a different fact
+	// with the same consequence.
+	if w.State == core.StateNeedsInput || w.State == core.StateQueued || w.State == core.StateBriefed {
 		if _, err := l.Transition(w.ID, core.StateRunning); err != nil {
 			return "", err
 		}

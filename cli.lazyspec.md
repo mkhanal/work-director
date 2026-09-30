@@ -148,14 +148,19 @@ exits 0.
 ## A Report Can Be Filed As Text, And The Gate Is The Same
 `wd report <id> "<text>"` files the text as the report and moves the work to the
 state the text's STATUS line names: DONE to review, BLOCKED to blocked, and
-nowhere if the work is already there. The report is the work author's own
-account of what it did, so a text handed over is the same verdict as one read
-out of a session — and it is the only account work built in the director's own
-session can have, since there is no executor to read one from. The verify and
-pull-request gates are untouched, a text with no STATUS line files nothing, and
-the report names where it came from so a reader comparing two reports need not
-guess which was read and which was filed. A work item with no session is told
-how to file a report rather than only that it has none.
+nowhere if the work is already there. Work whose row still says queued or
+briefed goes to running on the way, because a report is a thing that has
+finished and so the thing has run; a row that has never been moved is stale
+rather than true, since nothing spawns work the director builds itself, and a
+ledger that refused to believe a report it was just handed would have its state
+and its record disagree. The report is the work author's own account of what it
+did, so a text handed over is the same verdict as one read out of a session —
+and it is the only account work built in the director's own session can have,
+since there is no executor to read one from. The verify and pull-request gates
+are untouched, a text with no STATUS line files nothing, and the report names
+where it came from so a reader comparing two reports need not guess which was
+read and which was filed. A work item with no session is told how to file a
+report rather than only that it has none.
 
 ## A Standalone Task Closes Through The CLI Alone
 A task with no epic goes from queued to done through `wd add`, `wd spawn`,

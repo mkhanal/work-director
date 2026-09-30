@@ -1417,6 +1417,16 @@ func (f *cliFixture) bodies(t *testing.T, id string, kind core.EventKind) []stri
 	return out
 }
 
+// events is every event on work, in the order they were filed.
+func (f *cliFixture) events(t *testing.T, id string) []core.Event {
+	t.Helper()
+	var evs []core.Event
+	if err := json.Unmarshal([]byte(f.runOK(t, "events", id, "--json")), &evs); err != nil {
+		t.Fatal(err)
+	}
+	return evs
+}
+
 // stateOf is work's state through wd status.
 func (f *cliFixture) stateOf(t *testing.T, id string) core.State {
 	t.Helper()
@@ -2866,6 +2876,17 @@ func TestAReportCanBeFiledAsTextAndTheGateIsTheSame(t *testing.T) {
 	if !strings.Contains(evs[0], "no executor session") || !strings.Contains(evs[0], "STATUS: DONE") {
 		t.Errorf("report body = %q, want its provenance and the text both on the record", evs[0])
 	}
+	// It went through running, and that is on the record too: a report is a
+	// thing that has finished, so the ledger has to have seen it run.
+	var states []string
+	for _, e := range f.events(t, built) {
+		if e.Kind == core.EventState {
+			states = append(states, e.Body)
+		}
+	}
+	if !slices.Contains(states, string(core.StateRunning)) {
+		t.Errorf("states = %v, want running on the way: nothing spawns work the director builds", states)
+	}
 
 	// The gate is the same gate. Filing a report is not a way past verify or a
 	// pull request; it is only a way to produce the one thing a session-less work
@@ -2884,9 +2905,9 @@ func TestAReportCanBeFiledAsTextAndTheGateIsTheSame(t *testing.T) {
 	}
 
 	// BLOCKED is the same road: the text's status names where the work goes,
-	// and a report that is not DONE is still refused at soft-done.
+	// and a report that is not DONE is still refused at soft-done. Straight from
+	// queued, too, since that is where work the director built has always been.
 	stuck := jsonString(t, f.runOK(t, "add", "sample-app", "Blocked by hand", "--json"), "id")
-	f.runOK(t, "set", stuck, "running")
 	if got := jsonString(t, f.runOK(t, "report", stuck, "STATUS: BLOCKED\n\nWaiting on a decision that is not mine to make.", "--no-reflect", "--json"), "report"); got != "BLOCKED" {
 		t.Errorf("report = %q, want BLOCKED", got)
 	}
