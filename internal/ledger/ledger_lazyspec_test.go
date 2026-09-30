@@ -27,6 +27,8 @@ func newTestLedger(t *testing.T) *Ledger {
 
 func strPtr(s string) *string { return &s }
 
+func goalTypePtr(gt core.GoalType) *core.GoalType { return &gt }
+
 func wantErr(t *testing.T, err error, msg string) {
 	t.Helper()
 	if err == nil {
@@ -312,20 +314,139 @@ func TestLedger(t *testing.T) {
 		}
 	})
 
-	t.Run("Epics Hold Tasks And Nothing Sits Under An Epic", func(t *testing.T) {
+	t.Run("A Roadmap Holds Items And A Goal Holds Tasks", func(t *testing.T) {
 		l := newTestLedger(t)
-		epic := add(t, l, "p", "E", AddOptions{Kind: core.WorkEpic})
-		task := add(t, l, "p", "T", AddOptions{Parent: &epic.ID})
-		if ts := allTasks(t, l, epic.ID); len(ts) != 1 || ts[0].ID != task.ID {
+		roadmap := add(t, l, "p", "R", AddOptions{Kind: core.WorkRoadmap})
+		item := add(t, l, "p", "I", AddOptions{Kind: core.WorkItem, Parent: &roadmap.ID})
+		if is := allTasks(t, l, roadmap.ID); len(is) != 1 || is[0].ID != item.ID {
+			t.Fatalf("items = %v, want [%s]", is, item.ID)
+		}
+		goal := add(t, l, "p", "G", AddOptions{Kind: core.WorkGoal})
+		task := add(t, l, "p", "T", AddOptions{Parent: &goal.ID})
+		if ts := allTasks(t, l, goal.ID); len(ts) != 1 || ts[0].ID != task.ID {
 			t.Fatalf("tasks = %v, want [%s]", ts, task.ID)
 		}
-		_, err := l.Add("p", "E2", AddOptions{Kind: core.WorkEpic, Parent: &epic.ID})
-		wantErr(t, err, "an epic cannot sit under another work item")
+		// The two levels do not cross, and the refusal says which.
+		_, err := l.Add("p", "T2", AddOptions{Parent: &roadmap.ID})
+		wantErr(t, err, "under "+roadmap.ID+": a roadmap holds items, not task")
+		_, err = l.Add("p", "I2", AddOptions{Kind: core.WorkItem, Parent: &goal.ID})
+		wantErr(t, err, "under "+goal.ID+": a goal holds tasks, not item")
+		// A goal or a roadmap cannot sit under anything.
+		_, err = l.Add("p", "G2", AddOptions{Kind: core.WorkGoal, Parent: &roadmap.ID})
+		wantErr(t, err, "a goal or roadmap cannot sit under another work item")
+		_, err = l.Add("p", "R2", AddOptions{Kind: core.WorkRoadmap, Parent: &roadmap.ID})
+		wantErr(t, err, "a goal or roadmap cannot sit under another work item")
+		// An item with no roadmap has nowhere to live.
+		_, err = l.Add("p", "I3", AddOptions{Kind: core.WorkItem})
+		wantErr(t, err, "a roadmap item belongs to a roadmap")
+		// Nothing but the two levels holds children.
 		plain := add(t, l, "p", "P", AddOptions{})
-		_, err = l.Add("p", "T2", AddOptions{Parent: &plain.ID})
-		wantErr(t, err, "parent "+plain.ID+" is not an epic")
-		_, err = l.Add("p", "T3", AddOptions{Parent: strPtr("nope")})
+		_, err = l.Add("p", "T3", AddOptions{Parent: &plain.ID})
+		wantErr(t, err, "under "+plain.ID+": work of kind task holds no children")
+		_, err = l.Add("p", "T4", AddOptions{Parent: strPtr("nope")})
 		wantErr(t, err, "no work nope; wd status for known work items")
+		// A goal type is not spellable on anything but a goal.
+		_, err = l.Add("p", "T5", AddOptions{GoalType: goalTypePtr(core.GoalBuild)})
+		wantErr(t, err, "a goal type applies to a goal, not task")
+	})
+
+	t.Run("A Roadmap Item Becomes A Goal Without Changing Its Id", func(t *testing.T) {
+		l := newTestLedger(t)
+		roadmap := add(t, l, "p", "R", AddOptions{Kind: core.WorkRoadmap})
+		item := add(t, l, "p", "I", AddOptions{Kind: core.WorkItem, Parent: &roadmap.ID})
+		// Work filed against the item before it was committed stays with it.
+		_, err := l.AddEvent(item.ID, core.EventDecision, "asked about the shape")
+		wantNoErr(t, err)
+		got, err := l.Promote(item.ID, goalTypePtr(core.GoalBuild))
+		wantNoErr(t, err)
+		if got.ID != item.ID {
+			t.Fatalf("promoted id = %s, want the item's own id %s", got.ID, item.ID)
+		}
+		if got.Kind != core.WorkGoal {
+			t.Fatalf("kind = %s, want goal", got.Kind)
+		}
+		if got.GoalType == nil || *got.GoalType != core.GoalBuild {
+			t.Fatalf("goal_type = %v, want build", got.GoalType)
+		}
+		// The translation is on the record.
+		evs, err := l.Events(item.ID, nil)
+		wantNoErr(t, err)
+		found := false
+		for _, e := range evs {
+			if e.Body == "promoted to goal" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("events = %v, want the translation recorded", evs)
+		}
+		// The decision filed before the promotion is still there.
+		decisionKind := core.EventDecision
+		evs, err = l.Events(item.ID, &decisionKind)
+		wantNoErr(t, err)
+		if len(evs) != 1 || evs[0].Body != "asked about the shape" {
+			t.Fatalf("decisions = %v, want the one filed before the promotion", evs)
+		}
+		// Promoting what is not an item is refused.
+		_, err = l.Promote(item.ID, nil)
+		wantErr(t, err, "work "+item.ID+" is a goal, not a roadmap item")
+	})
+
+	t.Run("A Goal Type Is Set Deliberately Or Not At All", func(t *testing.T) {
+		l := newTestLedger(t)
+		goal := add(t, l, "p", "G", AddOptions{Kind: core.WorkGoal})
+		if goal.GoalType != nil {
+			t.Fatalf("goal_type = %v, want none: a type is never defaulted", *goal.GoalType)
+		}
+		got, err := l.SetGoalType(goal.ID, core.GoalQuery)
+		wantNoErr(t, err)
+		if got.GoalType == nil || *got.GoalType != core.GoalQuery {
+			t.Fatalf("goal_type = %v, want query", got.GoalType)
+		}
+		// The claim is on the record as a decision.
+		decisionKind := core.EventDecision
+		evs, err := l.Events(goal.ID, &decisionKind)
+		wantNoErr(t, err)
+		if len(evs) != 1 || evs[0].Body != "classified query" {
+			t.Fatalf("decisions = %v, want the classification recorded", evs)
+		}
+		// A type outside the set is not spellable.
+		_, err = l.SetGoalType(goal.ID, "invented")
+		wantErr(t, err, `unknown goal type "invented"`)
+		// A type on work that is not a goal is refused.
+		task := add(t, l, "p", "T", AddOptions{Parent: &goal.ID})
+		_, err = l.SetGoalType(task.ID, core.GoalBuild)
+		wantErr(t, err, "work "+task.ID+" is a task, not a goal")
+	})
+
+	t.Run("Work Can End Abandoned And Says Why", func(t *testing.T) {
+		l := newTestLedger(t)
+		goal := add(t, l, "p", "G", AddOptions{Kind: core.WorkGoal})
+		got, err := l.Abandon(goal.ID, core.AbandonNoPR, "no branch was ever pushed")
+		wantNoErr(t, err)
+		if got.State != core.StateAbandoned {
+			t.Fatalf("state = %s, want abandoned", got.State)
+		}
+		abandonKind := core.EventAbandon
+		evs, err := l.Events(goal.ID, &abandonKind)
+		wantNoErr(t, err)
+		if len(evs) != 1 || evs[0].Body != "no-pr: no branch was ever pushed" {
+			t.Fatalf("abandon events = %v, want the reason and the detail", evs)
+		}
+		// A reason nobody can verify is not spellable.
+		other := add(t, l, "p", "G2", AddOptions{Kind: core.WorkGoal})
+		_, err = l.Abandon(other.ID, "ran-out-of-enthusiasm", "")
+		wantErr(t, err, `unknown abandon reason "ran-out-of-enthusiasm"`)
+		// Abandoned is terminal: it does not transition back out.
+		_, err = l.Transition(goal.ID, core.StateRunning)
+		wantErr(t, err, "illegal transition abandoned → running")
+		// The other machine-checkable reason.
+		third := add(t, l, "p", "G3", AddOptions{Kind: core.WorkGoal})
+		got, err = l.Abandon(third.ID, core.AbandonUnmerged, "PR 12 never merged")
+		wantNoErr(t, err)
+		if got.State != core.StateAbandoned {
+			t.Fatalf("state = %s, want abandoned", got.State)
+		}
 	})
 
 	t.Run("Concerns Resolve With A Decision", func(t *testing.T) {
@@ -397,7 +518,7 @@ func TestLedger(t *testing.T) {
 		}
 	})
 
-	t.Run("An Epic Has At Most One Active Shared Worktree", func(t *testing.T) {
+	t.Run("A Goal Has At Most One Active Shared Worktree", func(t *testing.T) {
 		l := newTestLedger(t)
 		epic := add(t, l, "p", "epic", AddOptions{Kind: core.WorkEpic})
 		other := add(t, l, "p", "other", AddOptions{Kind: core.WorkEpic})
@@ -450,7 +571,7 @@ func TestLedger(t *testing.T) {
 		}
 	})
 
-	t.Run("Soft Done Requires Epic Tasks Done", func(t *testing.T) {
+	t.Run("Soft Done Requires Goal Tasks Done", func(t *testing.T) {
 		l := newTestLedger(t)
 		epic := add(t, l, "p", "E", AddOptions{Kind: core.WorkEpic})
 		task := add(t, l, "p", "T", AddOptions{Parent: &epic.ID})
@@ -638,12 +759,12 @@ CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT,
 			t.Fatalf("feedback = %v, want the seeded row", fb)
 		}
 
-		// The schema grew in place: four nullable columns and new tables.
+		// The schema grew in place: five nullable columns and new tables.
 		after := workColumns(t, openDirect(t, path))
-		if len(after) != 16 {
-			t.Fatalf("migrated schema has %d work columns, want 16", len(after))
+		if len(after) != 17 {
+			t.Fatalf("migrated schema has %d work columns, want 17", len(after))
 		}
-		for _, col := range []string{"parent", "heading", "claim", "impact"} {
+		for _, col := range []string{"parent", "heading", "claim", "impact", "goal_type"} {
 			if _, ok := after[col]; !ok {
 				t.Fatalf("column %s missing after migration", col)
 			}

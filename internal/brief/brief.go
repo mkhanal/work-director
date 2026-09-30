@@ -1,5 +1,5 @@
 // Package brief composes the briefs executors receive: the standalone brief,
-// the epic-slice brief and the epic spawn brief, plus the task-block
+// the goal-slice brief and the goal spawn brief, plus the task-block
 // rendering.
 package brief
 
@@ -112,7 +112,7 @@ func (c Context) historyOr() string {
 
 const coordination = `You are an executor, not the whole team. Claim what you work, and let others see it:
 - Claim your task: ` + "`wd claim <id> <session>`" + `. Record every area you will touch: ` + "`wd impact <id> <+path>`" + `.
-- Look before stepping: ` + "`wd conflict <epic>`" + ` shows overlapping claims; never edit a path another active task claims.
+- Look before stepping: ` + "`wd conflict <goal>`" + ` shows overlapping claims; never edit a path another active task claims.
 - Something does not work or conflicts? Raise ` + "`wd concern add <id> \"<text>\"`" + ` — a concern is a decision queue for the director, not something you work around silently.
 - Own worktree for isolation? Register it: ` + "`wd worktree attach <id> <path> [--branch <b>]`" + `. Merge it back when done: ` + "`wd merge <id>`" + ` (after verify and a clean conflict scan).`
 
@@ -200,9 +200,9 @@ Global rules are in your taste constitution and /taste-* skills. Specific to thi
 `, nil
 }
 
-// ComposeSlice renders one task of an epic: the epic goal, the task, and the
+// ComposeSlice renders one task of a goal: the goal goal, the task, and the
 // other executors' live claims. No backlog, no history.
-func ComposeSlice(w core.Work, epic core.Work, claims []core.Work, p *project.Project, cards []taste.Card) (string, error) {
+func ComposeSlice(w core.Work, goal core.Work, claims []core.Work, p *project.Project, cards []taste.Card) (string, error) {
 	if err := AssertNoHumanHours(w.Title + "\n" + w.Detail); err != nil {
 		return "", err
 	}
@@ -230,19 +230,19 @@ func ComposeSlice(w core.Work, epic core.Work, claims []core.Work, p *project.Pr
 	if w.Detail != "" {
 		detail = "\n" + w.Detail
 	}
-	return `# Brief ` + w.ID + ` · ` + p.Name + ` · ` + *heading + ` of epic ` + epic.ID + `
+	return `# Brief ` + w.ID + ` · ` + p.Name + ` · ` + *heading + ` of goal ` + goal.ID + `
 
-## Goal (epic)
-` + epic.Title + `
+## Goal (goal)
+` + goal.Title + `
 — this task:
 ` + w.Title + detail + `
 
 ## Co-workers on this branch — do not touch these paths
 ` + claimLines + `
-The full register is ` + "`wd tasks " + epic.ID + "`" + `; before a shared path run ` + "`wd conflict " + epic.ID + "`" + `. A resolved concern is a decision; follow it.
+The full register is ` + "`wd tasks " + goal.ID + "`" + `; before a shared path run ` + "`wd conflict " + goal.ID + "`" + `. A resolved concern is a decision; follow it.
 
 ## How to work
-` + strings.ReplaceAll(strings.ReplaceAll(coordination, "<id>", w.ID), "<epic>", epic.ID) + `
+` + strings.ReplaceAll(strings.ReplaceAll(coordination, "<id>", w.ID), "<goal>", goal.ID) + `
 - Decide ambiguities yourself, consistent with the rules below. Stop only for irreversible actions.
 - Checkpoint: after your plan (before code) and at DONE, send a report in the format below. Nothing else in between.
 
@@ -256,21 +256,21 @@ Global rules are in your taste constitution and /taste-* skills. Specific to thi
 `, nil
 }
 
-// ComposeEpic renders an epic spawn brief: goal, context, and the compact
+// ComposeGoal renders a goal spawn brief: goal, context, and the compact
 // open task list grouped by heading.
-func ComposeEpic(epic core.Work, taskBlock string, p *project.Project, cards []taste.Card, ctx Context) (string, error) {
-	if err := AssertNoHumanHours(epic.Title + "\n" + epic.Detail); err != nil {
+func ComposeGoal(goal core.Work, taskBlock string, p *project.Project, cards []taste.Card, ctx Context) (string, error) {
+	if err := AssertNoHumanHours(goal.Title + "\n" + goal.Detail); err != nil {
 		return "", err
 	}
 	roadmap := ctx.roadmapOr(p)
 	if roadmap == "" {
 		roadmap = "not written"
 	}
-	return `# Brief ` + epic.ID + ` · ` + p.Name + ` · epic
+	return `# Brief ` + goal.ID + ` · ` + p.Name + ` · goal
 
 ## Goal
-` + epic.Title + `
-` + epic.Detail + `
+` + goal.Title + `
+` + goal.Detail + `
 
 ## Context
 Where this project is heading:
@@ -284,7 +284,7 @@ Relevant history:
 ` + taskBlock + `
 
 ## How to work
-` + strings.ReplaceAll(coordination, "<epic>", epic.ID) + `
+` + strings.ReplaceAll(coordination, "<goal>", goal.ID) + `
 - Decide ambiguities yourself, consistent with the rules below. Stop only for irreversible actions.
 - Checkpoint: after your plan (before code) and at DONE, send a report in the format below. Nothing else in between.
 

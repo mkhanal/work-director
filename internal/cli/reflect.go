@@ -40,7 +40,7 @@ func (c *Cli) Reflect(w core.Work, texts []string) (reflectResult, error) {
 		return res, err
 	}
 	// The call runs where the work runs, not where the project lives: a child
-	// under an epic is reflected on with that epic's runner and in its shared
+	// under a goal is reflected on with that goal's runner and in its shared
 	// worktree, so the model reads the same code the executor did.
 	runnerName, cwd, err := coordinator.Where(c.Ledger, w, p)
 	if err != nil {

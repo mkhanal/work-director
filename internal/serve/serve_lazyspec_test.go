@@ -52,11 +52,11 @@ func serverBindsToLoopback(t *testing.T) {
 
 func jsonEndpointsServeTheBoard(t *testing.T) {
 	s := newTestServer(t)
-	epic, err := s.ledger.Add("p", "Goal", ledger.AddOptions{Kind: core.WorkEpic})
+	goal, err := s.ledger.Add("p", "Goal", ledger.AddOptions{Kind: core.WorkEpic})
 	if err != nil {
-		t.Fatalf("add epic: %v", err)
+		t.Fatalf("add goal: %v", err)
 	}
-	task, err := s.ledger.Add("p", "Task", ledger.AddOptions{Parent: &epic.ID})
+	task, err := s.ledger.Add("p", "Task", ledger.AddOptions{Parent: &goal.ID})
 	if err != nil {
 		t.Fatalf("add task: %v", err)
 	}
@@ -94,13 +94,13 @@ func jsonEndpointsServeTheBoard(t *testing.T) {
 	if len(goals.Goals) != 1 {
 		t.Fatalf("/api/goals goals = %d, want 1", len(goals.Goals))
 	}
-	var goal struct {
-		Epic  core.Work   `json:"epic"`
+	var one struct {
+		Goal  core.Work   `json:"goal"`
 		Tasks []core.Work `json:"tasks"`
 	}
-	getJSON(t, api.URL+"/api/goal/"+epic.ID, http.StatusOK, &goal)
-	if goal.Epic.ID != epic.ID || len(goal.Tasks) != 1 || goal.Tasks[0].ID != task.ID {
-		t.Fatalf("goal = %+v, want epic %s with task %s", goal, epic.ID, task.ID)
+	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &one)
+	if one.Goal.ID != goal.ID || len(one.Tasks) != 1 || one.Tasks[0].ID != task.ID {
+		t.Fatalf("goal = %+v, want goal %s with task %s", one, goal.ID, task.ID)
 	}
 	var missing map[string]string
 	getJSON(t, api.URL+"/api/goal/"+task.ID, http.StatusNotFound, &missing)

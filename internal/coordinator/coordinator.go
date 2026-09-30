@@ -1,4 +1,4 @@
-// Package coordinator drives an epic's planning and task sessions: the
+// Package coordinator drives a goal's planning and task sessions: the
 // planning brief, parsing the planner's reply, answering questions from
 // what the ledger already knows, and one coordination pass over the
 // children.
@@ -15,9 +15,9 @@ import (
 	"wd/internal/runner"
 )
 
-// EpicPlanBrief is the planning model's brief: analyse the goal and reply
+// GoalPlanBrief is the planning model's brief: analyse the goal and reply
 // with only a headed task list, editing nothing.
-func EpicPlanBrief(epic core.Work, p *project.Project) string {
+func GoalPlanBrief(goal core.Work, p *project.Project) string {
 	verify := "none listed"
 	if len(p.Verify) > 0 {
 		quoted := make([]string, len(p.Verify))
@@ -27,8 +27,8 @@ func EpicPlanBrief(epic core.Work, p *project.Project) string {
 		verify = strings.Join(quoted, ", ")
 	}
 	detail := ""
-	if epic.Detail != "" {
-		detail = "\n" + epic.Detail
+	if goal.Detail != "" {
+		detail = "\n" + goal.Detail
 	}
 	return fmt.Sprintf(`You are the director's planning model for the project %s (%s).
 
@@ -39,7 +39,7 @@ Analyse this goal and decompose it into concrete, independent tasks. Read the re
 - [ ] <task title>
 
 Cover what must change and be verified; keep tasks small enough that one session can finish each. Project verify commands: %s. The goal: %s%s`,
-		p.Name, p.Path, verify, epic.Title, detail)
+		p.Name, p.Path, verify, goal.Title, detail)
 }
 
 // PlanTask is one parsed planner reply line: the heading group it sits
@@ -153,12 +153,12 @@ type PassResult struct {
 var askRe = regexp.MustCompile(`ASK:\s*(\S.*)`)
 var statusRe = regexp.MustCompile(`STATUS:\s*(DONE|BLOCKED|NEEDS-INPUT)`)
 
-// Handle is work's live session: its runner (else its epic's, else the
+// Handle is work's live session: its runner (else its goal's, else the
 // project's), its session (else its claim), and its directory (its own cwd,
-// else its epic's active shared worktree, else the project's path). ok is
+// else its goal's active shared worktree, else the project's path). ok is
 // false when work has neither session nor claim.
 // Where resolves the runner and directory a work item is worked in: its own
-// runner else its epic's else the project's, and its own cwd else its epic's
+// runner else its goal's else the project's, and its own cwd else its goal's
 // active shared worktree else the project path. It is how every command reaches
 // the session a work item actually runs in, so a new call made on a work item's
 // behalf — a reflection, a judgement — runs where that work runs, not where the
@@ -167,14 +167,14 @@ func Where(l *ledger.Ledger, w core.Work, p *project.Project) (string, string, e
 	runnerName := p.Runner
 	cwd := p.Path
 	if w.Parent != nil {
-		epic, err := l.Get(*w.Parent)
+		goal, err := l.Get(*w.Parent)
 		if err != nil {
 			return "", "", err
 		}
-		if epic.Runner != nil {
-			runnerName = *epic.Runner
+		if goal.Runner != nil {
+			runnerName = *goal.Runner
 		}
-		wts, err := l.Worktrees(epic.ID)
+		wts, err := l.Worktrees(goal.ID)
 		if err != nil {
 			return "", "", err
 		}
@@ -211,7 +211,7 @@ func Handle(l *ledger.Ledger, w core.Work, p *project.Project) (runner.Handle, b
 // Send continues work's session and records the ref the runner returns, so a
 // status check reaches the process now serving the session. Only the ref is
 // recorded: a runner and directory work does not set itself keep following
-// its epic.
+// its goal.
 func Send(l *ledger.Ledger, id string, r runner.Runner, h runner.Handle, text string) error {
 	if err := r.Send(&h, text); err != nil {
 		return err
@@ -230,31 +230,31 @@ const (
 	Waiting   Outcome = "waiting"
 )
 
-// Known is the work whose decisions can answer w's questions: its epic and
-// the epic's tasks, or w alone when it has no epic.
+// Known is the work whose decisions can answer w's questions: its goal and
+// the goal's tasks, or w alone when it has no goal.
 func Known(l *ledger.Ledger, w core.Work) ([]core.Work, error) {
 	if w.Parent == nil {
 		return []core.Work{w}, nil
 	}
-	epic, err := l.Get(*w.Parent)
+	goal, err := l.Get(*w.Parent)
 	if err != nil {
 		return nil, err
 	}
-	children, err := l.Tasks(epic.ID)
+	children, err := l.Tasks(goal.ID)
 	if err != nil {
 		return nil, err
 	}
-	return append([]core.Work{epic}, children...), nil
+	return append([]core.Work{goal}, children...), nil
 }
 
-// CoordinateOnce runs one coordination pass over the epic's children. It
+// CoordinateOnce runs one coordination pass over the goal's children. It
 // does not spawn.
-func CoordinateOnce(epic core.Work, p *project.Project, l *ledger.Ledger, resolve func(name string) (runner.Runner, error)) (PassResult, error) {
-	children, err := l.Tasks(epic.ID)
+func CoordinateOnce(goal core.Work, p *project.Project, l *ledger.Ledger, resolve func(name string) (runner.Runner, error)) (PassResult, error) {
+	children, err := l.Tasks(goal.ID)
 	if err != nil {
 		return PassResult{}, err
 	}
-	known := append([]core.Work{epic}, children...)
+	known := append([]core.Work{goal}, children...)
 	res := PassResult{
 		Answered:  []string{},
 		Escalated: []string{},

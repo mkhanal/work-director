@@ -37,7 +37,7 @@ func (s *tuiSource) Detail(id string) (tui.Detail, error) {
 		return tui.Detail{}, err
 	}
 	d := tui.Detail{Work: w}
-	if core.IsEpic(w.Kind) {
+	if core.IsGoal(w.Kind) {
 		if d.Tasks, err = s.Ledger.Tasks(id); err != nil {
 			return tui.Detail{}, err
 		}

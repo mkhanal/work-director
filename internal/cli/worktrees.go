@@ -17,14 +17,14 @@ import (
 // $WD_HOME/worktrees, and removes them when the work is done and removing
 // them loses nothing. A worktree it did not make is never touched.
 
-func sharedBranch(epic core.Work) string { return "wd-" + epic.ID }
+func sharedBranch(goal core.Work) string { return "wd-" + goal.ID }
 
 func branchFor(w core.Work) string { return "wd-" + w.ID }
 
-// ensureSharedWorktree creates or reuses the epic's one shared worktree on
-// branch wd-<epic>, registered in the ledger.
-func (c *Cli) ensureSharedWorktree(epic core.Work, p *project.Project) (string, error) {
-	wts, err := c.Ledger.Worktrees(epic.ID)
+// ensureSharedWorktree creates or reuses the goal's one shared worktree on
+// branch wd-<goal>, registered in the ledger.
+func (c *Cli) ensureSharedWorktree(goal core.Work, p *project.Project) (string, error) {
+	wts, err := c.Ledger.Worktrees(goal.ID)
 	if err != nil {
 		return "", err
 	}
@@ -36,13 +36,13 @@ func (c *Cli) ensureSharedWorktree(epic core.Work, p *project.Project) (string, 
 	if _, err := c.runGit([]string{"worktree", "prune"}, p.Path); err != nil {
 		return "", err
 	}
-	path := filepath.Join(c.Worktrees, p.Name+"-epic-"+epic.ID)
-	r, err := c.runGit([]string{"worktree", "add", "-b", sharedBranch(epic), path}, p.Path)
+	path := filepath.Join(c.Worktrees, p.Name+"-goal-"+goal.ID)
+	r, err := c.runGit([]string{"worktree", "add", "-b", sharedBranch(goal), path}, p.Path)
 	if err != nil {
 		return "", err
 	}
 	if r.Code != 0 {
-		r, err = c.runGit([]string{"worktree", "add", path, sharedBranch(epic)}, p.Path)
+		r, err = c.runGit([]string{"worktree", "add", path, sharedBranch(goal)}, p.Path)
 		if err != nil {
 			return "", err
 		}
@@ -50,9 +50,9 @@ func (c *Cli) ensureSharedWorktree(epic core.Work, p *project.Project) (string, 
 	if r.Code != 0 {
 		return "", fail("cannot create shared worktree at %s: %s", path, strings.TrimSpace(r.Stderr))
 	}
-	wt, err := c.Ledger.AddWorktree(epic.ID, ledger.WorktreeInfo{
+	wt, err := c.Ledger.AddWorktree(goal.ID, ledger.WorktreeInfo{
 		Path:   path,
-		Branch: ptr(sharedBranch(epic)),
+		Branch: ptr(sharedBranch(goal)),
 		Kind:   core.WorktreeShared,
 		Origin: core.OriginDirector,
 	})
@@ -63,8 +63,8 @@ func (c *Cli) ensureSharedWorktree(epic core.Work, p *project.Project) (string, 
 }
 
 // ensurePrivateWorktree creates a private worktree for a task, branched off
-// the epic's shared branch.
-func (c *Cli) ensurePrivateWorktree(w core.Work, epic core.Work, p *project.Project) (string, error) {
+// the goal's shared branch.
+func (c *Cli) ensurePrivateWorktree(w core.Work, goal core.Work, p *project.Project) (string, error) {
 	wts, err := c.Ledger.Worktrees(w.ID)
 	if err != nil {
 		return "", err
@@ -78,7 +78,7 @@ func (c *Cli) ensurePrivateWorktree(w core.Work, epic core.Work, p *project.Proj
 		return "", err
 	}
 	path := filepath.Join(c.Worktrees, p.Name+"-"+w.ID)
-	r, err := c.runGit([]string{"worktree", "add", "-b", branchFor(w), path, sharedBranch(epic)}, p.Path)
+	r, err := c.runGit([]string{"worktree", "add", "-b", branchFor(w), path, sharedBranch(goal)}, p.Path)
 	if err != nil {
 		return "", err
 	}
@@ -233,21 +233,21 @@ func (c *Cli) lockReason(wt core.Worktree, p *project.Project) (string, error) {
 	return "it is locked", nil
 }
 
-// landingRef is the ref wt's branch lands on: the epic's shared branch for a
-// task's private worktree, the project's default branch for an epic's shared
+// landingRef is the ref wt's branch lands on: the goal's shared branch for a
+// task's private worktree, the project's default branch for a goal's shared
 // one. A default branch with an upstream lands on the upstream, fetched
 // first, because a pull request merges there. unreachable says why there is
 // no ref to compare with.
 func (c *Cli) landingRef(w core.Work, wt core.Worktree, p *project.Project) (ref, unreachable string, err error) {
 	if wt.Kind == core.WorktreePrivate {
 		if w.Parent == nil {
-			return "", "it is a private worktree of work with no epic", nil
+			return "", "it is a private worktree of work with no goal", nil
 		}
-		epic, err := c.Ledger.Get(*w.Parent)
+		goal, err := c.Ledger.Get(*w.Parent)
 		if err != nil {
 			return "", "", err
 		}
-		return sharedBranch(epic), "", nil
+		return sharedBranch(goal), "", nil
 	}
 	upstream, err := c.runGit([]string{"rev-parse", "--abbrev-ref", "--symbolic-full-name", p.DefaultBranch + "@{upstream}"}, p.Path)
 	if err != nil {

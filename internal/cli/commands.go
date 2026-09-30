@@ -277,26 +277,52 @@ func renderRunnerListing(l RunnerListing, specDir string) string {
 
 func (c *Cli) add(rest []string) error {
 	if len(rest) < 2 {
-		return fail("usage: wd add <project> <title> [--kind task|evolution|workflow|goal|epic] [--epic <id>] [--heading <label>] [--detail text]")
+		return fail("usage: wd add <project> <title> [--kind task|evolution|workflow|goal|roadmap|item] " +
+			"[--goal <id>] [--roadmap <id>] [--type query|build|fix|change|review] [--heading <label>] [--detail text]")
 	}
 	name, title := rest[0], rest[1]
 	if _, err := c.project(name); err != nil {
 		return err
 	}
-	kind, err := oneOf(core.WorkKinds, strOr(c.Args, "kind", "task"), "kind")
+	// epic was goal's old name, so --kind epic still writes a goal and
+	// --epic still names the same parent --goal does.
+	kindWord := strOr(c.Args, "kind", "task")
+	if kindWord == "epic" {
+		kindWord = "goal"
+	}
+	kind, err := oneOf(core.WorkKinds, kindWord, "kind")
 	if err != nil {
 		return err
 	}
-	parent := str(c.Args, "epic")
+	parent := str(c.Args, "goal")
+	if parent == nil {
+		parent = str(c.Args, "epic")
+	}
+	roadmap := str(c.Args, "roadmap")
+	if parent != nil && roadmap != nil {
+		return fail("a work item sits under a goal or under a roadmap, not both")
+	}
+	if roadmap != nil {
+		parent = roadmap
+	}
 	heading := str(c.Args, "heading")
-	if parent != nil && core.IsEpic(kind) {
-		return fail("an epic cannot sit under another work item")
+	if parent != nil && (core.IsGoal(kind) || kind == core.WorkRoadmap) {
+		return fail("a goal or roadmap cannot sit under another work item")
+	}
+	var goalType *core.GoalType
+	if t := strOr(c.Args, "type", ""); t != "" {
+		gt, err := core.ParseGoalType(t)
+		if err != nil {
+			return fail("%v", err)
+		}
+		goalType = &gt
 	}
 	w, err := c.Ledger.Add(name, title, ledger.AddOptions{
-		Kind:    kind,
-		Detail:  strOr(c.Args, "detail", ""),
-		Parent:  parent,
-		Heading: heading,
+		Kind:     kind,
+		Detail:   strOr(c.Args, "detail", ""),
+		Parent:   parent,
+		Heading:  heading,
+		GoalType: goalType,
 	})
 	if err != nil {
 		return err
@@ -306,15 +332,15 @@ func (c *Cli) add(rest []string) error {
 
 func (c *Cli) tasks(rest []string) error {
 	if len(rest) == 0 {
-		return fail("usage: wd tasks <epic> [--all]")
+		return fail("usage: wd tasks <goal> [--all]")
 	}
 	id := rest[0]
-	epic, err := c.Ledger.Get(id)
+	goal, err := c.Ledger.Get(id)
 	if err != nil {
 		return err
 	}
-	if !core.IsEpic(epic.Kind) {
-		return fail("%s is not an epic", id)
+	if !core.IsGoal(goal.Kind) {
+		return fail("%s is not a goal", id)
 	}
 	all, err := c.Ledger.Tasks(id)
 	if err != nil {
@@ -372,14 +398,14 @@ func (c *Cli) spawn(rest []string) error {
 	cwd := p.Path
 	var runnerWorktree *bool
 	if w.Parent != nil {
-		epic, err := c.Ledger.Get(*w.Parent)
+		goal, err := c.Ledger.Get(*w.Parent)
 		if err != nil {
 			return err
 		}
 		if flag(a, "worktree") {
-			cwd, err = c.ensurePrivateWorktree(w, epic, p)
+			cwd, err = c.ensurePrivateWorktree(w, goal, p)
 		} else {
-			cwd, err = c.ensureSharedWorktree(epic, p)
+			cwd, err = c.ensureSharedWorktree(goal, p)
 		}
 		if err != nil {
 			return err
@@ -442,7 +468,9 @@ type handleWithAttach struct {
 	Attach string `json:"attach"`
 }
 
-func (c *Cli) epicLike(cmd string, rest []string) error {
+// goalLike is the goal command. `wd goal` reaches the same code so anything
+// written before the rename keeps working; only the word a reader sees changed.
+func (c *Cli) goalLike(cmd string, rest []string) error {
 	a := c.Args
 	sub := ""
 	if len(rest) > 0 {
@@ -450,67 +478,159 @@ func (c *Cli) epicLike(cmd string, rest []string) error {
 	}
 	if cmd == "goal" && sub == "add" {
 		if len(rest) < 3 {
-			return fail("usage: wd goal add <project> <title> [--detail text]")
+			return fail("usage: wd goal add <project> <title> [--detail text] [--type query|build|fix|change|review]")
 		}
 		name, title := rest[1], rest[2]
 		if _, err := c.project(name); err != nil {
 			return err
 		}
-		w, err := c.Ledger.Add(name, title, ledger.AddOptions{Kind: core.WorkGoal, Detail: strOr(a, "detail", "")})
+		opts := ledger.AddOptions{Kind: core.WorkGoal, Detail: strOr(a, "detail", "")}
+		if t := strOr(a, "type", ""); t != "" {
+			gt, err := core.ParseGoalType(t)
+			if err != nil {
+				return fail("%v", err)
+			}
+			opts.GoalType = &gt
+		}
+		w, err := c.Ledger.Add(name, title, opts)
 		if err != nil {
 			return err
 		}
 		return c.out(w, fmt.Sprintf("goal %s queued — decompose it: wd goal plan %s", w.ID, w.ID))
 	}
-	var epic *core.Work
+	var goal *core.Work
 	if len(rest) > 1 {
 		w, err := c.Ledger.Get(rest[1])
 		if err != nil {
 			return err
 		}
-		if !core.IsEpic(w.Kind) {
-			return fail("%s is not a goal or epic", rest[1])
+		if !core.IsGoal(w.Kind) {
+			return fail("%s is a %s, not a goal", rest[1], w.Kind)
 		}
-		epic = &w
+		goal = &w
 	}
+	// wd epic is the old spelling of the same command; only the word a reader
+	// sees differs, so a goal opened through either says the same thing.
 	kindWord := "epic"
 	if cmd == "goal" {
 		kindWord = "goal"
 	}
-	usage := fmt.Sprintf("wd %s (plan <id> | spawn <id> | run <id> [--only|--heading] [--wait] | review <id> | status <id>)", cmd)
+	usage := fmt.Sprintf("wd %s (plan <id> | spawn <id> | run <id> [--only|--heading] [--wait] | review <id> | status <id> | classify <id> <type> | abandon <id> <reason>)", cmd)
 	switch sub {
 	case "plan":
-		if epic == nil {
+		if goal == nil {
 			return fail("usage: wd %s plan <id> [--runner <runner>] [--model <id>]", cmd)
 		}
-		return c.epicPlan(cmd, *epic)
+		return c.goalPlan(cmd, *goal)
 	case "spawn":
-		if epic == nil {
+		if goal == nil {
 			return fail("usage: wd %s spawn <id> [--count n] [--model id] [--runner claude|opencode|codex|claude,opencode,…]", cmd)
 		}
-		return c.epicSpawn(cmd, *epic)
+		return c.goalSpawn(cmd, *goal)
 	case "run":
-		if epic == nil {
+		if goal == nil {
 			return fail("usage: wd %s run <id> [--only id,id] [--heading label] [--runner list] [--wait] [--timeout s]", cmd)
 		}
-		return c.epicRun(cmd, kindWord, *epic)
+		return c.goalRun(cmd, kindWord, *goal)
 	case "review":
-		if epic == nil {
+		if goal == nil {
 			return fail("usage: wd %s review <id>", cmd)
 		}
-		return c.epicReview(*epic)
+		return c.goalReview(*goal)
 	case "status":
-		if epic == nil {
+		if goal == nil {
 			return fail("usage: wd %s status <id>", cmd)
 		}
-		return c.epicStatus(kindWord, *epic)
+		return c.goalStatus(kindWord, *goal)
+	case "classify":
+		return c.goalClassify(goal, rest)
+	case "abandon":
+		return c.goalAbandon(goal, rest)
 	}
 	return fail("%s", usage)
 }
 
-func (c *Cli) epicPlan(cmd string, epic core.Work) error {
+// abandon ends work that stopped without shipping, whatever kind it is: a
+// task's pull request can go unmerged as easily as a goal's. The reason is one
+// the ledger can check, and with none given it is computed from what the ledger
+// already knows — a PR that was never raised, or one that was raised and never
+// merged. Abandonment is detected, not declared.
+func (c *Cli) abandon(rest []string) error {
+	if len(rest) < 1 {
+		return fail("usage: wd abandon <id> [no-pr|unmerged] [--reason \"<detail>\"]")
+	}
+	return c.abandonWork(rest[0], rest[1:])
+}
+
+func (c *Cli) goalAbandon(goal *core.Work, rest []string) error {
+	if goal == nil {
+		return fail("usage: wd goal abandon <id> [no-pr|unmerged] [--reason \"<detail>\"]")
+	}
+	return c.abandonWork(goal.ID, rest[1:])
+}
+
+func (c *Cli) abandonWork(id string, args []string) error {
+	w, err := c.Ledger.Get(id)
+	if err != nil {
+		return err
+	}
+	reason := ""
+	if len(args) > 0 {
+		if _, err := core.ParseAbandonReason(args[0]); err != nil {
+			return fail("%v", err)
+		}
+		reason = args[0]
+	} else {
+		reason, err = c.abandonReason(w)
+		if err != nil {
+			return err
+		}
+	}
+	out, err := c.Ledger.Abandon(w.ID, reason, strOr(c.Args, "reason", ""))
+	if err != nil {
+		return err
+	}
+	return c.out(out, fmt.Sprintf("%s abandoned (%s): work that stopped without shipping", w.ID, reason))
+}
+
+// goalClassify says what kind of thing a goal was: a question answered or work
+// done. It is recorded as a decision, so the classification is a claim someone
+// or something made and can be seen and changed — not a field that quietly
+// fills itself in.
+func (c *Cli) goalClassify(goal *core.Work, rest []string) error {
+	if goal == nil || len(rest) < 3 {
+		return fail("usage: wd goal classify <id> <query|build|fix|change|review>")
+	}
+	gt, err := core.ParseGoalType(rest[2])
+	if err != nil {
+		return fail("%v", err)
+	}
+	w, err := c.Ledger.SetGoalType(goal.ID, gt)
+	if err != nil {
+		return err
+	}
+	return c.out(w, fmt.Sprintf("%s is a %s", w.ID, gt))
+}
+
+// abandonReason computes why a goal counts as abandoned, from what the ledger
+// already holds. A goal with a pull request that has landed is not abandoned,
+// whatever the reason offered: the change reached the product.
+func (c *Cli) abandonReason(w core.Work) (string, error) {
+	events, err := c.Ledger.Events(w.ID, nil)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range events {
+		if e.Kind == core.EventPr {
+			return core.AbandonUnmerged, nil
+		}
+	}
+	return core.AbandonNoPR, nil
+}
+
+func (c *Cli) goalPlan(cmd string, goal core.Work) error {
 	a := c.Args
-	p, err := c.project(epic.Project)
+	p, err := c.project(goal.Project)
 	if err != nil {
 		return err
 	}
@@ -529,8 +649,8 @@ func (c *Cli) epicPlan(cmd string, epic core.Work) error {
 	}
 	h, err := rn.Spawn(runner.SpawnOptions{
 		Cwd:   p.Path,
-		Name:  slice60(fmt.Sprintf("wd-%s plan", epic.ID)),
-		Brief: coordinator.EpicPlanBrief(epic, p),
+		Name:  slice60(fmt.Sprintf("wd-%s plan", goal.ID)),
+		Brief: coordinator.GoalPlanBrief(goal, p),
 		Agent: agent,
 		Model: model,
 	})
@@ -555,8 +675,8 @@ func (c *Cli) epicPlan(cmd string, epic core.Work) error {
 	}
 	rows := make([]core.Work, 0, len(tasks))
 	for _, t := range tasks {
-		w, err := c.Ledger.Add(epic.Project, t.Title, ledger.AddOptions{
-			Parent:  &epic.ID,
+		w, err := c.Ledger.Add(goal.Project, t.Title, ledger.AddOptions{
+			Parent:  &goal.ID,
 			Heading: &t.Heading,
 		})
 		if err != nil {
@@ -564,11 +684,11 @@ func (c *Cli) epicPlan(cmd string, epic core.Work) error {
 		}
 		rows = append(rows, w)
 	}
-	if _, err := c.Ledger.AddEvent(epic.ID, core.EventNote, fmt.Sprintf("plan: %d tasks", len(rows))); err != nil {
+	if _, err := c.Ledger.AddEvent(goal.ID, core.EventNote, fmt.Sprintf("plan: %d tasks", len(rows))); err != nil {
 		return err
 	}
-	if epic.State == core.StateQueued {
-		if _, err := c.Ledger.Transition(epic.ID, core.StateBriefed); err != nil {
+	if goal.State == core.StateQueued {
+		if _, err := c.Ledger.Transition(goal.ID, core.StateBriefed); err != nil {
 			return err
 		}
 	}
@@ -586,9 +706,9 @@ func (c *Cli) epicPlan(cmd string, epic core.Work) error {
 	return c.out(out, strings.Join(table, "\n"))
 }
 
-func (c *Cli) epicSpawn(cmd string, epic core.Work) error {
+func (c *Cli) goalSpawn(cmd string, goal core.Work) error {
 	a := c.Args
-	p, err := c.project(epic.Project)
+	p, err := c.project(goal.Project)
 	if err != nil {
 		return err
 	}
@@ -604,16 +724,16 @@ func (c *Cli) epicSpawn(cmd string, epic core.Work) error {
 	if err != nil {
 		return err
 	}
-	cwd, err := c.ensureSharedWorktree(epic, p)
+	cwd, err := c.ensureSharedWorktree(goal, p)
 	if err != nil {
 		return err
 	}
-	briefText, err := c.briefFor(epic.ID)
+	briefText, err := c.briefFor(goal.ID)
 	if err != nil {
 		return err
 	}
-	if epic.State == core.StateQueued {
-		if _, err := c.Ledger.Transition(epic.ID, core.StateBriefed); err != nil {
+	if goal.State == core.StateQueued {
+		if _, err := c.Ledger.Transition(goal.ID, core.StateBriefed); err != nil {
 			return err
 		}
 	}
@@ -642,7 +762,7 @@ func (c *Cli) epicSpawn(cmd string, epic core.Work) error {
 		}
 		h, err := rn.Spawn(runner.SpawnOptions{
 			Cwd:   cwd,
-			Name:  slice60(fmt.Sprintf("wd-%s %s", epic.ID, name)),
+			Name:  slice60(fmt.Sprintf("wd-%s %s", goal.ID, name)),
 			Brief: briefText,
 			Agent: agent,
 			Model: model,
@@ -651,7 +771,7 @@ func (c *Cli) epicSpawn(cmd string, epic core.Work) error {
 			return err
 		}
 		last = &h
-		if _, err := c.Ledger.AddEvent(epic.ID, core.EventSpawn, fmt.Sprintf("%s:%s", runnerName, h.Session)); err != nil {
+		if _, err := c.Ledger.AddEvent(goal.ID, core.EventSpawn, fmt.Sprintf("%s:%s", runnerName, h.Session)); err != nil {
 			return err
 		}
 		sessions = append(sessions, h.Session)
@@ -660,7 +780,7 @@ func (c *Cli) epicSpawn(cmd string, epic core.Work) error {
 		lines = append(lines, fmt.Sprintf("%s  %s", h.Session, hint))
 	}
 	if last != nil {
-		if err := c.Ledger.SetSession(epic.ID, ledger.SessionInfo{
+		if err := c.Ledger.SetSession(goal.ID, ledger.SessionInfo{
 			Runner:  last.Runner,
 			Session: last.Session,
 			Ref:     last.Ref,
@@ -669,17 +789,17 @@ func (c *Cli) epicSpawn(cmd string, epic core.Work) error {
 			return err
 		}
 	}
-	if epic.State != core.StateRunning {
-		if _, err := c.Ledger.Transition(epic.ID, core.StateRunning); err != nil {
+	if goal.State != core.StateRunning {
+		if _, err := c.Ledger.Transition(goal.ID, core.StateRunning); err != nil {
 			return err
 		}
 	}
 	return c.out(map[string]any{"sessions": sessions, "handles": handles}, strings.Join(lines, "\n"))
 }
 
-func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
+func (c *Cli) goalRun(cmd, kindWord string, goal core.Work) error {
 	a := c.Args
-	p, err := c.project(epic.Project)
+	p, err := c.project(goal.Project)
 	if err != nil {
 		return err
 	}
@@ -702,12 +822,12 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 			}
 		}
 	}
-	cwd, err := c.ensureSharedWorktree(epic, p)
+	cwd, err := c.ensureSharedWorktree(goal, p)
 	if err != nil {
 		return err
 	}
 	heading := str(a, "heading")
-	all, err := c.Ledger.Tasks(epic.ID)
+	all, err := c.Ledger.Tasks(goal.ID)
 	if err != nil {
 		return err
 	}
@@ -797,15 +917,15 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 				return err
 			}
 		}
-		if _, err := c.Ledger.AddEvent(epic.ID, core.EventSpawn, fmt.Sprintf("%s:%s", runnerName, h.Session)); err != nil {
+		if _, err := c.Ledger.AddEvent(goal.ID, core.EventSpawn, fmt.Sprintf("%s:%s", runnerName, h.Session)); err != nil {
 			return err
 		}
 		hint := rn.AttachHint(h)
 		spawned = append(spawned, handleWithAttach{Handle: h, Attach: hint})
 		lines = append(lines, fmt.Sprintf("%s  %s", h.Session, hint))
 	}
-	if len(spawned) > 0 && epic.State != core.StateRunning {
-		if _, err := c.Ledger.Transition(epic.ID, core.StateRunning); err != nil {
+	if len(spawned) > 0 && goal.State != core.StateRunning {
+		if _, err := c.Ledger.Transition(goal.ID, core.StateRunning); err != nil {
 			return err
 		}
 	}
@@ -820,7 +940,7 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 	escalated := false
 	passes := []coordinator.PassResult{}
 	for time.Now().Before(deadline) {
-		res, err := coordinator.CoordinateOnce(epic, p, c.Ledger, runner.RunnerNamed)
+		res, err := coordinator.CoordinateOnce(goal, p, c.Ledger, runner.RunnerNamed)
 		if err != nil {
 			return err
 		}
@@ -838,7 +958,7 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 			break
 		}
 		open := 0
-		tasks, err := c.Ledger.Tasks(epic.ID)
+		tasks, err := c.Ledger.Tasks(goal.ID)
 		if err != nil {
 			return err
 		}
@@ -853,7 +973,7 @@ func (c *Cli) epicRun(cmd, kindWord string, epic core.Work) error {
 		time.Sleep(time.Second)
 	}
 	openCt := 0
-	tasks, err := c.Ledger.Tasks(epic.ID)
+	tasks, err := c.Ledger.Tasks(goal.ID)
 	if err != nil {
 		return err
 	}
@@ -882,12 +1002,12 @@ func contains(list []string, x string) bool {
 	return false
 }
 
-func (c *Cli) epicReview(epic core.Work) error {
-	p, err := c.project(epic.Project)
+func (c *Cli) goalReview(goal core.Work) error {
+	p, err := c.project(goal.Project)
 	if err != nil {
 		return err
 	}
-	res, err := coordinator.CoordinateOnce(epic, p, c.Ledger, runner.RunnerNamed)
+	res, err := coordinator.CoordinateOnce(goal, p, c.Ledger, runner.RunnerNamed)
 	if err != nil {
 		return err
 	}
@@ -937,8 +1057,8 @@ func joinOrNone(ids []string) string {
 	return strings.Join(ids, ", ")
 }
 
-func (c *Cli) epicStatus(kindWord string, epic core.Work) error {
-	all, err := c.Ledger.Tasks(epic.ID)
+func (c *Cli) goalStatus(kindWord string, goal core.Work) error {
+	all, err := c.Ledger.Tasks(goal.ID)
 	if err != nil {
 		return err
 	}
@@ -948,8 +1068,8 @@ func (c *Cli) epicStatus(kindWord string, epic core.Work) error {
 			tasks = append(tasks, t)
 		}
 	}
-	return c.out(map[string]any{"epic": epic, "open": len(tasks), "tasks": tasks},
-		fmt.Sprintf("%s (%s) · %d open\n%s", epic.Title, epic.State, len(tasks), brief.RenderTaskBlock(tasks)))
+	return c.out(map[string]any{"goal": goal, "open": len(tasks), "tasks": tasks},
+		fmt.Sprintf("%s (%s) · %d open\n%s", goal.Title, goal.State, len(tasks), brief.RenderTaskBlock(tasks)))
 }
 
 func (c *Cli) send(rest []string) error {
@@ -1131,7 +1251,7 @@ func (c *Cli) verify(rest []string) error {
 		return err
 	}
 	cwd := w.Cwd
-	if cwd == nil && core.IsEpic(w.Kind) {
+	if cwd == nil && core.IsGoal(w.Kind) {
 		wts, err := c.Ledger.Worktrees(id)
 		if err != nil {
 			return err
@@ -1223,7 +1343,7 @@ func (c *Cli) softDone(rest []string) error {
 	codeChanged := true
 	if w.Parent != nil {
 		codeChanged = false
-	} else if !core.IsEpic(w.Kind) {
+	} else if !core.IsGoal(w.Kind) {
 		codeChanged = !flag(c.Args, "no-code")
 	}
 	after, err := c.Ledger.SoftDone(id, codeChanged)
@@ -1586,15 +1706,15 @@ func (c *Cli) impact(rest []string) error {
 
 func (c *Cli) conflict(rest []string) error {
 	if len(rest) == 0 {
-		return fail("usage: wd conflict <epic>")
+		return fail("usage: wd conflict <goal>")
 	}
 	id := rest[0]
-	epic, err := c.Ledger.Get(id)
+	goal, err := c.Ledger.Get(id)
 	if err != nil {
 		return err
 	}
-	if !core.IsEpic(epic.Kind) {
-		return fail("%s is not an epic", id)
+	if !core.IsGoal(goal.Kind) {
+		return fail("%s is not a goal", id)
 	}
 	cs, err := c.Ledger.Conflicts(id)
 	if err != nil {
@@ -1699,16 +1819,16 @@ func (c *Cli) merge(rest []string) error {
 		return err
 	}
 	if w.Parent == nil {
-		return fail("merge is only for tasks under an epic")
+		return fail("merge is only for tasks under a goal")
 	}
-	epic, err := c.Ledger.Get(*w.Parent)
+	goal, err := c.Ledger.Get(*w.Parent)
 	if err != nil {
 		return err
 	}
 	if _, err := c.project(w.Project); err != nil {
 		return err
 	}
-	shared, err := c.Ledger.Worktrees(epic.ID)
+	shared, err := c.Ledger.Worktrees(goal.ID)
 	if err != nil {
 		return err
 	}
@@ -1719,7 +1839,7 @@ func (c *Cli) merge(rest []string) error {
 		}
 	}
 	if sharedWt == nil {
-		return fail("epic %s has no active shared worktree", epic.ID)
+		return fail("goal %s has no active shared worktree", goal.ID)
 	}
 	wts, err := c.Ledger.Worktrees(id)
 	if err != nil {
@@ -1741,7 +1861,7 @@ func (c *Cli) merge(rest []string) error {
 	if len(verifies) == 0 || !strings.HasPrefix(verifies[len(verifies)-1].Body, "pass") {
 		return fail("refusing merge: run wd verify <id> until it passes")
 	}
-	cs, err := c.Ledger.Conflicts(epic.ID)
+	cs, err := c.Ledger.Conflicts(goal.ID)
 	if err != nil {
 		return err
 	}
@@ -1818,13 +1938,13 @@ func (c *Cli) concern(rest []string) error {
 		}
 		return c.out(cx, fmt.Sprintf("concern %d resolved: %s", cx.ID, rest[2]))
 	case "list":
-		var epic string
+		var goal string
 		if len(rest) > 1 {
-			epic = rest[1]
+			goal = rest[1]
 		}
 		cs := []core.Concern{}
 		var err error
-		if epic == "" {
+		if goal == "" {
 			all, err := c.Ledger.Concerns(nil)
 			if err != nil {
 				return err
@@ -1835,7 +1955,7 @@ func (c *Cli) concern(rest []string) error {
 				}
 			}
 		} else {
-			cs, err = c.Ledger.OpenConcerns(epic)
+			cs, err = c.Ledger.OpenConcerns(goal)
 			if err != nil {
 				return err
 			}

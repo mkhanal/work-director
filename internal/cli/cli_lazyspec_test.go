@@ -39,13 +39,15 @@ func TestWorkItemsSerializeWithTheWireSchema(t *testing.T) {
 	}
 	assertKeys(t, w, []string{
 		"id", "project", "title", "detail", "kind", "state", "runner", "session",
-		"ref", "cwd", "created", "updated", "parent", "heading", "claim", "impact",
+		"ref", "cwd", "created", "updated", "parent", "heading", "claim", "impact", "goal_type",
 	})
-	// Nullable fields are null, not omitted, when unset.
+	// Nullable fields are null, not omitted, when unset. A goal with no type
+	// has goal_type null: never a defaulted value, because a type that reads as
+	// right and is wrong is worse than no type.
 	empty := core.Work{ID: "x", Project: "p", Title: "t", Kind: core.WorkTask, State: core.StateQueued, Created: "c", Updated: "u"}
 	assertKeys(t, empty, []string{
 		"id", "project", "title", "detail", "kind", "state", "runner", "session",
-		"ref", "cwd", "created", "updated", "parent", "heading", "claim", "impact",
+		"ref", "cwd", "created", "updated", "parent", "heading", "claim", "impact", "goal_type",
 	})
 }
 
@@ -90,7 +92,7 @@ func TestCommandsComputeTheSameStatesAndValues(t *testing.T) {
 
 	// status --json: the epic and its tasks, with states.
 	out := f.runOK(t, "status", "--json")
-	assertHasKey(t, out, `"kind": "epic"`)
+	assertHasKey(t, out, `"kind": "goal"`)
 	assertHasKey(t, out, `"state": "running"`)
 
 	// tasks --json: open tasks grouped under the epic (t1 is done, filtered).
@@ -331,7 +333,7 @@ func TestStatusMarksWorkStaleAfterThirtyDaysWithoutActivity(t *testing.T) {
 	for _, r := range rows {
 		assertKeys(t, r, []string{
 			"id", "project", "title", "detail", "kind", "state", "runner", "session",
-			"ref", "cwd", "created", "updated", "parent", "heading", "claim", "impact", "stale",
+			"ref", "cwd", "created", "updated", "parent", "heading", "claim", "impact", "goal_type", "stale",
 		})
 		stale[r["id"].(string)] = r["stale"]
 	}
@@ -616,13 +618,13 @@ func TestErrorsAndExitCodesMatch(t *testing.T) {
 		{[]string{"unknowncmd"}, "wd <projects|"},
 		{[]string{"add"}, "usage: wd add"},
 		{[]string{"tasks"}, "usage: wd tasks"},
-		{[]string{"tasks", t1}, "is not an epic"},
-		{[]string{"conflict", t1}, "is not an epic"},
+		{[]string{"tasks", t1}, "is not a goal"},
+		{[]string{"conflict", t1}, "is not a goal"},
 		{[]string{"set", t1, "bogus"}, "unknown state bogus"},
 		{[]string{"set", t1, "done"}, "illegal transition"},
 		{[]string{"models", "bogus"}, "unknown runner bogus"},
 		{[]string{"impact", t1}, "usage: wd impact"},
-		{[]string{"merge", f.ids["standalone"]}, "merge is only for tasks under an epic"},
+		{[]string{"merge", f.ids["standalone"]}, "merge is only for tasks under a goal"},
 		{[]string{"soft-done", epic}, "not ready for soft-done"},
 		{[]string{"epic", "plan"}, "usage: wd epic plan"},
 		{[]string{"concern", "add", t1}, "usage: wd concern add"},
@@ -731,6 +733,9 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 	waited := jsonString(t, f.runOK(t, "add", "sample-app", "Waited on", "--epic", epic, "--json"), "id")
 	attached := jsonString(t, f.runOK(t, "add", "sample-app", "Attached", "--json"), "id")
 	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "A goal", "--json"), "id")
+	// Abandonment is a one-way door, so it gets work of its own rather than
+	// taking one the rest of the census still needs.
+	unshipped := jsonString(t, f.runOK(t, "add", "sample-app", "Never shipped", "--json"), "id")
 	ready := jsonString(t, f.runOK(t, "add", "sample-app", "Ready", "--epic", epic, "--json"), "id")
 	f.runOK(t, "set", ready, "running")
 	f.runOK(t, "set", ready, "review")
@@ -798,6 +803,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"concern", "resolve", "2", "settled"},
 		{"scan"},
 		{"events", t2},
+		{"roadmap"}, {"abandon", unshipped},
 		{"feedback", "add", "a note"}, {"feedback"}, {"feedback", "list"},
 		{"distill"},
 		{"doctor"},
@@ -1044,7 +1050,7 @@ func TestAnAdoptedCardLeavesThePromotionCandidates(t *testing.T) {
 	}
 }
 
-func TestEpicRunSpawnsOnlyChildrenNotYetUnderWay(t *testing.T) {
+func TestGoalRunSpawnsOnlyChildrenNotYetUnderWay(t *testing.T) {
 	f := newCLIFixture(t)
 	epic, t2, t3 := f.ids["epic"], f.ids["t2"], f.ids["t3"]
 	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
@@ -1130,7 +1136,7 @@ func TestEpicRunSpawnsOnlyChildrenNotYetUnderWay(t *testing.T) {
 
 func strPtr(s string) *string { return &s }
 
-func TestSendAndReportReachAChildWhereItsEpicsPassDoes(t *testing.T) {
+func TestSendAndReportReachAChildWhereItsGoalsPassDoes(t *testing.T) {
 	f := newCLIFixture(t)
 	bin := t.TempDir()
 	// One call per line, four fields: the third is flattened so a multi-line
@@ -1558,6 +1564,16 @@ func (f *cliFixture) worktreeStates(t *testing.T, work string) map[string]core.W
 	return out
 }
 
+// work reads one work row.
+func (f *cliFixture) workRow(t *testing.T, id string) core.Work {
+	t.Helper()
+	w, err := f.work(t, id)
+	if err != nil {
+		t.Fatalf("get %s: %v", id, err)
+	}
+	return w
+}
+
 // openConcerns is the text of work's own unresolved concerns, not its tasks'.
 func (f *cliFixture) openConcerns(t *testing.T, work string) []string {
 	t.Helper()
@@ -1830,7 +1846,7 @@ func (rf *reflectionFixture) runningWork(t *testing.T, env []string, project str
 	return id
 }
 
-func TestReflectionRidesOnTheReportAndTheEpicPass(t *testing.T) {
+func TestReflectionRidesOnTheReportAndTheGoalPass(t *testing.T) {
 	rf := newReflectionFixture(t, "auto-app", "auto", durableReply)
 	env := rf.envWithPath(t, rf.pathWith(t, "reflector"))
 	id := rf.runningWork(t, env, "auto-app")
@@ -1985,4 +2001,227 @@ func (f *cliFixture) work(t *testing.T, id string) (core.Work, error) {
 	}
 	defer l.Close()
 	return l.Get(id)
+}
+
+func TestARoadmapHoldsItemsAndTurnsThemIntoGoals(t *testing.T) {
+	f := newCLIFixture(t)
+
+	// A roadmap holds items, and an item with no roadmap is refused.
+	roadmap := jsonString(t, f.runOK(t, "roadmap", "add", "sample-app", "Ship the thing", "--json"), "id")
+	item := jsonString(t, f.runOK(t, "roadmap", "item", roadmap, "Migrate the ledger", "--json"), "id")
+	second := jsonString(t, f.runOK(t, "roadmap", "item", roadmap, "Retire the old CLI", "--json"), "id")
+	if errStr := f.runFail(t, "add", "sample-app", "Orphan", "--kind", "item"); !strings.Contains(errStr, "a roadmap item belongs to a roadmap") {
+		t.Errorf("orphan item: %q, want it refused for having no roadmap", errStr)
+	}
+	if errStr := f.runFail(t, "add", "sample-app", "Task on a roadmap", "--roadmap", roadmap); !strings.Contains(errStr, "a roadmap holds items, not task") {
+		t.Errorf("task under a roadmap: %q, want the roadmap to say what it holds", errStr)
+	}
+
+	// Planning translates the items on the same rows: the ids do not move.
+	f.runOK(t, "roadmap", "plan", roadmap, "--type", "build")
+	var promoted struct {
+		ID       string         `json:"id"`
+		Title    string         `json:"title"`
+		GoalType *core.GoalType `json:"goal_type"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "roadmap", "show", roadmap, "--json")), &promoted); err != nil {
+		t.Fatalf("roadmap show: %v", err)
+	}
+	for _, want := range []struct{ id, title string }{{item, "Migrate the ledger"}, {second, "Retire the old CLI"}} {
+		got := f.workRow(t, want.id)
+		if got.Kind != core.WorkGoal {
+			t.Errorf("%s kind = %s, want goal: the row translated rather than being copied", want.id, got.Kind)
+		}
+		if got.GoalType == nil || *got.GoalType != core.GoalBuild {
+			t.Errorf("%s goal_type = %v, want build", want.id, got.GoalType)
+		}
+	}
+	// show reads top-down: the roadmap, its waiting items, and its goals.
+	var show struct {
+		Roadmap core.Work   `json:"roadmap"`
+		Waiting []core.Work `json:"waiting"`
+		Goals   []struct {
+			Goal  core.Work   `json:"goal"`
+			Tasks []core.Work `json:"tasks"`
+			Open  int         `json:"open"`
+		} `json:"goals"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "roadmap", "show", roadmap, "--json")), &show); err != nil {
+		t.Fatalf("roadmap show: %v", err)
+	}
+	if show.Roadmap.ID != roadmap {
+		t.Errorf("show roadmap = %s, want %s", show.Roadmap.ID, roadmap)
+	}
+	if len(show.Waiting) != 0 {
+		t.Errorf("waiting = %v, want none: every item is now a goal", show.Waiting)
+	}
+	if len(show.Goals) != 2 || show.Goals[0].Goal.ID != item {
+		t.Errorf("goals = %+v, want the two goals in the order they were filed", show.Goals)
+	}
+	// Planning again is not an error and does not reset a goal that has begun.
+	f.runOK(t, "set", item, "running")
+	out := f.runOK(t, "roadmap", "plan", roadmap, "--json")
+	if strings.Contains(out, item) {
+		t.Errorf("second plan = %q, want it to leave the already-translated items alone", out)
+	}
+	if got := f.workRow(t, item); got.State != core.StateRunning {
+		t.Errorf("%s state = %s, want running: re-planning must not reset a goal", item, got.State)
+	}
+	// An empty roadmap says so rather than reporting nothing quietly.
+	empty := jsonString(t, f.runOK(t, "roadmap", "add", "sample-app", "Nothing yet", "--json"), "id")
+	if out := f.runOK(t, "roadmap", "plan", empty); !strings.Contains(out, "nothing waiting") {
+		t.Errorf("plan an empty roadmap = %q, want it to say nothing is waiting", out)
+	}
+	// The listing finds it.
+	if out := f.runOK(t, "roadmap"); !strings.Contains(out, empty) {
+		t.Errorf("roadmap list = %q, want it to include %s", out, empty)
+	}
+}
+
+func TestAGoalSaysWhatKindOfThingItWas(t *testing.T) {
+	f := newCLIFixture(t)
+	goal := f.ids["epic"]
+
+	// Unset means unset. A type is never defaulted.
+	if got := f.workRow(t, goal); got.GoalType != nil {
+		t.Fatalf("%s goal_type = %v, want none before anyone says", goal, *got.GoalType)
+	}
+
+	// --type at the moment of filing.
+	typed := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "What is the verify command", "--type", "query", "--json"), "id")
+	if got := f.workRow(t, typed); got.GoalType == nil || *got.GoalType != core.GoalQuery {
+		t.Fatalf("%s goal_type = %v, want query", typed, got.GoalType)
+	}
+
+	// classify records the claim as a decision, so it can be seen and changed.
+	f.runOK(t, "goal", "classify", goal, "build")
+	if got := f.workRow(t, goal); got.GoalType == nil || *got.GoalType != core.GoalBuild {
+		t.Fatalf("%s goal_type = %v, want build", goal, got.GoalType)
+	}
+	var events []core.Event
+	if err := json.Unmarshal([]byte(f.runOK(t, "events", goal, "--json")), &events); err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	found := false
+	for _, e := range events {
+		if e.Kind == core.EventDecision && e.Body == "classified build" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("events = %+v, want the classification recorded as a decision", events)
+	}
+
+	// A type outside the set is not spellable.
+	if errStr := f.runFail(t, "goal", "classify", goal, "invented"); !strings.Contains(errStr, `unknown goal type "invented"`) {
+		t.Errorf("classify: %q, want the set named", errStr)
+	}
+	// A type on work that is not a goal is refused.
+	if errStr := f.runFail(t, "goal", "classify", f.ids["t1"], "build"); !strings.Contains(errStr, "is a task, not a goal") {
+		t.Errorf("classify a task: %q, want it refused", errStr)
+	}
+	// --type on a task is refused at the door too.
+	if errStr := f.runFail(t, "add", "sample-app", "x", "--goal", goal, "--type", "build"); !strings.Contains(errStr, "a goal type applies to a goal, not task") {
+		t.Errorf("add a typed task: %q, want it refused", errStr)
+	}
+}
+
+func TestWorkEndsAbandonedAndSaysWhyItDidNotShip(t *testing.T) {
+	f := newCLIFixture(t)
+
+	// With no reason given it is computed from the ledger: no PR at all.
+	never := f.ids["standalone"]
+	out := f.runOK(t, "abandon", never, "--reason", "never started", "--json")
+	if !strings.Contains(out, `"state": "abandoned"`) {
+		t.Fatalf("abandon = %q, want the goal abandoned", out)
+	}
+	if got := f.workRow(t, never); got.State != core.StateAbandoned {
+		t.Fatalf("%s state = %s, want abandoned", never, got.State)
+	}
+	var events []core.Event
+	if err := json.Unmarshal([]byte(f.runOK(t, "events", never, "--json")), &events); err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	reason := ""
+	for _, e := range events {
+		if e.Kind == core.EventAbandon {
+			reason = e.Body
+		}
+	}
+	if reason != "no-pr: never started" {
+		t.Errorf("abandon event = %q, want the computed reason and the detail", reason)
+	}
+
+	// A PR that was raised and never merged reads unmerged.
+	raised := jsonString(t, f.runOK(t, "add", "sample-app", "Raised but never merged", "--json"), "id")
+	if code, _, errStr := f.run(t, "pr", raised, "https://example.test/pr/1", "--json"); code != 0 {
+		t.Fatalf("pr: exit %d: %s", code, errStr)
+	}
+	f.runOK(t, "abandon", raised, "--json")
+	events = nil
+	if err := json.Unmarshal([]byte(f.runOK(t, "events", raised, "--json")), &events); err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	reason = ""
+	for _, e := range events {
+		if e.Kind == core.EventAbandon {
+			reason = e.Body
+		}
+	}
+	if !strings.HasPrefix(reason, "unmerged") {
+		t.Errorf("abandon event = %q, want the computed reason unmerged", reason)
+	}
+
+	// A reason nobody can verify is not spellable.
+	if errStr := f.runFail(t, "abandon", f.ids["t2"], "lost-interest"); !strings.Contains(errStr, `unknown abandon reason "lost-interest"`) {
+		t.Errorf("abandon: %q, want only the verifiable reasons spellable", errStr)
+	}
+	// Abandoned is terminal: it does not transition back out.
+	if errStr := f.runFail(t, "set", never, "running"); !strings.Contains(errStr, "illegal transition abandoned → running") {
+		t.Errorf("set: %q, want abandoned to be terminal", errStr)
+	}
+}
+
+func TestWdEpicIsTheOldSpellingOfWdGoal(t *testing.T) {
+	f := newCLIFixture(t)
+	goal := f.ids["epic"]
+
+	// Both spellings reach the same work.
+	f.runOK(t, "epic", "status", goal)
+	f.runOK(t, "goal", "status", goal)
+	// And they say the same new word.
+	if out := f.runOK(t, "epic", "status", goal); strings.Contains(out, "epic") {
+		t.Errorf("wd epic status = %q, want the current word, not the old spelling", out)
+	}
+	if errStr := f.runFail(t, "epic", "status", f.ids["t1"]); !strings.Contains(errStr, "is a task, not a goal") {
+		t.Errorf("wd epic status on a task: %q, want the same refusal as wd goal", errStr)
+	}
+
+	// --kind epic writes a goal.
+	written := jsonString(t, f.runOK(t, "add", "sample-app", "Written the old way", "--kind", "epic", "--json"), "id")
+	if got := f.workRow(t, written); got.Kind != core.WorkGoal {
+		t.Errorf("%s kind = %s, want goal: the old spelling writes the current kind", written, got.Kind)
+	}
+	// --epic names the same parent as --goal.
+	old := jsonString(t, f.runOK(t, "add", "sample-app", "Under the old flag", "--epic", goal, "--json"), "id")
+	if got := f.workRow(t, old); got.Parent == nil || *got.Parent != goal {
+		t.Errorf("%s parent = %v, want %s", old, got.Parent, goal)
+	}
+	// A row stored under the old name reads as a goal without being rewritten.
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	defer l.Close()
+	stored, err := l.Add("sample-app", "Filed before the rename", ledger.AddOptions{Kind: core.WorkEpic})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if got := f.workRow(t, stored.ID); got.Kind != core.WorkGoal {
+		t.Fatalf("old row = %s, want it read as goal without being rewritten", got.Kind)
+	}
+	// And the board agrees it is a goal, not a stray kind.
+	if out := f.runOK(t, "status", "--all", "--json"); !strings.Contains(out, `"id": "`+stored.ID+`"`) || !strings.Contains(out, `"kind": "goal"`) {
+		t.Errorf("status --all = %q, want the old row listed as a goal", out)
+	}
 }

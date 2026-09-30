@@ -49,15 +49,15 @@ type boardGoal struct {
 	Rollup rollup    `json:"rollup"`
 }
 
-// boardView is every epic with its rollup and every open standalone work item.
+// boardView is every goal with its rollup and every open standalone work item.
 type boardView struct {
 	Goals      []boardGoal `json:"goals"`
 	Standalone []core.Work `json:"standalone"`
 }
 
-// goalView is one epic with its children, rollup and events.
+// goalView is one goal with its children, rollup and events.
 type goalView struct {
-	Epic   core.Work    `json:"epic"`
+	Goal   core.Work    `json:"goal"`
 	Tasks  []core.Work  `json:"tasks"`
 	Rollup rollup       `json:"rollup"`
 	Events []core.Event `json:"events"`
@@ -179,7 +179,7 @@ func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, b)
 }
 
-// handleGoal serves one epic with its children, rollup and events.
+// handleGoal serves one goal with its children, rollup and events.
 func (s *Server) handleGoal(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, r, http.MethodGet) {
 		return
@@ -189,12 +189,12 @@ func (s *Server) handleGoal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing goal id")
 		return
 	}
-	epic, ok := s.work(w, id)
+	goal, ok := s.work(w, id)
 	if !ok {
 		return
 	}
-	if !core.IsEpic(epic.Kind) {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("%s is not an epic", id))
+	if !core.IsGoal(goal.Kind) {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("%s is not a goal", id))
 		return
 	}
 	children, err := s.ledger.Tasks(id)
@@ -207,7 +207,7 @@ func (s *Server) handleGoal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, goalView{Epic: epic, Tasks: children, Rollup: goalRollup(children), Events: events})
+	writeJSON(w, http.StatusOK, goalView{Goal: goal, Tasks: children, Rollup: goalRollup(children), Events: events})
 }
 
 // handleWork lists all work items.
@@ -348,7 +348,7 @@ func (s *Server) answerWS(c *wsConn, payload []byte) error {
 	return c.writeJSON(wsAction{Type: "action", actionResult: res})
 }
 
-// board returns every epic with its rollup and every open standalone work item.
+// board returns every goal with its rollup and every open standalone work item.
 func (s *Server) board() (boardView, error) {
 	items, err := s.ledger.List(ledger.ListFilter{})
 	if err != nil {
@@ -356,7 +356,7 @@ func (s *Server) board() (boardView, error) {
 	}
 	b := boardView{Goals: []boardGoal{}, Standalone: []core.Work{}}
 	for _, w := range items {
-		if core.IsEpic(w.Kind) {
+		if core.IsGoal(w.Kind) {
 			children, err := s.ledger.Tasks(w.ID)
 			if err != nil {
 				return boardView{}, err

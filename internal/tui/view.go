@@ -13,7 +13,7 @@ import (
 	"wd/internal/runner"
 )
 
-// BoardRow is one board line: a goal or epic with its task rollup, or a
+// BoardRow is one board line: a goal or goal with its task rollup, or a
 // standalone work item.
 type BoardRow struct {
 	Work   core.Work
@@ -41,11 +41,11 @@ var stateOrder = []core.State{
 }
 
 // NewBoard rolls the ledger's work items into board rows: every goal and
-// epic with its task rollup, then the standalone open work.
+// goal with its task rollup, then the standalone open work.
 func NewBoard(items []core.Work, tasks func(string) ([]core.Work, error)) (Board, error) {
 	b := Board{Rows: []BoardRow{}}
 	for _, w := range items {
-		if !core.IsEpic(w.Kind) {
+		if !core.IsGoal(w.Kind) {
 			continue
 		}
 		ts, err := tasks(w.ID)
@@ -55,7 +55,7 @@ func NewBoard(items []core.Work, tasks func(string) ([]core.Work, error)) (Board
 		b.Rows = append(b.Rows, BoardRow{Work: w, Rollup: rollup(ts), Epic: true})
 	}
 	for _, w := range items {
-		if core.IsEpic(w.Kind) || w.Parent != nil {
+		if core.IsGoal(w.Kind) || w.Parent != nil {
 			continue
 		}
 		if w.State == core.StateDone || w.State == core.StateDropped {
@@ -140,11 +140,11 @@ func BoardFrame(b Board, m Model) []string {
 	selStart, selEnd := -1, -1
 	for _, sec := range []struct {
 		title string
-		epic  bool
+		goal  bool
 	}{{"Goals", true}, {"Standalone", false}} {
 		titled := false
 		for i, r := range b.Rows {
-			if r.Epic != sec.epic {
+			if r.Epic != sec.goal {
 				continue
 			}
 			if !titled {
@@ -309,7 +309,7 @@ func sessionLabel(s *SessionView) string {
 	return label
 }
 
-// taskRows renders the epic's tasks.
+// taskRows renders the goal's tasks.
 func taskRows(tasks []core.Work) []string {
 	var out []string
 	for _, t := range tasks {

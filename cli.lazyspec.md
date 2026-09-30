@@ -112,14 +112,14 @@ After `wd scan --adopt <card>` writes the global candidate, `wd scan` exits 0
 without listing that card, and adopting it again exits 1 with `no promotion
 candidate <card>`, leaving the written candidate as it was.
 
-## Epic Run Spawns Only Children Not Yet Under Way
+## Goal Run Spawns Only Children Not Yet Under Way
 `wd epic run` spawns the open children that are queued or briefed, or
 running with neither session nor claim. Children in review, needs-input,
 blocked or soft-done, and running children with a session or a claim, keep
 their state, session and claim. It reports how many it spawned; a run that spawns none leaves the
 epic's state as it was.
 
-## Send And Report Reach A Child Where Its Epic's Pass Does
+## Send And Report Reach A Child Where Its Goal's Pass Does
 `wd send` and `wd report` on a child with no session of its own reach its
 claim, with its epic's runner else its project's, in its epic's active
 shared worktree else the project's path: the session `wd epic review`
@@ -152,7 +152,7 @@ else writes the ledger. `wd report` on a task with no session files nothing
 and exits 1. A task whose latest report is not DONE is refused by
 `wd soft-done`, even in review with a passing verify and a PR.
 
-## Reflection Rides On The Report And The Epic Pass
+## Reflection Rides On The Report And The Goal Pass
 `wd report` on a DONE report and `wd epic review` on children that just reported
 DONE each ask one bounded question of the finished session's transcript, and
 record one event naming the runner, model, tokens and verdicts. `--no-reflect`
@@ -195,3 +195,35 @@ is never removed.
 `wd worktree remove <id>` applies the same rule to done work: it exits 0 once
 nothing stays and 1 naming each worktree that still does. On work not done it
 exits 1 and removes nothing.
+
+## A Roadmap Holds Items And Turns Them Into Goals
+`wd roadmap add <project> <title>` files a roadmap; `wd roadmap item <roadmap>
+<title>` files an item under it; `wd roadmap plan <roadmap>` translates every
+item still waiting into a goal on the same row, keeping the id, and records the
+translation. An item already translated is left alone, so planning twice is not
+an error and does not reset a goal that has begun. With no items left, `plan`
+says so and exits 0. `wd roadmap show <id>` reads the roadmap, the items still
+waiting, and every goal under it with its open-task count and how it ended;
+`wd roadmap` lists the roadmaps. An item with no roadmap is refused.
+
+## A Goal Says What Kind Of Thing It Was
+`wd goal classify <id> <query|build|fix|change|review>` records the type and a
+decision event saying what was claimed, and `--type` sets it at the moment the
+goal is filed. A goal with no type reads as no type: nothing is defaulted, and a
+type that reads as right and is wrong is worse than a missing one. A type
+outside the set is not spellable, and one on work that is not a goal is refused.
+
+## Work Ends Abandoned And Says Why It Did Not Ship
+`wd abandon <id>` (and `wd goal abandon <id>`) ends work that stopped without
+shipping, recording the reason and the detail. It takes any kind of work, not
+only a goal: a task's pull request can go unmerged as easily as a goal's. With no reason given it is computed from the ledger: a
+pull request that was raised and never merged reads `unmerged`, and no pull
+request at all reads `no-pr`. A reason outside those two is not spellable,
+because a reason nobody can verify is not a reason. Abandoned is terminal.
+
+## Wd Epic Is The Old Spelling Of Wd Goal
+`wd epic` reaches the same code as `wd goal`, `--kind epic` writes a goal, and
+`--epic <id>` names the same parent as `--goal <id>`, so anything written
+before the rename keeps working. A goal opened through either says `goal` in
+`status` and `tasks`, and a row stored under the old name reads as a goal
+without being rewritten.

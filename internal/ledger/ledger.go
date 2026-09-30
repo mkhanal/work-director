@@ -21,7 +21,7 @@ import (
 const schema = `
 CREATE TABLE IF NOT EXISTS work (id TEXT PRIMARY KEY, project TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
   kind TEXT NOT NULL, state TEXT NOT NULL, runner TEXT, session TEXT, ref TEXT, cwd TEXT, created TEXT NOT NULL, updated TEXT NOT NULL,
-  parent TEXT, heading TEXT, claim TEXT, impact TEXT);
+  parent TEXT, heading TEXT, claim TEXT, impact TEXT, goal_type TEXT);
 CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), kind TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT, card TEXT, source TEXT NOT NULL, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS concern (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), text TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, decision TEXT, at TEXT NOT NULL, resolved_at TEXT);
@@ -30,11 +30,15 @@ CREATE TABLE IF NOT EXISTS filed (work TEXT PRIMARY KEY REFERENCES work(id), ses
 CREATE UNIQUE INDEX IF NOT EXISTS worktree_one_active_shared ON worktree(work) WHERE kind = 'shared' AND state = 'active';
 `
 
-// Additive migration for ledgers created before epics and worktree origins
-// existed. A worktree row with no recorded origin reads as attached, so wd
-// never removes a directory it cannot prove it made.
+// Additive migration for ledgers created before parents, worktree origins,
+// goal types or the epic rename existed. A worktree row with no recorded origin
+// reads as attached, so wd never removes a directory it cannot prove it made. A
+// work row whose kind reads as epic is goal under its old name: the rename
+// happens in Go, not by rewriting rows, so a ledger written before the rename
+// still opens and still says what it meant.
 var addedColumns = []struct{ table, col, decl string }{
 	{"work", "parent", "TEXT"}, {"work", "heading", "TEXT"}, {"work", "claim", "TEXT"}, {"work", "impact", "TEXT"},
+	{"work", "goal_type", "TEXT"},
 	{"worktree", "origin", "TEXT NOT NULL DEFAULT 'attached'"},
 }
 
@@ -161,7 +165,7 @@ func updateWork(e execer, id, query string, args ...any) error {
 }
 
 const workColumns = `id, project, title, detail, kind, state, runner, session, ref, cwd,
-	created, updated, parent, heading, claim, impact`
+	created, updated, parent, heading, claim, impact, goal_type`
 
 func nullStr(ns sql.NullString) *string {
 	if !ns.Valid {
@@ -175,11 +179,18 @@ func scanWork(s rowScanner) (core.Work, error) {
 	var w core.Work
 	var kind, state string
 	var runner, session, ref, cwd, parent, heading, claim, impact sql.NullString
+	var goalType sql.NullString
 	err := s.Scan(&w.ID, &w.Project, &w.Title, &w.Detail, &kind, &state,
 		&runner, &session, &ref, &cwd, &w.Created, &w.Updated,
-		&parent, &heading, &claim, &impact)
+		&parent, &heading, &claim, &impact, &goalType)
 	if err != nil {
 		return core.Work{}, err
+	}
+	// An old row's kind reads as epic, which is goal under its former name:
+	// the rename lives here rather than in a row rewrite, so a ledger written
+	// before it still opens and still means what it meant.
+	if kind == string(core.WorkEpic) {
+		kind = string(core.WorkGoal)
 	}
 	if w.Kind, err = core.ParseWorkKind(kind); err != nil {
 		return core.Work{}, fmt.Errorf("work %s: %w", w.ID, err)
@@ -195,6 +206,13 @@ func scanWork(s rowScanner) (core.Work, error) {
 	w.Heading = nullStr(heading)
 	w.Claim = nullStr(claim)
 	w.Impact = nullStr(impact)
+	if goalType.Valid {
+		gt, err := core.ParseGoalType(goalType.String)
+		if err != nil {
+			return core.Work{}, fmt.Errorf("work %s: %w", w.ID, err)
+		}
+		w.GoalType = &gt
+	}
 	return w, nil
 }
 
@@ -260,10 +278,31 @@ func scanWorktree(s rowScanner) (core.Worktree, error) {
 }
 
 type AddOptions struct {
-	Kind    core.WorkKind
-	Detail  string
-	Parent  *string
-	Heading *string
+	Kind     core.WorkKind
+	Detail   string
+	Parent   *string
+	Heading  *string
+	GoalType *core.GoalType
+}
+
+// The two levels that organise work: a roadmap holds items, a goal holds
+// tasks. Anything else refuses a parent, so the shape of the ledger cannot
+// drift into something no reader could draw.
+func childKind(parentKind, childKind core.WorkKind) error {
+	switch {
+	case parentKind == core.WorkRoadmap:
+		if childKind != core.WorkItem {
+			return fmt.Errorf("a roadmap holds items, not %s", childKind)
+		}
+		return nil
+	case core.IsGoal(parentKind):
+		if childKind != core.WorkTask {
+			return fmt.Errorf("a goal holds tasks, not %s", childKind)
+		}
+		return nil
+	default:
+		return fmt.Errorf("work of kind %s holds no children", parentKind)
+	}
 }
 
 func (l *Ledger) Add(project, title string, opts AddOptions) (core.Work, error) {
@@ -271,20 +310,33 @@ func (l *Ledger) Add(project, title string, opts AddOptions) (core.Work, error) 
 	if kind == "" {
 		kind = core.WorkTask
 	}
+	if kind == core.WorkEpic {
+		// epic was goal's old name. A write always uses the current one; an old
+		// row still reads as goal, so nothing needs rewriting to migrate.
+		kind = core.WorkGoal
+	}
 	var parent *string
 	if opts.Parent != nil {
 		p := *opts.Parent
-		if core.IsEpic(kind) {
-			return core.Work{}, fmt.Errorf("an epic cannot sit under another work item")
+		// A goal or a roadmap is a level, not a child: checked before the
+		// parent's own rule so the refusal says what is wrong rather than what
+		// the parent happened to hold.
+		if kind == core.WorkRoadmap || core.IsGoal(kind) {
+			return core.Work{}, fmt.Errorf("a goal or roadmap cannot sit under another work item")
 		}
 		pw, err := l.Get(p)
 		if err != nil {
 			return core.Work{}, err
 		}
-		if !core.IsEpic(pw.Kind) {
-			return core.Work{}, fmt.Errorf("parent %s is not an epic", p)
+		if err := childKind(pw.Kind, kind); err != nil {
+			return core.Work{}, fmt.Errorf("under %s: %w", p, err)
 		}
 		parent = &p
+	} else if kind == core.WorkItem {
+		return core.Work{}, fmt.Errorf("a roadmap item belongs to a roadmap")
+	}
+	if opts.GoalType != nil && !core.IsGoal(kind) {
+		return core.Work{}, fmt.Errorf("a goal type applies to a goal, not %s", kind)
 	}
 	id, err := newId()
 	if err != nil {
@@ -293,9 +345,9 @@ func (l *Ledger) Add(project, title string, opts AddOptions) (core.Work, error) 
 	t := now()
 	err = l.inTx(func(tx *sql.Tx) error {
 		if _, err := tx.Exec(
-			`INSERT INTO work (id, project, title, detail, kind, state, parent, heading, created, updated)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			id, project, title, opts.Detail, string(kind), string(core.StateQueued), parent, opts.Heading, t, t); err != nil {
+			`INSERT INTO work (id, project, title, detail, kind, state, parent, heading, created, updated, goal_type)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, project, title, opts.Detail, string(kind), string(core.StateQueued), parent, opts.Heading, t, t, goalTypeArg(opts.GoalType)); err != nil {
 			return err
 		}
 		_, err := addEvent(tx, id, core.EventState, string(core.StateQueued), t)
@@ -305,6 +357,13 @@ func (l *Ledger) Add(project, title string, opts AddOptions) (core.Work, error) 
 		return core.Work{}, err
 	}
 	return l.Get(id)
+}
+
+func goalTypeArg(gt *core.GoalType) any {
+	if gt == nil {
+		return nil
+	}
+	return string(*gt)
 }
 
 func (l *Ledger) Get(id string) (core.Work, error) { return getWork(l.db, id) }
@@ -331,6 +390,7 @@ func (l *Ledger) Has(id string) (bool, error) {
 type ListFilter struct {
 	Project *string
 	States  []core.State
+	Kinds   []core.WorkKind
 }
 
 func (l *Ledger) List(filter ListFilter) ([]core.Work, error) {
@@ -351,14 +411,27 @@ func (l *Ledger) List(filter ListFilter) ([]core.Work, error) {
 		if filter.States != nil && !slices.Contains(filter.States, w.State) {
 			continue
 		}
+		if filter.Kinds != nil && !slices.Contains(filter.Kinds, w.Kind) {
+			continue
+		}
 		out = append(out, w)
 	}
 	return out, rows.Err()
 }
 
-// Children of an epic, oldest first.
-func (l *Ledger) Tasks(epicID string) ([]core.Work, error) {
-	rows, err := l.db.Query(`SELECT `+workColumns+` FROM work WHERE parent = ? ORDER BY created`, epicID)
+// Children of a goal, oldest first.
+func (l *Ledger) Tasks(goalID string) ([]core.Work, error) {
+	return l.children(goalID)
+}
+
+// RoadmapItems of a roadmap, oldest first: the items still waiting, and the
+// goals already translated out of them, in the order they were filed.
+func (l *Ledger) Items(roadmapID string) ([]core.Work, error) {
+	return l.children(roadmapID)
+}
+
+func (l *Ledger) children(parentID string) ([]core.Work, error) {
+	rows, err := l.db.Query(`SELECT `+workColumns+` FROM work WHERE parent = ? ORDER BY created`, parentID)
 	if err != nil {
 		return nil, err
 	}
@@ -376,6 +449,97 @@ func (l *Ledger) Tasks(epicID string) ([]core.Work, error) {
 
 // Transition moves work along core.Transitions. Soft-done is reached only
 // through SoftDone, which checks readiness first.
+// Promote translates a roadmap item into a goal. It is the same row, not a
+// copy: the id an item was filed under is the id its goal keeps, so a
+// conversation, a decision or an event recorded against the item before it was
+// committed stays attached to the goal it became.
+func (l *Ledger) Promote(itemID string, gt *core.GoalType) (core.Work, error) {
+	err := l.inTx(func(tx *sql.Tx) error {
+		w, err := getWork(tx, itemID)
+		if err != nil {
+			return err
+		}
+		if !core.IsRoadmapItem(w.Kind) {
+			return fmt.Errorf("work %s is a %s, not a roadmap item", itemID, w.Kind)
+		}
+		if gt != nil {
+			if _, err := tx.Exec(`UPDATE work SET kind = ?, goal_type = ? WHERE id = ?`,
+				string(core.WorkGoal), string(*gt), itemID); err != nil {
+				return err
+			}
+		} else if _, err := tx.Exec(`UPDATE work SET kind = ? WHERE id = ?`, string(core.WorkGoal), itemID); err != nil {
+			return err
+		}
+		_, err = addEvent(tx, itemID, core.EventState, "promoted to goal", now())
+		return err
+	})
+	if err != nil {
+		return core.Work{}, err
+	}
+	return l.Get(itemID)
+}
+
+// SetGoalType classifies a goal as a question answered or work done, and
+// records the decision. An unset type stays unset: a wrong type is a lie the
+// reader cannot see, so nothing is defaulted.
+func (l *Ledger) SetGoalType(id string, gt core.GoalType) (core.Work, error) {
+	if _, err := core.ParseGoalType(string(gt)); err != nil {
+		return core.Work{}, err
+	}
+	err := l.inTx(func(tx *sql.Tx) error {
+		w, err := getWork(tx, id)
+		if err != nil {
+			return err
+		}
+		if !core.IsGoal(w.Kind) {
+			return fmt.Errorf("work %s is a %s, not a goal", id, w.Kind)
+		}
+		if _, err := tx.Exec(`UPDATE work SET goal_type = ? WHERE id = ?`, string(gt), id); err != nil {
+			return err
+		}
+		_, err = addEvent(tx, id, core.EventDecision, "classified "+string(gt), now())
+		return err
+	})
+	if err != nil {
+		return core.Work{}, err
+	}
+	return l.Get(id)
+}
+
+// Abandon records that work stopped without shipping and why. The reason is
+// one the ledger can verify — no PR was ever raised, or one was raised and
+// never merged — because a reason nobody can check is not a reason.
+func (l *Ledger) Abandon(id, reason, detail string) (core.Work, error) {
+	if _, err := core.ParseAbandonReason(reason); err != nil {
+		return core.Work{}, err
+	}
+	body := reason
+	if detail != "" {
+		body = reason + ": " + detail
+	}
+	err := l.inTx(func(tx *sql.Tx) error {
+		w, err := getWork(tx, id)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains(core.Transitions[w.State], core.StateAbandoned) {
+			return core.IllegalTransition{From: w.State, To: core.StateAbandoned}
+		}
+		if _, err := tx.Exec(`UPDATE work SET state = ? WHERE id = ?`, string(core.StateAbandoned), id); err != nil {
+			return err
+		}
+		if _, err := addEvent(tx, id, core.EventAbandon, body, now()); err != nil {
+			return err
+		}
+		_, err = addEvent(tx, id, core.EventState, string(core.StateAbandoned), now())
+		return err
+	})
+	if err != nil {
+		return core.Work{}, err
+	}
+	return l.Get(id)
+}
+
 func (l *Ledger) Transition(id string, to core.State) (core.Work, error) {
 	if to == core.StateSoftDone {
 		return core.Work{}, fmt.Errorf("work %s: soft-done is reached only through SoftDone, which checks readiness", id)
@@ -750,7 +914,7 @@ func (l *Ledger) SoftDone(id string, codeChanged bool) (core.Work, error) {
 		return nil
 	}
 	var missing []string
-	if core.IsEpic(w.Kind) {
+	if core.IsGoal(w.Kind) {
 		open, err := l.Tasks(id)
 		if err != nil {
 			return core.Work{}, err

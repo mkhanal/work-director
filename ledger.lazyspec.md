@@ -31,8 +31,32 @@ With `codeChanged` true, `SoftDone` also requires a `pr` event.
 ## Feedback Seen Twice Becomes A Distill Candidate
 `Distill` returns groups keyed by card, else project, else global, only where two or more feedback entries share the key.
 
-## Epics Hold Tasks And Nothing Sits Under An Epic
-`Add` with a parent requires the parent to exist and be an epic; an epic or goal itself cannot have a parent.
+## A Roadmap Holds Items And A Goal Holds Tasks
+`Add` with a parent requires the parent to exist and to be the level that takes
+this child: a roadmap takes items and a goal takes tasks. Anything else is
+refused naming what the parent holds, so the two levels cannot drift into a
+shape no reader could draw. A goal or a roadmap cannot itself sit under another
+work item, and an item with no roadmap is refused because it belongs to one.
+
+## A Roadmap Item Becomes A Goal Without Changing Its Id
+`Promote` translates an item into a goal on the same row: the kind changes, the
+id does not, and the translation is recorded as an event. Work filed against an
+item before it was committed — an event, a decision, a session — stays attached
+to the goal it became. Promoting a row that is not an item is refused.
+
+## A Goal Type Is Set Deliberately Or Not At All
+`SetGoalType` records the classification and a decision event saying what was
+claimed. A goal with no type has none: nothing is defaulted, because a type that
+is wrong and reads as right is worse than a missing one. A type on work that is
+not a goal is refused, and a type outside the set is not spellable.
+
+## Work Can End Abandoned And Says Why
+`Abandon` moves work to abandoned from any state that allows it, records an
+abandon event whose body is the reason and the detail, and records the state
+change. The reason is one of `no-pr` or `unmerged` and nothing else is
+spellable, because a reason nobody can verify is not a reason. Abandoned is
+terminal: work comes to rest there, and a reversal is a new decision against
+the same goal rather than a transition back out.
 
 ## Concerns Resolve With A Decision
 `AddConcern` records an unresolved concern; `ResolveConcern` marks it resolved with the decision and files a note event; resolving it again fails and keeps the first decision.
@@ -44,21 +68,21 @@ With `codeChanged` true, `SoftDone` also requires a `pr` event.
 `AddWorktree` stores its origin, director or attached; `SetWorktreeState` can move it to removed.
 A worktree stored without an origin reads as attached.
 
-## An Epic Has At Most One Active Shared Worktree
+## A Goal Has At Most One Active Shared Worktree
 `AddWorktree` and `SetWorktreeState` refuse a second active shared worktree
 for the same work; a merged or abandoned one no longer counts.
 
 ## Conflicts Surface When Claimed Tasks Overlap
 `Conflicts` pairs concurrently claimed, non-terminal tasks of an epic whose impact paths overlap, listing the overlapping paths.
 
-## Soft Done Requires Epic Tasks Done
-For an epic, `SoftDone` additionally requires every task done or dropped.
+## Soft Done Requires Goal Tasks Done
+For a goal, `SoftDone` additionally requires every task done or dropped.
 
 ## The Ledger Persists Across Reopen
 Work added to a file-backed ledger is still there after closing and reopening it.
 
 ## Old Ledgers Stay Readable
-`New` on a ledger written before epics — a `work` table without parent, heading, claim or impact, and no concern or worktree tables — reads every existing row, adds the missing columns and tables in place, and leaves all stored values untouched.
+`New` on a ledger written before parents, goal types or the goal rename — a `work` table without parent, heading, claim, impact or goal_type, and no concern or worktree tables — reads every existing row, adds the missing columns and tables in place, and leaves all stored values untouched. A row whose kind reads as `epic` reads as `goal`: the rename lives in Go rather than in a row rewrite, so a ledger from before it opens and still means what it meant.
 
 ## Migration Is Additive Only
 Migration adds columns that are nullable or carry a default and creates missing tables; it never drops, renames or rewrites a column or table, so a ledger migrated by the Go wd stays readable by the TypeScript wd, and opening an already-migrated ledger changes nothing.

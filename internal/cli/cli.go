@@ -32,7 +32,8 @@ import (
 var valueFlags = map[string]bool{
 	"runner": true, "model": true, "mode": true, "agent": true, "count": true,
 	"tail": true, "stack": true, "workflow": true, "verify": true, "lazyspec": true,
-	"kind": true, "epic": true, "heading": true, "detail": true, "project": true,
+	"kind": true, "goal": true, "epic": true, "roadmap": true, "type": true, "reason": true,
+	"heading": true, "detail": true, "project": true,
 	"branch": true, "adopt": true, "source": true, "card": true, "only": true,
 	"timeout": true, "port": true, "ref": true, "cwd": true, "cancelled": true,
 }
@@ -219,19 +220,23 @@ func tasteCheckout() (string, error) {
 	return "", nil
 }
 
-const usage = "wd <projects|add|tasks|brief|spawn|models|runner|epic|goal|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|feedback|distill|tui|serve|doctor> [--json]"
+const usage = "wd <projects|add|tasks|brief|spawn|models|runner|roadmap|goal|goal|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|review|roadmap|abandon|feedback|distill|tui|serve|doctor> [--json]"
 
 // commands maps each wd command to its handler, given the arguments after it.
 var commands = map[string]func(c *Cli, rest []string) error{
-	"projects":  (*Cli).projects,
-	"models":    (*Cli).models,
-	"runner":    (*Cli).runner,
-	"add":       (*Cli).add,
-	"tasks":     (*Cli).tasks,
-	"brief":     (*Cli).brief,
-	"spawn":     (*Cli).spawn,
-	"epic":      func(c *Cli, rest []string) error { return c.epicLike("epic", rest) },
-	"goal":      func(c *Cli, rest []string) error { return c.epicLike("goal", rest) },
+	"projects": (*Cli).projects,
+	"models":   (*Cli).models,
+	"runner":   (*Cli).runner,
+	"add":      (*Cli).add,
+	"tasks":    (*Cli).tasks,
+	"brief":    (*Cli).brief,
+	"spawn":    (*Cli).spawn,
+	"goal":     func(c *Cli, rest []string) error { return c.goalLike("goal", rest) },
+	// epic was goal's old name. It reaches the same code so anything written
+	// before the rename keeps working.
+	"epic":      func(c *Cli, rest []string) error { return c.goalLike("epic", rest) },
+	"roadmap":   (*Cli).roadmap,
+	"abandon":   (*Cli).abandon,
 	"send":      (*Cli).send,
 	"attach":    (*Cli).attach,
 	"report":    (*Cli).report,
@@ -470,7 +475,7 @@ func (c *Cli) briefFor(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if core.IsEpic(w.Kind) {
+	if core.IsGoal(w.Kind) {
 		open, err := c.Ledger.Tasks(id)
 		if err != nil {
 			return "", err
@@ -481,14 +486,14 @@ func (c *Cli) briefFor(id string) (string, error) {
 				openTasks = append(openTasks, t)
 			}
 		}
-		return brief.ComposeEpic(w, brief.RenderTaskBlock(openTasks), p, cards, ctx)
+		return brief.ComposeGoal(w, brief.RenderTaskBlock(openTasks), p, cards, ctx)
 	}
 	if w.Parent != nil {
-		epic, err := c.Ledger.Get(*w.Parent)
+		goal, err := c.Ledger.Get(*w.Parent)
 		if err != nil {
 			return "", err
 		}
-		claims, err := c.Ledger.Tasks(epic.ID)
+		claims, err := c.Ledger.Tasks(goal.ID)
 		if err != nil {
 			return "", err
 		}
@@ -498,7 +503,7 @@ func (c *Cli) briefFor(id string) (string, error) {
 				claimList = append(claimList, t)
 			}
 		}
-		return brief.ComposeSlice(w, epic, claimList, p, cards)
+		return brief.ComposeSlice(w, goal, claimList, p, cards)
 	}
 	return brief.Compose(w, p, cards, ctx)
 }

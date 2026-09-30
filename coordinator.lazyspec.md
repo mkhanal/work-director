@@ -11,7 +11,7 @@ parser, the known-answer lookup and one coordination pass over an epic's
 children. The ledger's claims, impacts, conflicts, concerns and worktrees
 are specified in `ledger.lazyspec.md`.
 
-## The Epic Plan Brief Names The Project And Verify Commands
+## The Goal Plan Brief Names The Project And Verify Commands
 `EpicPlanBrief` names the project and its path, lists the project's verify
 commands in backticks (or "none listed"), carries the goal title and detail,
 and demands the exact headed task-list shape.
@@ -85,7 +85,7 @@ An `ASK:` or `STATUS: NEEDS-INPUT` the executor writes again — in a later
 transcript entry, or from a new session — is filed and answered or
 escalated again.
 
-## A Child Without Its Own Runner Or Directory Uses Its Epic's Then Its Project's
+## A Child Without Its Own Runner Or Directory Uses Its Goal's Then Its Project's
 A child with no runner coordinates with its epic's runner, else its
 project's; with no cwd it works in its epic's active shared worktree, else
 the project's path.
