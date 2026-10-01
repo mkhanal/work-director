@@ -61,8 +61,12 @@ func TestLedgerObjectsKeepTheirColumnNames(t *testing.T) {
 	// The claim's own shape is the shape a review reads.
 	assertKeys(t, core.Decision{Question: "q", Answer: "a"},
 		[]string{"question", "answer", "source", "runner", "model", "tokens", "reverses", "reversed_by"})
-	assertKeys(t, core.Feedback{ID: 1, Text: "t", Project: strPtr("p"), Card: strPtr("c"), Source: core.FeedbackDirector, At: "a"},
-		[]string{"id", "text", "project", "card", "source", "at"})
+	// Feedback carries the work the evidence came from, under the column's own
+	// name like every other ledger object: evidence that cannot be pointed back
+	// at the thing that produced it cannot be audited against it, and the
+	// column is called work.
+	assertKeys(t, core.Feedback{ID: 1, Text: "t", Project: strPtr("p"), Card: strPtr("c"), Source: core.FeedbackDirector, Work: strPtr("w"), At: "a"},
+		[]string{"id", "text", "project", "card", "source", "work", "at"})
 	// resolved_at keeps the ledger's snake_case column name.
 	assertKeys(t, core.Concern{ID: 1, Work: "w", Text: "t", Resolved: 1, Decision: strPtr("d"), At: "a", ResolvedAt: strPtr("ra")},
 		[]string{"id", "work", "text", "resolved", "decision", "at", "resolved_at"})
@@ -1917,6 +1921,12 @@ func TestReflectionRidesOnTheReportAndTheGoalPass(t *testing.T) {
 	if filed[0].Card == nil || *filed[0].Card != "defensive-coding" {
 		t.Fatalf("filed card = %v, want defensive-coding", filed[0].Card)
 	}
+	// The evidence names the work it came out of, so a card promoted on it
+	// records its decision there and a reader can audit the promotion against
+	// the session that showed the pattern.
+	if filed[0].Work == nil || *filed[0].Work != id {
+		t.Errorf("filed work = %v, want %s: evidence that cannot be pointed back at the thing that produced it cannot be audited against it", filed[0].Work, id)
+	}
 
 	// It recorded an event naming the runner, model and the verdict.
 	var body string
@@ -3205,4 +3215,187 @@ func TestTheLandingLinkIsDerivedRatherThanTyped(t *testing.T) {
 	if headOf(t, tree) == headOf(t, f.sample) {
 		t.Fatal("the goal's tree shares the project's commit, so this proves nothing")
 	}
+}
+
+// tasteCheckout is a taste build in a directory of its own: a real checkout for
+// the loop to write a card into and commit, so a test of promotion never writes
+// into the repository the tests are running from. It holds one project-scoped
+// adopted card and nothing else, because a rule with no evidence is never a
+// candidate and would make the test prove nothing.
+func seedTasteCheckout(t *testing.T, f *cliFixture) (root, cardID string, env []string) {
+	t.Helper()
+	root = filepath.Join(f.dir, "taste-checkout")
+	cards := filepath.Join(root, "taste", "cards", "organization")
+	if err := os.MkdirAll(cards, 0o755); err != nil {
+		t.Fatalf("mkdir cards: %v", err)
+	}
+	// The presets are the real ones, copied in: the build resolves every card's
+	// enforce ids against them, and a checkout without them is not a checkout
+	// the build can run in.
+	if err := copyDirRecursive(filepath.Join(repoRoot(t), "presets"), filepath.Join(root, "presets")); err != nil {
+		t.Fatalf("copy presets: %v", err)
+	}
+	cardID = "watch-the-shared-worktree"
+	body := "---\nid: " + cardID + "\ntitle: Wait for the worktree before writing into it\ncategory: organisation\nscope: [project:driven]\nkind: practice\nstatus: adopted\nalways: false\nenforce: []\nevidence: []\n---\nA shared worktree has one working tree, so a second send into it races\nthe first.\n"
+	if err := os.WriteFile(filepath.Join(cards, cardID+".md"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write card: %v", err)
+	}
+	gitRun(t, root, "init", "-b", "main", "-q")
+	gitRun(t, root, "config", "user.email", "fixture@work-director")
+	gitRun(t, root, "config", "user.name", "Fixture")
+	gitRun(t, root, "add", ".")
+	gitRun(t, root, "commit", "-qm", "the taste as it was")
+	// The environment a run needs to find this checkout rather than the real one.
+	env = f.env(t, f.bin)
+	for i, e := range env {
+		if strings.HasPrefix(e, "WD_ROOT=") {
+			env[i] = "WD_ROOT=" + root
+		}
+	}
+	return root, cardID, env
+}
+
+// Under autonomy nothing waits on a person, and a card promoted to the global
+// taste is the loudest thing the loop can change: every future session in every
+// project reads it. So the loop judges it on its own judgement, spends that
+// judgement from the same bound, records the decision on the work that showed
+// the pattern, and says what it did in its own output.
+func TestTheLoopDecidesForItselfWhatBecomesGlobal(t *testing.T) {
+	f := newCLIFixture(t)
+	driveProject(t, f)
+	root, cardID, env := seedTasteCheckout(t, f)
+	goal, task := drivenGoal(t, f, "Judge the card yourself")
+	f.runEnvOK(t, env, "feedback", "add", "the rule held on three separate runs",
+		"--card", cardID, "--project", "driven", "--source", "attached", "--work", task)
+	judgeAnswer(t, f, true)
+
+	out := f.runEnvOK(t, env, "drive", goal, "--turns", "1", "--judgements", "2",
+		"--stalled", "0", "--poll-seconds", "1")
+
+	// The card is global and adopted, written by the judgement rather than
+	// proposed for a person to sign off. That is the whole difference between
+	// this and a command somebody has to remember to run.
+	global := filepath.Join(root, "taste", "cards", "organisation", cardID+"-global.md")
+	card, err := os.ReadFile(global)
+	if err != nil {
+		t.Fatalf("no global card written: %v", err)
+	}
+	for _, want := range []string{"status: adopted", "scope: [global]", "id: " + cardID + "-global"} {
+		if !strings.Contains(string(card), want) {
+			t.Errorf("global card is missing %q:\n%s", want, card)
+		}
+	}
+	// The artifacts are rebuilt from it, or the belief changed on disk and never
+	// reached a session: the plugin is how taste travels.
+	if _, err := os.Stat(filepath.Join(root, "plugin", "constitution.md")); err != nil {
+		t.Errorf("the plugin was not rebuilt from the promoted card: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "dist", "AGENTS.fragment.md")); err != nil {
+		t.Errorf("the agents fragment was not rebuilt from the promoted card: %v", err)
+	}
+	// The change is committed, staged to the card and the artifacts and nothing
+	// else, so the loop cannot sweep in unrelated work from the tree.
+	head := gitOut(t, root, "log", "-1", "--pretty=%s")
+	if !strings.Contains(head, cardID) {
+		t.Errorf("HEAD = %q, want a commit naming the card it promoted", head)
+	}
+	if dirty := gitOut(t, root, "status", "--porcelain"); dirty != "" {
+		t.Errorf("the checkout is left dirty:\n%s", dirty)
+	}
+	if body := gitOut(t, root, "show", "--stat", "--pretty=", "HEAD"); strings.Contains(body, "sample-app") {
+		t.Errorf("the promotion commit touched something outside the taste:\n%s", body)
+	}
+	// The decision is on the work that showed the pattern, as a structured claim
+	// naming the card, so a review reads why the taste changed rather than only
+	// that it did.
+	events := f.events(t, task)
+	found := false
+	for _, e := range events {
+		if e.Kind != core.EventDecision || e.Decision == nil {
+			continue
+		}
+		if strings.Contains(e.Decision.Question, cardID) {
+			found = true
+			if e.Decision.Answer == "" {
+				t.Error("the recorded claim has no answer, so it is not a decision anybody can read")
+			}
+			if e.Decision.Source != "judge" {
+				t.Errorf("claim source = %q, want judge: a promotion decided by the loop is not a person's claim", e.Decision.Source)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no decision naming %s on %s: a promotion with no claim on it cannot be audited", cardID, task)
+	}
+	// The run says what it changed about what the loop believes. A loop that
+	// promotes a card in silence leaves the largest thing it did to be found
+	// later by somebody diffing the taste.
+	if !strings.Contains(out, "promoted to the global taste: "+cardID) {
+		t.Errorf("run output does not name what it promoted:\n%s", out)
+	}
+	// And the card is a candidate no more, so a later run cannot promote it twice.
+	if scan := f.runEnvOK(t, env, "scan"); strings.Contains(scan, cardID) {
+		t.Errorf("wd scan still offers the promoted card:\n%s", scan)
+	}
+}
+
+// A decline is an answer about a card too. The card stays a candidate, nothing is
+// written, nothing is committed, and the run says it looked — rather than
+// promoting a rule a model said it could not place, or leaving a reader to
+// wonder whether the loop ever saw the card at all.
+func TestACardTheLoopJudgesNotGlobalIsHeldAndNothingIsWritten(t *testing.T) {
+	f := newCLIFixture(t)
+	driveProject(t, f)
+	root, cardID, env := seedTasteCheckout(t, f)
+	goal, task := drivenGoal(t, f, "Hold the card")
+	f.runEnvOK(t, env, "feedback", "add", "the rule held once",
+		"--card", cardID, "--project", "driven", "--source", "attached", "--work", task)
+	judgeAnswer(t, f, false)
+	before := headOf(t, root)
+
+	out := f.runEnvOK(t, env, "drive", goal, "--turns", "1", "--judgements", "2",
+		"--stalled", "0", "--poll-seconds", "1")
+
+	if _, err := os.Stat(filepath.Join(root, "taste", "cards", "organisation", cardID+"-global.md")); err == nil {
+		t.Error("a global card was written for a judgement that declined")
+	}
+	if after := headOf(t, root); after != before {
+		t.Errorf("HEAD moved from %s to %s, want nothing committed for a held card", before, after)
+	}
+	if !strings.Contains(out, "judged not global, left as it is: "+cardID) {
+		t.Errorf("run output does not name the card it held:\n%s", out)
+	}
+	// The refusal is on the work the judgement was recorded against, and it is
+	// not a claim: the ledger never gains a decision nobody made.
+	events := f.events(t, task)
+	claims, notes := 0, 0
+	for _, e := range events {
+		if e.Kind == core.EventDecision && e.Decision != nil {
+			claims++
+		}
+		if e.Kind == core.EventNote && strings.Contains(e.Body, cardID) {
+			notes++
+		}
+	}
+	if claims != 0 {
+		t.Errorf("%d claims recorded for a declined judgement, want none", claims)
+	}
+	if notes == 0 {
+		t.Error("a declined card is not on the record at all, so a reader cannot tell the loop looked")
+	}
+	// Still a candidate, so a run with more evidence can ask again.
+	if scan := f.runEnvOK(t, env, "scan"); !strings.Contains(scan, cardID) {
+		t.Errorf("a held card is no longer a candidate:\n%s", scan)
+	}
+}
+
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	c := exec.Command("git", args...)
+	c.Dir = dir
+	out, err := c.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }

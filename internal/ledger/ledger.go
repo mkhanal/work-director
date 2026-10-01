@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS work (id TEXT PRIMARY KEY, project TEXT NOT NULL, tit
   kind TEXT NOT NULL, state TEXT NOT NULL, runner TEXT, session TEXT, ref TEXT, cwd TEXT, created TEXT NOT NULL, updated TEXT NOT NULL,
   parent TEXT, heading TEXT, claim TEXT, impact TEXT, goal_type TEXT);
 CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), kind TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL, effective TEXT, payload TEXT);
-CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT, card TEXT, source TEXT NOT NULL, at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT, card TEXT, source TEXT NOT NULL, at TEXT NOT NULL, work TEXT REFERENCES work(id));
 CREATE TABLE IF NOT EXISTS concern (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), text TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, decision TEXT, at TEXT NOT NULL, resolved_at TEXT);
 CREATE TABLE IF NOT EXISTS worktree (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), path TEXT NOT NULL, branch TEXT, kind TEXT NOT NULL, state TEXT NOT NULL, created TEXT NOT NULL, origin TEXT NOT NULL DEFAULT 'attached');
 CREATE TABLE IF NOT EXISTS filed (work TEXT PRIMARY KEY REFERENCES work(id), session TEXT NOT NULL, entries INTEGER NOT NULL);
@@ -48,6 +48,12 @@ var addedColumns = []struct{ table, col, decl string }{
 	// are absent rather than defaulted so a reader can tell "not separated"
 	// from "recorded the same way".
 	{"event", "effective", "TEXT"}, {"event", "payload", "TEXT"},
+	// work on feedback is null on a note somebody typed by hand. Attached
+	// evidence came out of a session and knows the work it came from, because
+	// evidence with no pointer back to the thing that produced it cannot be
+	// audited against it — and a card promoted on that evidence records its
+	// decision on that work, so the two have to meet somewhere.
+	{"feedback", "work", "TEXT REFERENCES work(id)"},
 }
 
 type Ledger struct {
@@ -251,13 +257,14 @@ func scanEvent(s rowScanner) (core.Event, error) {
 func scanFeedback(s rowScanner) (core.Feedback, error) {
 	var f core.Feedback
 	var source string
-	var project, card sql.NullString
-	err := s.Scan(&f.ID, &f.Text, &project, &card, &source, &f.At)
+	var project, card, work sql.NullString
+	err := s.Scan(&f.ID, &f.Text, &project, &card, &source, &f.At, &work)
 	if err != nil {
 		return core.Feedback{}, err
 	}
 	f.Project = nullStr(project)
 	f.Card = nullStr(card)
+	f.Work = nullStr(work)
 	if f.Source, err = core.ParseFeedbackSource(source); err != nil {
 		return core.Feedback{}, fmt.Errorf("feedback %d: %w", f.ID, err)
 	}
@@ -858,7 +865,7 @@ func (l *Ledger) SetCursor(project, name string, value int) error {
 // the decisions made under it: a card that changed what the loop thinks is
 // part of what the loop decided.
 func (l *Ledger) FeedbackAfter(after int) ([]core.Feedback, error) {
-	rows, err := l.db.Query(`SELECT id, text, project, card, source, at FROM feedback WHERE id > ? ORDER BY id`, after)
+	rows, err := l.db.Query(`SELECT id, text, project, card, source, at, work FROM feedback WHERE id > ? ORDER BY id`, after)
 	if err != nil {
 		return nil, err
 	}
@@ -1143,6 +1150,9 @@ type FeedbackOptions struct {
 	Project *string
 	Card    *string
 	Source  core.FeedbackSource
+	// Work is the piece of work the evidence came from, when it came from one.
+	// A note typed by hand has none and says so rather than guessing.
+	Work *string
 }
 
 func (l *Ledger) AddFeedback(text string, o FeedbackOptions) (core.Feedback, error) {
@@ -1150,10 +1160,18 @@ func (l *Ledger) AddFeedback(text string, o FeedbackOptions) (core.Feedback, err
 	if source == "" {
 		source = core.FeedbackDirector
 	}
+	// The work is checked before the insert rather than left to the constraint,
+	// because a bare constraint failure does not say which work was missing and
+	// the person filing evidence is the one who has to fix it.
+	if o.Work != nil {
+		if _, err := l.Get(*o.Work); err != nil {
+			return core.Feedback{}, noWork(*o.Work)
+		}
+	}
 	f, err := scanFeedback(l.db.QueryRow(
-		`INSERT INTO feedback (text, project, card, source, at) VALUES (?, ?, ?, ?, ?)
-		 RETURNING id, text, project, card, source, at`,
-		text, o.Project, o.Card, string(source), now()))
+		`INSERT INTO feedback (text, project, card, source, at, work) VALUES (?, ?, ?, ?, ?, ?)
+		 RETURNING id, text, project, card, source, at, work`,
+		text, o.Project, o.Card, string(source), now(), o.Work))
 	if err != nil {
 		return core.Feedback{}, fmt.Errorf("feedback insert failed: %w", err)
 	}
@@ -1161,7 +1179,7 @@ func (l *Ledger) AddFeedback(text string, o FeedbackOptions) (core.Feedback, err
 }
 
 func (l *Ledger) Feedback() ([]core.Feedback, error) {
-	rows, err := l.db.Query(`SELECT id, text, project, card, source, at FROM feedback ORDER BY id`)
+	rows, err := l.db.Query(`SELECT id, text, project, card, source, at, work FROM feedback ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}

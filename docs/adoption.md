@@ -69,10 +69,17 @@ match your stack.
 
 ```
 wd feedback add "a handler swallowed the failure and logged" --card fail-loud
+wd feedback add "a gate that cannot fail is not a gate" --card no-defensive-mechanism --work <id>
 wd distill                      # groups repeated feedback into candidates
-wd scan                         # also surfaces project rules to promote to global
-wd scan --adopt <candidate>     # writes a global *candidate* card; adopt it, then go run ./cmd/taste
+wd scan                         # also surfaces project rules worth asking about as global
+wd scan --adopt <candidate>     # by hand: writes a global *candidate* card; adopt it, then go run ./cmd/taste
 ```
+
+You do not have to do that last part yourself. `wd drive <goal>` asks about the same candidates
+from the same judgement budget it spends on executors' questions, and a card decided to be true
+beyond its project is written global and adopted, the artifacts rebuilt, the change committed and
+named in the run's output. A card judged to be a project convention is left as it is, and the run
+says it looked. Point the loop at your checkout with `WD_ROOT` so it has somewhere to write.
 
 ## 2. Director — orchestrate many repos from the terminal
 

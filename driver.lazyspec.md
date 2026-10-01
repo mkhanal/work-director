@@ -41,6 +41,30 @@ unanswered. Retrying a question a model has declined to settle spends the run's
 budget on a question it has already said it cannot answer. A hedged reply counts
 as a refusal for the same reason.
 
+## Taste Is Judged From The Same Budget, And Only Once
+Each turn, after the work's own questions are settled, the driver asks about the
+taste: the cards waiting to be judged come from `Candidates`, and the question is
+put through `TasteJudge`, `Spend` and the same judgement bound as an executor's.
+A second judge function because the brief is a different one, not a second
+budget — promoting a card changes what every future session in every project
+believes, so a change that loud gets the same scrutiny as a decision delivered to
+a running task, not less. Each card is asked once a run and skipped thereafter:
+a card stays a candidate until it is promoted, so without that the loop would ask
+about the same card every turn and reach the same answer every turn, spending the
+whole budget to do it. A later run asks again, because more evidence is a
+different question. A decline holds the card and the run names it as judged not
+global, so a reader can see the loop looked rather than left to wonder. A driver
+with no taste judge leaves its taste alone, which is the smaller mistake of the
+two.
+
+## A Workful Turn Spends Its Judgement On The Work Before The Taste
+An executor's question is somebody waiting to work; a card that could be promoted
+one turn later is nobody waiting. So a turn answers the work's questions first and
+taste takes what is left, and a run whose judgement bound is spent on its own
+work promotes nothing rather than promoting a stranger's rule while its own task
+sits stuck. A question past the bound is not dropped either way: it is named as
+where a person is still needed.
+
 ## A Judgement Is Recorded Before It Is Delivered
 A judgement is recorded on the work before the answer is handed to the executor
 waiting on it, and the spend is what the turn actually reported rather than

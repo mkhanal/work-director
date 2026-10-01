@@ -100,6 +100,12 @@ type Turn struct {
 	// judgement: both are the ledger's own answer about what it would not pass.
 	Closed  []string          `json:"closed"`
 	Blocked map[string]string `json:"blocked"`
+	// Promoted is the taste card this turn made global, and Held is the one it
+	// judged should stay where it is. Taste is the loudest thing a loop changes
+	// and it is judged like everything else, so a run says what it changed about
+	// what the loop believes rather than leaving that to be noticed later.
+	Promoted []string `json:"promoted"`
+	Held     []string `json:"held"`
 	// Failed is why the turn could not run. Empty is a turn that ran.
 	Failed string `json:"failed"`
 }
@@ -138,10 +144,16 @@ type Result struct {
 	// naming the gate that stopped it. It is the honest bill of a run that did
 	// everything it could: a gate that refuses is not a failure to hide, it is
 	// the one thing a person is still needed for.
-	Blocked    map[string]string `json:"blocked"`
-	Turns      int               `json:"turns"`
-	Judgements int               `json:"judgements"`
-	Tokens     int               `json:"tokens"`
+	Blocked map[string]string `json:"blocked"`
+	// Promoted is the taste card this run made global, and Held is the one it
+	// judged should stay where it is. What the loop believes about itself
+	// changed during the run, and a run that does not say so leaves the biggest
+	// thing it did to be found later by somebody diffing the taste.
+	Promoted   []string `json:"promoted"`
+	Held       []string `json:"held"`
+	Turns      int      `json:"turns"`
+	Judgements int      `json:"judgements"`
+	Tokens     int      `json:"tokens"`
 	// Answered and Unanswered are the questions this run settled and the ones it
 	// could not. Unanswered is the honest list of where a person is still
 	// needed, and it is empty only when the goal shipped.
@@ -180,6 +192,30 @@ type Closing struct {
 // that has not spoken yet, and a gate that has been tried and refused.
 type Close func(goal core.Work) (Closing, error)
 
+// Candidate is a rule card waiting to be judged for the global taste, and what
+// to do with the answer. The judgement is the driver's, not the step's: taste is
+// the loudest thing the loop can change, so it is asked and recorded through the
+// same budget and the same record as any other question, and a step that asked
+// on its own would be a second, quieter budget.
+type Candidate struct {
+	// Work is the work the decision is recorded on: the one whose evidence put
+	// the card forward. A decision needs somewhere to live so a reader can find
+	// it, and the work that showed the pattern is the place a reader looks.
+	Work string
+	// Asked is the brief put to the model and Recorded is the one line that
+	// goes on the ledger. They differ because a brief is a page of instruction
+	// and a claim is a line a reader scans: recording the brief and truncating
+	// it would leave the card unnamed on the very record that promoted it.
+	Asked    string
+	Recorded string
+	// Apply puts the verdict into effect and names the card it acted on, or ""
+	// when it did nothing. A decline is an answer, so Apply is called with one.
+	Apply func(v Verdict) (string, error)
+}
+
+// Candidates is what is waiting to be judged about the taste.
+type Candidates func() ([]Candidate, error)
+
 // Driver runs one goal's loop. Everything it does that reaches out — the
 // coordination pass, the judgement, recording the judgement, delivering the
 // answer — is injected, so the thing that decides when to stop contains no I/O
@@ -194,6 +230,11 @@ type Driver struct {
 	// unanswered, which is the old supervised behaviour: it works, and it stops
 	// at the first question.
 	Judge Judge
+	// TasteJudge answers a question about the taste, which is a different
+	// question with a different brief, and it is a separate function so neither
+	// can borrow the other's words. A driver with none judges its work and
+	// leaves its taste alone, which is the smaller mistake of the two.
+	TasteJudge Judge
 	// Spend records a judgement as a structured decision on the work. It is
 	// required whenever there is a judge, because an unrecorded decision is
 	// one the review surface cannot show a reader.
@@ -205,6 +246,10 @@ type Driver struct {
 	// it a task that reported DONE sits in review for ever, and the run that
 	// watched it get there calls a goal finished while its work is unfinished.
 	Close Close
+	// Candidates reports the taste cards waiting to be judged. It is asked of
+	// the driver's own judge rather than of its own, and it is nil-safe: a
+	// driver that does not judge taste simply does not.
+	Candidates Candidates
 	// Now is the clock, so a deadline is testable without waiting for one.
 	Now func() time.Time
 	// Poll is how long a turn waits before looking again. Zero polls as fast as
@@ -271,6 +316,8 @@ func (d *Driver) Drive(goal core.Work, b Budget) (Result, error) {
 			}
 			res.Blocked[id] = gate
 		}
+		res.Promoted = append(res.Promoted, t.Promoted...)
+		res.Held = append(res.Held, t.Held...)
 		if d.OnTurn != nil {
 			d.OnTurn(turn, t, spent)
 		}
@@ -371,17 +418,16 @@ func (d *Driver) turn(goal core.Work, b, spent Budget, settled []core.Work, put 
 		}
 		t.Closed, t.Blocked = c.Closed, c.Blocked
 	}
-	if len(pass.Unanswered) == 0 {
-		return t, spent, nil
-	}
-	if d.Judge == nil || d.Send == nil {
+	if len(pass.Unanswered) > 0 && (d.Judge == nil || d.Send == nil) {
 		// With no judge, every question stays unanswered. That is the old
 		// behaviour and it is honest: the loop stops at the first question and
 		// says which question, rather than pretending to have settled it.
 		t.Unanswered = pass.Unanswered
-		return t, spent, nil
 	}
 	for _, q := range pass.Unanswered {
+		if d.Judge == nil || d.Send == nil {
+			break
+		}
 		if put[q.Text] {
 			// Already put to the model this run. A pass reports the question
 			// again every turn because the executor is still asking it, and
@@ -393,36 +439,22 @@ func (d *Driver) turn(goal core.Work, b, spent Budget, settled []core.Work, put 
 			continue
 		}
 		put[q.Text] = true
-		if b.Judgements > 0 && spent.Judgements >= b.Judgements {
-			// Out of judgement. The remaining questions are not dropped: they
-			// become the list of where a person is still needed, which is the
-			// run's honest bill.
-			t.Unanswered = append(t.Unanswered, q)
-			continue
-		}
-		if b.Tokens > 0 && spent.Tokens >= b.Tokens {
-			t.Unanswered = append(t.Unanswered, q)
-			continue
-		}
-		v, err := d.Judge(q.Text, settled)
-		if err != nil {
-			// A judge that could not run is not a decline: it is a failure, and
-			// it is reported as one rather than quietly counted as an answer.
-			t.Failed = fmt.Sprintf("judging %s: %v", q.Work, err)
+		var v Verdict
+		var asked bool
+		var why string
+		// Assigned rather than declared: a := here would shadow the run's spend
+		// inside the loop body and the budget would stop being the budget.
+		v, spent, asked, why = d.putToModel(d.Judge, q.Work, q.Text, q.Text, b, spent, settled)
+		if why != "" {
+			t.Failed = why
 			return t, spent, nil
 		}
-		spent.Judgements++
-		spent.Tokens += v.Tokens
-		if d.Spend != nil {
-			if err := d.Spend(q.Work, q.Text, v); err != nil {
-				t.Failed = "recording a judgement: " + err.Error()
-				return t, spent, nil
-			}
-		}
-		if !v.Decided() {
+		if !asked || !v.Decided() {
 			// A decline is a real answer and it counts. Retrying a question a
 			// model has declined to settle spends the run's budget on a
-			// question it has already said it cannot answer.
+			// question it has already said it cannot answer. So is a question
+			// past the bound: it is not dropped, it becomes the list of where a
+			// person is still needed, which is the run's honest bill.
 			t.Unanswered = append(t.Unanswered, q)
 			continue
 		}
@@ -431,6 +463,108 @@ func (d *Driver) turn(goal core.Work, b, spent Budget, settled []core.Work, put 
 			return t, spent, nil
 		}
 		t.Answered = append(t.Answered, q.Work)
+	}
+	// Taste last. An executor's question is somebody waiting to work; a card
+	// that could be promoted one turn later is nobody waiting. So the judgement
+	// budget is spent on the work first and taste gets what is left, which is
+	// why a run with a small judgement bound promotes nothing rather than
+	// answering a stranger and leaving its own work stuck.
+	ft, spent, err := d.taste(b, spent, settled, put)
+	ft.Answered, ft.Unanswered, ft.Escalated = t.Answered, t.Unanswered, t.Escalated
+	ft.Closed, ft.Blocked = t.Closed, t.Blocked
+	if ft.Failed != "" {
+		return ft, spent, nil
+	}
+	return ft, spent, nil
+}
+
+// putToModel asks the judge one question when there is budget for it, and records
+// the verdict before anything acts on it. It returns whether it was asked: a
+// question past the bound is not asked and not asking is not a decline, so the
+// caller decides what an unasked question means for its own kind of work.
+func (d *Driver) putToModel(judge Judge, work, asked, recorded string, b, spent Budget, settled []core.Work) (Verdict, Budget, bool, string) {
+	if judge == nil {
+		return Verdict{}, spent, false, ""
+	}
+	if b.Judgements > 0 && spent.Judgements >= b.Judgements {
+		return Verdict{}, spent, false, ""
+	}
+	if b.Tokens > 0 && spent.Tokens >= b.Tokens {
+		return Verdict{}, spent, false, ""
+	}
+	v, err := judge(asked, settled)
+	if err != nil {
+		// A judge that could not run is not a decline: it is a failure, and it
+		// is reported as one rather than quietly counted as an answer.
+		return Verdict{}, spent, false, fmt.Sprintf("judging %s: %v", work, err)
+	}
+	spent.Judgements++
+	spent.Tokens += v.Tokens
+	if d.Spend != nil {
+		if err := d.Spend(work, recorded, v); err != nil {
+			return v, spent, false, "recording a judgement: " + err.Error()
+		}
+	}
+	return v, spent, true, ""
+}
+
+// taste is the loop's own standing question: which rule cards, if any, are worth
+// making global. One card a turn, each asked once, through the same judge, the
+// same bound and the same record as an executor's question — because promoting
+// a card changes what every future session believes, and a change that loud
+// deserves the same scrutiny as a decision delivered to a running task, not
+// less.
+func (d *Driver) taste(b, spent Budget, settled []core.Work, put map[string]bool) (Turn, Budget, error) {
+	var t Turn
+	if d.Candidates == nil || d.TasteJudge == nil {
+		return t, spent, nil
+	}
+	cands, err := d.Candidates()
+	if err != nil {
+		t.Failed = "looking for taste to judge: " + err.Error()
+		return t, spent, nil
+	}
+	for _, cand := range cands {
+		if cand.Apply == nil {
+			continue
+		}
+		if put[cand.Recorded] {
+			// Already put to the model this run. A card is a candidate until it
+			// is promoted, so without this the loop would ask about the same
+			// card every turn and reach the same answer every turn, spending
+			// the budget to do it. A later run asks again, because more evidence
+			// may have arrived and that is a different question.
+			continue
+		}
+		put[cand.Recorded] = true
+		var v Verdict
+		var asked bool
+		var why string
+		v, spent, asked, why = d.putToModel(d.TasteJudge, cand.Work, cand.Asked, cand.Recorded, b, spent, settled)
+		if why != "" {
+			t.Failed = why
+			return t, spent, nil
+		}
+		if !asked {
+			// Out of budget. The card stays a candidate, which is exactly where
+			// it already was, and a run with budget can judge it.
+			return t, spent, nil
+		}
+		card, err := cand.Apply(v)
+		if err != nil {
+			t.Failed = "promoting taste: " + err.Error()
+			return t, spent, nil
+		}
+		if card == "" {
+			continue
+		}
+		if v.Decided() {
+			t.Promoted = append(t.Promoted, card)
+		} else {
+			// A decline is an answer, so the card is held and the run says so
+			// rather than leaving a reader to wonder whether the loop looked.
+			t.Held = append(t.Held, card)
+		}
 	}
 	return t, spent, nil
 }

@@ -250,7 +250,12 @@ type Feedback struct {
 	Project *string        `json:"project"`
 	Card    *string        `json:"card"`
 	Source  FeedbackSource `json:"source"`
-	At      string         `json:"at"`
+	// Work is the piece of work the evidence came from, when it came from one.
+	// Evidence that cannot be pointed back at the thing that produced it cannot
+	// be audited against it, and a card promoted on that evidence records its
+	// decision there.
+	Work *string `json:"work"`
+	At   string  `json:"at"`
 }
 
 type Candidate struct {

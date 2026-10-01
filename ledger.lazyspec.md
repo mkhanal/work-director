@@ -95,6 +95,15 @@ a sweep has already shown a reader, and one that forgets shows the same thing
 twice while hiding everything that changed since. Names are independent within
 a project, so a sweep that keeps two streams keeps two independent marks.
 
+## Evidence From A Session Knows The Work It Came From
+Feedback carries a nullable `work`, set when the evidence came out of a session
+running a work item and null when somebody typed a note by hand. The column is
+null rather than defaulted because a note really has no work behind it, and a
+feedback row pointed at the work that produced it is what a card promoted on that
+evidence records its decision against — evidence that cannot be pointed back at
+the thing that produced it cannot be audited against it. The reference means
+feedback for a work that does not exist fails, like every other relation.
+
 ## Events Concerns And Worktrees Belong To Existing Work
 `AddEvent`, `AddConcern` and `AddWorktree` for a work id that does not exist
 fail and store nothing.

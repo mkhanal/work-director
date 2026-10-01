@@ -2326,7 +2326,7 @@ func (c *Cli) feedback(rest []string) error {
 	}
 	if sub == "add" {
 		if len(rest) < 2 {
-			return fail("usage: wd feedback add <text> [--project p] [--card c] [--source director|note|attached]")
+			return fail("usage: wd feedback add <text> [--project p] [--card c] [--work id] [--source director|note|attached]")
 		}
 		text := rest[1]
 		var source core.FeedbackSource
@@ -2337,10 +2337,20 @@ func (c *Cli) feedback(rest []string) error {
 			}
 			source = parsed
 		}
+		work := str(a, "work")
+		if work != nil {
+			// Evidence that names a work names a real one: a note pointed at
+			// work that is not there is evidence nothing can be audited against,
+			// and it would be found out only when a card was promoted on it.
+			if _, err := c.Ledger.Get(*work); err != nil {
+				return fail("no work %s to file this evidence against", *work)
+			}
+		}
 		f, err := c.Ledger.AddFeedback(text, ledger.FeedbackOptions{
 			Project: str(a, "project"),
 			Card:    str(a, "card"),
 			Source:  source,
+			Work:    work,
 		})
 		if err != nil {
 			return err
@@ -2348,7 +2358,7 @@ func (c *Cli) feedback(rest []string) error {
 		return c.out(f, strconv.Itoa(f.ID))
 	}
 	if sub != "" && sub != "list" {
-		return fail("usage: wd feedback (list | add <text> [--project p] [--card c] [--source director|note|attached])")
+		return fail("usage: wd feedback (list | add <text> [--project p] [--card c] [--work id] [--source director|note|attached])")
 	}
 	all, err := c.Ledger.Feedback()
 	if err != nil {

@@ -76,7 +76,7 @@ func (c *Cli) Reflect(w core.Work, texts []string) (reflectResult, error) {
 	for _, v := range durable {
 		proj := w.Project
 		card := v.Card
-		opts := ledger.FeedbackOptions{Source: core.FeedbackAttached, Project: &proj}
+		opts := ledger.FeedbackOptions{Source: core.FeedbackAttached, Project: &proj, Work: &w.ID}
 		if card != "" {
 			opts.Card = &card
 		}

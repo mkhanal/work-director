@@ -112,6 +112,26 @@ After `wd scan --adopt <card>` writes the global candidate, `wd scan` exits 0
 without listing that card, and adopting it again exits 1 with `no promotion
 candidate <card>`, leaving the written candidate as it was.
 
+## The Loop Decides For Itself What Becomes Global
+`wd drive` asks about the taste each turn, through the same judge, the same
+bound and the same record as an executor's question: the cards waiting to be
+judged come from the promotion candidates, the brief names the card and its
+evidence, and the decision is recorded on the work that supplied the most recent
+piece of evidence, so a review reads why the taste changed and not only that it
+did. A decided card is written global and adopted, the artifacts are rebuilt from
+it, and the change is committed — staged to the card and the artifacts and
+nothing else, because a loop that ran `git add -A` would sweep in whatever else
+was in the tree. A declined card is left exactly as it was and the run names it
+as judged not global, so a reader can see the loop looked rather than left to
+wonder; the refusal is on the work and is not a claim, because the ledger never
+gains a decision nobody made. Either way the run's own output names the card:
+what the loop believes about itself changed, and the largest thing it did should
+not have to be found later by somebody diffing the taste. A card promoted this
+way is a candidate no more. `wd feedback add --work <id>` files evidence against
+the work it came from and refuses a work that is not there, and a checkout
+behind no card is no candidate: a taste the loop believes in but cannot ship is a
+taste that quietly does not exist.
+
 ## Goal Run Spawns Only Children Not Yet Under Way
 `wd epic run` spawns the open children that are queued or briefed, or
 running with neither session nor claim. Children in review, needs-input,

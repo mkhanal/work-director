@@ -6,6 +6,7 @@ import (
 
 	"wd/internal/core"
 	"wd/internal/project"
+	"wd/internal/taste"
 )
 
 func TestTheModelIsToldThatDecliningIsALegitimateAnswer(t *testing.T) {
@@ -117,5 +118,46 @@ func TestAJudgementIsRecordedAsADecisionWithWhatItCostAndADeclineIsNotOne(t *tes
 	}
 	if strings.Contains(declined, "answer:") {
 		t.Errorf("event = %q, want it never to read as a decision", declined)
+	}
+}
+
+// Promoting a card changes what every future session in every project believes,
+// so the brief that asks about it has to say so. A model that does not know the
+// stakes will answer confidently about a rule it has never had to live with.
+func TestACardIsJudgedByABriefThatKnowsWhatPromotingItCosts(t *testing.T) {
+	p := &project.Project{Name: "sample"}
+	card := taste.Card{
+		ID:        "project-layout",
+		Title:     "The API layer lives under internal/api",
+		Category:  taste.CategoryOrganisation,
+		Kind:      taste.KindPractice,
+		Scope:     []taste.Scope{"project:sample"},
+		Statement: "Keep handlers in internal/api so the transport stays swappable.",
+		Body:      "The web handler in cmd/ never imports the domain directly.",
+	}
+	evidence := []string{"- [sample] wd send raced a busy task in a shared worktree"}
+	brief := PromotionBrief(p, card, evidence)
+
+	for _, want := range []string{
+		"sample",         // which project the card was written in
+		"project-layout", // the card, by name: a decision that does not name its card cannot be found
+		"The API layer lives under internal/api",
+		"internal/api so the transport", // the card's own statement, not a summary of it
+		"wd send raced a busy task",     // the evidence, quoted
+		"project:sample",                // the scope it has today, so the model can see what it is being widened from
+		"every future session",          // the stakes
+		"must NOT become global",        // the trap: a project convention, promoted on its own evidence
+		"DECLINE:",                      // a way to say no
+		"```",                           // the evidence is fenced, so a line in it cannot read as a command
+	} {
+		if !strings.Contains(brief, want) {
+			t.Errorf("brief is missing %q", brief)
+		}
+	}
+	// A card with no evidence is said to have none rather than left to look
+	// overlooked, and it still goes to the model: the absence of evidence is
+	// itself something a judgement can weigh.
+	if empty := PromotionBrief(p, card, nil); !strings.Contains(empty, "nothing recorded") {
+		t.Error("a card with no evidence is not shown to have none")
 	}
 }

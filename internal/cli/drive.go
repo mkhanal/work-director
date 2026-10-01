@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,7 +15,9 @@ import (
 	"wd/internal/judge"
 	"wd/internal/ledger"
 	"wd/internal/project"
+	"wd/internal/promotion"
 	"wd/internal/runner"
+	"wd/internal/taste"
 )
 
 // judgeTimeout bounds one judgement call. It is one bounded question, so it
@@ -147,6 +150,208 @@ func (c *Cli) closeOne(t core.Work) (string, error) {
 	return "", nil
 }
 
+// tasteJudgeOnce asks about the taste, which needs its own brief and so its own
+// call: a model told it is settling an executor's fork would answer a different
+// question than the one asked, and the wrong answer here reaches every project
+// rather than one task.
+func (c *Cli) tasteJudgeOnce(p *project.Project) driver.Judge {
+	return func(question string, _ []core.Work) (driver.Verdict, error) {
+		brief := question
+		rn, err := detectedRunner(p.Runner)
+		if err != nil {
+			return driver.Verdict{}, err
+		}
+		h, err := rn.Spawn(runner.SpawnOptions{
+			Cwd:   p.Path,
+			Name:  "wd judge taste",
+			Brief: brief,
+			Model: p.Model,
+		})
+		if err != nil {
+			return driver.Verdict{}, err
+		}
+		v := awaitJudgement(rn, h)
+		return driver.Verdict{
+			Answer:  v.Answer,
+			Decline: v.Decline,
+			Tokens:  v.Tokens,
+			Runner:  rn.Name(),
+			Model:   strOrEmpty(p.Model),
+		}, nil
+	}
+}
+
+// promoteTaste reports the rule cards waiting to be judged for the global taste,
+// as candidates for the driver's own judge. The question is the brief, because
+// the brief is the whole shape of this judgement and the driver passes a
+// question through untouched.
+//
+// A card with no checkout behind it is not a candidate: promoting it would write
+// a file into a directory the tool had only guessed at, and a taste the loop
+// believes in but cannot ship is a taste that quietly does not exist.
+func (c *Cli) promoteTaste(p *project.Project) ([]driver.Candidate, error) {
+	cards, cardsDir, err := loadTasteCards()
+	if err != nil {
+		return nil, err
+	}
+	if cardsDir == "" {
+		return nil, nil
+	}
+	feedback, err := c.Ledger.Feedback()
+	if err != nil {
+		return nil, err
+	}
+	cands := promotion.PromotionCandidates(cards, feedback)
+	out := make([]driver.Candidate, 0, len(cands))
+	for _, cand := range cands {
+		shown := make([]string, 0, len(cand.Evidence))
+		for _, f := range cand.Evidence {
+			line := fmt.Sprintf("- %s", clipLine(f.Text, 200))
+			if f.Project != nil {
+				line = fmt.Sprintf("- [%s] %s", *f.Project, line[2:])
+			}
+			shown = append(shown, line)
+		}
+		// The ledger line names the card; the brief is what the model reads. A
+		// brief truncated onto the work would cut the card off, and the record
+		// of what was promoted is the one place a reader looks for the name.
+		recorded := fmt.Sprintf("promote card %s (%s) to the global taste: is it true beyond the project it was written in?", cand.Card.ID, clipLine(cand.Card.Title, 80))
+		out = append(out, driver.Candidate{
+			Work:     hostOf(cand.Evidence),
+			Asked:    judge.PromotionBrief(p, cand.Card, shown),
+			Recorded: recorded,
+			Apply:    c.promoteCard(cand, cardsDir),
+		})
+	}
+	return out, nil
+}
+
+// hostOf is the work a promotion decision is recorded on: the most recent piece
+// of evidence, because that is the observation that put the card forward. A
+// decision needs a row to live on so a reader can find it, and the work that
+// showed the pattern is the row a reader looks at.
+func hostOf(evidence []core.Feedback) string {
+	if len(evidence) == 0 {
+		return ""
+	}
+	last := evidence[len(evidence)-1]
+	if last.Work != nil {
+		return *last.Work
+	}
+	return ""
+}
+
+// promoteCard is what a decided promotion does: the global card is written
+// adopted, the artifacts are rebuilt from it, and the change is committed on its
+// own. The card is the source and never hand-edited, so writing it is the edit;
+// the rebuild is what makes it reach a session; and the commit is the record
+// that it did.
+//
+// Only these files are staged. A loop that ran `git add -A` in somebody's
+// working tree would sweep in whatever else was in it, and the one thing a
+// taste promotion must never do is take unrelated work with it.
+//
+// A commit that fails is not a reason to un-adopt the card: the judgement was
+// made and the file was written, and shipping a change is a separate fact from
+// believing it. The failure is reported and the card stands.
+func (c *Cli) promoteCard(cand promotion.PromotionCandidate, cardsDir string) func(driver.Verdict) (string, error) {
+	return func(v driver.Verdict) (string, error) {
+		if !v.Decided() {
+			// A decline is an answer, so the card is held. It stays a candidate
+			// and the refusal is on the work the judgement was recorded on.
+			return cand.Card.ID, nil
+		}
+		ids := make([]string, 0, len(cand.Evidence))
+		for _, f := range cand.Evidence {
+			ids = append(ids, strconv.Itoa(f.ID))
+		}
+		path, err := promotion.WriteGlobal(cand.Card, ids, taste.StatusAdopted, cardsDir)
+		if err != nil {
+			return "", err
+		}
+		if _, err := taste.Build(buildPaths(cardsDir)); err != nil {
+			return "", err
+		}
+		if err := c.commitPromotion(checkoutRoot(cardsDir), path, cand.Card); err != nil {
+			return "", err
+		}
+		return cand.Card.ID, nil
+	}
+}
+
+// commitPromotion records the change a promotion made, staged to the card it
+// wrote and the artifacts rebuilt from it and nothing else.
+func (c *Cli) commitPromotion(root, cardPath string, card taste.Card) error {
+	// The paths are relative to the checkout rather than absolute: a partial
+	// commit is resolved against the index, and git will not match an absolute
+	// path against a checkout that has to recognise it as its own first.
+	rel, err := filepath.Rel(root, cardPath)
+	if err != nil {
+		return err
+	}
+	paths := []string{rel, "plugin", "dist"}
+	args := append([]string{"add", "--"}, paths...)
+	r, err := c.runGit(args, root)
+	if err != nil {
+		return err
+	}
+	if r.Code != 0 {
+		// A staged add that failed leaves nothing to commit and a commit that
+		// then refuses would name the wrong problem, so the add is the thing
+		// reported when the add is what went wrong.
+		return fail("staging the promoted card %s: %s", card.ID, gitSays(r))
+	}
+	msg := fmt.Sprintf("taste: promote %s to the global taste\n\nA judgement decided this card states something true beyond the project it\nwas written in, and the evidence is on the work it is recorded against.\n", card.ID)
+	args = append([]string{"commit", "-m", msg, "--"}, paths...)
+	r, err = c.runGit(args, root)
+	if err != nil {
+		return err
+	}
+	if r.Code != 0 {
+		// Nothing to commit is the ordinary case when the card was already
+		// global and the artifacts were already right; anything else is the
+		// checkout saying no, and the run says so.
+		if strings.Contains(r.Stderr, "nothing to commit") || strings.Contains(r.Stdout, "nothing to commit") {
+			return nil
+		}
+		return fail("committing the promoted card %s: %s", card.ID, gitSays(r))
+	}
+	return nil
+}
+
+// gitSays is what a git command complained about, which is on stderr and is
+// sometimes also on stdout depending on the git version.
+func gitSays(r runner.RunResult) string {
+	msg := strings.TrimSpace(r.Stderr)
+	if msg == "" {
+		msg = strings.TrimSpace(r.Stdout)
+	}
+	return msg
+}
+
+// buildPaths are the taste build's four directories, derived from where the cards
+// were found: the build is the same build cmd/taste runs, and deriving it from
+// the one directory already known keeps the loop from having to be told where
+// the repository is.
+func buildPaths(cardsDir string) taste.BuildPaths {
+	root := checkoutRoot(cardsDir)
+	return taste.BuildPaths{
+		CardsDir:   cardsDir,
+		PresetsDir: filepath.Join(root, "presets"),
+		PluginDir:  filepath.Join(root, "plugin"),
+		DistDir:    filepath.Join(root, "dist"),
+	}
+}
+
+// checkoutRoot is the repository a cards directory belongs to: two levels up
+// from taste/cards, because the paths are the shape of the checkout rather than
+// something a caller should have to supply. It takes the cards directory and not
+// a card's path, because a card sits three levels down and two up from a card is
+// taste, which is still inside the repository and not the root of it.
+func checkoutRoot(cardsDir string) string {
+	return filepath.Dir(filepath.Dir(cardsDir))
+}
+
 // Drive runs a goal's loop with nobody watching. It is the whole replacement
 // for supervision: each turn coordinates the goal's open work, spends a bounded
 // number of model judgements on the questions the ledger could not answer, and
@@ -187,6 +392,8 @@ func (c *Cli) drive(rest []string) error {
 		Ledger:     c.Ledger,
 		Coordinate: c.driveTurn(goal, p),
 		Judge:      c.judgeOnce(goal, p),
+		TasteJudge: c.tasteJudgeOnce(p),
+		Candidates: func() ([]driver.Candidate, error) { return c.promoteTaste(p) },
 		Close:      c.closeFinished,
 		Spend:      c.spendJudgement,
 		Send:       c.sendAnswer(p),
@@ -553,9 +760,30 @@ func (c *Cli) turnLine(turn int, t driver.Turn, used driver.Budget) {
 		bits = append(bits, fmt.Sprintf("closed %d", n))
 	}
 	if n := len(t.Blocked); n > 0 {
-		bits = append(bits, fmt.Sprintf("held %d", n))
+		bits = append(bits, fmt.Sprintf("gated %d", n))
+	}
+	if n := len(t.Promoted); n > 0 {
+		bits = append(bits, fmt.Sprintf("promoted %d", n))
+	}
+	if n := len(t.Held); n > 0 {
+		bits = append(bits, fmt.Sprintf("kept %d", n))
 	}
 	fmt.Fprintln(c.Stderr, strings.Join(bits, " · "))
+}
+
+// tasteLines is what the run did to the taste, and it is always said. A loop
+// that changes what every future session believes and does not name the card in
+// its own output leaves the largest thing it did to be found later by somebody
+// diffing the taste and guessing which run did it.
+func tasteLines(res driver.Result) []string {
+	out := []string{}
+	if len(res.Promoted) > 0 {
+		out = append(out, "promoted to the global taste: "+strings.Join(res.Promoted, ", "))
+	}
+	if len(res.Held) > 0 {
+		out = append(out, "judged not global, left as it is: "+strings.Join(res.Held, ", "))
+	}
+	return out
 }
 
 // sortedKeys so a map of gates is read in the same order every run. A bill that
@@ -577,10 +805,12 @@ func (c *Cli) printDrive(goal core.Work, res driver.Result, gates []string) erro
 		// to do, which is the whole claim.
 		out = append(out, fmt.Sprintf("shipped and closed: %d turn(s), %d judgement(s), %d tokens",
 			res.Turns, res.Judgements, res.Tokens))
+		out = append(out, tasteLines(res)...)
 	case res.Shipped:
 		out = append(out, fmt.Sprintf("every task landed after %d turn(s), %d judgement(s), %d tokens",
 			res.Turns, res.Judgements, res.Tokens))
 		out = append(out, "the goal still owes: "+strings.Join(gates, ", "))
+		out = append(out, tasteLines(res)...)
 	default:
 		out = append(out, fmt.Sprintf("stopped: %s — %s", res.Stop, res.Why))
 		out = append(out, fmt.Sprintf("%d turn(s), %d judgement(s), %d tokens", res.Turns, res.Judgements, res.Tokens))
@@ -615,6 +845,7 @@ func (c *Cli) printDrive(goal core.Work, res driver.Result, gates []string) erro
 				out = append(out, "  "+id+": "+res.Blocked[id])
 			}
 		}
+		out = append(out, tasteLines(res)...)
 		if res.Stop == driver.StopComplete && len(res.Unlanded) > 0 {
 			// Every task came to rest and one of them was not a landing, so
 			// there is nothing left to drive and the goal is not finished. Only

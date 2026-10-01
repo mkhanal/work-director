@@ -14,6 +14,20 @@ so than in most: a wrong answer ships wrong code, and a decline ends one goal
 honestly. A question with nothing settled is given as nothing rather than as
 silence, because a model asked to choose between no options will invent some.
 
+## A Card Is Judged By A Brief That Knows What Promoting It Costs
+`PromotionBrief` is a different brief from `Brief`, because it is a different
+question. An executor's fork has a right answer inside the project's settled
+position; whether a rule written for one project is true of software in general
+has no settled position to read off, so the card and its evidence are the whole
+argument and the model is told that. It is told the stakes — promoting a card
+changes what every future session in every project believes — because a model
+that does not know that will answer confidently about a rule it has never had to
+live with. It is told that a project convention must not become global however
+much evidence there is for it, that a fence around the evidence keeps a line in
+it from reading as a command, and that declining is the safe answer rather than
+the lazy one, because a wrong card is much harder to notice than a missing one.
+The answer shape is the same as any other judgement, so `Parse` reads it.
+
 ## A Reply Is An Answer Or A Decline, And A Hedge Is A Decline
 `Parse` reads `ANSWER:`, `DECLINE:` and `TOKENS:` lines and ignores everything
 else, so a chatty session costs nothing but its tokens. A reply carrying both

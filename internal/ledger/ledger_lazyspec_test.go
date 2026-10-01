@@ -501,6 +501,48 @@ func TestLedger(t *testing.T) {
 		}
 	})
 
+	t.Run("Evidence From A Session Knows The Work It Came From", func(t *testing.T) {
+		l := newTestLedger(t)
+		w := add(t, l, "p", "t", AddOptions{})
+		proj, card := "p", "no-branch-chains"
+		// Evidence from a session points at the work it came out of, so a card
+		// promoted on it records its decision there and a reader can audit the
+		// promotion against the thing that showed the pattern.
+		f, err := l.AddFeedback("wd send raced a busy task in a shared worktree",
+			FeedbackOptions{Project: &proj, Card: &card, Source: core.FeedbackAttached, Work: &w.ID})
+		wantNoErr(t, err)
+		if f.Work == nil || *f.Work != w.ID {
+			t.Errorf("feedback work = %v, want %s", f.Work, w.ID)
+		}
+		all, err := l.Feedback()
+		wantNoErr(t, err)
+		if len(all) != 1 || all[0].Work == nil || *all[0].Work != w.ID {
+			t.Errorf("feedback read back as %+v, want the work kept", all)
+		}
+		after, err := l.FeedbackAfter(0)
+		wantNoErr(t, err)
+		if len(after) != 1 || after[0].Work == nil || *after[0].Work != w.ID {
+			t.Errorf("feedback after 0 = %+v, want the work kept: a review reads this", after)
+		}
+		// A note somebody typed by hand has no work behind it, and says so
+		// rather than guessing at one.
+		n, err := l.AddFeedback("a preference stated once", FeedbackOptions{Project: &proj})
+		wantNoErr(t, err)
+		if n.Work != nil {
+			t.Errorf("a hand-typed note recorded work %v, want none", *n.Work)
+		}
+		// The reference is a relation like every other, so evidence pointed at
+		// work that is not there fails rather than becoming an orphan nothing
+		// can be audited against.
+		_, err = l.AddFeedback("evidence for nothing", FeedbackOptions{Work: strPtr("nope")})
+		wantErr(t, err, noWork("nope").Error())
+		var rows int
+		wantNoErr(t, l.db.QueryRow(`SELECT COUNT(*) FROM feedback WHERE work = ?`, "nope").Scan(&rows))
+		if rows != 0 {
+			t.Fatalf("%d rows stored for unknown work, want 0", rows)
+		}
+	})
+
 	t.Run("Worktrees Track Path Branch And State", func(t *testing.T) {
 		l := newTestLedger(t)
 		w := add(t, l, "p", "t", AddOptions{})

@@ -102,6 +102,28 @@ goal with a rolled-up goal-level status, and each item's ledger and live transcr
 exposes the same board as JSON and a WebSocket event stream on 127.0.0.1:8787 for native
 clients; each action runs through the real `wd` CLI, so a board can never drift from the CLI.
 
+A goal can also run with nobody watching. `wd drive <goal>` is the loop: each turn it
+coordinates the open tasks, answers what it can from recorded decisions, asks one model the
+rest, and closes the work that finished through the gates that are left. It stops on a condition,
+not on supervision — a bound it was given, or every task at rest — and it names where it stopped.
+
+```
+wd drive <goal>                       # the default bounds: 20 turns, 5 judgements, 200k tokens, 3 stalled
+wd drive <goal> --turns 40 --judgements 0    # 0 means no bound on that one; pair it with --deadline
+wd drive <goal> --deadline 30m --poll-seconds 5
+```
+
+The model that acts in a person's place is the project's own `runner` and `model`, so a judgement
+is made by the same provider that does the work rather than a second one to keep configured.
+
+A judgement is a bounded question with declining as a legitimate answer, recorded as a decision
+on the work before it is delivered, and never retried: a run that needs a hundred human
+decisions was never autonomous. `wd drive` also judges the taste. A project rule card that
+something has been observed doing is put to the same judge, from the same bound — and a card
+that is decided to be true beyond its project is written global, the artifacts rebuilt and the
+change committed, named in the run's own output. A card judged to be a project convention is
+left exactly as it is, and the run says it looked.
+
 A task's `soft-done` needs only its DONE report; the **epic** closes when every task is done,
 its DONE report is in, verify passes and a PR is recorded. Lazyspec is the repo's own fact:
 work-director installs it in itself (its requirements are married to tests); a new managed

@@ -528,3 +528,141 @@ func TestAGateThatRefusedIsHeldOnTheRun(t *testing.T) {
 		t.Errorf("stop = %s (%s), want the turn bound: nothing came to rest", res.Stop, res.Why)
 	}
 }
+
+// Promoting a card changes what every future session in every project believes,
+// so it is asked through the same judge, the same bound and the same record as
+// an executor's question — and asked once. A loop that put the same card to the
+// model every turn would spend its whole budget reaching the same answer.
+func TestTasteIsJudgedFromTheSameBudgetAndOnlyOnce(t *testing.T) {
+	h := newHarness(t, 1)
+	h.pass = func(int) (Turn, error) { return Turn{}, nil }
+	asked := []string{}
+	applied := 0
+	h.d.TasteJudge = func(question string, _ []core.Work) (Verdict, error) {
+		asked = append(asked, question)
+		return Verdict{Answer: "true everywhere", Tokens: 300, Runner: "opencode", Model: "big-pickle"}, nil
+	}
+	h.d.Candidates = func() ([]Candidate, error) {
+		return []Candidate{{
+			Work:     h.tasks[0].ID,
+			Asked:    "brief: promote card no-branch-chains",
+			Recorded: "promote card no-branch-chains to the global taste",
+			Apply: func(Verdict) (string, error) {
+				applied++
+				return "no-branch-chains", nil
+			},
+		}}, nil
+	}
+	res, err := h.drive(Budget{Turns: 3, Judgements: 1, Stalled: 0})
+	if err != nil {
+		t.Fatalf("Drive: %v", err)
+	}
+	if len(asked) != 1 {
+		t.Errorf("asked %d times (%v), want once: a card is a candidate until it is promoted", len(asked), asked)
+	}
+	if applied != 1 {
+		t.Errorf("applied %d times, want once", applied)
+	}
+	if len(res.Promoted) != 1 || res.Promoted[0] != "no-branch-chains" {
+		t.Errorf("promoted = %v, want the card named: a run that changed the taste has to say so", res.Promoted)
+	}
+	// The judgement went through the same bound as everything else. One bound
+	// for the whole run, or a loop could act in a person's place twice as often
+	// as it was told it could.
+	if res.Judgements != 1 {
+		t.Errorf("judgements = %d, want the taste judgement charged to the same bound", res.Judgements)
+	}
+	// And through the same record, so a review can show a reader why the taste
+	// changed rather than only that it did.
+	if len(h.spent) != 1 || h.spent[0] != h.tasks[0].ID+":promote card no-branch-chains to the global taste" {
+		t.Errorf("recorded = %v, want the decision on the work whose evidence put the card forward", h.spent)
+	}
+}
+
+// A decline is an answer about a card too: the card stays where it is and the
+// run says it looked, rather than leaving a reader to wonder.
+func TestACardTheModelDeclinesIsHeldAndNamed(t *testing.T) {
+	h := newHarness(t, 1)
+	h.pass = func(int) (Turn, error) { return Turn{}, nil }
+	h.d.TasteJudge = func(string, []core.Work) (Verdict, error) {
+		return Verdict{Decline: "this is a project convention", Tokens: 200}, nil
+	}
+	h.d.Candidates = func() ([]Candidate, error) {
+		return []Candidate{{
+			Work:     h.tasks[0].ID,
+			Asked:    "brief",
+			Recorded: "promote card project-layout to the global taste",
+			Apply:    func(Verdict) (string, error) { return "project-layout", nil },
+		}}, nil
+	}
+	res, err := h.drive(Budget{Turns: 2, Judgements: 2, Stalled: 0})
+	if err != nil {
+		t.Fatalf("Drive: %v", err)
+	}
+	if len(res.Promoted) != 0 {
+		t.Errorf("promoted = %v, want nothing: a decline is an answer", res.Promoted)
+	}
+	if len(res.Held) != 1 || res.Held[0] != "project-layout" {
+		t.Errorf("held = %v, want the card named as judged not global", res.Held)
+	}
+	// A decline is not a decision and the ledger never gains one.
+	if len(h.spent) != 1 {
+		t.Errorf("recorded %d judgements, want the decline on the record and no decision", len(h.spent))
+	}
+}
+
+// The work's own questions come first. An executor waiting on an answer is
+// somebody stopped; a card that could be promoted one turn later is nobody.
+func TestAWorkfulTurnSpendsItsJudgementOnTheWorkBeforeTheTaste(t *testing.T) {
+	h := newHarness(t, 1)
+	h.pass = func(int) (Turn, error) {
+		return Turn{Unanswered: []Question{{Work: h.tasks[0].ID, Text: "which port?"}}}, nil
+	}
+	h.d.TasteJudge = func(string, []core.Work) (Verdict, error) {
+		return Verdict{Answer: "yes"}, nil
+	}
+	h.d.Candidates = func() ([]Candidate, error) {
+		return []Candidate{{
+			Work:     h.tasks[0].ID,
+			Asked:    "brief",
+			Recorded: "promote card x to the global taste",
+			Apply:    func(Verdict) (string, error) { return "x", nil },
+		}}, nil
+	}
+	res, err := h.drive(Budget{Turns: 1, Judgements: 1, Stalled: 0})
+	if err != nil {
+		t.Fatalf("Drive: %v", err)
+	}
+	if len(res.Promoted) != 0 {
+		t.Errorf("promoted = %v, want nothing: the bound went to the work's question", res.Promoted)
+	}
+	if len(res.Unanswered) != 1 {
+		t.Errorf("unanswered = %v, want the question past the bound named as where a person is needed", res.Unanswered)
+	}
+}
+
+// A driver that judges its work and not its taste is a smaller mistake than the
+// other way round, and it is a real one: a taste judge with no candidates, or a
+// candidate with no judge, must do nothing rather than half of it.
+func TestADriverWithoutATasteJudgeLeavesTasteAlone(t *testing.T) {
+	h := newHarness(t, 1)
+	h.pass = func(int) (Turn, error) { return Turn{}, nil }
+	called := false
+	h.d.Candidates = func() ([]Candidate, error) {
+		called = true
+		return []Candidate{{Work: h.tasks[0].ID, Asked: "b", Recorded: "r", Apply: func(Verdict) (string, error) {
+			t.Error("a card was applied with no taste judge to ask")
+			return "x", nil
+		}}}, nil
+	}
+	res, err := h.drive(Budget{Turns: 1, Judgements: 3, Stalled: 0})
+	if err != nil {
+		t.Fatalf("Drive: %v", err)
+	}
+	if called {
+		t.Error("the cards were asked for with no judge to put them to")
+	}
+	if len(res.Promoted) != 0 || len(res.Held) != 0 {
+		t.Errorf("promoted %v held %v, want taste untouched", res.Promoted, res.Held)
+	}
+}
