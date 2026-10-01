@@ -242,6 +242,7 @@ var commands = map[string]func(c *Cli, rest []string) error{
 	"roadmap":   (*Cli).roadmap,
 	"drive":     (*Cli).drive,
 	"abandon":   (*Cli).abandon,
+	"reopen":    (*Cli).reopen,
 	"review":    (*Cli).review,
 	"send":      (*Cli).send,
 	"attach":    (*Cli).attach,
@@ -409,6 +410,15 @@ func (c *Cli) sendTo(id, text string) error {
 	w, err := c.Ledger.Get(id)
 	if err != nil {
 		return err
+	}
+	// Finished work is refused here rather than downstream: sending to it
+	// records the message before the state check would run, so a goal someone is
+	// asking a question of would end up carrying a sent event it never accepted.
+	// The check is on being finished, not on the state machine, because the
+	// machine now has a done → running edge that only Reopen may take and a
+	// message is not a reason.
+	if core.Reopenable(w.State) {
+		return fail("%s is done; a message is not a reason to work on it again — wd reopen %s \"<what is being worked on>\", or wd context %s to ask it something", w.ID, w.ID, w.ID)
 	}
 	if w.State != core.StateRunning && !slices.Contains(core.Transitions[w.State], core.StateRunning) {
 		return fail("%s", core.IllegalTransition{From: w.State, To: core.StateRunning}.Error())

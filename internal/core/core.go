@@ -320,12 +320,27 @@ var Transitions = map[State][]State{
 	StateReview:     {StateSoftDone, StateRunning, StateBlocked, StateDropped, StateAbandoned},
 	StateSoftDone:   {StateDone, StateRunning, StateBlocked, StateDropped, StateAbandoned},
 	StateBlocked:    {StateQueued, StateRunning, StateDone, StateDropped, StateAbandoned},
-	StateDone:       {},
-	StateDropped:    {},
-	// Abandoned is terminal like done and dropped: work comes to rest there.
-	// A reversal is a new decision event against the same goal, not a
-	// transition back out.
+	// Done is not terminal. Work that is finished and then built on again — a
+	// goal someone keeps extending — has to come back to life rather than
+	// forcing a near-copy of the same work under a new id, which loses the
+	// history of what came first. Reopening says what is being worked on, so it
+	// is reached through Reopen and not by a bare transition.
+	StateDone: {StateRunning},
+	// Dropped is terminal: work let go of on purpose stays let go of.
+	StateDropped: {},
+	// Abandoned is terminal: work comes to rest there and stays there, because
+	// it is the record of a thing that stopped without shipping rather than one
+	// that finished. A reversal is a new decision event against the same goal,
+	// not a transition back out.
 	StateAbandoned: {},
+}
+
+// Reopenable reports whether work in state s may be worked on again. Only done
+// work is: dropped and abandoned are the two ways of saying this is finished
+// with, deliberately, and reopening either would make those endings reversible by
+// accident.
+func Reopenable(s State) bool {
+	return s == StateDone
 }
 
 // Why a goal is abandoned. Both are facts the ledger can verify, so

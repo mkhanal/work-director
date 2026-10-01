@@ -76,8 +76,8 @@ func TestCommandsFailLoud(t *testing.T) {
 	})
 
 	t.Run("send refuses closed work before sending", func(t *testing.T) {
-		if errStr := f.runFail(t, "send", t1, "hello"); !strings.Contains(errStr, "illegal transition done → running") {
-			t.Fatalf("stderr = %q, want the illegal transition", errStr)
+		if errStr := f.runFail(t, "send", t1, "hello"); !strings.Contains(errStr, "is done; a message is not a reason to work on it again") {
+			t.Fatalf("stderr = %q, want the reopen message", errStr)
 		}
 		out := f.runOK(t, "events", t1, "--json")
 		if strings.Contains(out, `"kind": "sent"`) {

@@ -747,6 +747,25 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 	// Abandonment is a one-way door, so it gets work of its own rather than
 	// taking one the rest of the census still needs.
 	unshipped := jsonString(t, f.runOK(t, "add", "sample-app", "Never shipped", "--json"), "id")
+	// Reopening needs finished work, so this one closes through the gates first.
+	// Abandonment and re-opening are both one-way enough that neither borrows a
+	// row the rest of the census still needs.
+	finished := jsonString(t, f.runOK(t, "add", "sample-app", "Finished, then reopened", "--json"), "id")
+	f.runOK(t, "set", finished, "running")
+	f.runOK(t, "set", finished, "review")
+	f.runOK(t, "report", finished, "DONE\nSTATUS: DONE")
+	f.runOK(t, "verify", finished)
+	f.runOK(t, "pr", finished, "https://example.test/pr/finished")
+	f.runOK(t, "soft-done", finished)
+	f.runOK(t, "done", finished)
+	finishedGoal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Finished goal, then reopened", "--json"), "id")
+	f.runOK(t, "set", finishedGoal, "running")
+	f.runOK(t, "set", finishedGoal, "review")
+	f.runOK(t, "report", finishedGoal, "DONE\nSTATUS: DONE")
+	f.runOK(t, "verify", finishedGoal)
+	f.runOK(t, "pr", finishedGoal, "https://example.test/pr/finished-goal")
+	f.runOK(t, "soft-done", finishedGoal)
+	f.runOK(t, "done", finishedGoal)
 	driveGoal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Never driven", "--json"), "id")
 	ready := jsonString(t, f.runOK(t, "add", "sample-app", "Ready", "--epic", epic, "--json"), "id")
 	f.runOK(t, "set", ready, "running")
@@ -818,6 +837,8 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"roadmap"},
 		{"drive", driveGoal},
 		{"abandon", unshipped},
+		{"reopen", finished, "a second half nobody had asked for"},
+		{"goal", "reopen", finishedGoal, "and again, through the goal spelling"},
 		{"review", "--project", "sample-app"}, {"review", "--ack", "--project", "sample-app"},
 		{"feedback", "add", "a note"}, {"feedback"}, {"feedback", "list"},
 		{"distill"},
@@ -2171,6 +2192,115 @@ func TestAGoalSaysWhatKindOfThingItWas(t *testing.T) {
 	if errStr := f.runFail(t, "add", "sample-app", "x", "--goal", goal, "--type", "build"); !strings.Contains(errStr, "a goal type applies to a goal, not task") {
 		t.Errorf("add a typed task: %q, want it refused", errStr)
 	}
+}
+
+func TestAFinishedGoalIsReopenedOnlyForWorkNotForAQuestion(t *testing.T) {
+	f := newCLIFixture(t)
+
+	// A finished goal, closed the way goals close: its task done, then its own
+	// report, verify and pull request, then done.
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "A goal that finished", "--type", "build", "--json"), "id")
+	task := jsonString(t, f.runOK(t, "add", "sample-app", "Its only task", "--goal", goal, "--json"), "id")
+	closeThroughTheGates(t, f, task)
+	closeThroughTheGates(t, f, goal)
+	if got := f.workRow(t, goal); got.State != core.StateDone {
+		t.Fatalf("goal state = %s, want done", got.State)
+	}
+
+	// Asking it something is not reopening it, so the reason is required and the
+	// refusal points at the reads that do answer a question.
+	errStr := f.runFail(t, "reopen", goal)
+	if !strings.Contains(errStr, "wd context "+goal) || !strings.Contains(errStr, "wd events "+goal) {
+		t.Errorf("reopen with no reason = %q, want it naming the reads that answer a question", errStr)
+	}
+	if got := f.workRow(t, goal); got.State != core.StateDone {
+		t.Errorf("goal state = %s, want the refusal to leave it done: a question is not work", got.State)
+	}
+
+	// A query about the finished goal is its own goal, and the finished one stays
+	// finished: a status question costs nothing and changes nothing.
+	q := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "What did the loop decide about ports?", "--type", "query", "--json"), "id")
+	if got := f.workRow(t, q); got.GoalType == nil || *got.GoalType != core.GoalQuery {
+		t.Errorf("query goal type = %v, want query", got.GoalType)
+	}
+	if got := f.workRow(t, goal); got.State != core.StateDone {
+		t.Errorf("goal state = %s after being asked about, want done", got.State)
+	}
+
+	// A task under a finished goal would sit there with nothing to run it.
+	errStr = f.runFail(t, "add", "sample-app", "Work nobody will run", "--goal", goal)
+	if !strings.Contains(errStr, "wd reopen "+goal) {
+		t.Errorf("add under a done goal = %q, want it naming the reopen", errStr)
+	}
+	if tasks := strings.Count(f.runOK(t, "tasks", goal, "--all", "--json"), `"id"`); tasks != 1 {
+		t.Errorf("goal holds %d rows, want the refused task not to exist", tasks)
+	}
+
+	// A message is not a reason either, and it is refused before the message is
+	// recorded rather than after.
+	errStr = f.runFail(t, "send", goal, "what did you decide?")
+	if !strings.Contains(errStr, "wd reopen "+goal) {
+		t.Errorf("send to a done goal = %q, want it naming the reopen", errStr)
+	}
+	if strings.Contains(f.runOK(t, "events", goal, "--json"), `"kind": "sent"`) {
+		t.Error("a sent event was recorded on a goal that refused the message")
+	}
+
+	// Working more on top of it: the reopen names what, and the claim travels
+	// with it so a reader can see why a finished goal is running again.
+	out := f.runOK(t, "reopen", goal, "a second half on the driver", "--json")
+	if !strings.Contains(out, `"state": "running"`) {
+		t.Fatalf("reopen = %q, want the goal running", out)
+	}
+	if !strings.Contains(f.runOK(t, "events", goal, "--json"), "a second half on the driver") {
+		t.Error("the reopen says nothing about what is being worked on")
+	}
+	// The first run's evidence does not close the second: the goal has a new task
+	// that has not been done, and the report, verify and pull request it still
+	// holds are all from before the reopen.
+	errStr = f.runFail(t, "soft-done", goal)
+	for _, want := range []string{"DONE report", "passing verify", "pull request"} {
+		if !strings.Contains(errStr, want) {
+			t.Errorf("soft-done after reopen = %q, want it to still want %q", errStr, want)
+		}
+	}
+
+	// The same command through the goal spelling, on a goal of its own so this
+	// one is not reopened twice.
+	other := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Another finished goal", "--type", "build", "--json"), "id")
+	otherTask := jsonString(t, f.runOK(t, "add", "sample-app", "Its only task", "--goal", other, "--json"), "id")
+	closeThroughTheGates(t, f, otherTask)
+	closeThroughTheGates(t, f, other)
+	if errStr := f.runFail(t, "goal", "reopen", other); !strings.Contains(errStr, "wd context "+other) {
+		t.Errorf("wd goal reopen with no reason = %q, want the same reason guidance", errStr)
+	}
+	f.runOK(t, "goal", "reopen", other, "the second half")
+	if got := f.workRow(t, other); got.State != core.StateRunning {
+		t.Errorf("goal state = %s, want running", got.State)
+	}
+
+	// A task is reopenable on its own terms too: work that grows a second half
+	// is the same shape of thing as a goal that does.
+	half := jsonString(t, f.runOK(t, "add", "sample-app", "A task that finished", "--json"), "id")
+	closeThroughTheGates(t, f, half)
+	f.runOK(t, "reopen", half, "the other half")
+	if got := f.workRow(t, half); got.State != core.StateRunning {
+		t.Errorf("task state = %s, want running", got.State)
+	}
+}
+
+// closeThroughTheGates takes work from queued to done through every gate it
+// needs: running, review, a DONE report, a passing verify, and — where asked —
+// a pull request.
+func closeThroughTheGates(t *testing.T, f *cliFixture, id string) {
+	t.Helper()
+	f.runOK(t, "set", id, "running")
+	f.runOK(t, "set", id, "review")
+	f.runOK(t, "report", id, "DONE\nSTATUS: DONE")
+	f.runOK(t, "verify", id)
+	f.runOK(t, "pr", id, "commit https://github.com/mkhanal/sample-app/commit/abc1234")
+	f.runOK(t, "soft-done", id)
+	f.runOK(t, "done", id)
 }
 
 func TestWorkEndsAbandonedAndSaysWhyItDidNotShip(t *testing.T) {

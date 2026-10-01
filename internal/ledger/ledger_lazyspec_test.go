@@ -1046,3 +1046,209 @@ func TestAGoalsEventsAreItsOwnAndItsTasks(t *testing.T) {
 		t.Errorf("the goal row alone has %d events and the subtree %d, want the subtree to be more", len(solo), len(events))
 	}
 }
+func TestFinishedWorkIsReopenedWithAReasonOrNotAtAll(t *testing.T) {
+	l := newTestLedger(t)
+	w := add(t, l, "p", "A goal somebody keeps extending", AddOptions{Kind: core.WorkGoal})
+	task := add(t, l, "p", "The first half", AddOptions{Parent: &w.ID})
+	closeGoal(t, l, w.ID, task.ID)
+
+	// A reopen with no reason is refused, and the refusal says what to do
+	// instead, because the two reasons someone arrives at a finished goal —
+	// asking it something, and building on it — look identical in the state.
+	_, err := l.Reopen(w.ID, "")
+	if err == nil || !strings.Contains(err.Error(), "wd context "+w.ID) {
+		t.Fatalf("Reopen with no reason = %v, want it refused naming the reads that answer a question", err)
+	}
+	if got := mustGet(t, l, w.ID); got.State != core.StateDone {
+		t.Fatalf("state after the refusal = %q, want the goal left done", got.State)
+	}
+
+	opened, err := l.Reopen(w.ID, "a second half on the driver")
+	wantNoErr(t, err)
+	if opened.State != core.StateRunning {
+		t.Fatalf("state = %q, want running: someone working more on it is on it now, not waiting to be picked up", opened.State)
+	}
+	// The reopen is a claim, not a bare state change: what is being worked on
+	// travels with it, and a review can read it as one.
+	evs, err := l.Events(w.ID, nil)
+	wantNoErr(t, err)
+	last := evs[len(evs)-1]
+	if last.Kind != core.EventDecision || last.Decision == nil {
+		t.Fatalf("last event = %+v, want a decision", last)
+	}
+	if !strings.Contains(last.Decision.Answer, "a second half on the driver") {
+		t.Errorf("the claim answers %q, want it to say what is being worked on", last.Decision.Answer)
+	}
+	// The first run's history is not erased — it is what the second one reads
+	// against, and the evidence of the first close is still here to read.
+	closing := allEvents(t, l, w.ID, nil)
+	if len(closing) <= 3 {
+		t.Errorf("events = %d, want the first run's events kept alongside the reopen", len(closing))
+	}
+
+	// Dropped and abandoned are the two ways of saying a thing is finished with,
+	// on purpose. Neither comes back to life: a state change should not be able
+	// to undo a deliberate ending by accident.
+	for _, ending := range []struct {
+		name string
+		to   core.State
+	}{
+		{"dropped", core.StateDropped},
+		{"abandoned", core.StateAbandoned},
+	} {
+		d := add(t, l, "p", "Finished with, on purpose "+ending.name, AddOptions{})
+		move(t, l, d.ID, ending.to)
+		_, err := l.Reopen(d.ID, "on reflection")
+		if err == nil || !strings.Contains(err.Error(), "only done work is reopened") {
+			t.Errorf("Reopen of %s work = %v, want it refused: that ending is deliberate", ending.name, err)
+		}
+	}
+
+	// The machine has the edge — done work can run again — but Transition will
+	// not take it, so nothing but Reopen can reach it with a reason attached.
+	other := add(t, l, "p", "Another finished thing", AddOptions{})
+	move(t, l, other.ID, core.StateDone)
+	_, err = l.Transition(other.ID, core.StateRunning)
+	if err == nil || !strings.Contains(err.Error(), "wd reopen "+other.ID) {
+		t.Errorf("Transition done → running = %v, want it refused naming Reopen", err)
+	}
+	if got := mustGet(t, l, other.ID); got.State != core.StateDone {
+		t.Errorf("state after the refusal = %q, want it left done", got.State)
+	}
+	if !slices.Contains(core.Transitions[core.StateDone], core.StateRunning) {
+		t.Error("the machine does not list done → running, so Reopen could not take it either")
+	}
+	if core.Reopenable(core.StateAbandoned) || core.Reopenable(core.StateDropped) {
+		t.Error("Reopenable says a deliberate ending can come back to life")
+	}
+}
+
+// A reopened goal still holds the report, verify and pull request of the run
+// that closed it. Judging readiness on those would let a goal walk straight
+// back to soft-done on a completion nobody did.
+func TestReadinessIsJudgedOnThisRunsEvidence(t *testing.T) {
+	l := newTestLedger(t)
+	g := add(t, l, "p", "The loop runs itself", AddOptions{Kind: core.WorkGoal})
+	first := add(t, l, "p", "The first pass", AddOptions{Parent: &g.ID})
+	closeGoal(t, l, g.ID, first.ID)
+
+	opened, err := l.Reopen(g.ID, "and now the promotion step")
+	wantNoErr(t, err)
+	second := add(t, l, "p", "The promotion step", AddOptions{Parent: &opened.ID})
+
+	// Every gate the first run satisfied is unsatisfied again: the goal's own
+	// DONE report, its verify, and its pull request are all read from before the
+	// reopen.
+	var nr core.NotReady
+	if _, err := l.SoftDone(g.ID, false); !errors.As(err, &nr) {
+		t.Fatalf("SoftDone after reopen = %v, want NotReady", err)
+	} else if !slices.Equal(nr.Missing, []string{"1 task(s) not done", "DONE report", "passing verify", "pull request"}) {
+		t.Errorf("missing = %v, want the second run to prove all four again", nr.Missing)
+	}
+
+	// The second run files its own evidence and the gate opens. What closed the
+	// first run took back; it did not become a wall.
+	if _, err := l.AddEvent(g.ID, core.EventReport, "DONE\nSTATUS: DONE"); err != nil {
+		t.Fatalf("report: %v", err)
+	}
+	if _, err := l.AddEvent(g.ID, core.EventVerify, "pass"); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if _, err := l.AddEvent(g.ID, core.EventPr, "commit https://github.test/o/r/commit/5a5f3bb"); err != nil {
+		t.Fatalf("pr: %v", err)
+	}
+	closeOnlyTask(t, l, second.ID)
+	move(t, l, g.ID, core.StateReview)
+	if got := softDone(t, l, g.ID, false); got.State != core.StateSoftDone {
+		t.Fatalf("state = %q, want soft-done once the second run proved itself", got.State)
+	}
+
+	// Work never reopened is judged on everything it has, which is what makes
+	// the reopen the only thing that changes.
+	plain := add(t, l, "p", "Never reopened", AddOptions{})
+	for _, s := range []core.State{core.StateRunning, core.StateReview} {
+		move(t, l, plain.ID, s)
+	}
+	l.AddEvent(plain.ID, core.EventReport, "DONE\nSTATUS: DONE")
+	l.AddEvent(plain.ID, core.EventVerify, "pass")
+	if got := softDone(t, l, plain.ID, false); got.State != core.StateSoftDone {
+		t.Fatalf("state = %q, want soft-done on its own evidence", got.State)
+	}
+}
+
+// A task under a finished goal would sit there with nothing to run it: the goal
+// is not open, so no pass drives it, and the rollup would show open work under
+// finished work.
+func TestATaskCannotBeAddedUnderAGoalThatHasComeToRest(t *testing.T) {
+	l := newTestLedger(t)
+	g := add(t, l, "p", "A goal that finished", AddOptions{Kind: core.WorkGoal})
+	task := add(t, l, "p", "Its only task", AddOptions{Parent: &g.ID})
+	closeGoal(t, l, g.ID, task.ID)
+
+	_, err := l.Add("p", "A second task nobody will run", AddOptions{Parent: &g.ID})
+	if err == nil || !strings.Contains(err.Error(), "wd reopen "+g.ID) {
+		t.Fatalf("Add under a done goal = %v, want it refused naming reopen", err)
+	}
+	tasks, err := l.Tasks(g.ID)
+	wantNoErr(t, err)
+	if len(tasks) != 1 {
+		t.Fatalf("tasks = %d, want the refused task not to exist", len(tasks))
+	}
+
+	// Reopened, the same task is exactly the thing the reopen was for.
+	opened, err := l.Reopen(g.ID, "there is more to do here")
+	wantNoErr(t, err)
+	if _, err := l.Add("p", "A second task", AddOptions{Parent: &opened.ID}); err != nil {
+		t.Fatalf("Add after reopen: %v", err)
+	}
+}
+
+// closeGoal drives a goal and its only task all the way to done: the task
+// through the report and verify gates, the goal through those and a pull
+// request, which is what a goal needs before soft-done will open.
+func closeGoal(t *testing.T, l *Ledger, goal, task string) {
+	t.Helper()
+	closeOnlyTask(t, l, task)
+	for _, s := range []core.State{core.StateRunning, core.StateReview} {
+		move(t, l, goal, s)
+	}
+	if _, err := l.AddEvent(goal, core.EventReport, "DONE\nSTATUS: DONE"); err != nil {
+		t.Fatalf("goal report: %v", err)
+	}
+	if _, err := l.AddEvent(goal, core.EventVerify, "pass"); err != nil {
+		t.Fatalf("goal verify: %v", err)
+	}
+	if _, err := l.AddEvent(goal, core.EventPr, "commit https://github.test/o/r/commit/5a5f3bb"); err != nil {
+		t.Fatalf("goal pr: %v", err)
+	}
+	softDone(t, l, goal, false)
+	got, err := l.Transition(goal, core.StateDone)
+	wantNoErr(t, err)
+	if got.State != core.StateDone {
+		t.Fatalf("state = %q, want done", got.State)
+	}
+}
+
+// closeOnlyTask takes a task all the way to done on its own evidence, because a
+// goal's gate counts its tasks and an unfinished one holds the goal open.
+func closeOnlyTask(t *testing.T, l *Ledger, task string) {
+	t.Helper()
+	for _, s := range []core.State{core.StateRunning, core.StateReview} {
+		move(t, l, task, s)
+	}
+	if _, err := l.AddEvent(task, core.EventReport, "DONE\nSTATUS: DONE"); err != nil {
+		t.Fatalf("task report: %v", err)
+	}
+	if _, err := l.AddEvent(task, core.EventVerify, "pass"); err != nil {
+		t.Fatalf("task verify: %v", err)
+	}
+	softDone(t, l, task, true)
+	move(t, l, task, core.StateDone)
+}
+
+func mustGet(t *testing.T, l *Ledger, id string) core.Work {
+	t.Helper()
+	w, err := l.Get(id)
+	wantNoErr(t, err)
+	return w
+}

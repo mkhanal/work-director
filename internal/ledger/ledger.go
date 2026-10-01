@@ -357,6 +357,13 @@ func (l *Ledger) Add(project, title string, opts AddOptions) (core.Work, error) 
 		if err := childKind(pw.Kind, kind); err != nil {
 			return core.Work{}, fmt.Errorf("under %s: %w", p, err)
 		}
+		// A task under a goal that has come to rest would sit there with nobody
+		// to run it: the goal is not open, so the coordinator never drives it,
+		// and the rollup would show an open task under finished work. Reopening
+		// first is what puts the goal back in the loop, and it costs one command.
+		if pw.State == core.StateDone {
+			return core.Work{}, fmt.Errorf("%s is done; work on it again reopens it first: wd reopen %s \"<what is being worked on>\"", p, p)
+		}
 		parent = &p
 	} else if kind == core.WorkItem {
 		return core.Work{}, fmt.Errorf("a roadmap item belongs to a roadmap")
@@ -566,6 +573,51 @@ func (l *Ledger) Abandon(id, reason, detail string) (core.Work, error) {
 	return l.Get(id)
 }
 
+// Reopen returns finished work to life and records what is being worked on.
+//
+// The reason is required, and that is the whole difference between this and a
+// question. Someone asking a finished goal what it decided, or what is still
+// open, has not asked for more work — the answer is in the ledger and asking
+// costs nothing. Someone working more on top of a finished goal has, and the
+// ledger has no way to tell the two apart from a state change alone: both look
+// like a person arriving at a goal that says done. So the arrival has to say
+// which it is, and a reopen with no stated work is refused rather than allowed
+// to pass for a question.
+//
+// The work goes to running rather than queued, because reopening means someone
+// is on it now: queued work is waiting to be picked up, and this was not.
+func (l *Ledger) Reopen(id, why string) (core.Work, error) {
+	if why == "" {
+		return core.Work{}, fmt.Errorf("work %s: reopening says what is being worked on: wd reopen %s \"<what>\"; "+
+			"to ask a finished goal something, read it — wd context %s, wd events %s", id, id, id, id)
+	}
+	err := l.inTx(func(tx *sql.Tx) error {
+		w, err := getWork(tx, id)
+		if err != nil {
+			return err
+		}
+		if !core.Reopenable(w.State) {
+			return fmt.Errorf("work %s is %s, and only done work is reopened: %s", id, w.State, core.IllegalTransition{From: w.State, To: core.StateRunning})
+		}
+		if _, err := tx.Exec(`UPDATE work SET state = ? WHERE id = ?`, string(core.StateRunning), id); err != nil {
+			return err
+		}
+		// A decision, not a bare state event: reopening claims something is
+		// being worked on, and a claim is what a review reads and a reversal
+		// undoes. The first run's events stay exactly where they were, which is
+		// what makes a reopened goal's second history legible against the first.
+		_, err = addClaim(tx, id, core.EventDecision, "reopened: "+why, now(), nil, &core.Decision{
+			Question: "what is being worked on in " + id + " now it is done?",
+			Answer:   why,
+		})
+		return err
+	})
+	if err != nil {
+		return core.Work{}, err
+	}
+	return l.Get(id)
+}
+
 func (l *Ledger) Transition(id string, to core.State) (core.Work, error) {
 	if to == core.StateSoftDone {
 		return core.Work{}, fmt.Errorf("work %s: soft-done is reached only through SoftDone, which checks readiness", id)
@@ -578,6 +630,13 @@ func (l *Ledger) transition(id string, to core.State) (core.Work, error) {
 		w, err := getWork(tx, id)
 		if err != nil {
 			return err
+		}
+		// Reopening is a claim with a reason attached, so the machine has the
+		// edge but this refuses to take it: done → running is reachable only
+		// through Reopen, so no caller can bring a finished goal back to life
+		// without saying what for. Checked here, where the row is already read.
+		if to == core.StateRunning && core.Reopenable(w.State) {
+			return fmt.Errorf("work %s is done; work on it again goes through Reopen, which says what is being worked on: wd reopen %s \"<what>\"", id, id)
 		}
 		if !slices.Contains(core.Transitions[w.State], to) {
 			return core.IllegalTransition{From: w.State, To: to}
@@ -1124,6 +1183,16 @@ func (l *Ledger) SoftDone(id string, codeChanged bool) (core.Work, error) {
 	if err != nil {
 		return core.Work{}, err
 	}
+	// Readiness is judged on this run's evidence. A goal that was finished once
+	// and then reopened still holds the report, the verify and the pull request
+	// of that first run, and a reopened goal with no new task would otherwise
+	// walk straight back to soft-done on the strength of work already shipped —
+	// a completion nobody did. What closed the previous run is what a reopen
+	// takes back: the events stay, because they are the history, but they no
+	// longer count as evidence for the next one.
+	if since := reopenedAt(evs); since > 0 {
+		evs = slices.DeleteFunc(evs, func(e core.Event) bool { return e.ID <= since })
+	}
 	last := func(k core.EventKind) *core.Event {
 		for i := len(evs) - 1; i >= 0; i-- {
 			if evs[i].Kind == k {
@@ -1175,6 +1244,17 @@ func (l *Ledger) SoftDone(id string, codeChanged bool) (core.Work, error) {
 		return core.Work{}, core.NotReady{Missing: missing}
 	}
 	return l.transition(id, core.StateSoftDone)
+}
+
+// reopenedAt is the event id of the most recent reopening, or 0 when the work has
+// never been reopened. Readiness is read from just after it.
+func reopenedAt(evs []core.Event) int {
+	for i := len(evs) - 1; i >= 0; i-- {
+		if evs[i].Kind == core.EventDecision && strings.HasPrefix(evs[i].Body, "reopened: ") {
+			return evs[i].ID
+		}
+	}
+	return 0
 }
 
 type FeedbackOptions struct {

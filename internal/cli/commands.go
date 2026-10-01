@@ -516,7 +516,7 @@ func (c *Cli) goalLike(cmd string, rest []string) error {
 	if cmd == "goal" {
 		kindWord = "goal"
 	}
-	usage := fmt.Sprintf("wd %s (plan <id> | spawn <id> | run <id> [--only|--heading] [--wait] | review <id> | status <id> | classify <id> <type> | abandon <id> <reason>)", cmd)
+	usage := fmt.Sprintf("wd %s (plan <id> | spawn <id> | run <id> [--only|--heading] [--wait] | review <id> | status <id> | classify <id> <type> | abandon <id> <reason> | reopen <id> \"<what is being worked on>\")", cmd)
 	switch sub {
 	case "plan":
 		if goal == nil {
@@ -547,6 +547,8 @@ func (c *Cli) goalLike(cmd string, rest []string) error {
 		return c.goalClassify(goal, rest)
 	case "abandon":
 		return c.goalAbandon(goal, rest)
+	case "reopen":
+		return c.goalReopen(goal, rest)
 	}
 	return fail("%s", usage)
 }
@@ -568,6 +570,39 @@ func (c *Cli) goalAbandon(goal *core.Work, rest []string) error {
 		return fail("usage: wd goal abandon <id> [no-pr|unmerged] [--reason \"<detail>\"]")
 	}
 	return c.abandonWork(goal.ID, rest[1:])
+}
+
+// reopen works more on top of finished work, and says what is being worked on.
+//
+// The reason is not decoration. A finished goal that someone asks a question
+// about has not been reopened, and a state change cannot tell that apart from
+// someone building on it — both look like a person arriving at a goal that says
+// done. So the command refuses without a reason and points at the reads that
+// answer a question, and a goal left done and a goal picked back up stay
+// different facts on the board because someone said which one happened.
+func (c *Cli) reopen(rest []string) error {
+	if len(rest) < 1 {
+		return fail("usage: wd reopen <id> \"<what is being worked on>\"")
+	}
+	// One argument reaches Reopen rather than the usage line, because the reader
+	// who typed it has forgotten the reason and not the command, and the reason
+	// is what they need told.
+	return c.reopenWork(rest[0], strings.Join(rest[1:], " "))
+}
+
+func (c *Cli) goalReopen(goal *core.Work, rest []string) error {
+	if goal == nil {
+		return fail("usage: wd goal reopen <id> \"<what is being worked on>\"")
+	}
+	return c.reopenWork(goal.ID, strings.Join(rest[2:], " "))
+}
+
+func (c *Cli) reopenWork(id, why string) error {
+	w, err := c.Ledger.Reopen(id, why)
+	if err != nil {
+		return err
+	}
+	return c.out(w, fmt.Sprintf("%s reopened: %s", w.ID, why))
 }
 
 func (c *Cli) abandonWork(id string, args []string) error {

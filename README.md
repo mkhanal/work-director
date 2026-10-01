@@ -90,7 +90,15 @@ wd worktree remove <id>           # retry: wd done removes the worktrees wd made
 wd concern add <task> "..." ; wd concern resolve <n> "<decision>"        # the decision queue
 wd decide <id> "<decision>"       # record a decision in one line; briefs and ASK: answers read it
 wd scan --adopt <candidate>       # promote a project rule to a global candidate card
+wd reopen <e> "<what is being worked on>"  # more work on top of a finished goal; the reason is required
 ```
+
+`done` is the only ending that comes back to life, and only for work rather than for a question:
+someone asking a finished goal what it decided has not reopened it, so `wd reopen` refuses without a
+reason and points at `wd context` and `wd events`, which answer it. Adding a task under a finished
+goal is refused the same way — there would be nothing to run it — and reopening puts the goal back
+in the loop. The first run's report, verify and pull request stay in the ledger as history but stop
+counting as evidence: a reopened goal proves itself again from the reopen onwards.
 
 Complex goals run partially across conversations — `wd epic run --only` works a slice and leaves
 the rest open for another conversation; the coordinator drives every open task, including ones

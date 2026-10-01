@@ -13,7 +13,16 @@ and the work state machine. It opens every ledger an earlier wd wrote.
 `Add` returns work in state `queued` with a `state` event recording it.
 
 ## Only Listed Transitions Are Allowed
-queued→briefed→running→(needs-input|review)→soft-done→done, with blocked and dropped reachable from open states; queued→running is reserved for attaching an outside conversation that is already working; queued, briefed and blocked work goes straight to done when a human closes it; anything else fails with IllegalTransition naming both states.
+queued→briefed→running→(needs-input|review)→soft-done→done, with blocked and dropped reachable from open states; queued→running is reserved for attaching an outside conversation that is already working; queued, briefed and blocked work goes straight to done when a human closes it; anything else fails with IllegalTransition naming both states. Two edges are reachable only through the command that checks why: soft-done through `SoftDone`, and done→running through `Reopen`, so a plain `Transition` onto either is refused naming the command that takes it.
+
+## Finished Work Is Reopened With A Reason Or Not At All
+`Reopen(id, why)` returns done work to running and records a decision saying what is being worked on. The reason is required, because the ledger cannot tell the two reasons someone arrives at a finished goal from a state change: asking it a question, which changes nothing, and building more on top of it, which does. A reopen with no reason is refused and names the reads that answer a question instead. `Reopen` refuses any state but done — dropped and abandoned are the two ways of saying a thing is finished with, on purpose — and `Transition` refuses done→running outright, so no caller can move a finished goal back to life without saying what for. Reopening leaves the first run's events in place: the events are the history, and a goal's second run reads against the one before it.
+
+## Readiness Is Judged On This Run's Evidence
+`SoftDone` reads the report, verify and pull request recorded after the most recent reopening, ignoring the earlier run's. A reopened goal still holds the evidence that closed it, and a goal reopened with no new work would otherwise walk straight back to soft-done on the strength of a run already shipped — a completion nobody did. Nothing else moves: work never reopened is judged on all of its events.
+
+## A Task Cannot Be Added Under A Goal That Has Come To Rest
+`Add` with a parent that is done is refused naming `wd reopen`. A task under a finished goal would sit there with nothing to run it — the goal is not open, so no pass drives it — and the rollup would show open work under finished work. Reopening first is what puts the goal back in the loop, and it costs one command.
 
 ## Any Event Counts As Activity
 Adding an event moves the work's `updated` to that event's time.

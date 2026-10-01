@@ -258,6 +258,18 @@ pull request that was raised and never merged reads `unmerged`, and no pull
 request at all reads `no-pr`. A reason outside those two is not spellable,
 because a reason nobody can verify is not a reason. Abandoned is terminal.
 
+## A Finished Goal Is Reopened Only For Work, Not For A Question
+`wd reopen <id> "<what is being worked on>"` (and `wd goal reopen <id> "<what>"`)
+works more on top of finished work and refuses without a reason, naming the reads
+that answer a question instead — `wd context <id>`, `wd events <id>` — because a
+finished goal that someone asks something of has not been reopened, and the state
+machine cannot tell that from someone building on it. `wd add --goal <id>` on a
+finished goal is refused naming the reopen, so no task is filed under a goal that
+nothing will run it; `wd send` to a finished goal is refused the same way rather
+than recording a message the work never accepted. A `query`-typed goal asked
+about a finished one stands on its own and leaves that goal done: asking is not
+reopening.
+
 ## Wd Epic Is The Old Spelling Of Wd Goal
 `wd epic` reaches the same code as `wd goal`, `--kind epic` writes a goal, and
 `--epic <id>` names the same parent as `--goal <id>`, so anything written
