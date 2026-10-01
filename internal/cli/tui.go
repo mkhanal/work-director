@@ -7,6 +7,7 @@ import (
 
 	"wd/internal/core"
 	"wd/internal/ledger"
+	"wd/internal/review"
 	"wd/internal/runner"
 	"wd/internal/tui"
 )
@@ -42,9 +43,20 @@ func (s *tuiSource) Detail(id string) (tui.Detail, error) {
 			return tui.Detail{}, err
 		}
 	}
-	if d.Events, err = s.Ledger.Events(id, nil); err != nil {
+	// The goal and everything under it: a goal decided nothing on its own row, so
+	// reading only that row would show a goal that has not run.
+	if d.Events, err = s.Ledger.EventsUnder(id); err != nil {
 		return tui.Detail{}, err
 	}
+	// Claims and landings are read out of those events rather than fetched
+	// again: the view is already holding the facts, and a second read of the
+	// ledger could disagree with the log printed beside it.
+	works := map[string]core.Work{w.ID: w}
+	for _, task := range d.Tasks {
+		works[task.ID] = task
+	}
+	d.Claims = review.ClaimsUnder(d.Events, works)
+	d.Landings = review.LandingsUnder(d.Events, works)
 	concerns, err := s.Ledger.Concerns(&id)
 	if err != nil {
 		return tui.Detail{}, err

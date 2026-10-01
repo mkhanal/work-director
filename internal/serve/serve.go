@@ -13,6 +13,7 @@ import (
 
 	"wd/internal/core"
 	"wd/internal/ledger"
+	"wd/internal/review"
 )
 
 // DefaultPort is the port serve binds to when --port is not given.
@@ -55,12 +56,18 @@ type boardView struct {
 	Standalone []core.Work `json:"standalone"`
 }
 
-// goalView is one goal with its children, rollup and events.
+// goalView is one goal with its children, rollup and events, plus the two facts
+// that make a goal legible on its own: what the loop decided in a person's place,
+// and where the work reached. They are read out of the events rather than fetched
+// again, because a client rendering the goal's decisions and its event log must
+// not be looking at two reads of the same ledger.
 type goalView struct {
-	Goal   core.Work    `json:"goal"`
-	Tasks  []core.Work  `json:"tasks"`
-	Rollup rollup       `json:"rollup"`
-	Events []core.Event `json:"events"`
+	Goal     core.Work       `json:"goal"`
+	Tasks    []core.Work     `json:"tasks"`
+	Rollup   rollup          `json:"rollup"`
+	Events   []core.Event    `json:"events"`
+	Claims   []review.Claim  `json:"claims"`
+	Landings []review.Landed `json:"landings"`
 }
 
 // actionResult is a CLI run: its exit code and combined output.
@@ -202,12 +209,26 @@ func (s *Server) handleGoal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	events, err := s.ledger.Events(id, nil)
+	events, err := s.ledger.EventsUnder(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, goalView{Goal: goal, Tasks: children, Rollup: goalRollup(children), Events: events})
+	// Every work this goal is made of: the goal itself and its tasks, which is
+	// what a claim or a landing can name, and which the events above may be
+	// filed against.
+	works := map[string]core.Work{goal.ID: goal}
+	for _, t := range children {
+		works[t.ID] = t
+	}
+	writeJSON(w, http.StatusOK, goalView{
+		Goal:     goal,
+		Tasks:    children,
+		Rollup:   goalRollup(children),
+		Events:   events,
+		Claims:   review.ClaimsUnder(events, works),
+		Landings: review.LandingsUnder(events, works),
+	})
 }
 
 // handleWork lists all work items.

@@ -21,6 +21,18 @@ every open standalone work item. `GET /api/goals` returns the same data.
 `GET /api/goal/<id>` returns one epic with its children, rollup and
 events; unknown or non-epic ids return 404.
 
+## A Goal Serves What The Loop Decided And Where It Reached
+`GET /api/goal/<id>` also returns `claims` and `landings`, read out of the
+events it already serves rather than fetched again — a client showing the goal's
+decisions and its event log must not be reading the ledger twice and disagreeing
+with itself. A claim carries the work it belongs to and whether it still stands; a
+landing carries the kind of place the work reached, so a client can tell a change
+that went straight into the product from one still waiting on a merge, which is
+the difference between "reviewed" and "landed". Both arrays are `[]` rather than
+absent when empty, and a landing whose work row is not among the goal's is still
+listed with its link, because the link is the fact and the row is only the
+caption.
+
 ## Work Items Serve Over HTTP
 `GET /api/work` lists all work items. `GET /api/work/<id>` returns one
 work item; unknown ids return 404. `GET /api/work/<id>/events` returns

@@ -802,6 +802,37 @@ func (l *Ledger) Events(work string, kind *core.EventKind) ([]core.Event, error)
 	return out, rows.Err()
 }
 
+// EventsUnder returns the events of a work item and everything under it, in
+// event order.
+//
+// A goal's story happens on its tasks. The goal's own row carries the spine —
+// it was promoted, it went running, it will end — and every decision, landing
+// and report in between is filed on the task that caused it, because that is
+// what the row is for. So a goal read from its own row looks like a goal that
+// decided nothing no matter how much it decided, and a goal read from its tasks
+// looks like tasks with no parent. One set is the whole subtree, which is what
+// both surfaces show on a goal and what keeps them showing the same thing.
+//
+// A task has nothing under it, so for a task this is its own events.
+func (l *Ledger) EventsUnder(work string) ([]core.Event, error) {
+	rows, err := l.db.Query(`SELECT `+eventColumns+` FROM event
+		WHERE work = ? OR work IN (SELECT id FROM work WHERE parent = ?)
+		ORDER BY id`, work, work)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []core.Event{}
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // EventsAfter returns every event, across all work, with an id above after,
 // in id order.
 func (l *Ledger) EventsAfter(after int) ([]core.Event, error) {

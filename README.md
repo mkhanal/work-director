@@ -98,9 +98,12 @@ the rest open for another conversation; the coordinator drives every open task, 
 questions from recorded decisions instead of guessing. Simple goals run in one go (`wd epic spawn`).
 
 Goals are first-class entry points, not conversations. `wd tui` is the terminal board: every
-goal with a rolled-up goal-level status, and each item's ledger and live transcript. `wd serve`
-exposes the same board as JSON and a WebSocket event stream on 127.0.0.1:8787 for native
-clients; each action runs through the real `wd` CLI, so a board can never drift from the CLI.
+goal with a rolled-up goal-level status, and each item's ledger and live transcript. Opening a
+goal shows its type, what the loop decided in your place, and where the work reached — the two
+things a person has left to review. `wd serve` exposes the same board as JSON and a WebSocket
+event stream on 127.0.0.1:8787 for native clients, with the goal's `claims` and `landings` in
+`/api/goal/<id>`; each action runs through the real `wd` CLI, so a board can never drift from the
+CLI.
 
 A goal can also run with nobody watching. `wd drive <goal>` is the loop: each turn it
 coordinates the open tasks, answers what it can from recorded decisions, asks one model the

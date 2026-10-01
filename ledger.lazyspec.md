@@ -44,6 +44,16 @@ id does not, and the translation is recorded as an event. Work filed against an
 item before it was committed — an event, a decision, a session — stays attached
 to the goal it became. Promoting a row that is not an item is refused.
 
+## A Goal's Events Are Its Own And Its Tasks'
+`EventsUnder` returns the events of a work item and everything under it, in
+event order, from one query: a goal's own row carries the spine — promoted,
+running, ended — and every decision, landing and report in between is filed on
+the task that caused it, because that is what the row is for. So reading only
+the goal's row shows a goal that decided nothing however much it decided, and
+reading only the tasks' shows tasks with no parent. For a task, which has
+nothing under it, this is its own events. `Events` still reads one work item
+alone, for the surfaces that want one row's log.
+
 ## A Goal Type Is Set Deliberately Or Not At All
 `SetGoalType` records the classification and a decision event saying what was
 claimed. A goal with no type has none: nothing is defaulted, because a type that

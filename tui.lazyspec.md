@@ -21,6 +21,19 @@ Opening a work item shows its title, state, kind and project, its tasks (for an
 epic), its events, its open concerns, and — when it has a session — the live
 transcript of that session with the runner's status.
 
+## A Goal Is Readable In One Place
+A goal's header names its type, or names nothing when it is unclassified rather
+than letting a reader assume. The detail view then carries a **Decisions** panel
+— each claim as what was asked and what was decided, with a claim another claim
+undid marked withdrawn on its own line — and a **Landed** panel giving each
+landing with the kind of place it reached, an unknown kind said to be unknown.
+Both are read out of the events the view already holds rather than fetched again,
+so a client cannot show two reads of the same ledger that disagree. They outrank
+tasks and the event log when the terminal is short, because under autonomy they
+are the two things a reader opened the goal for: what the loop decided in their
+place, and where the work reached. A landing whose work row is not among the
+goal's is still listed with its link.
+
 ## Live Transcripts Refresh From The Runner's Store
 The detail view re-reads the selected session's transcript on every refresh and
 shows its latest messages; new executor messages appear without restarting.

@@ -967,3 +967,82 @@ CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT,
 		}
 	})
 }
+
+// A goal's story happens on its tasks, so the one set a surface needs is the
+// goal's row plus everything under it — read once, in event order, rather than
+// as two lists a reader has to put together and could put together wrongly.
+func TestAGoalsEventsAreItsOwnAndItsTasks(t *testing.T) {
+	l := newTestLedger(t)
+	goal := add(t, l, "p", "Autonomous factory", AddOptions{Kind: core.WorkEpic})
+	t1 := add(t, l, "p", "Drive the loop", AddOptions{Parent: &goal.ID})
+	t2 := add(t, l, "p", "Show the goal in context", AddOptions{Parent: &goal.ID})
+	elsewhere := add(t, l, "p", "Another goal", AddOptions{Kind: core.WorkEpic})
+
+	move(t, l, goal.ID, core.StateRunning)
+	claim, err := l.Decide(t1.ID, "the loop decided", core.Decision{Question: "which port?", Answer: "8080", Source: "judge"}, nil)
+	wantNoErr(t, err)
+	if _, err := l.AddEvent(t2.ID, core.EventPr, "commit https://x.test/c/1"); err != nil {
+		t.Fatalf("pr: %v", err)
+	}
+	if _, err := l.AddEvent(elsewhere.ID, core.EventState, "running"); err != nil {
+		t.Fatalf("other goal event: %v", err)
+	}
+
+	events, err := l.EventsUnder(goal.ID)
+	wantNoErr(t, err)
+	// Exactly the goal's own row and its two tasks', in event order: the spine is
+	// in the set, and so is every decision, landing and report filed on a task,
+	// because that is what makes a goal readable as a whole rather than as a row
+	// that looks like it decided nothing.
+	rows := map[string]int{}
+	for _, e := range events {
+		rows[e.Work]++
+	}
+	if len(rows) != 3 || rows[goal.ID] == 0 || rows[t1.ID] == 0 || rows[t2.ID] == 0 {
+		t.Errorf("rows under goal = %v, want the goal's own row and both its tasks'", rows)
+	}
+	if !slices.IsSortedFunc(events, func(a, b core.Event) int { return a.ID - b.ID }) {
+		t.Errorf("events under goal are not in id order, so the log reads out of order")
+	}
+	var sawClaim, sawLanding bool
+	for _, e := range events {
+		if e.ID == claim.ID {
+			sawClaim = true
+		}
+		if strings.HasPrefix(e.Body, "commit https://x.test/c/1") {
+			sawLanding = true
+		}
+	}
+	if !sawClaim || !sawLanding {
+		t.Errorf("events under goal carry the decision = %v and the landing = %v, want both", sawClaim, sawLanding)
+	}
+	// Another goal's events are not in this one: a subtree that leaked would show
+	// two goals' decisions as if they were one run.
+	for _, e := range events {
+		if e.Work == elsewhere.ID {
+			t.Fatalf("events under goal include another goal's event %d", e.ID)
+		}
+	}
+
+	// A task has nothing under it, so for a task this is its own events — the
+	// same set `Events` gives, not the whole goal's log.
+	own, err := l.EventsUnder(t1.ID)
+	wantNoErr(t, err)
+	same, err := l.Events(t1.ID, nil)
+	wantNoErr(t, err)
+	if len(own) != len(same) {
+		t.Errorf("events under task = %d, want its own %d, not the whole goal's log", len(own), len(same))
+	}
+
+	// The spine still reads on its own, for a surface that wants one row's log.
+	solo, err := l.Events(goal.ID, nil)
+	wantNoErr(t, err)
+	for _, e := range solo {
+		if e.Work != goal.ID {
+			t.Fatalf("Events on the goal row returned an event on %s", e.Work)
+		}
+	}
+	if len(solo) >= len(events) {
+		t.Errorf("the goal row alone has %d events and the subtree %d, want the subtree to be more", len(solo), len(events))
+	}
+}

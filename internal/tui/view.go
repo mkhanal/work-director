@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"wd/internal/core"
+	"wd/internal/review"
 	"wd/internal/runner"
 )
 
@@ -104,9 +105,17 @@ type SessionView struct {
 
 // Detail is the detail view's data for one work item.
 type Detail struct {
-	Work     core.Work
-	Tasks    []core.Work
-	Events   []core.Event
+	Work   core.Work
+	Tasks  []core.Work
+	Events []core.Event
+	// Claims and Landings are read out of the events above rather than fetched
+	// again, and they are the two sections that make a goal legible in context:
+	// under autonomy the one thing a person is here to do is read what the loop
+	// decided in their place and see where the work reached. Events show both as
+	// one line of prose; a goal whose decisions need reading one event at a time
+	// is a goal nobody reviews.
+	Claims   []review.Claim
+	Landings []review.Landed
 	Concerns []core.Concern
 	Session  *SessionView
 }
@@ -210,17 +219,22 @@ func DetailFrame(d Detail, m Model) []string {
 	out := []string{
 		fmt.Sprintf("wd · %s · %s", w.ID, w.State),
 		w.Title,
-		fmt.Sprintf("%s · %s", w.Project, w.Kind),
+		fmt.Sprintf("%s · %s%s", w.Project, w.Kind, goalTypeLabel(w)),
 		"",
 	}
 	budget := m.Height - len(out) - 2 // blank + footer
 	if m.Status != "" {
 		budget -= 2
 	}
+	// Ranked so the two things a reader came for are the last to be cut: what the
+	// loop decided, and where the work reached. Tasks and the event log are the
+	// long ones, and a cut list of events still shows the newest.
 	panels := []panel{
-		{title: "Tasks", rows: taskRows(d.Tasks), rank: 3},
-		{title: "Events", rows: eventRows(d.Events), rank: 2, newest: true},
-		{title: "Concerns", rows: concernRows(d.Concerns), rank: 0},
+		{title: "Decisions", rows: claimRows(d.Claims, m.Width), rank: 0, newest: true},
+		{title: "Landed", rows: landedRows(d.Landings), rank: 1, newest: true},
+		{title: "Tasks", rows: taskRows(d.Tasks), rank: 4},
+		{title: "Events", rows: eventRows(d.Events, d.Work.ID), rank: 3, newest: true},
+		{title: "Concerns", rows: concernRows(d.Concerns), rank: 2},
 	}
 	if d.Session != nil {
 		panels = append(panels, panel{title: "Live transcript · " + sessionLabel(d.Session), rows: transcriptRows(d.Session, m.Width), rank: 1, newest: true})
@@ -309,6 +323,66 @@ func sessionLabel(s *SessionView) string {
 	return label
 }
 
+// goalTypeLabel names what kind of goal this is, and says nothing when it is not
+// typed: an unclassified goal reads as unclassified rather than as whatever a
+// reader would assume, because the type is the one word that says whether this
+// was a thing to build or a question that was asked.
+func goalTypeLabel(w core.Work) string {
+	if w.GoalType == nil {
+		return ""
+	}
+	return " · " + string(*w.GoalType)
+}
+
+// claimRows renders the decisions made on a work item: what was asked, what was
+// decided, and whether it still stands. A claim another claim undid says so on
+// the same line, because a decision shown without its correction is a decision a
+// reader would act on.
+func claimRows(claims []review.Claim, width int) []string {
+	var out []string
+	for _, c := range claims {
+		line := "  " + onelineTo(c.Event.Decision.Question, width-8)
+		if c.Stands {
+			line += " → " + onelineTo(c.Event.Decision.Answer, width-len(line))
+		} else {
+			line += " → withdrawn, " + c.Reversed
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+// landedRows renders where the work reached, each with the kind of place it
+// reached. An unknown kind is said to be unknown: showing it as a commit or as a
+// pull request would be a guess about whether anybody read the diff.
+func landedRows(landed []review.Landed) []string {
+	var out []string
+	for _, l := range landed {
+		id := "        "
+		if l.Work != nil {
+			id = "  " + l.Work.ID
+		}
+		kind := string(l.Kind)
+		if kind == "" {
+			kind = "of unknown kind"
+		}
+		out = append(out, fmt.Sprintf("%s %s · %s", id, kind, l.URL))
+	}
+	return out
+}
+
+// onelineTo folds a text to one line of at most n characters.
+func onelineTo(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if n < 4 {
+		return ""
+	}
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-3] + "..."
+}
+
 // taskRows renders the goal's tasks.
 func taskRows(tasks []core.Work) []string {
 	var out []string
@@ -319,14 +393,28 @@ func taskRows(tasks []core.Work) []string {
 }
 
 // eventRows renders the work item's events, one line each.
-func eventRows(events []core.Event) []string {
+// eventRows renders the event log. An event filed on a task rather than on the
+// goal named first says so, because a goal's log is the whole subtree and an
+// unattributed line would leave the reader guessing which of its tasks ran.
+func eventRows(events []core.Event, self string) []string {
 	var out []string
 	for _, e := range events {
 		head := e.Body
 		if i := strings.IndexByte(e.Body, '\n'); i >= 0 {
 			head = e.Body[:i]
 		}
-		out = append(out, fmt.Sprintf("  %-8s %s", e.Kind, head))
+		// A structured decision is often filed with an empty body, because the
+		// body is a note and the parts are the claim. Rendered blank it would be
+		// a line of nothing in the middle of the log, so it shows the question it
+		// answers.
+		if head == "" && e.Decision != nil {
+			head = e.Decision.Question
+		}
+		whose := ""
+		if e.Work != self {
+			whose = e.Work + " "
+		}
+		out = append(out, fmt.Sprintf("  %s%-8s %s", whose, e.Kind, head))
 	}
 	return out
 }

@@ -31,6 +31,7 @@ func newTestServer(t *testing.T) *Server {
 func TestServe(t *testing.T) {
 	t.Run("The Server Binds To Loopback", serverBindsToLoopback)
 	t.Run("JSON Endpoints Serve The Board", jsonEndpointsServeTheBoard)
+	t.Run("A Goal Serves What The Loop Decided And Where It Reached", aGoalServesWhatTheLoopDecidedAndWhereItReached)
 	t.Run("Work Items Serve Over HTTP", workItemsServeOverHTTP)
 	t.Run("Actions Dispatch To The CLI", actionsDispatchToTheCLI)
 	t.Run("WebSocket Serves Live Events", webSocketServesLiveEvents)
@@ -105,6 +106,99 @@ func jsonEndpointsServeTheBoard(t *testing.T) {
 	var missing map[string]string
 	getJSON(t, api.URL+"/api/goal/"+task.ID, http.StatusNotFound, &missing)
 	getJSON(t, api.URL+"/api/goal/nope", http.StatusNotFound, &missing)
+}
+
+// Under autonomy the one thing a person opens a goal for is what the loop
+// decided in their place and where the work reached, so both come with the goal
+// itself — and both come out of the events already on the response, because a
+// client that rendered the decisions and the event log from two reads of the
+// ledger would be free to disagree with itself.
+func aGoalServesWhatTheLoopDecidedAndWhereItReached(t *testing.T) {
+	s := newTestServer(t)
+	kind := core.GoalBuild
+	goal, err := s.ledger.Add("p", "Autonomous factory", ledger.AddOptions{Kind: core.WorkEpic, GoalType: &kind})
+	if err != nil {
+		t.Fatalf("add goal: %v", err)
+	}
+	task, err := s.ledger.Add("p", "Drive the goal loop", ledger.AddOptions{Parent: &goal.ID})
+	if err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+	answered, err := s.ledger.Decide(task.ID, "the loop decided",
+		core.Decision{Question: "which port?", Answer: "8080", Source: "judge"}, nil)
+	if err != nil {
+		t.Fatalf("decide: %v", err)
+	}
+	if _, err := s.ledger.AddEvent(task.ID, core.EventPr, "commit https://github.test/o/r/commit/5a5f3bb"); err != nil {
+		t.Fatalf("pr: %v", err)
+	}
+	if _, err := s.ledger.AddEvent(goal.ID, core.EventPr, "https://github.test/o/r/pull/7"); err != nil {
+		t.Fatalf("legacy pr: %v", err)
+	}
+
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	var one struct {
+		Goal   core.Work `json:"goal"`
+		Claims []struct {
+			Event  core.Event `json:"event"`
+			Work   *core.Work `json:"work"`
+			Stands bool       `json:"stands"`
+		} `json:"claims"`
+		Landings []struct {
+			Work *core.Work       `json:"work"`
+			Kind core.LandingKind `json:"kind"`
+			URL  string           `json:"url"`
+		} `json:"landings"`
+	}
+	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &one)
+
+	if one.Goal.GoalType == nil || *one.Goal.GoalType != core.GoalBuild {
+		t.Fatalf("goal type = %v, want build: a goal whose kind is not on it reads as untyped", one.Goal.GoalType)
+	}
+	if len(one.Claims) != 1 {
+		t.Fatalf("claims = %d, want 1", len(one.Claims))
+	}
+	// Which work a claim is about travels with it, so a reader sees what it was
+	// about and not only which row it sits on.
+	if one.Claims[0].Event.ID != answered.ID || one.Claims[0].Work == nil || one.Claims[0].Work.ID != task.ID {
+		t.Errorf("claim = %+v, want event %d resolved to task %s", one.Claims[0], answered.ID, task.ID)
+	}
+	if !one.Claims[0].Stands {
+		t.Errorf("claim stands = false, want true: nothing reversed it")
+	}
+	if len(one.Landings) != 2 {
+		t.Fatalf("landings = %d, want both", len(one.Landings))
+	}
+	// The kind is what separates a change that went into the product from one
+	// still waiting on a merge — the difference between "reviewed" and "landed".
+	if one.Landings[0].Kind != core.LandingCommit || one.Landings[0].URL != "https://github.test/o/r/commit/5a5f3bb" {
+		t.Errorf("first landing = %+v, want the commit and its link", one.Landings[0])
+	}
+	if one.Landings[0].Work == nil || one.Landings[0].Work.ID != task.ID {
+		t.Errorf("first landing work = %+v, want task %s", one.Landings[0].Work, task.ID)
+	}
+	// A landing filed before kinds were recorded is a real link of unknown kind,
+	// and the link is still the fact.
+	if one.Landings[1].Kind != "" || one.Landings[1].URL != "https://github.test/o/r/pull/7" {
+		t.Errorf("legacy landing = %+v, want the link kept and the kind unknown", one.Landings[1])
+	}
+
+	// A goal with nothing decided and nowhere landed sends two empty arrays, not
+	// two nulls: a client should never have to write the null check the review
+	// spec already told it not to.
+	empty, err := s.ledger.Add("p", "Nothing yet", ledger.AddOptions{Kind: core.WorkEpic})
+	if err != nil {
+		t.Fatalf("add empty goal: %v", err)
+	}
+	var none struct {
+		Claims   []any `json:"claims"`
+		Landings []any `json:"landings"`
+	}
+	getJSON(t, api.URL+"/api/goal/"+empty.ID, http.StatusOK, &none)
+	if none.Claims == nil || len(none.Claims) != 0 || none.Landings == nil || len(none.Landings) != 0 {
+		t.Errorf("empty goal served %+v, want empty arrays", none)
+	}
 }
 
 func workItemsServeOverHTTP(t *testing.T) {

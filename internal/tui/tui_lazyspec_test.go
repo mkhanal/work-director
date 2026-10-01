@@ -10,6 +10,7 @@ import (
 
 	"wd/internal/core"
 	"wd/internal/ledger"
+	"wd/internal/review"
 	"wd/internal/runner"
 )
 
@@ -320,6 +321,82 @@ func TestTui(t *testing.T) {
 				t.Fatalf("oldest event shown while newer ones were dropped:\n%s", text)
 			}
 		})
+	})
+
+	t.Run("A Goal Is Readable In One Place", func(t *testing.T) {
+		// Under autonomy the one thing a person opens a goal for is what the loop
+		// decided in their place and where the work reached, so those two read
+		// off the events the view is already holding rather than off a second
+		// read that could disagree with the log printed beside them.
+		build := core.GoalBuild
+		works := map[string]core.Work{
+			"goal0001": {ID: "goal0001", Title: "Autonomous factory"},
+			"task0001": {ID: "task0001", Title: "Drive the goal loop"},
+		}
+		events := []core.Event{
+			{ID: 1, Work: "task0001", Kind: core.EventDecision,
+				Decision: &core.Decision{Question: "which port does the server bind?", Answer: "8787", Source: "judge"}},
+			{ID: 2, Work: "task0001", Kind: core.EventDecision,
+				Decision: &core.Decision{Question: "should the card be global?", Answer: "it is a project convention", Source: "judge"}},
+			{ID: 3, Work: "goal0001", Kind: core.EventDecision,
+				Decision: &core.Decision{Question: "should the loop bind wide?", Answer: "no, loopback only", Source: "judge"}},
+			{ID: 4, Work: "goal0001", Kind: core.EventDecision,
+				Decision: &core.Decision{Question: "should the loop bind wide after all?", Answer: "yes", Source: "judge", Reverses: 3}},
+			{ID: 5, Work: "task0001", Kind: core.EventPr, Body: "commit https://github.test/o/r/commit/5a5f3bb"},
+			{ID: 6, Work: "task0001", Kind: core.EventPr, Body: "https://github.test/o/r/pull/7"},
+		}
+		detail := Detail{
+			Work:   core.Work{ID: "goal0001", Project: "work-director", Title: "Autonomous factory", Kind: core.WorkEpic, State: core.StateRunning, GoalType: &build},
+			Tasks:  []core.Work{{ID: "task0001", Title: "Drive the goal loop", State: core.StateDone}},
+			Events: events,
+		}
+		detail.Claims = review.ClaimsUnder(events, works)
+		detail.Landings = review.LandingsUnder(events, works)
+		text := strings.Join(DetailFrame(detail, Model{View: ViewDetail, Width: 100, Height: 40}), "\n")
+
+		// The header names what kind of goal this is: whether it was a thing to
+		// build or a question that was asked is the first thing a reader wants.
+		assertContains(t, text, "work-director · epic · build")
+
+		// A decision reads as what was asked and what was decided, on one line.
+		assertContains(t, text, "Decisions")
+		assertContains(t, text, "which port does the server bind? → 8787")
+		// A claim a later claim undid says so where the reader is already
+		// looking, because a decision shown without its correction is a decision
+		// a reader would act on.
+		assertContains(t, text, "withdrawn")
+		assertContains(t, text, "should the loop bind wide? → withdrawn")
+
+		// Where the work reached, with the kind of place it reached: a change that
+		// went into the product is not one still waiting on a merge.
+		assertContains(t, text, "Landed")
+		assertContains(t, text, "commit · https://github.test/o/r/commit/5a5f3bb")
+		// A landing filed before kinds were recorded keeps its link and says the
+		// kind is unknown rather than guessing at one.
+		assertContains(t, text, "of unknown kind")
+		assertContains(t, text, "https://github.test/o/r/pull/7")
+
+		// An event on a task says which task, because the goal's log is the whole
+		// subtree and an unattributed line leaves the reader guessing.
+		assertContains(t, text, "task0001 decision")
+
+		// An unclassified goal says nothing rather than letting a reader assume.
+		untyped := Detail{Work: core.Work{ID: "goal0002", Project: "p", Title: "Unclassified", Kind: core.WorkEpic, State: core.StateQueued}}
+		text = strings.Join(DetailFrame(untyped, Model{View: ViewDetail, Width: 100, Height: 24}), "\n")
+		assertContains(t, text, "p · epic")
+		if strings.Contains(text, "Decisions") || strings.Contains(text, "Landed") {
+			t.Fatalf("empty panels shown for a goal with nothing decided or landed:\n%s", text)
+		}
+
+		// In a short terminal the decisions and the landings are the last to go:
+		// they are what the reader opened the goal for.
+		short := DetailFrame(detail, Model{View: ViewDetail, Width: 100, Height: 24})
+		shortText := strings.Join(short, "\n")
+		if len(short) > 24 {
+			t.Fatalf("frame is %d lines, taller than the terminal's 24:\n%s", len(short), shortText)
+		}
+		assertContains(t, shortText, "which port does the server bind? → 8787")
+		assertContains(t, shortText, "commit · https://github.test/o/r/commit/5a5f3bb")
 	})
 
 	t.Run("Live Transcripts Refresh From The Runner's Store", func(t *testing.T) {

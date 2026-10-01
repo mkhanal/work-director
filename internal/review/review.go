@@ -351,3 +351,64 @@ func clip(s string, n int) string {
 	}
 	return s
 }
+
+// ClaimsUnder reads the claims in a set of events, with each claim's work
+// resolved from the works the caller already holds. It is for the surfaces that
+// show one goal in context rather than a project over a window: the detail view
+// already holds the goal's events, and asking the ledger for a second copy of
+// the same facts would give it two sources that could disagree.
+//
+// A reversal inside the set is resolved here, the same as in a pass, because a
+// claim shown as standing when a later claim in the same set undid it is a claim
+// the reader would act on wrongly. A reversal outside the set is not visible
+// from inside it, so such a claim reads as standing and the pass is where a
+// reader catches it: the detail view answers what this goal did, and the pass
+// answers whether it still stands.
+func ClaimsUnder(events []core.Event, works map[string]core.Work) []Claim {
+	reversedBy := map[int]int{}
+	for _, e := range events {
+		if e.Decision != nil && e.Decision.Reverses > 0 {
+			reversedBy[e.Decision.Reverses] = e.ID
+		}
+	}
+	out := []Claim{}
+	for _, e := range events {
+		if e.Kind != core.EventDecision || e.Decision == nil {
+			continue
+		}
+		claim := Claim{Event: e, Work: workIn(works, e.Work), Stands: true}
+		if by, ok := reversedBy[e.ID]; ok {
+			claim.Stands = false
+			claim.Reversed = "by event " + strconv.Itoa(by)
+		}
+		out = append(out, claim)
+	}
+	return out
+}
+
+// LandingsUnder reads the landings in a set of events, the same way
+// ClaimsUnder reads the claims: from what the caller holds, resolving each
+// landing's work from the same works.
+func LandingsUnder(events []core.Event, works map[string]core.Work) []Landed {
+	out := []Landed{}
+	for _, e := range events {
+		if e.Kind != core.EventPr {
+			continue
+		}
+		landing := core.ParseLanding(e.Body)
+		out = append(out, Landed{Work: workIn(works, e.Work), Kind: landing.Kind, URL: landing.URL, At: e.At})
+	}
+	return out
+}
+
+// workIn resolves a work id against works the caller already has. A landing
+// whose row is not among them is still a landing: the event and the link are the
+// facts and the row is only the caption, so the caption is simply absent rather
+// than the landing being dropped.
+func workIn(works map[string]core.Work, id string) *core.Work {
+	w, ok := works[id]
+	if !ok {
+		return nil
+	}
+	return &w
+}

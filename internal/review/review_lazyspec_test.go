@@ -416,3 +416,86 @@ func TestAPassSaysHowEachChangeLanded(t *testing.T) {
 		t.Errorf("render of a landing with no row = %q, want the link and the kind still shown", text)
 	}
 }
+
+// A goal opened on its own has to show what the loop decided in a person's place
+// and where the work reached, without a second read of the ledger to disagree
+// with the first. So both are read out of the events the caller already holds.
+func TestAGoalIsReadableInOnePlace(t *testing.T) {
+	build := core.GoalBuild
+	events := []core.Event{
+		{Kind: core.EventState, Body: "running"},
+		{ID: 11, Work: "g1", Kind: core.EventDecision, At: "2026-10-01T09:00:00Z",
+			Decision: &core.Decision{Question: "should the port be fixed?", Answer: "8080", Source: "judge"}},
+		{ID: 12, Work: "g1", Kind: core.EventDecision, At: "2026-10-01T10:00:00Z",
+			Decision: &core.Decision{Question: "should the card be global?", Answer: "it is a project convention", Source: "judge"}},
+		{ID: 13, Work: "g1", Kind: core.EventDecision, At: "2026-10-01T11:00:00Z",
+			Decision: &core.Decision{Question: "what about the path?", Answer: "keep it", Source: "judge", Reverses: 12}},
+		{ID: 14, Work: "t1", Kind: core.EventPr, Body: "commit https://github.test/o/r/commit/abc", At: "2026-10-01T12:00:00Z"},
+		{ID: 15, Work: "t1", Kind: core.EventPr, Body: "https://github.test/o/r/pull/7", At: "2026-10-01T13:00:00Z"},
+	}
+	works := map[string]core.Work{
+		"g1": {ID: "g1", Title: "Serve on a fixed port", GoalType: &build},
+		"t1": {ID: "t1", Title: "Wire the server"},
+	}
+
+	claims := ClaimsUnder(events, works)
+	if len(claims) != 3 {
+		t.Fatalf("claims = %d, want all three: a decision filtered out of a goal's own view is one nobody reads", len(claims))
+	}
+	// Which work each claim is about is resolved, so a reader sees what it was
+	// about and not only which row it sits on.
+	for _, c := range claims {
+		if c.Work == nil {
+			t.Errorf("claim %d has no work resolved, so a reader sees a row id and nothing else", c.Event.ID)
+		}
+	}
+	if claims[0].Event.Decision.Question != "should the port be fixed?" {
+		t.Errorf("first claim = %q, want the events in order", claims[0].Event.Decision.Question)
+	}
+	// A claim another claim undid is marked withdrawn, with the reason on it: a
+	// decision shown as standing when a later decision in the same set undid it
+	// is a decision a reader would act on.
+	var withdrawn *Claim
+	for i := range claims {
+		if claims[i].Event.ID == 12 {
+			withdrawn = &claims[i]
+		}
+	}
+	if withdrawn == nil || withdrawn.Stands {
+		t.Fatalf("claim 12 = %+v, want it withdrawn", withdrawn)
+	}
+	if !strings.Contains(withdrawn.Reversed, "13") {
+		t.Errorf("withdrawal reason = %q, want the claim that undid it named", withdrawn.Reversed)
+	}
+	// The claims that nothing undid still stand.
+	if !claims[0].Stands || !claims[2].Stands {
+		t.Errorf("claims outside the reversal stand = %v %v, want both true", claims[0].Stands, claims[2].Stands)
+	}
+
+	landed := LandingsUnder(events, works)
+	if len(landed) != 2 {
+		t.Fatalf("landings = %d, want both", len(landed))
+	}
+	if landed[0].Kind != core.LandingCommit || !strings.Contains(landed[0].URL, "/commit/abc") {
+		t.Errorf("first landing = %+v, want the commit and its link", landed[0])
+	}
+	// A landing filed before kinds were recorded is a real link of unknown kind,
+	// and saying so is the difference between "landed" and "was reviewed".
+	if landed[1].Kind != "" || landed[1].URL != "https://github.test/o/r/pull/7" {
+		t.Errorf("legacy landing = %+v, want the link kept and the kind unknown", landed[1])
+	}
+
+	// A landing whose row is not among the works is still a landing: the link is
+	// the fact and the row is only the caption.
+	gone := LandingsUnder([]core.Event{{ID: 20, Work: "gone", Kind: core.EventPr, Body: "commit https://x.test/c/1"}}, works)
+	if len(gone) != 1 || gone[0].Work != nil {
+		t.Errorf("landing with no row = %+v, want it listed with the link and no work", gone)
+	}
+	// Empty is empty, not absent: a client rendering a client that never nulls.
+	if got := ClaimsUnder(nil, works); got == nil || len(got) != 0 {
+		t.Errorf("claims of nothing = %#v, want an empty slice", got)
+	}
+	if got := LandingsUnder(nil, works); got == nil || len(got) != 0 {
+		t.Errorf("landings of nothing = %#v, want an empty slice", got)
+	}
+}
