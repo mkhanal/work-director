@@ -328,16 +328,19 @@ var Transitions = map[State][]State{
 	StateDone: {StateRunning},
 	// Dropped is terminal: work let go of on purpose stays let go of.
 	StateDropped: {},
-	// Abandoned is terminal: work comes to rest there and stays there, because
-	// it is the record of a thing that stopped without shipping rather than one
-	// that finished. A reversal is a new decision event against the same goal,
-	// not a transition back out.
-	StateAbandoned: {},
+	// Abandoned is not terminal, but it is nearly so: it records a thing that
+	// stopped without shipping, and the only way out is into dropped, because
+	// sometimes a thing filed as a failure was a choice all along — a duplicate
+	// whose work landed elsewhere, a probe that was never meant to ship. Release
+	// is what takes that edge, because reclassifying a failure as a choice is a
+	// claim and has to be said out loud. Reopening is not on this list: a goal
+	// that never shipped is not a goal being worked on again.
+	StateAbandoned: {StateDropped},
 }
 
 // Reopenable reports whether work in state s may be worked on again. Only done
-// work is: dropped and abandoned are the two ways of saying this is finished
-// with, deliberately, and reopening either would make those endings reversible by
+// work is. Dropped is a choice and abandoned is a stop, and neither is work that
+// is in progress; reopening either would make a deliberate ending reversible by
 // accident.
 func Reopenable(s State) bool {
 	return s == StateDone

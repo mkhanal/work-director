@@ -618,6 +618,48 @@ func (l *Ledger) Reopen(id, why string) (core.Work, error) {
 	return l.Get(id)
 }
 
+// Release moves work that came to rest abandoned into dropped: work that was
+// filed as a failure and turns out to have been a choice. A duplicate whose
+// work landed under another id, a probe that was never meant to ship — both were
+// written down as "stopped without shipping", and that sentence is false of them.
+//
+// The reason is required for the same reason Reopen's is: this reclassifies a
+// failure as a choice, and the only thing standing between the two is what the
+// person filing it says. So it is said, and it is filed as a decision rather than
+// an edit. The abandon event stays exactly where it was, because it did happen —
+// work that never shipped — and a reader sees the failure and then the correction
+// that the failure was the wrong word for it. History is not rewritten; the row
+// simply stops claiming the work stopped.
+//
+// Releasing is the only way out of abandoned. It does not lead back to running:
+// work that never shipped does not become work in progress by being relabelled.
+func (l *Ledger) Release(id, why string) (core.Work, error) {
+	if why == "" {
+		return core.Work{}, fmt.Errorf("work %s: releasing says why the stop was a choice: wd release %s \"<what was true instead>\"", id, id)
+	}
+	err := l.inTx(func(tx *sql.Tx) error {
+		w, err := getWork(tx, id)
+		if err != nil {
+			return err
+		}
+		if w.State != core.StateAbandoned {
+			return fmt.Errorf("work %s is %s, and only abandoned work is released: %s", id, w.State, core.IllegalTransition{From: w.State, To: core.StateDropped})
+		}
+		if _, err := tx.Exec(`UPDATE work SET state = ? WHERE id = ?`, string(core.StateDropped), id); err != nil {
+			return err
+		}
+		_, err = addClaim(tx, id, core.EventDecision, "released: "+why, now(), nil, &core.Decision{
+			Question: "was the stop recorded against " + id + " a failure or a choice?",
+			Answer:   why,
+		})
+		return err
+	})
+	if err != nil {
+		return core.Work{}, err
+	}
+	return l.Get(id)
+}
+
 func (l *Ledger) Transition(id string, to core.State) (core.Work, error) {
 	if to == core.StateSoftDone {
 		return core.Work{}, fmt.Errorf("work %s: soft-done is reached only through SoftDone, which checks readiness", id)
@@ -637,6 +679,12 @@ func (l *Ledger) transition(id string, to core.State) (core.Work, error) {
 		// without saying what for. Checked here, where the row is already read.
 		if to == core.StateRunning && core.Reopenable(w.State) {
 			return fmt.Errorf("work %s is done; work on it again goes through Reopen, which says what is being worked on: wd reopen %s \"<what>\"", id, id)
+		}
+		// The same shape as reopening, and the same reason: abandoned → dropped
+		// reclassifies a stop as a choice, so the machine has the edge and only
+		// Release may take it, with the reason attached.
+		if to == core.StateDropped && w.State == core.StateAbandoned {
+			return fmt.Errorf("work %s is abandoned; saying the stop was a choice goes through Release: wd release %s \"<what was true instead>\"", id, id)
 		}
 		if !slices.Contains(core.Transitions[w.State], to) {
 			return core.IllegalTransition{From: w.State, To: to}

@@ -256,7 +256,22 @@ shipping, recording the reason and the detail. It takes any kind of work, not
 only a goal: a task's pull request can go unmerged as easily as a goal's. With no reason given it is computed from the ledger: a
 pull request that was raised and never merged reads `unmerged`, and no pull
 request at all reads `no-pr`. A reason outside those two is not spellable,
-because a reason nobody can verify is not a reason. Abandoned is terminal.
+because a reason nobody can verify is not a reason. Abandoned comes to rest, and
+the one way out of it is `wd release <id> "<what was true instead>"` (also `wd goal
+release <id> "<what>"`), which is covered on its own below.
+
+## A Stop Recorded As A Failure Can Be Released Into A Choice
+`wd release <id> "<what was true instead>"` (and `wd goal release <id> "<what>"`)
+moves abandoned work to dropped and files the reason as a decision, and refuses
+without one. Abandoning says a thing stopped without shipping, and for a
+duplicate whose work landed under another id, or a probe that was never meant to
+ship, that sentence is false. The reason is required for the same reason the
+abandon reason is: nothing separates the failure from the choice except what the
+person filing it says, so it is said. `wd set <id> dropped` cannot do it — the
+reason is the whole content of the command — and the abandon event stays on the
+row, because the work really did not ship and a reader sees the stop and then the
+correction that stop was the wrong word for it. It refuses work in any state but
+abandoned: releasing done work would be reopening it and renaming it at once.
 
 ## A Finished Goal Is Reopened Only For Work, Not For A Question
 `wd reopen <id> "<what is being worked on>"` (and `wd goal reopen <id> "<what>"`)

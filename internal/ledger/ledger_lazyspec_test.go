@@ -1252,3 +1252,107 @@ func mustGet(t *testing.T, l *Ledger, id string) core.Work {
 	wantNoErr(t, err)
 	return w
 }
+
+// Abandoning records that a thing stopped without shipping. For a duplicate
+// whose work landed under another id, that sentence is false, and the row cannot
+// be left saying it forever — it is the one thing on a board that contradicts
+// work that demonstrably shipped.
+func TestAnAbandonedRowCanBeReleasedIntoAChoice(t *testing.T) {
+	l := newTestLedger(t)
+	dup := add(t, l, "p", "The same work shipped as another task", AddOptions{})
+	for _, s := range []core.State{core.StateRunning, core.StateReview} {
+		move(t, l, dup.ID, s)
+	}
+	if _, err := l.Abandon(dup.ID, core.AbandonNoPR, "never started"); err != nil {
+		t.Fatalf("abandon: %v", err)
+	}
+
+	// The reason is the whole content of the command, so it is required and its
+	// absence is refused with the command that takes one.
+	if _, err := l.Release(dup.ID, ""); err == nil || !strings.Contains(err.Error(), "wd release "+dup.ID) {
+		t.Fatalf("Release with no reason = %v, want it refused naming the command", err)
+	}
+	if got := mustGet(t, l, dup.ID); got.State != core.StateAbandoned {
+		t.Fatalf("state = %q, want the refusal to leave it abandoned", got.State)
+	}
+
+	released, err := l.Release(dup.ID, "the same work shipped as 17b4a94b, which is done")
+	wantNoErr(t, err)
+	if released.State != core.StateDropped {
+		t.Fatalf("state = %q, want dropped: the work was let go of, never failed", released.State)
+	}
+	evs, err := l.Events(dup.ID, nil)
+	wantNoErr(t, err)
+	last := evs[len(evs)-1]
+	if last.Kind != core.EventDecision || last.Decision == nil {
+		t.Fatalf("last event = %+v, want the correction filed as a decision", last)
+	}
+	if !strings.Contains(last.Decision.Answer, "17b4a94b") {
+		t.Errorf("the claim answers %q, want it to name what was true instead", last.Decision.Answer)
+	}
+
+	// History is not rewritten. The abandon event stays, because work really did
+	// not ship, and a reader sees the stop and then the correction — which is the
+	// only way the row can stop contradicting the work without erasing it.
+	var stops int
+	for _, e := range evs {
+		if e.Kind == core.EventAbandon && strings.HasPrefix(e.Body, "no-pr:") {
+			stops++
+		}
+	}
+	if stops != 1 {
+		t.Errorf("abandon events = %d, want the original stop kept alongside the release", stops)
+	}
+
+	// A bare transition cannot do it: the reason is the content, not a formality.
+	other := add(t, l, "p", "Another stop", AddOptions{})
+	for _, s := range []core.State{core.StateRunning, core.StateReview} {
+		move(t, l, other.ID, s)
+	}
+	if _, err := l.Abandon(other.ID, core.AbandonNoPR, "never started"); err != nil {
+		t.Fatalf("abandon: %v", err)
+	}
+	if _, err := l.Transition(other.ID, core.StateDropped); err == nil || !strings.Contains(err.Error(), "wd release "+other.ID) {
+		t.Errorf("Transition abandoned → dropped = %v, want it refused naming Release", err)
+	}
+	if got := mustGet(t, l, other.ID); got.State != core.StateAbandoned {
+		t.Errorf("state = %q, want it left abandoned", got.State)
+	}
+	if !slices.Contains(core.Transitions[core.StateAbandoned], core.StateDropped) {
+		t.Error("the machine does not list abandoned → dropped, so Release could not take it either")
+	}
+
+	// Release is not a second name for reopening. Work that never shipped does
+	// not become work in progress by being relabelled, and only abandoned work
+	// has a stop to correct.
+	for _, w := range []struct {
+		name string
+		work core.Work
+		to   core.State
+	}{
+		{"done", finish(t, l, "Shipped"), core.StateDone},
+		{"dropped", released, core.StateDropped},
+	} {
+		if _, err := l.Release(w.work.ID, "on reflection"); err == nil || !strings.Contains(err.Error(), "only abandoned work is released") {
+			t.Errorf("Release of %s work = %v, want it refused", w.name, err)
+		}
+	}
+	if _, err := l.Release(dup.ID, "again"); err == nil {
+		t.Error("releasing an already-released row succeeded, want a refusal")
+	}
+}
+
+// finish closes work through every gate it needs and returns it done, so a test
+// about states it must not be able to leave can start from a real one.
+func finish(t *testing.T, l *Ledger, title string) core.Work {
+	t.Helper()
+	w := add(t, l, "p", title, AddOptions{})
+	for _, s := range []core.State{core.StateRunning, core.StateReview} {
+		move(t, l, w.ID, s)
+	}
+	l.AddEvent(w.ID, core.EventReport, "DONE\nSTATUS: DONE")
+	l.AddEvent(w.ID, core.EventVerify, "pass")
+	softDone(t, l, w.ID, false)
+	move(t, l, w.ID, core.StateDone)
+	return mustGet(t, l, w.ID)
+}

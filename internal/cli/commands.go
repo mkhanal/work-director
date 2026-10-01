@@ -516,7 +516,7 @@ func (c *Cli) goalLike(cmd string, rest []string) error {
 	if cmd == "goal" {
 		kindWord = "goal"
 	}
-	usage := fmt.Sprintf("wd %s (plan <id> | spawn <id> | run <id> [--only|--heading] [--wait] | review <id> | status <id> | classify <id> <type> | abandon <id> <reason> | reopen <id> \"<what is being worked on>\")", cmd)
+	usage := fmt.Sprintf("wd %s (plan <id> | spawn <id> | run <id> [--only|--heading] [--wait] | review <id> | status <id> | classify <id> <type> | abandon <id> <reason> | reopen <id> \"<what is being worked on>\" | release <id> \"<what was true instead>\")", cmd)
 	switch sub {
 	case "plan":
 		if goal == nil {
@@ -549,6 +549,8 @@ func (c *Cli) goalLike(cmd string, rest []string) error {
 		return c.goalAbandon(goal, rest)
 	case "reopen":
 		return c.goalReopen(goal, rest)
+	case "release":
+		return c.goalRelease(goal, rest)
 	}
 	return fail("%s", usage)
 }
@@ -603,6 +605,37 @@ func (c *Cli) reopenWork(id, why string) error {
 		return err
 	}
 	return c.out(w, fmt.Sprintf("%s reopened: %s", w.ID, why))
+}
+
+// release says a stop was a choice. Work filed as abandoned records that it
+// stopped without shipping, and for a duplicate whose work landed elsewhere or a
+// probe that was never meant to ship that sentence is simply false. Release
+// corrects the row to dropped and files why, so the record stops claiming a
+// failure.
+func (c *Cli) release(rest []string) error {
+	if len(rest) < 1 {
+		return fail("usage: wd release <id> \"<what was true instead>\"")
+	}
+	// One argument reaches Release rather than the usage line, because the reader
+	// who typed it has forgotten the reason and not the command.
+	return c.releaseWork(rest[0], strings.Join(rest[1:], " "))
+}
+
+func (c *Cli) goalRelease(goal *core.Work, rest []string) error {
+	if goal == nil {
+		return fail("usage: wd goal release <id> \"<what was true instead>\"")
+	}
+	// rest[0] is the subcommand and rest[1] the goal, so the reason starts after
+	// both — the same slice abandonWork reads its own reason from.
+	return c.releaseWork(goal.ID, strings.Join(rest[2:], " "))
+}
+
+func (c *Cli) releaseWork(id, why string) error {
+	w, err := c.Ledger.Release(id, why)
+	if err != nil {
+		return err
+	}
+	return c.out(w, fmt.Sprintf("%s released: %s", w.ID, why))
 }
 
 func (c *Cli) abandonWork(id string, args []string) error {

@@ -242,6 +242,7 @@ var commands = map[string]func(c *Cli, rest []string) error{
 	"roadmap":   (*Cli).roadmap,
 	"drive":     (*Cli).drive,
 	"abandon":   (*Cli).abandon,
+	"release":   (*Cli).release,
 	"reopen":    (*Cli).reopen,
 	"review":    (*Cli).review,
 	"send":      (*Cli).send,

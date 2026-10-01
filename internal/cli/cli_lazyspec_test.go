@@ -747,6 +747,14 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 	// Abandonment is a one-way door, so it gets work of its own rather than
 	// taking one the rest of the census still needs.
 	unshipped := jsonString(t, f.runOK(t, "add", "sample-app", "Never shipped", "--json"), "id")
+	// A stop released into a choice needs an abandoned row of its own, and both
+	// endings are one-way enough that neither borrows a row the census needs.
+	released := jsonString(t, f.runOK(t, "add", "sample-app", "Never shipped, on purpose", "--json"), "id")
+	f.runOK(t, "set", released, "running")
+	f.runOK(t, "abandon", released, "no-pr", "--reason", "never started")
+	releasedGoal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "A goal let go of", "--json"), "id")
+	f.runOK(t, "set", releasedGoal, "running")
+	f.runOK(t, "abandon", releasedGoal, "no-pr", "--reason", "superseded")
 	// Reopening needs finished work, so this one closes through the gates first.
 	// Abandonment and re-opening are both one-way enough that neither borrows a
 	// row the rest of the census still needs.
@@ -837,6 +845,8 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"roadmap"},
 		{"drive", driveGoal},
 		{"abandon", unshipped},
+		{"release", released, "a probe that was never meant to ship"},
+		{"goal", "release", releasedGoal, "and through the goal spelling"},
 		{"reopen", finished, "a second half nobody had asked for"},
 		{"goal", "reopen", finishedGoal, "and again, through the goal spelling"},
 		{"review", "--project", "sample-app"}, {"review", "--ack", "--project", "sample-app"},
@@ -2191,6 +2201,83 @@ func TestAGoalSaysWhatKindOfThingItWas(t *testing.T) {
 	// --type on a task is refused at the door too.
 	if errStr := f.runFail(t, "add", "sample-app", "x", "--goal", goal, "--type", "build"); !strings.Contains(errStr, "a goal type applies to a goal, not task") {
 		t.Errorf("add a typed task: %q, want it refused", errStr)
+	}
+}
+
+func TestAStopRecordedAsAFailureCanBeReleasedIntoAChoice(t *testing.T) {
+	f := newCLIFixture(t)
+
+	// A duplicate left queued, written down as a thing that stopped without
+	// shipping — which is false of it, because the work it duplicates shipped
+	// elsewhere. That is the one sentence on a board that contradicts work that
+	// demonstrably landed, and it has to be correctable.
+	dup := jsonString(t, f.runOK(t, "add", "sample-app", "The same work as another task", "--json"), "id")
+	f.runOK(t, "set", dup, "running")
+	f.runOK(t, "abandon", dup, "no-pr", "--reason", "never started")
+	if got := f.workRow(t, dup); got.State != core.StateAbandoned {
+		t.Fatalf("state = %s, want abandoned", got.State)
+	}
+
+	// wd set cannot do it: the reason is the whole content of the command.
+	if errStr := f.runFail(t, "set", dup, "dropped"); !strings.Contains(errStr, "wd release "+dup) {
+		t.Errorf("set dropped = %q, want it naming the release", errStr)
+	}
+
+	// One argument reaches the reason rather than the usage line, because the
+	// reader who typed it has forgotten the reason and not the command.
+	errStr := f.runFail(t, "release", dup)
+	if !strings.Contains(errStr, "wd release "+dup) {
+		t.Errorf("release with no reason = %q, want it naming the command that takes one", errStr)
+	}
+
+	out := f.runOK(t, "release", dup, "the same work shipped as 17b4a94b, which is done", "--json")
+	if !strings.Contains(out, `"state": "dropped"`) {
+		t.Fatalf("release = %q, want the row dropped", out)
+	}
+	// The stop stays on the row. It happened — work did not ship — and the
+	// correction is filed next to it rather than in place of it.
+	evs := f.runOK(t, "events", dup, "--json")
+	for _, want := range []string{"no-pr: never started", "17b4a94b", `"kind": "decision"`} {
+		if !strings.Contains(evs, want) {
+			t.Errorf("events = %s, want %q", evs, want)
+		}
+	}
+
+	// Releasing is not reopening under another name: it only ever leaves
+	// abandoned, so work that never shipped does not start being worked on.
+	if errStr := f.runFail(t, "release", dup, "again"); !strings.Contains(errStr, "only abandoned work is released") {
+		t.Errorf("second release = %q, want it refused", errStr)
+	}
+	shipped := jsonString(t, f.runOK(t, "add", "sample-app", "Shipped work", "--json"), "id")
+	closeThroughTheGates(t, f, shipped)
+	if errStr := f.runFail(t, "release", shipped, "on reflection"); !strings.Contains(errStr, "only abandoned work is released") {
+		t.Errorf("release of done work = %q, want it refused: that is reopening", errStr)
+	}
+	if got := f.workRow(t, shipped); got.State != core.StateDone {
+		t.Errorf("state = %s, want done", got.State)
+	}
+
+	// And a released task no longer holds its goal open. That is the point of the
+	// correction: the goal closes on what it actually shipped instead of being
+	// held open forever by a row saying a failure that was a choice.
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "A goal with a duplicate in it", "--type", "build", "--json"), "id")
+	leftBehind := jsonString(t, f.runOK(t, "add", "sample-app", "A duplicate left behind", "--goal", goal, "--json"), "id")
+	kept := jsonString(t, f.runOK(t, "add", "sample-app", "The work that shipped", "--goal", goal, "--json"), "id")
+	closeThroughTheGates(t, f, kept)
+	f.runOK(t, "set", leftBehind, "running")
+	f.runOK(t, "abandon", leftBehind, "no-pr", "--reason", "never started")
+	f.runOK(t, "set", goal, "running")
+	f.runOK(t, "set", goal, "review")
+	f.runOK(t, "report", goal, "DONE\nSTATUS: DONE")
+	f.runOK(t, "verify", goal)
+	f.runOK(t, "pr", goal, "commit https://github.com/mkhanal/sample-app/commit/abc1234")
+	if errStr := f.runFail(t, "soft-done", goal); !strings.Contains(errStr, "task(s) not done") {
+		t.Errorf("soft-done over an abandoned task = %q, want it counting the stop", errStr)
+	}
+	f.runOK(t, "release", leftBehind, "the same work shipped as "+kept)
+	f.runOK(t, "soft-done", goal)
+	if got := f.workRow(t, goal); got.State != core.StateSoftDone {
+		t.Errorf("goal state = %s, want soft-done once the duplicate was released", got.State)
 	}
 }
 

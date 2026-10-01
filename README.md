@@ -91,7 +91,15 @@ wd concern add <task> "..." ; wd concern resolve <n> "<decision>"        # the d
 wd decide <id> "<decision>"       # record a decision in one line; briefs and ASK: answers read it
 wd scan --adopt <candidate>       # promote a project rule to a global candidate card
 wd reopen <e> "<what is being worked on>"  # more work on top of a finished goal; the reason is required
+wd abandon <id> no-pr && wd release <id> "<what was true instead>"   # a stop recorded as a failure, corrected to a choice
 ```
+
+`abandoned` records that work stopped without shipping. Sometimes that sentence is false of the work —
+a duplicate whose work landed under another id, a probe that was never meant to ship — so `wd release`
+corrects the row to `dropped` and files why, as a decision. The abandon event stays on the row: the
+work really did not ship, and a reader sees the stop and then the correction. A dropped task does not
+make a goal unshipped; an abandoned one does, because a goal that chose not to do something still
+ships what it set out to do as revised.
 
 `done` is the only ending that comes back to life, and only for work rather than for a question:
 someone asking a finished goal what it decided has not reopened it, so `wd reopen` refuses without a
