@@ -418,9 +418,10 @@ func (c *Cli) drive(rest []string) error {
 	// left in running with all its work shipped is the last thing a person has to
 	// come and do. Where a gate needs a fact the loop cannot have — the work is
 	// not pushed, so there is nowhere to point at — it stops there and says so.
-	// A goal with a dropped or abandoned task is not this case: it came to rest
-	// without shipping, and only a person decides whether that goal was worth
-	// finishing another way.
+	// A goal with a task that stopped without shipping is not this case: it came
+	// to rest short of its own plan, and only a person decides whether that goal
+	// was worth finishing another way. A goal that dropped a task is this case —
+	// it chose not to do the work, and what it did do still has to land.
 	gates := []string{}
 	if res.Shipped {
 		gates, err = c.goalGates(goal, res)
