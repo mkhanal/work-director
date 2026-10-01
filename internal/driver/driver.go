@@ -133,12 +133,12 @@ type Result struct {
 	// out, or that nothing moved.
 	Why string `json:"why"`
 	// Shipped says whether the goal's work landed: every task done, not merely
-	// at rest. A goal with a dropped or abandoned task has come to rest without
-	// shipping, and calling that shipped would let the caller close a goal whose
-	// work is on the floor.
+	// at rest. A goal with a task that stopped without shipping has come to
+	// rest short of its own plan, and calling that shipped would let the caller
+	// close a goal whose work is on the floor.
 	Shipped bool `json:"shipped"`
-	// Unlanded is the task that stopped a run that came to rest without
-	// shipping, or nil when every task is done.
+	// Unlanded names the tasks that stopped without shipping, so a caller can see
+	// what the goal did not get. It is empty when there are none.
 	Unlanded []string `json:"unlanded"`
 	// Blocked is the work a turn found ready to close and could not close, each
 	// naming the gate that stopped it. It is the honest bill of a run that did
@@ -360,8 +360,8 @@ func (d *Driver) Drive(goal core.Work, b Budget) (Result, error) {
 	res.Answered, res.Unanswered = unique(res.Answered), uniqueQuestions(res.Unanswered)
 	// Landed is asked of the ledger rather than of the run, because the run
 	// watched tasks leave the open set and cannot tell a task that finished from
-	// one that was dropped. A goal with a dropped piece came to rest without
-	// shipping, and only the task's own state says which.
+	// one that stopped without shipping. A goal with such a piece came to rest
+	// short of its own plan, and only the task's own state says which.
 	unlanded, err := d.unlanded(goal.ID)
 	if err != nil {
 		return res, err
@@ -373,9 +373,12 @@ func (d *Driver) Drive(goal core.Work, b Budget) (Result, error) {
 	return res, nil
 }
 
-// unlanded is every task that came to rest without landing: dropped, or
-// abandoned. Both are endings rather than successes, and a goal with one has not
-// shipped, so the caller must not close it as though it had.
+// unlanded is every task that came to rest without landing, which is the
+// abandoned ones. A dropped task is not one of them: dropped is the goal
+// deciding not to do the work, so the goal still ships what it set out to do as
+// revised. Reading dropped as unshipped would end a goal as
+// stopped-without-shipping over a decision to leave something out, which is a
+// different and untrue statement about the same run.
 func (d *Driver) unlanded(goal string) ([]string, error) {
 	tasks, err := d.Ledger.Tasks(goal)
 	if err != nil {
@@ -383,7 +386,7 @@ func (d *Driver) unlanded(goal string) ([]string, error) {
 	}
 	out := []string{}
 	for _, t := range tasks {
-		if t.State == core.StateDropped || t.State == core.StateAbandoned {
+		if t.State == core.StateAbandoned {
 			out = append(out, t.ID)
 		}
 	}

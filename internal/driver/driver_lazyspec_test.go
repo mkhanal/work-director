@@ -469,14 +469,14 @@ func TestNothingMovingIsAStop(t *testing.T) {
 	}
 }
 
-// A dropped task is an ending, not a landing. A run can stop complete and still
-// not have shipped, and a caller that reads the stop as the outcome would close
-// a goal whose work is on the floor.
+// An abandoned task is an ending, not a landing. A run can stop complete and
+// still not have shipped, and a caller that reads the stop as the outcome would
+// close a goal whose work is on the floor.
 func TestARunThatComesToRestWithoutLandingIsNotShipped(t *testing.T) {
 	h := newHarness(t, 1)
 	h.pass = func(int) (Turn, error) { return Turn{}, nil }
-	// The task is dropped rather than finished: the run has nothing left to
-	// drive, and the goal has not shipped.
+	// The task stopped without shipping rather than finishing: the run has
+	// nothing left to drive, and the goal has not shipped.
 	if _, err := h.l.Abandon(h.tasks[0].ID, core.AbandonNoPR, "the run ran out of budget"); err != nil {
 		t.Fatalf("abandon: %v", err)
 	}
@@ -500,6 +500,34 @@ func TestARunThatComesToRestWithoutLandingIsNotShipped(t *testing.T) {
 	// two lists answer different questions and must not be conflated.
 	if len(res.Unfinished) != 0 || len(res.Open) != 0 {
 		t.Errorf("unfinished = %v, open = %v, want both empty: the task came to rest", res.Unfinished, res.Open)
+	}
+}
+
+// A dropped task is not an ending, it is a decision. Dropped is the goal
+// choosing not to do the work, so the goal still ships what it set out to do as
+// revised — and a run that reported it unshipped would end a goal as
+// stopped-without-shipping over a decision to leave something out.
+func TestADroppedTaskDoesNotStopAGoalShipping(t *testing.T) {
+	h := newHarness(t, 1)
+	h.pass = func(int) (Turn, error) { return Turn{}, nil }
+	if _, err := h.l.Transition(h.tasks[0].ID, core.StateDropped); err != nil {
+		t.Fatalf("drop: %v", err)
+	}
+	if h.failed != "" {
+		t.Fatalf("harness: %s", h.failed)
+	}
+	res, err := h.drive(Budget{Turns: 5, Judgements: 1, Stalled: 2})
+	if err != nil {
+		t.Fatalf("Drive: %v", err)
+	}
+	if res.Stop != StopComplete {
+		t.Errorf("stop = %s (%s), want complete: there is nothing left to drive", res.Stop, res.Why)
+	}
+	if !res.Shipped {
+		t.Errorf("shipped = false with a dropped task, want true: the goal chose not to do it, not failed to")
+	}
+	if len(res.Unlanded) != 0 {
+		t.Errorf("unlanded = %v, want empty: a dropped task never stopped without shipping", res.Unlanded)
 	}
 }
 

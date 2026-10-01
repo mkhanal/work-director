@@ -15,9 +15,13 @@ bound number of turns. `StopFailed` means the loop could not run, with why.
 Every one of these is a fact about work, not a judgement about it, and every one
 says which fact ran out: "it stopped" is not something a person can act on.
 `Shipped` is not the same question as the stop. A run can stop complete and still
-not ship, because a dropped or abandoned task is an ending rather than a landing;
-those are named in `Unlanded`, and a caller must not close a goal as shipped
-while one is on that list. What the run finished is computed from the open set
+not ship, because an abandoned task is an ending rather than a landing; those are
+named in `Unlanded`, and a caller must not close a goal as shipped while one is
+on that list. A dropped task is not on that list. Dropped is work the goal chose
+not to do, so the goal still ships what it set out to do as revised, and calling
+it unshipped would report a goal as stopped-without-shipping over a decision to
+leave the mobile app out. The two states are not the same kind of fact and the
+run reads them differently. What the run finished is computed from the open set
 rather than reported by the pass, because a pass moves work between states and
 only the ledger sees a task come to rest. `Blocked` is the work a turn found
 ready to close and a gate would not let it past, each naming the gate; it is
