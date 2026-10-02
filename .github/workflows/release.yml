@@ -1,0 +1,80 @@
+# Cut a release when a v* tag is pushed, and publish the binaries as a GitHub
+# Release. This is how almost everyone installs wd — a downloaded tarball
+# verified against a checksum — so it is part of the product, not a nicety.
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+
+      - name: the tag must be the release
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          echo "releasing $tag"
+          test "${tag#v}" != "$tag" || { echo "tag $tag does not start with v" >&2; exit 1; }
+
+      # The icon set needs Apple's iconutil, so it is built on the macOS runner
+      # and the dmg alongside it rather than skipped.
+      - name: the mac icon set
+        if: runner.os == 'macos'
+        run: scripts/icons.sh
+
+      # One job builds every target. Cross-compiling pure Go is just GOOS/GOARCH,
+      # so a matrix would buy parallelism and cost a checksum pass; the whole set
+      # takes a couple of minutes and one job keeps checksums.txt coherent.
+      - name: build every target
+        run: |
+          VERSION="${GITHUB_REF_NAME}" COMMIT="$(git rev-parse --short HEAD)" \
+            scripts/build.sh
+
+      - name: the assets are there and the stamps are right
+        run: |
+          ls -l dist
+          test -f dist/checksums.txt
+          # Every asset must verify, or the release ships something nobody can
+          # install with confidence.
+          (cd dist && sha256sum -c checksums.txt)
+
+      - name: the binaries say which release they are
+        run: |
+          mkdir -p /tmp/smoke && tar -xzf dist/wd-darwin-amd64.tar.gz -C /tmp/smoke
+          /tmp/smoke/wd --version | grep -F "${GITHUB_REF_NAME}"
+
+      - name: generate the homebrew formula from what was just published
+        run: VERSION="${GITHUB_REF_NAME}" scripts/formula.sh
+
+      - name: the formula has no build dependency and names this release
+        run: |
+          grep -F "${GITHUB_REF_NAME}" scripts/homebrew/wd.rb
+          ! grep -q 'depends_on' scripts/homebrew/wd.rb
+
+      - name: build the mac disk image
+        run: VERSION="${GITHUB_REF_NAME}" COMMIT="$(git rev-parse --short HEAD)" scripts/dmg.sh
+
+      - name: publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -l
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag \
+            dist/wd-*.tar.gz \
+            dist/wd-*.zip \
+            dist/wd-*.dmg \
+            assets/icon/wd.icns \
+            dist/*.sha256 \
+            dist/checksums.txt \
+            scripts/install.sh \
+            scripts/install.ps1

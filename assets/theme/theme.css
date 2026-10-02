@@ -1,0 +1,204 @@
+/*
+ * Work Director — the theme.
+ *
+ * One file, every token, no per-component colours anywhere else. The reason is
+ * not tidiness: the UI's hardest rule is that nothing is shown unless the ledger
+ * can verify it, and a palette that lives next to the component that uses it is
+ * how a colour starts meaning something the ledger never said. Tokens are named
+ * for what they are, not where they sit.
+ *
+ * The palette is the icon's, so the product is one thing: the same violet plate,
+ * the same two-colour mark — violet for work in flight, white for work that
+ * landed.
+ *
+ * Dark is the default. This is a tool people leave open next to an editor for
+ * hours, and the light theme is the accommodation rather than the base.
+ */
+
+:root {
+  color-scheme: dark light;
+
+  /* ---- Brand ------------------------------------------------------------
+     Pulled straight from assets/icon/icon.svg so the app and its icon cannot
+     drift into being two products. */
+  --brand-plate-top: #5b21b6;
+  --brand-plate-mid: #341068;
+  --brand-plate-end: #120a26;
+  --brand-live-from: #8b5cf6;
+  --brand-live-to: #f0abfc;
+
+  /* ---- Surfaces ---------------------------------------------------------
+     Four steps only. A board is a grid of cards on a ground; more steps than
+     this and a card stops reading as a card. */
+  --ground: #0b0716;
+  --surface: #140c26;
+  --surface-raised: #1c1136;
+  --surface-sunken: #0a0614;
+
+  /* ---- Ink --------------------------------------------------------------
+     Four steps, all named by what they are allowed to do. */
+  --ink: #f6f3ff;
+  --ink-muted: #b9aee0;
+  --ink-faint: #7a6fa3;
+  --ink-inverse: #120a26;
+
+  /* ---- Lines ------------------------------------------------------------ */
+  --line: #2a1c4d;
+  --line-strong: #3d2a6b;
+  --line-focus: #a78bfa;
+
+  /* ---- Meaning ----------------------------------------------------------
+     One hue per fact, used for one fact. Violet is work in flight and is not
+     available for decoration, which is what stops the board turning into
+     confetti. */
+  --live: #a78bfa;
+  --live-dim: #6d4fd6;
+  --landed: #34d399;
+  --landed-dim: #0f7a58;
+  --warn: #fbbf24;
+  --warn-dim: #92610b;
+  --stop: #f87171;
+  --stop-dim: #93262c;
+  --info: #60a5fa;
+
+  /* ---- Tints ------------------------------------------------------------
+     A flag or a banner is ink at low alpha over its own surface, never a flat
+     fill: a solid block of colour reads as a state change the ledger never
+     made. */
+  --live-wash: rgba(167, 139, 250, 0.12);
+  --landed-wash: rgba(52, 211, 153, 0.12);
+  --warn-wash: rgba(251, 191, 36, 0.12);
+  --stop-wash: rgba(248, 113, 113, 0.12);
+  --info-wash: rgba(96, 165, 250, 0.12);
+
+  /* ---- Type -------------------------------------------------------------
+     One family. A second is a second opinion about the product. */
+  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  /* A four-step ramp. Anything that needs a fifth size is a layout bug, not a
+     type scale that needs extending. */
+  --t-xs: 0.6875rem;
+  --t-sm: 0.8125rem;
+  --t-md: 0.9375rem;
+  --t-lg: 1.125rem;
+  --t-xl: 1.5rem;
+  --t-display: 2rem;
+
+  /* ---- Space ------------------------------------------------------------
+     A four-step grid. */
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.5rem;
+  --s-6: 2rem;
+  --s-7: 3rem;
+
+  /* ---- Shape ------------------------------------------------------------ */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-full: 999px;
+
+  /* A shadow tuned for a dark ground: elevation is a lighter surface, and the
+     shadow only has to stop a card from bleeding into the page. */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --shadow-3: 0 16px 48px rgba(0, 0, 0, 0.55);
+
+  --ring: 0 0 0 2px var(--ground), 0 0 0 4px var(--line-focus);
+
+  /* ---- Motion -----------------------------------------------------------
+     Short and few. This is a board that updates from a live socket; animation
+     that outlasts the update is animation working against the person reading
+     it. */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --fast: 120ms;
+  --calm: 220ms;
+
+  --header-h: 52px;
+  --rail-w: 360px;
+}
+
+/*
+ * Light. Same tokens, same names, different values — which is the whole test of
+ * whether a palette is a palette or a pile of hex codes in a component.
+ */
+@media (prefers-color-scheme: light) {
+  :root {
+    --ground: #f7f5fc;
+    --surface: #ffffff;
+    --surface-raised: #ffffff;
+    --surface-sunken: #efeaf8;
+
+    --ink: #1a0f33;
+    --ink-muted: #5b4b86;
+    --ink-faint: #8d80ad;
+    --ink-inverse: #ffffff;
+
+    --line: #e2dbf1;
+    --line-strong: #cdc2e4;
+
+    --live: #6d28d9;
+    --live-dim: #a78bfa;
+    --landed: #047857;
+    --landed-dim: #6ee7b7;
+    --warn: #b45309;
+    --warn-dim: #fcd34d;
+    --stop: #b91c1c;
+    --stop-dim: #fca5a5;
+    --info: #1d4ed8;
+
+    --live-wash: rgba(109, 40, 217, 0.08);
+    --landed-wash: rgba(4, 120, 87, 0.08);
+    --warn-wash: rgba(180, 83, 9, 0.08);
+    --stop-wash: rgba(185, 28, 28, 0.08);
+    --info-wash: rgba(29, 78, 216, 0.08);
+
+    --shadow-1: 0 1px 2px rgba(26, 15, 51, 0.06);
+    --shadow-2: 0 4px 16px rgba(26, 15, 51, 0.1);
+    --shadow-3: 0 16px 48px rgba(26, 15, 51, 0.14);
+  }
+}
+
+/*
+ * Forced colours. A person who has told the OS they cannot use our palette gets
+ * the OS's palette, and every one of our meanings survives as a border or a
+ * glyph rather than as a hue we chose.
+ */
+@media (forced-colors: active) {
+  :root {
+    --live: LinkText;
+    --landed: LinkText;
+    --warn: LinkText;
+    --stop: LinkText;
+    --line: CanvasText;
+  }
+  .chip,
+  .card,
+  .panel {
+    border: 1px solid CanvasText;
+  }
+}
+
+/*
+ * Reduced motion. The board's live updates still land — that is information —
+ * but nothing travels across the screen to deliver it.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fast: 0ms;
+    --calm: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

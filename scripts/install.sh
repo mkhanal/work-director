@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# Single-command install for the director:
+# Single-command install for the director on macOS and Linux:
 #
 #   curl -fsSL https://raw.githubusercontent.com/mkhanal/work-director/main/scripts/install.sh | sh
 #
-# Downloads the static wd binary for this platform from the latest GitHub
-# release, verifies its sha256, and puts it on PATH. The binary has no
-# runtime dependencies; `wd doctor` afterwards reports which runner CLIs
-# are detected.
+# Downloads the static wd binary for this machine from the latest GitHub
+# release, verifies its sha256 against the release's checksums file, and puts
+# it on PATH. The binary has no runtime dependencies; `wd doctor` afterwards
+# reports which runner CLIs are detected.
+#
+# Pass a version to install something other than the latest:
+#
+#   ... | sh -s -- v1.2.0
+#
+# Windows uses scripts/install.ps1 instead; this script says so rather than
+# failing with a confusing tar error.
 set -euo pipefail
 
 repo=mkhanal/work-director
@@ -21,6 +28,9 @@ case $arch in
 esac
 case $os in
   darwin|linux) ;;
+  windows*) echo "install: on Windows use install.ps1:" >&2
+    echo "  irm https://raw.githubusercontent.com/$repo/main/scripts/install.ps1 | iex" >&2
+    exit 1 ;;
   *) echo "install: unsupported platform $os" >&2; exit 1 ;;
 esac
 
@@ -37,21 +47,31 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 echo "installing wd $version ($os/$arch)"
+
+# checksums.txt lists every asset in the release, so one download verifies the
+# whole set and a swapped tarball is caught before anything is unpacked.
+curl -fsSL "$base/checksums.txt" -o "$tmp/checksums.txt" || {
+  echo "install: $version published no checksums.txt — refusing to install unverified" >&2; exit 1; }
 curl -fsSL "$base/$asset.tar.gz" -o "$tmp/$asset.tar.gz"
-curl -fsSL "$base/$asset.tar.gz.sha256" -o "$tmp/$asset.tar.gz.sha256"
 
-# check verifies the download against its .sha256 ("<hash>  <filename>").
-check() {
-  if command -v shasum >/dev/null 2>&1; then
-    (cd "$(dirname "$1")" && shasum -a 256 -c "$(basename "$2")")
-  else
-    (cd "$(dirname "$1")" && sha256sum -c "$(basename "$2")")
-  fi
+want=$(awk -v f="$asset.tar.gz" '$2 == f || $2 == "*"f {print $1}' "$tmp/checksums.txt" | head -n 1)
+[ -n "$want" ] || { echo "install: $asset.tar.gz is not listed in the release checksums" >&2; exit 1; }
+
+sha256() {
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}';
+  else sha256sum "$1" | awk '{print $1}'; fi
 }
-check "$tmp/$asset.tar.gz" "$tmp/$asset.tar.gz.sha256"
+got=$(sha256 "$tmp/$asset.tar.gz")
+if [ "$got" != "$want" ]; then
+  echo "install: $asset.tar.gz does not match its published sha256" >&2
+  echo "  expected $want" >&2
+  echo "  got      $got" >&2
+  exit 1
+fi
+echo "verified $asset.tar.gz"
 
-mkdir -p "$dir"
 tar -xzf "$tmp/$asset.tar.gz" -C "$tmp"
+mkdir -p "$dir"
 install -m 0755 "$tmp/wd" "$dir/wd"
 echo "installed $dir/wd"
 

@@ -131,10 +131,34 @@ type Cli struct {
 }
 
 // Run parses args, opens the ledger and projects, and dispatches the command.
+// Version is the release this binary was built from, set by the release
+// build with -ldflags. A binary that cannot say what it is is a binary nobody
+// can file a bug against, so an unstamped build reads as dev rather than
+// pretending to be a release.
+var Version = "dev"
+
+// Commit is the git revision the release was cut from, stamped the same way.
+var Commit = ""
+
 func Run(args []string) error {
 	parsed, err := parse(args)
 	if err != nil {
 		return err
+	}
+	// version answers before anything is opened: a person asking what they
+	// installed does not need a ledger, a projects directory or a worktrees
+	// directory created on their disk to be told what they have.
+	if parsed.Switches["version"] || (len(parsed.Positional) == 1 && parsed.Positional[0] == "version") {
+		out := fmt.Sprintf("wd %s", Version)
+		if Commit != "" {
+			out += " (" + Commit + ")"
+		}
+		fmt.Fprintln(os.Stdout, out)
+		return nil
+	}
+	if parsed.Switches["help"] || (len(parsed.Positional) == 1 && parsed.Positional[0] == "help") {
+		fmt.Fprintln(os.Stdout, usage)
+		return nil
 	}
 	wdHome, err := runner.WDHome()
 	if err != nil {
@@ -224,7 +248,7 @@ func tasteCheckout() (string, error) {
 	return "", nil
 }
 
-const usage = "wd <projects|add|tasks|brief|spawn|models|runner|roadmap|goal|drive|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|review|abandon|feedback|distill|tui|serve|doctor> [--json]"
+const usage = "wd <projects|add|tasks|brief|spawn|models|runner|roadmap|goal|drive|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|review|abandon|release|reopen|feedback|distill|tui|serve|doctor> [--json]\n\nwd --version   what release this binary is\nwd serve       the web UI and the JSON API; open the address it prints\nwd doctor     which runner CLIs are detected, and whether this is a repo"
 
 // commands maps each wd command to its handler, given the arguments after it.
 var commands = map[string]func(c *Cli, rest []string) error{

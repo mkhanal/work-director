@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Work Director</title>
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0.2" y2="1">
+      <stop offset="0" stop-color="#5B21B6"/>
+      <stop offset="0.5" stop-color="#341068"/>
+      <stop offset="1" stop-color="#120A26"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.20"/>
+      <stop offset="0.45" stop-color="#FFFFFF" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="live" x1="0" y1="1" x2="0.7" y2="0">
+      <stop offset="0" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#F0ABFC"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#plate)" d="M512 64C300 64 148 64 96 116C44 168 44 320 44 512C44 704 44 856 96 908C148 960 300 960 512 960C724 960 876 960 928 908C980 856 980 704 980 512C980 320 980 168 928 116C876 64 724 64 512 64Z"/>
+  <path fill="url(#sheen)" d="M512 64C300 64 148 64 96 116C44 168 44 320 44 512C44 704 44 856 96 908C148 960 300 960 512 960C724 960 876 960 928 908C980 856 980 704 980 512C980 320 980 168 928 116C876 64 724 64 512 64Z"/>
+  <path d="M512 628L291 441" fill="none" stroke="#F5F3FF" stroke-width="66" stroke-linecap="round"/>
+  <path d="M512 628L691 477" fill="none" stroke="url(#live)" stroke-width="66" stroke-linecap="round"/>
+  <path d="M512 790L512 628" fill="none" stroke="#F5F3FF" stroke-width="66" stroke-linecap="round"/>
+  <circle cx="512" cy="790" r="50" fill="#F5F3FF"/>
+  <circle cx="266" cy="420" r="76" fill="#F5F3FF"/>
+  <circle cx="758" cy="420" r="76" fill="none" stroke="url(#live)" stroke-width="42"/>
+</svg>

@@ -2,3 +2,4 @@ dist/
 *.db
 .DS_Store
 .claude/
+assets/icon/build/
