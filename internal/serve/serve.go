@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"wd/internal/core"
+	"wd/internal/delivery"
 	"wd/internal/ledger"
 	"wd/internal/review"
 )
@@ -68,6 +69,7 @@ type goalView struct {
 	Events   []core.Event    `json:"events"`
 	Claims   []review.Claim  `json:"claims"`
 	Landings []review.Landed `json:"landings"`
+	Delivery delivery.State  `json:"delivery,omitempty"`
 }
 
 // actionResult is a CLI run: its exit code and combined output.
@@ -228,6 +230,7 @@ func (s *Server) handleGoal(w http.ResponseWriter, r *http.Request) {
 		Events:   events,
 		Claims:   review.ClaimsUnder(events, works),
 		Landings: review.LandingsUnder(events, works),
+		Delivery: delivery.StatusFor(s.ledger.Dir(), events, goal, children),
 	})
 }
 

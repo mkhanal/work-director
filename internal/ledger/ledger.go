@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -57,7 +58,8 @@ var addedColumns = []struct{ table, col, decl string }{
 }
 
 type Ledger struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
 
 // Pragmas are per connection, so they ride on the DSN and apply to every
@@ -1395,4 +1397,12 @@ func (l *Ledger) EventWork(eventID int) (string, error) {
 		return "", fmt.Errorf("no event %d; wd events <work> lists ids", eventID)
 	}
 	return work, err
+}
+
+// Dir returns the directory containing the ledger database.
+func (l *Ledger) Dir() string {
+	if l.path == "" {
+		return ""
+	}
+	return filepath.Dir(l.path)
 }
