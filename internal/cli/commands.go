@@ -40,49 +40,16 @@ func (c *Cli) projects(rest []string) error {
 		if err != nil {
 			return err
 		}
-		csv := func(k string) []string {
-			if v := str(a, k); v != nil {
-				var out []string
-				for _, s := range strings.Split(*v, ",") {
-					if t := strings.TrimSpace(s); t != "" {
-						out = append(out, t)
-					}
-				}
-				return out
-			}
-			return nil
-		}
 		opts := project.NewProjectOptions{
 			Runner:    strOr(a, "runner", ""),
 			Mode:      strOr(a, "mode", ""),
 			Model:     strOr(a, "model", ""),
-			Stack:     csv("stack"),
-			Workflows: csv("workflow"),
-			Verify:    csv("verify"),
+			Stack:     csvFlags(a, "stack"),
+			Workflows: csvFlags(a, "workflow"),
+			Verify:    csvFlags(a, "verify"),
 		}
-		given := projectValues(path, opts)
-		// The file is one `key: value` line per field.
-		for _, g := range given {
-			if strings.ContainsAny(g[1], "\r\n") {
-				return fail("%s %q cannot be held in a project file: it breaks the line", g[0], g[1])
-			}
-		}
-		text := project.ProjectTemplate(name, path, opts)
-		file := filepath.Join(c.ProjectsDir, name+".md")
-		p, err := project.ParseProject(text, file)
+		p, err := c.registerProjectFile(name, path, opts)
 		if err != nil {
-			return err
-		}
-		back := projectValues(p.Path, project.NewProjectOptions{
-			Runner: p.Runner, Mode: string(p.Mode), Model: strOrEmpty(p.Model),
-			Stack: p.Stack, Workflows: p.Workflows, Verify: p.Verify,
-		})
-		for i, g := range given {
-			if g[1] != "" && (i >= len(back) || back[i] != g) {
-				return fail("%s %q cannot be held in a project file: it reads back changed", g[0], g[1])
-			}
-		}
-		if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
 			return err
 		}
 		ls := str(a, "lazyspec")

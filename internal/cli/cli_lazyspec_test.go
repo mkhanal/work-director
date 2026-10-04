@@ -804,8 +804,13 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 	}
 	env := f.envWithPath(t, f.pathWith(t, "claude", "opencode", "codex", "planner"))
 	covered := map[string]bool{}
+	// A parent workspace and one created under it, so the create path is
+	// exercised for real rather than appearing only in this census.
+	f.runOK(t, "workspace", "add", filepath.Join(f.dir, "workspaces"), "--creates", "--name", "workspaces")
+	f.runOK(t, "workspace", "create", "workspaces", "made-by-the-census")
 	for _, args := range [][]string{
 		{"projects"}, {"projects", "list"},
+		{"workspace", "list"}, {"workspace", "show", "workspaces"},
 		{"projects", "add", "second", f.sample, "--lazyspec", "n"},
 		{"projects", "add", "third", f.sample, "--lazyspec", "y"},
 		{"models", "opencode"},
@@ -2278,6 +2283,79 @@ func TestAStopRecordedAsAFailureCanBeReleasedIntoAChoice(t *testing.T) {
 	f.runOK(t, "soft-done", goal)
 	if got := f.workRow(t, goal); got.State != core.StateSoftDone {
 		t.Errorf("goal state = %s, want soft-done once the duplicate was released", got.State)
+	}
+}
+
+func TestWdWorkspaceRegistersADirectoryAndCreatesNewOnesOnlyUnderPermission(t *testing.T) {
+	f := newCLIFixture(t)
+
+	base := filepath.Join(f.dir, "workspaces")
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	f.runOK(t, "workspace", "add", base, "--creates", "--name", "workspaces")
+
+	// An empty list reads as a sentence saying what to do, not as nothing.
+	f.runOK(t, "workspace", "list")
+
+	// A project started here is a workspace without being registered twice: the
+	// directory, its repository and the project file are all made in one command.
+	created := jsonString(t, f.runOK(t, "workspace", "create", "workspaces", "new-idea", "--json"), "id")
+	dir := filepath.Join(base, "new-idea")
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		t.Fatalf("%s is not a directory: %v", dir, err)
+	}
+	if st, err := os.Stat(filepath.Join(dir, ".git")); err != nil || !st.IsDir() {
+		t.Fatalf("no repository in %s: everything downstream assumes git is there — verify runs in a worktree, pr works out the pushed commit, delivery is derived from git: %v", dir, err)
+	}
+	// The project is registered too, so the rest of the director already knows
+	// about it rather than it needing a second command.
+	f.runOK(t, "projects", "list")
+	if !strings.Contains(f.runOK(t, "projects", "list", "--json"), "new-idea") {
+		t.Error("the created workspace is not a project, want one registration covering both")
+	}
+
+	// Creating the same name again is refused rather than silently reusing the
+	// directory, which would put a second workspace's work in the first one's repo.
+	if errStr := f.runFail(t, "workspace", "create", "workspaces", "new-idea"); !strings.Contains(errStr, "already exists") {
+		t.Errorf("create over an existing directory = %q, want it refused", errStr)
+	}
+
+	// Permission lives with the machine. A remote client can create a workspace
+	// anywhere this director may create one and nowhere else, so the parent is
+	// named explicitly and a plain workspace is not a parent.
+	plain := filepath.Join(f.dir, "a-repo")
+	if err := os.MkdirAll(plain, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	f.runOK(t, "workspace", "add", plain, "--name", "a-repo")
+	if errStr := f.runFail(t, "workspace", "create", "a-repo", "sneaky"); !strings.Contains(errStr, "--creates") {
+		t.Errorf("create under a plain workspace = %q, want it refused naming how to make a parent", errStr)
+	}
+
+	// The escape attempts, from a desk as much as from a phone: the same check.
+	for _, name := range []string{"../escape", "/etc", "a/../../b"} {
+		if errStr := f.runFail(t, "workspace", "create", "workspaces", name); errStr == "" {
+			t.Errorf("create %q was accepted, want it refused", name)
+		}
+	}
+	for _, dir := range []string{"escape", "etc", "b"} {
+		if _, err := os.Stat(filepath.Join(base, dir)); err == nil {
+			t.Errorf("%s was created, want no directory outside the parent", dir)
+		}
+	}
+
+	// A person types a name, a client holds an id, and both find the same row.
+	for arg, want := range map[string]string{"workspaces": base, "a-repo": plain, base: base} {
+		if got := jsonString(t, f.runOK(t, "workspace", "show", arg, "--json"), "path"); got != want {
+			t.Errorf("show %q found %q, want %q", arg, got, want)
+		}
+	}
+	if errStr := f.runFail(t, "workspace", "show", "nothing-called-this"); !strings.Contains(errStr, "wd workspace list") {
+		t.Errorf("show an unknown workspace = %q, want it naming the command that lists them", errStr)
+	}
+	if !strings.Contains(f.runOK(t, "workspace", "list", "--json"), created) {
+		t.Error("the created workspace is missing from the list")
 	}
 }
 

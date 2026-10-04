@@ -37,6 +37,9 @@ var valueFlags = map[string]bool{
 	"since": true, "since-feedback": true, "work": true,
 	"heading": true, "detail": true, "project": true,
 	"branch": true, "adopt": true, "source": true, "card": true, "only": true,
+	// name labels a workspace. It is a value, not a switch: a workspace is
+	// something a person names, and the label is what they would type back.
+	"name":    true,
 	"timeout": true, "port": true, "ref": true, "cwd": true, "cancelled": true,
 	"turns": true, "judgements": true, "stalled": true, "poll-seconds": true,
 	"deadline": true,
@@ -248,7 +251,7 @@ func tasteCheckout() (string, error) {
 	return "", nil
 }
 
-const usage = "wd <projects|add|tasks|brief|spawn|models|runner|roadmap|goal|drive|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|review|abandon|release|reopen|feedback|distill|tui|serve|doctor> [--json]\n\nwd --version   what release this binary is\nwd serve       the web UI and the JSON API; open the address it prints\nwd doctor     which runner CLIs are detected, and whether this is a repo"
+const usage = "wd <projects|workspace|add|tasks|brief|spawn|models|runner|roadmap|goal|drive|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|review|abandon|release|reopen|feedback|distill|tui|serve|doctor> [--json]\n\nwd --version   what release this binary is\nwd serve       the web UI and the JSON API; open the address it prints\nwd doctor     which runner CLIs are detected, and whether this is a repo"
 
 // commands maps each wd command to its handler, given the arguments after it.
 var commands = map[string]func(c *Cli, rest []string) error{
@@ -264,6 +267,7 @@ var commands = map[string]func(c *Cli, rest []string) error{
 	// before the rename keeps working.
 	"epic":      func(c *Cli, rest []string) error { return c.goalLike("epic", rest) },
 	"roadmap":   (*Cli).roadmap,
+	"workspace": (*Cli).workspace,
 	"drive":     (*Cli).drive,
 	"abandon":   (*Cli).abandon,
 	"release":   (*Cli).release,

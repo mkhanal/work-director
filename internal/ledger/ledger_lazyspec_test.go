@@ -1356,3 +1356,82 @@ func finish(t *testing.T, l *Ledger, title string) core.Work {
 	move(t, l, w.ID, core.StateDone)
 	return mustGet(t, l, w.ID)
 }
+
+// A client names a workspace and never sends a path, so the containment check is
+// the whole of what stands between a token from a phone and a directory
+// somewhere else on the machine.
+func TestWorkspacesAreRegisteredAndNewOnesAreOnlyMadeUnderAParentThatAllowsIt(t *testing.T) {
+	l := newTestLedger(t)
+
+	parent, err := l.AddWorkspace("workspaces", t.TempDir(), true)
+	wantNoErr(t, err)
+	if !parent.Creates {
+		t.Fatal("parent = a plain workspace, want it registered as one")
+	}
+
+	// The ordinary path: a name under a parent that allows it.
+	path, err := l.CreateWorkspacePath(parent.ID, "new-idea")
+	wantNoErr(t, err)
+	if !strings.HasPrefix(path, parent.Path+string(filepath.Separator)) || !strings.HasSuffix(path, "new-idea") {
+		t.Errorf("path = %q, want it inside %q", path, parent.Path)
+	}
+
+	// A workspace is not a parent. This is the rule that keeps "create" from
+	// meaning "create anywhere" one flag at a time.
+	plain, err := l.AddWorkspace("a-repo", t.TempDir(), false)
+	wantNoErr(t, err)
+	_, err = l.CreateWorkspacePath(plain.ID, "sneaky")
+	if err == nil || !strings.Contains(err.Error(), "--creates") {
+		t.Errorf("create under a plain workspace = %v, want it refused naming how to make a parent", err)
+	}
+
+	// The name comes from a client, so containment is checked rather than
+	// assumed. Each of these escapes a naive join.
+	for _, name := range []string{"../elsewhere", "a/../../b", "/etc", "..", ".", "sub/dir"} {
+		if got, err := l.CreateWorkspacePath(parent.ID, name); err == nil {
+			t.Errorf("name %q was accepted as %q, want it refused: it is not one directory inside the parent", name, got)
+		}
+	}
+	if _, err := l.CreateWorkspacePath(parent.ID, ""); err == nil {
+		t.Error("an empty name was accepted, want it refused")
+	}
+
+	// Two of these three are about the ledger refusing rather than the
+	// filesystem, and a directory that does not exist yet is not a refusal: a
+	// workspace can be registered before anything is in it.
+	again, err := l.AddWorkspace("workspaces", parent.Path, true)
+	if err == nil {
+		t.Errorf("the same path registered twice as %s, want the second refused: one directory is one workspace", again.ID)
+	}
+
+	listed, err := l.Workspaces()
+	wantNoErr(t, err)
+	if len(listed) != 2 {
+		t.Fatalf("workspaces = %d, want the parent and the plain one", len(listed))
+	}
+	if !listed[0].Creates {
+		t.Errorf("list starts with %s, want parents first: a client rendering a picker shows where new work can go above where it is", listed[0].Name)
+	}
+
+	// A person types a name; a client holds an id. Both must land on one row.
+	byID, err := l.Workspace(parent.ID)
+	wantNoErr(t, err)
+	byPath, err := l.Workspace(parent.Path)
+	wantNoErr(t, err)
+	byName, err := l.Workspace("workspaces")
+	wantNoErr(t, err)
+	if byID.ID != byPath.ID || byID.ID != byName.ID {
+		t.Errorf("id %s, path %s and name %s did not all find the same workspace", byID.ID, byPath.ID, byName.ID)
+	}
+
+	// A name that matches two is refused rather than resolved to whichever
+	// sorted first: picking one silently is how work ends up on the wrong one.
+	for _, dir := range []string{t.TempDir(), t.TempDir()} {
+		_, err := l.AddWorkspace("shared", dir, false)
+		wantNoErr(t, err)
+	}
+	_, err = l.Workspace("shared")
+	if err == nil || !strings.Contains(err.Error(), "names 2 workspaces") {
+		t.Errorf("ambiguous name = %v, want it refused naming the ids to choose between", err)
+	}
+}

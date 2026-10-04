@@ -273,6 +273,9 @@ row, because the work really did not ship and a reader sees the stop and then th
 correction that stop was the wrong word for it. It refuses work in any state but
 abandoned: releasing done work would be reopening it and renaming it at once.
 
+## Wd Workspace Registers A Directory And Creates New Ones Only Under Permission
+`wd workspace add <path> [--name <label>] [--creates]` registers a directory this director serves, and `--creates` marks it as a parent under which new workspaces may be made. `wd workspace list` prints them parents first, and `wd workspace show <id-or-path>` prints one. `wd workspace create <parent> <name>` makes `~/work/workspaces/<name>` and registers it: it resolves the path through the ledger's containment check, creates the directory, `git init`s it, registers it as a project and registers it as a workspace, so a project started with wd is a workspace without being registered twice. Permission lives with the machine, not the client — a remote actor can create a workspace anywhere this director is allowed to create one and nowhere else — so the command takes the parent explicitly rather than picking one.
+
 ## A Finished Goal Is Reopened Only For Work, Not For A Question
 `wd reopen <id> "<what is being worked on>"` (and `wd goal reopen <id> "<what>"`)
 works more on top of finished work and refuses without a reason, naming the reads

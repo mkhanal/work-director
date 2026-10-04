@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS worktree (id INTEGER PRIMARY KEY, work TEXT NOT NULL 
 CREATE TABLE IF NOT EXISTS filed (work TEXT PRIMARY KEY REFERENCES work(id), session TEXT NOT NULL, entries INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS cursor (project TEXT NOT NULL, name TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (project, name));
 CREATE UNIQUE INDEX IF NOT EXISTS worktree_one_active_shared ON worktree(work) WHERE kind = 'shared' AND state = 'active';
+CREATE TABLE IF NOT EXISTS workspace (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, creates INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL, updated TEXT NOT NULL);
 `
 
 // Additive migration for ledgers created before parents, worktree origins,
@@ -56,6 +57,12 @@ var addedColumns = []struct{ table, col, decl string }{
 	// decision on that work, so the two have to meet somewhere.
 	{"feedback", "work", "TEXT REFERENCES work(id)"},
 }
+
+// workspaceSchema is the additive statement for ledgers created before
+// workspaces existed. It is a whole table rather than columns in addedColumns
+// because a PRIMARY KEY cannot be added with ALTER TABLE ADD COLUMN, and the
+// uniqueness on path is the whole point: one directory is one workspace.
+const workspaceSchema = `CREATE TABLE IF NOT EXISTS workspace (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, creates INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL, updated TEXT NOT NULL);`
 
 type Ledger struct {
 	db   *sql.DB
@@ -90,6 +97,9 @@ func New(path string) (*Ledger, error) {
 }
 
 func migrate(db *sql.DB) error {
+	if _, err := db.Exec(workspaceSchema); err != nil {
+		return err
+	}
 	for _, c := range addedColumns {
 		cols, err := columns(db, c.table)
 		if err != nil {
@@ -1405,4 +1415,133 @@ func (l *Ledger) Dir() string {
 		return ""
 	}
 	return filepath.Dir(l.path)
+}
+
+// Workspaces lists the directories this director serves, parents first, so a
+// client rendering a picker shows the place new work can go above the places it
+// already is.
+func (l *Ledger) Workspaces() ([]core.Workspace, error) {
+	rows, err := l.db.Query(`SELECT id, name, path, creates, created, updated FROM workspace ORDER BY creates DESC, name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []core.Workspace{}
+	for rows.Next() {
+		var w core.Workspace
+		if err := rows.Scan(&w.ID, &w.Name, &w.Path, &w.Creates, &w.Created, &w.Updated); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// Workspace returns one registered workspace by id, by path, or by name.
+//
+// The three are tried in that order because a person types a name and a client
+// holds an id, and both must land on the same row. A name that matches more than
+// one is refused rather than resolved to whichever sorted first: picking one
+// silently is how work ends up attached to the wrong workspace, and this is the
+// lookup that decides where a phone's instructions go.
+func (l *Ledger) Workspace(idOrPathOrName string) (core.Workspace, error) {
+	const cols = `id, name, path, creates, created, updated`
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`SELECT ` + cols + ` FROM workspace WHERE id = ?`, []any{idOrPathOrName}},
+		{`SELECT ` + cols + ` FROM workspace WHERE path = ?`, []any{idOrPathOrName}},
+		{`SELECT ` + cols + ` FROM workspace WHERE name = ? ORDER BY created`, []any{idOrPathOrName}},
+	} {
+		rows, err := l.db.Query(q.sql, q.args...)
+		if err != nil {
+			return core.Workspace{}, err
+		}
+		found := []core.Workspace{}
+		for rows.Next() {
+			var w core.Workspace
+			if err := rows.Scan(&w.ID, &w.Name, &w.Path, &w.Creates, &w.Created, &w.Updated); err != nil {
+				rows.Close()
+				return core.Workspace{}, err
+			}
+			found = append(found, w)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return core.Workspace{}, err
+		}
+		if len(found) == 1 {
+			return found[0], nil
+		}
+		if len(found) > 1 {
+			return core.Workspace{}, fmt.Errorf("%s names %d workspaces (%s): name it by id or path", idOrPathOrName, len(found), joinIds(found))
+		}
+	}
+	return core.Workspace{}, fmt.Errorf("no workspace is called %q: wd workspace list", idOrPathOrName)
+}
+
+// joinIds names the rows an ambiguous lookup matched, so the message can say
+// which ones to choose between rather than just that there are several.
+func joinIds(ws []core.Workspace) string {
+	ids := make([]string, 0, len(ws))
+	for _, w := range ws {
+		ids = append(ids, w.ID)
+	}
+	return strings.Join(ids, ", ")
+}
+
+// AddWorkspace registers a directory this director will serve. The path is
+// stored as given but resolved, so "~/work/foo" and "/Users/me/work/foo" are
+// one workspace rather than two rows that disagree about what they point at.
+func (l *Ledger) AddWorkspace(name, path string, creates bool) (core.Workspace, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return core.Workspace{}, err
+	}
+	id, err := newId()
+	if err != nil {
+		return core.Workspace{}, err
+	}
+	stamp := now()
+	if _, err := l.db.Exec(`INSERT INTO workspace (id, name, path, creates, created, updated) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, name, abs, creates, stamp, stamp); err != nil {
+		return core.Workspace{}, err
+	}
+	return l.Workspace(id)
+}
+
+// CreateWorkspacePath is where a new workspace would live under parent for the
+// given name, and the only place one may ever be made.
+//
+// The name comes from a client — often a phone, on a different network, over a
+// token — so the containment is checked rather than assumed. Constructing the
+// path ourselves is not the same as it being inside the parent: "..",
+// "a/../../b" and an absolute name all escape a naive join. So the joined path
+// is cleaned and then required to still be under the parent, and the parent
+// itself has to be one that was registered as a parent. A name that escapes is
+// refused by name, the way every other refusal here names what would fix it.
+func (l *Ledger) CreateWorkspacePath(parentID, name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("a new workspace needs a name")
+	}
+	parent, err := l.Workspace(parentID)
+	if err != nil {
+		return "", err
+	}
+	if !parent.Creates {
+		return "", fmt.Errorf("workspace %s is a workspace, not a parent: new ones are created under a parent — wd workspace add <path> --creates", parent.ID)
+	}
+	// A name is one directory, so anything that is not one segment is not a
+	// name. This is checked before the join so the message names the real
+	// problem rather than reporting an escape.
+	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." || filepath.IsAbs(name) {
+		return "", fmt.Errorf("%q is not a workspace name: it is one directory name, not a path", name)
+	}
+	child := filepath.Clean(filepath.Join(parent.Path, name))
+	if !strings.HasPrefix(child, parent.Path+string(filepath.Separator)) {
+		return "", fmt.Errorf("%q would land outside %s", name, parent.Path)
+	}
+	return child, nil
 }

@@ -306,6 +306,24 @@ func ClosesDirectly(s State) bool {
 	return false
 }
 
+// Workspace is one directory this director serves: a repo or a folder of
+// work, identified so a client can name it instead of sending a path. A client
+// never transmits a filesystem path — it names a workspace, which is what keeps
+// a stolen token from becoming filesystem access on the machine.
+//
+// Creates says the path is a parent under which new workspaces may be made.
+// It is permission, held by the machine rather than by the client: a remote
+// actor can create a workspace anywhere this director is allowed to create one,
+// and nowhere else.
+type Workspace struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	Creates bool   `json:"creates"`
+	Created string `json:"created"`
+	Updated string `json:"updated"`
+}
+
 type Conflict struct {
 	A     string   `json:"a"`
 	B     string   `json:"b"`
