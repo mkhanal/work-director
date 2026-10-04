@@ -74,8 +74,11 @@ func (c *Cli) projects(rest []string) error {
 		return c.out(map[string]any{"project": p, "evolution": w},
 			fmt.Sprintf("project %s created (%s); lazyspec install queued as %s (evolution — wd spawn %s)", name, path, w.ID, w.ID))
 	}
+	if sub == "policy" {
+		return c.projectPolicy(rest)
+	}
 	if sub != "" && sub != "list" {
-		return fail("usage: wd projects (list | add <name> <path>)")
+		return fail("usage: wd projects (list | add <name> <path> | policy <name>)")
 	}
 	list := []*project.Project{}
 	for _, name := range c.projectNames() {

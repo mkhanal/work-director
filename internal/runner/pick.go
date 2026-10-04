@@ -79,21 +79,14 @@ type Verdict struct {
 // decline when it should.
 type Probe func(model Model, role Role) Verdict
 
-// Policy is how a role picks. Every part is overridable, and the defaults are
-// chosen to never name a model: a hardcoded id is right until the free tier that
-// carried it is replaced.
+// Policy is one role's policy plus the two seams Pick needs. The fields live on
+// RolePolicy so a project file and a global file describe a role the same way;
+// putting them here as well is how the two would drift.
 type Policy struct {
-	// Runners to try, in order. Empty means every detected runner in detection
-	// order.
-	Runners []string
-	// Preferred are model names this role should take when one offers it and
-	// one passes the floor. A stale entry costs nothing: it is only ever
-	// selected from a runner that actually offers it.
-	Preferred []string
-	// Forced pins one model and is never second-guessed. It is an override, so
-	// it is honoured even when it fails the floor — but Choice.Why records that
-	// it did, because an override nobody warned about is not one.
-	Forced string
+	// Role is a named field rather than an embedded one: setting promoted fields
+	// in a literal needs a newer language version than this module declares, and
+	// a one-word tool should not raise the toolchain floor a clone needs.
+	Role RolePolicy
 	// Lister is how a runner's models are found. Nil asks the runner, which is
 	// what production does; a test supplies its own so the ladder can be checked
 	// without three fake CLIs on PATH. This is the only seam, deliberately: the
@@ -140,11 +133,11 @@ type Step struct {
 // very likely the same thing a person would have got, and is never a guess wd
 // invented.
 func Pick(role Role, avail []Availability, costs map[string]Cost, probe Probe, p Policy) (Choice, error) {
-	if p.Forced != "" {
-		return Choice{Model: p.Forced, Why: "forced by configuration; the floor was not applied", Floor: false}, nil
+	if p.Role.Forced != "" {
+		return Choice{Model: p.Role.Forced, Why: "forced by configuration; the floor was not applied", Floor: false}, nil
 	}
 
-	order := p.Runners
+	order := p.Role.Runners
 	if len(order) == 0 {
 		for _, a := range avail {
 			if a.Detected {
@@ -186,7 +179,7 @@ func Pick(role Role, avail []Availability, costs map[string]Cost, probe Probe, p
 		return Choice{}, fmt.Errorf("no runner offers a model %s could rank: every detected runner either reports nothing or is not on PATH", role)
 	}
 
-	for _, want := range p.Preferred {
+	for _, want := range p.Role.Preferred {
 		for _, m := range everything {
 			if !matches(m.ID, want) {
 				continue
@@ -371,4 +364,40 @@ func DeclaredCosts(home string) (map[string]Cost, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return out, nil
+}
+
+// LoadPolicy reads the machine's global per-role policy from
+// $WD_HOME/judge.json. An absent file is not an error: it is an unconfigured
+// machine, which means every runner and no preference.
+//
+// Kept beside models.json rather than inside it on purpose. Costs are facts
+// about the world and get regenerated; these are choices by a person and must
+// survive that.
+func LoadPolicy(home string) (PolicySet, error) {
+	var out PolicySet
+	path := filepath.Join(home, "judge.json")
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return out, nil
+	}
+	if err != nil {
+		return out, err
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return out, fmt.Errorf("%s: %w", path, err)
+	}
+	return out, nil
+}
+
+// MarshalPolicy renders a policy set for the file a person edits. Indented,
+// because judge.json is meant to be read and argued with, and 0600 because it
+// names which providers a person's work is allowed to reach.
+func MarshalPolicy(p PolicySet) ([]byte, error) {
+	raw, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	// A trailing newline because this file is meant to be edited by a person
+	// and read by git, and both of those notice its absence.
+	return append(raw, '\n'), nil
 }

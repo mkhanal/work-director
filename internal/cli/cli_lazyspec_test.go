@@ -20,6 +20,7 @@ import (
 
 	"wd/internal/core"
 	"wd/internal/ledger"
+	"wd/internal/project"
 	"wd/internal/taste"
 )
 
@@ -811,6 +812,10 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 	for _, args := range [][]string{
 		{"projects"}, {"projects", "list"},
 		{"workspace", "list"}, {"workspace", "show", "workspaces"},
+		{"model"}, {"model", "for", "interpret"}, {"model", "for", "taste"},
+		{"model", "set", "interpret", "--runners", "claude,opencode"},
+		{"model", "reset", "interpret"},
+		{"projects", "policy", "sample-app"},
 		{"projects", "add", "second", f.sample, "--lazyspec", "n"},
 		{"projects", "add", "third", f.sample, "--lazyspec", "y"},
 		{"models", "opencode"},
@@ -2283,6 +2288,71 @@ func TestAStopRecordedAsAFailureCanBeReleasedIntoAChoice(t *testing.T) {
 	f.runOK(t, "soft-done", goal)
 	if got := f.workRow(t, goal); got.State != core.StateSoftDone {
 		t.Errorf("goal state = %s, want soft-done once the duplicate was released", got.State)
+	}
+}
+
+func TestAProjectSaysWhatItsJudgementsMayReachAndWhereTheyMayNot(t *testing.T) {
+	f := newCLIFixture(t)
+
+	// An unconfigured machine: no runners named, so nothing is restricted, and
+	// the printed policy says so rather than implying a lock that is not there.
+	out := f.runOK(t, "projects", "policy", "sample-app", "--json")
+	for _, role := range []string{"interpret", "taste"} {
+		if !strings.Contains(out, `"role": "`+role+`"`) {
+			t.Errorf("policy = %s, want a row for %s", out, role)
+		}
+	}
+	if !strings.Contains(out, `"promote_global": true`) {
+		t.Errorf("policy = %s, want promotion on by default: global taste is the director's own and travels", out)
+	}
+
+	// A preference no runner offers is refused when it is set, not ignored later.
+	// The JSON census already exercises `model set`; this is the refusal.
+	if errStr := f.runFail(t, "model", "set", "interpret", "--prefer", "no-such-model-anywhere"); !strings.Contains(errStr, "not offered by any detected runner") {
+		t.Errorf("set a preference nobody offers = %q, want it refused naming the runners that exist", errStr)
+	}
+	if errStr := f.runFail(t, "model", "set", "interpret", "--runners", "claude", "--model", "opencode/some-model"); !strings.Contains(errStr, "does not include") {
+		t.Errorf("forcing a model outside the runners = %q, want it refused", errStr)
+	}
+	if errStr := f.runFail(t, "model", "for", "nonsense"); !strings.Contains(errStr, "interpret|taste") {
+		t.Errorf("an unknown role = %q, want the two that exist", errStr)
+	}
+
+	// Setting and resetting round-trips, and the file is one a person can read.
+	f.runOK(t, "model", "set", "taste", "--runners", "claude,opencode", "--prefer", "anthropic/claude-opus-5")
+	home := filepath.Join(f.wdHome, "judge.json")
+	raw, err := os.ReadFile(home)
+	if err != nil {
+		t.Fatalf("judge.json: %v", err)
+	}
+	if !strings.Contains(string(raw), "anthropic/claude-opus-5") || !strings.Contains(string(raw), "\n  ") {
+		t.Errorf("judge.json = %s, want the preference and an indented file a person can edit", raw)
+	}
+	if !strings.Contains(f.runOK(t, "model", "for", "taste", "--json"), "anthropic/claude-opus-5") {
+		t.Error("the set preference is not what the taste role would use")
+	}
+	f.runOK(t, "model", "reset", "taste")
+	raw, err = os.ReadFile(home)
+	if err != nil {
+		t.Fatalf("judge.json: %v", err)
+	}
+	if strings.Contains(string(raw), "anthropic/claude-opus-5") {
+		t.Errorf("after reset judge.json = %s, want the preference gone", raw)
+	}
+
+	// A project file narrows what its judgements may reach, and the narrowing is
+	// reported rather than implied.
+	file := filepath.Join(f.wdHome, "projects", "resident.md")
+	text := project.ProjectTemplate("resident", f.sample, project.NewProjectOptions{Runner: "claude"})
+	text = strings.Replace(text, "runner: claude\n", "runner: claude\npolicy: [interpret=claude, taste=claude]\n", 1)
+	if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
+		t.Fatalf("write project: %v", err)
+	}
+	got := f.runOK(t, "projects", "policy", "resident", "--json")
+	for _, runner := range []string{"opencode", "codex"} {
+		if !strings.Contains(got, `"blocked_by_project": [`) && !strings.Contains(got, runner) {
+			t.Errorf("policy = %s, want %s listed as blocked", got, runner)
+		}
 	}
 }
 

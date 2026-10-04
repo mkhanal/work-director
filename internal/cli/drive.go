@@ -161,11 +161,18 @@ func (c *Cli) tasteJudgeOnce(p *project.Project) driver.Judge {
 		if err != nil {
 			return driver.Verdict{}, err
 		}
+		if err := c.restrictToProject(rn.Name(), p, runner.RoleTaste); err != nil {
+			return driver.Verdict{}, err
+		}
+		model, err := c.judgementModel(p, runner.RoleTaste, mustPolicy(c.Home))
+		if err != nil {
+			return driver.Verdict{}, err
+		}
 		h, err := rn.Spawn(runner.SpawnOptions{
 			Cwd:   p.Path,
 			Name:  "wd judge taste",
 			Brief: brief,
-			Model: p.Model,
+			Model: optionalModel(model),
 		})
 		if err != nil {
 			return driver.Verdict{}, err
@@ -610,11 +617,22 @@ func (c *Cli) judgeOnce(goal core.Work, p *project.Project) driver.Judge {
 		if err != nil {
 			return driver.Verdict{}, err
 		}
+		// The runner and the model are both the project's to constrain, and the
+		// project's runner list wins over the project's single runner: a
+		// residency promise is about providers, and pinning one runner in the
+		// project file would otherwise be a way around it.
+		if err := c.restrictToProject(rn.Name(), p, runner.RoleInterpret); err != nil {
+			return driver.Verdict{}, err
+		}
+		model, err := c.judgementModel(p, runner.RoleInterpret, mustPolicy(c.Home))
+		if err != nil {
+			return driver.Verdict{}, err
+		}
 		h, err := rn.Spawn(runner.SpawnOptions{
 			Cwd:   cwd,
 			Name:  slice60(fmt.Sprintf("wd-%s judge", goal.ID)),
 			Brief: brief,
-			Model: p.Model,
+			Model: optionalModel(model),
 		})
 		if err != nil {
 			return driver.Verdict{}, err
@@ -625,7 +643,7 @@ func (c *Cli) judgeOnce(goal core.Work, p *project.Project) driver.Judge {
 			Decline: v.Decline,
 			Tokens:  v.Tokens,
 			Runner:  rn.Name(),
-			Model:   strOrEmpty(p.Model),
+			Model:   model,
 		}, nil
 	}
 }

@@ -29,6 +29,29 @@ session — is recorded as not reached, which is not the same as the model faili
 and the two never collapse. Every candidate tried and its verdict are returned,
 so the ladder is inspectable rather than a result with no explanation.
 
+## A Project Narrows The Policy And Can Never Widen It
+A role's policy is its runners, the models it prefers, and optionally one model
+that overrides both. `Resolve` narrows a machine's global policy with a project's
+own and refuses anything a project asks for the global policy does not allow: a
+runner list on the project is checked against the global list rather than
+replacing it, and a forced model is refused when its runner is not among the
+runners allowed here. The asymmetry is the whole of the safety property — a
+project forbidden from reaching a provider cannot re-allow it in its own file,
+or closing a provider globally would be one project file away from undone. A
+project may forbid and may reorder; it may never permit. `PromoteGlobal` defaults
+true, because global taste is the director's own engineering taste and travels
+by design while project rules live in the project; it is available for a team
+that wants even their own cards to stay put. Every refusal names what is
+allowed instead, because a refusal that only says no is a dead end.
+
+## A Model Outside The Allowed Runners Is Refused By Name
+`RolePolicy.Allowed` reports whether a model may be used under a policy, and it
+is what makes a `/model` switch checkable rather than decorative: the switch
+changes the preference inside the allowlist and cannot leave it. A model whose
+runner is not listed is refused naming the runners that are, and a role with a
+forced model refuses anything but that model. This holds for agents as much as
+for people, because the loop reads the same set.
+
 ## A Runner That Reports Nothing Is Asked Rather Than Guessed At
 No runner's CLI reports what its models cost — opencode lists ids and no prices,
 claude lists nothing at all — so cost comes from a declaration in

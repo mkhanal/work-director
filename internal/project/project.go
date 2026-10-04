@@ -36,6 +36,43 @@ type Project struct {
 	InstructionsFile string   `json:"instructionsFile"`
 	DefaultBranch    string   `json:"defaultBranch"`
 	Roadmap          string   `json:"roadmap"`
+	// Policy restricts which runners each role may reach for this project, keyed
+	// by role name. It narrows the machine's global policy and never widens it:
+	// a project that forbids a provider cannot re-allow it here, or closing it
+	// globally would be one project file away from undone.
+	Policy map[string]string `json:"policy,omitempty"`
+}
+
+// RestrictedRunners is what the policy says for one role, as a list. An empty
+// result means the role is unrestricted here, which is the default.
+func (p *Project) RestrictedRunners(role string) []string {
+	v, ok := p.Policy[role]
+	if !ok {
+		return nil
+	}
+	return taste.List(v)
+}
+
+// ProjectError names the file and what is wrong with it.
+// parsePolicy reads the optional policy field: a comma-separated list of
+// runner:role pairs, one per restriction, of the form
+//
+//	interpret=claude, taste=claude
+//
+// It is one scalar rather than a nested block because that is what the
+// frontmatter parser holds, and because the rule a project states is short: this
+// project does not let these roles reach anything but that runner. Absence means
+// no restriction, which is what an unconfigured project has.
+func parsePolicy(v string) map[string]string {
+	out := map[string]string{}
+	for _, part := range taste.List(v) {
+		role, runners, ok := strings.Cut(part, "=")
+		if !ok || strings.TrimSpace(role) == "" || strings.TrimSpace(runners) == "" {
+			continue
+		}
+		out[strings.TrimSpace(role)] = strings.TrimSpace(runners)
+	}
+	return out
 }
 
 // ProjectError names the file and what is wrong with it.
@@ -83,6 +120,7 @@ func ParseProject(text, path string) (*Project, error) {
 		return nil, &ProjectError{Path: path, Detail: err.Error()}
 	}
 	p := &Project{
+		Policy:           parsePolicy(fields["policy"]),
 		Name:             strings.TrimSuffix(filepath.Base(path), ".md"),
 		Path:             repo,
 		Runner:           runner,

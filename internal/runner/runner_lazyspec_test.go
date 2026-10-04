@@ -539,6 +539,7 @@ func TestARoleTakesTheCheapestModelThatAlsoDoesTheJob(t *testing.T) {
 			return Verdict{Probed: true, Capable: true, Why: "returned a valid verdict"}
 		}
 		got, err := Pick(RoleTaste, both, nil, probe, Policy{
+			Role:   RolePolicy{},
 			Lister: ladderRunner("alpha", free("cheap-but-weak"), paid("solid", 2, 10)),
 		})
 		if err != nil {
@@ -559,6 +560,7 @@ func TestARoleTakesTheCheapestModelThatAlsoDoesTheJob(t *testing.T) {
 			return Verdict{Probed: true, Capable: m.ID == "second"}
 		}
 		_, err := Pick(RoleInterpret, both, nil, probe, Policy{
+			Role:   RolePolicy{},
 			Lister: ladderRunner("alpha", free("first"), free("second"), free("third"), free("fourth")),
 		})
 		if err != nil {
@@ -574,6 +576,7 @@ func TestARoleTakesTheCheapestModelThatAlsoDoesTheJob(t *testing.T) {
 		// costing money without anyone having decided that it should.
 		probe := func(m Model, role Role) Verdict { return Verdict{Probed: true, Capable: true} }
 		got, err := Pick(RoleInterpret, both, nil, probe, Policy{
+			Role:   RolePolicy{},
 			Lister: ladderRunner("alpha", unknown("mystery"), paid("certain", 1, 4)),
 		})
 		if err != nil {
@@ -591,6 +594,7 @@ func TestARoleTakesTheCheapestModelThatAlsoDoesTheJob(t *testing.T) {
 			return Verdict{Unreachable: true, Why: "no session"}
 		}
 		_, err := Pick(RoleInterpret, both, nil, probe, Policy{
+			Role:   RolePolicy{},
 			Lister: ladderRunner("alpha", free("only")),
 		})
 		if err == nil || !strings.Contains(err.Error(), "no session") {
@@ -601,6 +605,7 @@ func TestARoleTakesTheCheapestModelThatAlsoDoesTheJob(t *testing.T) {
 	t.Run("every candidate tried is returned, so the ladder is inspectable", func(t *testing.T) {
 		probe := func(m Model, role Role) Verdict { return Verdict{Probed: true, Why: "nope"} }
 		_, err := Pick(RoleTaste, both, nil, probe, Policy{
+			Role:   RolePolicy{},
 			Lister: ladderRunner("alpha", free("a"), paid("b", 2, 10), paid("c", 1, 4)),
 		})
 		if err == nil {
@@ -618,8 +623,8 @@ func TestARoleTakesTheCheapestModelThatAlsoDoesTheJob(t *testing.T) {
 			return Verdict{Probed: true, Capable: false, Why: "returned prose"}
 		}
 		_, err := Pick(RoleTaste, both, nil, probe, Policy{
-			Preferred: []string{"chosen"},
-			Lister:    ladderRunner("alpha", paid("chosen", 0.5, 2), paid("other", 3, 15)),
+			Role:   RolePolicy{Preferred: []string{"chosen"}},
+			Lister: ladderRunner("alpha", paid("chosen", 0.5, 2), paid("other", 3, 15)),
 		})
 		if err == nil || !strings.Contains(err.Error(), "does not meet the floor") {
 			t.Errorf("Pick = %v, want it refused naming the floor", err)
@@ -635,6 +640,7 @@ func TestARunnerThatReportsNothingIsAskedRatherThanGuessedAt(t *testing.T) {
 		// A rankable model exists, but nothing checked whether it can do the
 		// job. Naming it anyway would claim a floor nobody applied.
 		got, err := Pick(RoleTaste, both, nil, nil, Policy{
+			Role: RolePolicy{},
 			Lister: func(r string) ([]Model, error) {
 				if r == "quiet" {
 					return nil, fmt.Errorf("models failed")
@@ -655,6 +661,7 @@ func TestARunnerThatReportsNothingIsAskedRatherThanGuessedAt(t *testing.T) {
 
 	t.Run("no runner offers anything, so no model is named at all", func(t *testing.T) {
 		got, err := Pick(RoleTaste, both, nil, nil, Policy{
+			Role:   RolePolicy{},
 			Lister: func(string) ([]Model, error) { return nil, nil },
 		})
 		if err != nil {
@@ -702,4 +709,122 @@ func TestARunnerThatReportsNothingIsAskedRatherThanGuessedAt(t *testing.T) {
 			t.Error("a malformed models.json was accepted, want it refused naming the file")
 		}
 	})
+}
+
+// A Project Narrows The Policy And Can Never Widen It
+func TestAProjectNarrowsThePolicyAndCanNeverWidenIt(t *testing.T) {
+	global := RolePolicy{Runners: []string{"claude", "opencode"}}
+	present := []string{"claude", "opencode", "codex"}
+
+	t.Run("a project may forbid", func(t *testing.T) {
+		got, err := Resolve(global, RolePolicy{Runners: []string{"claude"}}, RoleInterpret, present)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if len(got.Runners) != 1 || got.Runners[0] != "claude" {
+			t.Errorf("runners = %v, want only claude", got.Runners)
+		}
+	})
+
+	t.Run("a project may not permit, and is told what is", func(t *testing.T) {
+		// codex is detected, which is exactly why this has to be refused: a
+		// project that could re-allow a runner would make the global closure
+		// one file away from undone.
+		_, err := Resolve(global, RolePolicy{Runners: []string{"codex"}}, RoleInterpret, present)
+		if err == nil || !strings.Contains(err.Error(), "never widen") {
+			t.Fatalf("Resolve = %v, want it refused naming the asymmetry", err)
+		}
+		if !strings.Contains(err.Error(), "claude") {
+			t.Errorf("refusal %q does not say what is allowed, so it is a dead end", err)
+		}
+	})
+
+	t.Run("a forced model outside the allowed runners is refused", func(t *testing.T) {
+		_, err := Resolve(global, RolePolicy{Forced: "codex/gpt-5.5"}, RoleInterpret, present)
+		if err == nil || !strings.Contains(err.Error(), "not among the runners allowed") {
+			t.Errorf("Resolve = %v, want it refused", err)
+		}
+		// The same model on an allowed runner is fine.
+		got, err := Resolve(global, RolePolicy{Forced: "claude/claude-sonnet-5-5"}, RoleInterpret, present)
+		if err != nil || got.Forced != "claude/claude-sonnet-5-5" {
+			t.Errorf("Resolve = %+v, %v; want the force honoured", got, err)
+		}
+	})
+
+	t.Run("a project inherits what it does not set", func(t *testing.T) {
+		g := RolePolicy{Runners: []string{"claude"}, Preferred: []string{"claude-haiku-4-5"}}
+		got, err := Resolve(g, RolePolicy{Runners: []string{"claude"}}, RoleTaste, present)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if len(got.Preferred) != 1 || got.Preferred[0] != "claude-haiku-4-5" {
+			t.Errorf("preferred = %v, want the global preference inherited", got.Preferred)
+		}
+	})
+
+	t.Run("promote_global defaults on and only ever narrows", func(t *testing.T) {
+		on := true
+		off := false
+
+		// Unset on both sides means the default, which is on: global taste is
+		// the director's own taste and travels by design.
+		got, err := Resolve(RolePolicy{}, RolePolicy{}, RoleTaste, present)
+		if err != nil || !PromotesGlobal(got) {
+			t.Errorf("Resolve = %+v, %v; want promotion on by default", got, err)
+		}
+		got, err = Resolve(RolePolicy{PromoteGlobal: &on}, RolePolicy{}, RoleTaste, present)
+		if err != nil || !PromotesGlobal(got) {
+			t.Errorf("Resolve = %+v, %v; want the machine's yes inherited", got, err)
+		}
+		got, err = Resolve(RolePolicy{PromoteGlobal: &on}, RolePolicy{PromoteGlobal: &off}, RoleTaste, present)
+		if err != nil || PromotesGlobal(got) {
+			t.Errorf("Resolve = %+v, %v; want a project able to hold its cards still", got, err)
+		}
+		// The other direction is refused, for the same reason a project cannot
+		// permit a runner: it may hold things still, not release them.
+		_, err = Resolve(RolePolicy{PromoteGlobal: &off}, RolePolicy{PromoteGlobal: &on}, RoleTaste, present)
+		if err == nil || !strings.Contains(err.Error(), "never widen") {
+			t.Errorf("Resolve = %v, want a project's yes refused against a machine no", err)
+		}
+		// And unset is distinguishable from an explicit no, which is the whole
+		// reason the field is a pointer.
+		got, err = Resolve(RolePolicy{PromoteGlobal: &off}, RolePolicy{}, RoleTaste, present)
+		if err != nil || PromotesGlobal(got) {
+			t.Errorf("Resolve = %+v, %v; want an unset project to inherit the machine's no", got, err)
+		}
+	})
+}
+
+// A Model Outside The Allowed Runners Is Refused By Name
+func TestAModelOutsideTheAllowedRunnersIsRefusedByName(t *testing.T) {
+	open := RolePolicy{Runners: []string{"claude", "opencode"}}
+
+	if err := open.Allowed("opencode/some-model"); err != nil {
+		t.Errorf("Allowed(opencode model) = %v, want nil", err)
+	}
+	err := open.Allowed("codex/gpt-5.5")
+	if err == nil || !strings.Contains(err.Error(), "not allowed here") {
+		t.Fatalf("Allowed(codex model) = %v, want it refused", err)
+	}
+	if !strings.Contains(err.Error(), "claude") || !strings.Contains(err.Error(), "opencode") {
+		t.Errorf("refusal %q does not name what is allowed", err)
+	}
+
+	// A forced role is the narrowest thing there is: anything else is refused
+	// with the model that is in use, because otherwise a /model that appeared
+	// to take would silently not.
+	forced := RolePolicy{Forced: "claude/claude-sonnet-5-5"}
+	if err := forced.Allowed("claude/claude-sonnet-5-5"); err != nil {
+		t.Errorf("Allowed(the forced model) = %v, want nil", err)
+	}
+	err = forced.Allowed("claude/claude-opus-5-5")
+	if err == nil || !strings.Contains(err.Error(), "is forced") {
+		t.Errorf("Allowed(anything else) = %v, want it refused naming the forced model", err)
+	}
+
+	// No runners named means unrestricted, which is an unconfigured machine
+	// rather than a closed one.
+	if err := (RolePolicy{}).Allowed("codex/gpt-5.5"); err != nil {
+		t.Errorf("Allowed with no policy = %v, want nil", err)
+	}
 }

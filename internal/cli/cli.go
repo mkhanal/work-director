@@ -39,7 +39,11 @@ var valueFlags = map[string]bool{
 	"branch": true, "adopt": true, "source": true, "card": true, "only": true,
 	// name labels a workspace. It is a value, not a switch: a workspace is
 	// something a person names, and the label is what they would type back.
-	"name":    true,
+	"name": true,
+	// prefer and runners set one role's policy. They are values, not switches:
+	// a policy written from a switch is a policy silently left empty, which is
+	// the failure mode this list exists to prevent.
+	"prefer": true, "runners": true,
 	"timeout": true, "port": true, "ref": true, "cwd": true, "cancelled": true,
 	"turns": true, "judgements": true, "stalled": true, "poll-seconds": true,
 	"deadline": true,
@@ -267,6 +271,7 @@ var commands = map[string]func(c *Cli, rest []string) error{
 	// before the rename keeps working.
 	"epic":      func(c *Cli, rest []string) error { return c.goalLike("epic", rest) },
 	"roadmap":   (*Cli).roadmap,
+	"model":     (*Cli).model,
 	"workspace": (*Cli).workspace,
 	"drive":     (*Cli).drive,
 	"abandon":   (*Cli).abandon,
