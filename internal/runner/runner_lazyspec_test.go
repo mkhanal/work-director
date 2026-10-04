@@ -505,3 +505,201 @@ transcript = "cat {log}"
 		}
 	})
 }
+
+// ladderRunner makes two runners detected and gives each a fixed model list, so
+// the ordering rules can be checked without putting fake CLIs on PATH.
+func ladderRunner(name string, models ...Model) func(string) ([]Model, error) {
+	return func(got string) ([]Model, error) {
+		if got != name {
+			return nil, fmt.Errorf("no runner called %s", got)
+		}
+		return models, nil
+	}
+}
+
+func free(id string) Model { return Model{ID: id, Cost: Cost{}, CostKnown: true} }
+
+func paid(id string, in, out float64) Model {
+	return Model{ID: id, Cost: Cost{Input: in, Output: out}, CostKnown: true}
+}
+
+func unknown(id string) Model { return Model{ID: id} }
+
+// A Role Takes The Cheapest Model That Also Does The Job
+func TestARoleTakesTheCheapestModelThatAlsoDoesTheJob(t *testing.T) {
+	both := []Availability{{Runner: "alpha", Detected: true}, {Runner: "beta", Detected: true}}
+
+	t.Run("the cheapest that can do the job, not just the cheapest", func(t *testing.T) {
+		// A free model that cannot hold the schema, and a paid one that can.
+		// Ranking by price alone picks the first and promotes bad taste.
+		probe := func(m Model, role Role) Verdict {
+			if m.ID == "cheap-but-weak" {
+				return Verdict{Probed: true, Why: "returned prose where the schema allows a label", Capable: false}
+			}
+			return Verdict{Probed: true, Capable: true, Why: "returned a valid verdict"}
+		}
+		got, err := Pick(RoleTaste, both, nil, probe, Policy{
+			Lister: ladderRunner("alpha", free("cheap-but-weak"), paid("solid", 2, 10)),
+		})
+		if err != nil {
+			t.Fatalf("Pick: %v", err)
+		}
+		if got.Model != "solid" {
+			t.Errorf("chose %s, want solid: a free model that cannot do the job is not cheaper, it is wrong", got.Model)
+		}
+		if !got.Floor {
+			t.Error("floor = false on a model that passed it")
+		}
+	})
+
+	t.Run("probing stops at the first pass rather than ranking everything", func(t *testing.T) {
+		asked := []string{}
+		probe := func(m Model, role Role) Verdict {
+			asked = append(asked, m.ID)
+			return Verdict{Probed: true, Capable: m.ID == "second"}
+		}
+		_, err := Pick(RoleInterpret, both, nil, probe, Policy{
+			Lister: ladderRunner("alpha", free("first"), free("second"), free("third"), free("fourth")),
+		})
+		if err != nil {
+			t.Fatalf("Pick: %v", err)
+		}
+		if len(asked) != 2 || asked[0] != "first" || asked[1] != "second" {
+			t.Errorf("probed %v, want it to stop at the second: probing all forty to rank them is how this stops being cheap", asked)
+		}
+	})
+
+	t.Run("an unstated cost is unknown, not free", func(t *testing.T) {
+		// unknown is not zero. Ranking it as zero is how a judgement starts
+		// costing money without anyone having decided that it should.
+		probe := func(m Model, role Role) Verdict { return Verdict{Probed: true, Capable: true} }
+		got, err := Pick(RoleInterpret, both, nil, probe, Policy{
+			Lister: ladderRunner("alpha", unknown("mystery"), paid("certain", 1, 4)),
+		})
+		if err != nil {
+			t.Fatalf("Pick: %v", err)
+		}
+		if got.Model != "certain" {
+			t.Errorf("chose %s, want certain: a model nobody stated a price for is unrankable", got.Model)
+		}
+	})
+
+	t.Run("a model that could not be asked has not failed", func(t *testing.T) {
+		// A quota or a missing session is us not knowing, which is not the same
+		// as the model being incapable, and the ladder must not treat it as one.
+		probe := func(m Model, role Role) Verdict {
+			return Verdict{Unreachable: true, Why: "no session"}
+		}
+		_, err := Pick(RoleInterpret, both, nil, probe, Policy{
+			Lister: ladderRunner("alpha", free("only")),
+		})
+		if err == nil || !strings.Contains(err.Error(), "no session") {
+			t.Errorf("Pick = %v, want a refusal naming why, not a silent fallthrough", err)
+		}
+	})
+
+	t.Run("every candidate tried is returned, so the ladder is inspectable", func(t *testing.T) {
+		probe := func(m Model, role Role) Verdict { return Verdict{Probed: true, Why: "nope"} }
+		_, err := Pick(RoleTaste, both, nil, probe, Policy{
+			Lister: ladderRunner("alpha", free("a"), paid("b", 2, 10), paid("c", 1, 4)),
+		})
+		if err == nil {
+			t.Fatal("expected a refusal when nothing meets the floor")
+		}
+		for _, id := range []string{"a", "b", "c"} {
+			if !strings.Contains(err.Error(), id) {
+				t.Errorf("refusal %q does not mention %s, so the ladder cannot be debugged", err, id)
+			}
+		}
+	})
+
+	t.Run("a preferred model that fails the floor is refused, not silently used", func(t *testing.T) {
+		probe := func(m Model, role Role) Verdict {
+			return Verdict{Probed: true, Capable: false, Why: "returned prose"}
+		}
+		_, err := Pick(RoleTaste, both, nil, probe, Policy{
+			Preferred: []string{"chosen"},
+			Lister:    ladderRunner("alpha", paid("chosen", 0.5, 2), paid("other", 3, 15)),
+		})
+		if err == nil || !strings.Contains(err.Error(), "does not meet the floor") {
+			t.Errorf("Pick = %v, want it refused naming the floor", err)
+		}
+	})
+}
+
+// A Runner That Reports Nothing Is Asked Rather Than Guessed At
+func TestARunnerThatReportsNothingIsAskedRatherThanGuessedAt(t *testing.T) {
+	both := []Availability{{Runner: "alpha", Detected: true}, {Runner: "quiet", Detected: true}}
+
+	t.Run("with no floor data a runner is asked rather than one called capable", func(t *testing.T) {
+		// A rankable model exists, but nothing checked whether it can do the
+		// job. Naming it anyway would claim a floor nobody applied.
+		got, err := Pick(RoleTaste, both, nil, nil, Policy{
+			Lister: func(r string) ([]Model, error) {
+				if r == "quiet" {
+					return nil, fmt.Errorf("models failed")
+				}
+				return []Model{free("a")}, nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("Pick: %v", err)
+		}
+		if got.Model != "" {
+			t.Errorf("model = %q, want none named: the floor was never checked on it", got.Model)
+		}
+		if !strings.Contains(got.Why, "was not checked") {
+			t.Errorf("why = %q, want it to say the floor was not checked", got.Why)
+		}
+	})
+
+	t.Run("no runner offers anything, so no model is named at all", func(t *testing.T) {
+		got, err := Pick(RoleTaste, both, nil, nil, Policy{
+			Lister: func(string) ([]Model, error) { return nil, nil },
+		})
+		if err != nil {
+			t.Fatalf("Pick: %v", err)
+		}
+		if got.Model != "" {
+			t.Errorf("model = %q, want none named: inventing an id is the registry this avoids", got.Model)
+		}
+		if got.Runner != "alpha" && got.Runner != "beta" && got.Runner != "quiet" {
+			t.Errorf("runner = %q, want one of the detected runners asked to use its own default", got.Runner)
+		}
+		if !strings.Contains(got.Why, "one wd invented") {
+			t.Errorf("why = %q, want it to say wd is not guessing", got.Why)
+		}
+	})
+
+	t.Run("nothing detected at all is refused naming the command that reports it", func(t *testing.T) {
+		_, err := Pick(RoleInterpret, nil, nil, nil, Policy{})
+		if err == nil || !strings.Contains(err.Error(), "wd doctor") {
+			t.Errorf("Pick = %v, want a refusal naming wd doctor", err)
+		}
+	})
+
+	t.Run("declared costs are read from models.json, and an absent file is not an error", func(t *testing.T) {
+		home := t.TempDir()
+		costs, err := DeclaredCosts(home)
+		if err != nil || len(costs) != 0 {
+			t.Fatalf("DeclaredCosts with no file = %v, %v; want empty and no error", costs, err)
+		}
+		path := filepath.Join(home, "models.json")
+		if err := os.WriteFile(path, []byte(`{"opencode/a":{"input":0,"output":0},"opencode/b":{"input":2,"output":10}}`), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		costs, err = DeclaredCosts(home)
+		if err != nil {
+			t.Fatalf("DeclaredCosts: %v", err)
+		}
+		if costs["opencode/a"].Total() != 0 || costs["opencode/b"].Total() != 12 {
+			t.Errorf("costs = %v, want the stated numbers", costs)
+		}
+		if err := os.WriteFile(path, []byte(`not json`), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		if _, err := DeclaredCosts(home); err == nil {
+			t.Error("a malformed models.json was accepted, want it refused naming the file")
+		}
+	})
+}

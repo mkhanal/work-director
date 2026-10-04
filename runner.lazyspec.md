@@ -10,6 +10,38 @@ The runners own each provider's commands, session discovery, transcript
 parsing and error messages. The three foundation adapters are code; every other
 provider is a TOML file of commands under `~/.work-director/runners/`.
 
+## A Role Takes The Cheapest Model That Also Does The Job
+`Pick` chooses the model one role should use, and a role is a job rather than a
+price: `interpret` classifies text into a closed vocabulary, `taste` judges
+whether a rule generalises. The ladder is forced, then a preferred model that
+meets the floor, then the cheapest model that meets the floor, then a runner's
+own default when nothing could be ranked, then a refusal. Cheapest alone is not
+the rule — a free but weak model judging whether a taste rule generalises
+promotes bad taste globally, which is worse than not automating it — so
+candidates are walked cheapest-first and probed in that order and the first that
+passes is by construction the cheapest that can do the job. Probing in cost
+order rather than probing everything is what keeps it cheap: it stops at the
+first pass rather than paying to rank forty models. A model whose cost nobody has
+stated is unrankable rather than free, because unknown is not zero and guessing
+it as zero is how a judgement starts costing money without anyone deciding that
+it should. A probe that could not be asked at all — no runner, no quota, no
+session — is recorded as not reached, which is not the same as the model failing,
+and the two never collapse. Every candidate tried and its verdict are returned,
+so the ladder is inspectable rather than a result with no explanation.
+
+## A Runner That Reports Nothing Is Asked Rather Than Guessed At
+No runner's CLI reports what its models cost — opencode lists ids and no prices,
+claude lists nothing at all — so cost comes from a declaration in
+`$WD_HOME/models.json`, which is a person stating a number rather than wd
+inferring one from a model name, because a name-based guess is right until the
+free tier carrying that name is replaced. An absent file is not an error. With
+nothing declared and nothing rankable, `Pick` returns that runner with no model
+named, so the runner's own default is used: the provider's choice is very likely
+what a person would have got, and is never a guess wd invented. Every model name
+the ladder carries is either detected from a runner's own listing or declared by
+a person; none is hardcoded, because a hardcoded free-tier id is right for about
+as long as that tier exists.
+
 ## Spawning Records Runner Session And Attach Hint
 `spawn` returns a handle with the runner's session id and a hint a human can run to join the session.
 
