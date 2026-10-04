@@ -17,6 +17,13 @@ model for a run is chosen live from the provider's own CLI via `wd models`, neve
 **learning that injects direction** (global rules at runtime via the plugin, project-level
 rules into the project's own files as a PR it accepts).
 
+
+### The web UI
+
+`wd serve` is the UI. A visual preview of the design — and the reasoning behind
+it — is in [`docs/design/`](docs/design/README.md); open
+[`docs/design/preview.html`](docs/design/preview.html) in a browser.
+
 ## Install the taste plugin
 
 ```

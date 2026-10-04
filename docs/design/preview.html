@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Work Director — web UI preview</title>
+<link rel="stylesheet" href="../../assets/theme/theme.css">
+<style>
+  /* Component styles only. Every colour is a token from theme.css — no hex
+     appears below, so the preview cannot drift from what the app will be. */
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--font); font-size: var(--t-md); line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  code, .mono { font-family: var(--font-mono); font-size: 0.9em; }
+
+  /* ---- header ---- */
+  header {
+    height: var(--header-h); display: flex; align-items: center; gap: var(--s-4);
+    padding: 0 var(--s-4); border-bottom: 1px solid var(--line);
+    background: var(--surface); position: sticky; top: 0; z-index: 10;
+  }
+  header img { width: 24px; height: 24px; border-radius: 5px; }
+  .brand { font-weight: 620; letter-spacing: -0.01em; }
+  .status {
+    margin-left: auto; display: flex; gap: var(--s-3); align-items: center;
+    font-size: var(--t-sm); color: var(--ink-muted);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--landed); }
+  .dot.live { background: var(--live); }
+  .dot.warn { background: var(--warn); }
+  nav { display: flex; gap: var(--s-1); padding: var(--s-2) var(--s-4); border-bottom: 1px solid var(--line); background: var(--surface); }
+  nav button {
+    background: none; border: 0; color: var(--ink-muted); font: inherit;
+    font-size: var(--t-sm); padding: var(--s-2) var(--s-3); border-radius: var(--r-sm);
+    cursor: pointer;
+  }
+  nav button[aria-current="true"] { background: var(--live-wash); color: var(--ink); }
+
+  main { padding: var(--s-5) var(--s-4) var(--s-7); max-width: 1500px; margin: 0 auto; }
+  h1 { font-size: var(--t-xl); letter-spacing: -0.02em; margin: 0 0 var(--s-1); }
+  .sub { color: var(--ink-muted); margin: 0 0 var(--s-5); max-width: 68ch; }
+  h2 { font-size: var(--t-lg); letter-spacing: -0.01em; margin: 0 0 var(--s-3); }
+  section { margin-bottom: var(--s-6); }
+  .note { color: var(--ink-faint); font-size: var(--t-sm); }
+
+  /* ---- chat ---- */
+  .chatwrap { display: grid; grid-template-columns: minmax(0,1fr) 380px; gap: var(--s-4); align-items: start; }
+  .panel {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-lg); overflow: hidden;
+  }
+  .panel-h {
+    padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--line);
+    font-size: var(--t-sm); color: var(--ink-muted); font-weight: 560;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .thread { padding: var(--s-4); display: flex; flex-direction: column; gap: var(--s-4); min-height: 320px; }
+  .msg { max-width: 78%; }
+  .msg.you { align-self: flex-end; background: var(--live-wash); border: 1px solid var(--line);
+    padding: var(--s-2) var(--s-3); border-radius: var(--r-md); }
+  .msg.you p { margin: 0; }
+  .who { font-size: var(--t-xs); color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: var(--s-1); }
+  .answer { border-left: 2px solid var(--line-strong); padding-left: var(--s-3); }
+  .answer p { margin: 0; }
+  .src { font-size: var(--t-xs); color: var(--ink-faint); margin-top: var(--s-2); }
+
+  /* interpretation card — the defining interaction */
+  .interp { border: 1px solid var(--live-dim); border-left-width: 3px; border-radius: var(--r-md); padding: var(--s-4); background: var(--live-wash); }
+  .interp .k { color: var(--live); font-weight: 620; font-size: var(--t-sm); letter-spacing: 0.02em; }
+  .interp h3 { margin: var(--s-2) 0 var(--s-1); font-size: var(--t-md); }
+  .argv {
+    font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-muted);
+    background: var(--surface-sunken); border: 1px solid var(--line); border-radius: var(--r-sm);
+    padding: var(--s-2); margin: var(--s-3) 0; overflow-x: auto; white-space: nowrap;
+  }
+  .row { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+  button.act {
+    font: inherit; font-size: var(--t-sm); padding: var(--s-2) var(--s-3);
+    border-radius: var(--r-sm); border: 1px solid var(--line-strong);
+    background: var(--surface-raised); color: var(--ink); cursor: pointer;
+  }
+  button.act.primary { background: var(--live); border-color: var(--live); color: #fff; font-weight: 560; }
+  button.act.quiet { background: none; color: var(--ink-muted); }
+
+  /* composer */
+  .composer { border-top: 1px solid var(--line); padding: var(--s-3) var(--s-4); display: flex; gap: var(--s-2); align-items: flex-end; }
+  .composer .fake {
+    flex: 1; border: 1px solid var(--line-strong); border-radius: var(--r-md);
+    padding: var(--s-3); color: var(--ink-faint); background: var(--surface-sunken);
+  }
+  .slash { border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--r-md) var(--r-md); background: var(--surface-sunken); }
+  .slash div { padding: var(--s-2) var(--s-4); font-size: var(--t-sm); display: flex; justify-content: space-between; color: var(--ink-muted); border-bottom: 1px solid var(--line); }
+  .slash div:last-child { border-bottom: 0; }
+  .slash .tag { font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-faint); }
+
+  /* ---- rail ---- */
+  .rail { display: flex; flex-direction: column; }
+  .ev { padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--line); font-size: var(--t-sm); }
+  .ev:last-child { border-bottom: 0; }
+  .ev .t { color: var(--ink-faint); font-size: var(--t-xs); }
+  .ev .src-tag { font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-faint); }
+
+  /* ---- board ---- */
+  .attention {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: var(--s-3); margin-bottom: var(--s-5);
+  }
+  .flag {
+    border: 1px solid var(--warn); border-left-width: 3px; background: var(--warn-wash);
+    border-radius: var(--r-md); padding: var(--s-3);
+  }
+  .flag.ok { border-color: var(--landed); background: var(--landed-wash); }
+  .flag .lab { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--warn); font-weight: 620; }
+  .flag.ok .lab { color: var(--landed); }
+  .flag p { margin: var(--s-1) 0 var(--s-2); font-size: var(--t-sm); }
+
+  .lanes { display: grid; grid-template-columns: repeat(5, minmax(210px, 1fr)); gap: var(--s-3); align-items: start; }
+  .lane { background: var(--surface-sunken); border: 1px solid var(--line); border-radius: var(--r-md); }
+  .lane-h {
+    padding: var(--s-3); font-size: var(--t-sm); font-weight: 620;
+    display: flex; justify-content: space-between; border-bottom: 1px solid var(--line);
+  }
+  .lane-h .n { color: var(--ink-faint); font-weight: 400; }
+  .cards { padding: var(--s-2); display: flex; flex-direction: column; gap: var(--s-2); }
+
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s-3); }
+  .card.attention-card { border-color: var(--warn); border-left-width: 3px; }
+  .card-t { font-size: var(--t-sm); font-weight: 560; line-height: 1.35; margin-bottom: var(--s-2); }
+  .meta { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--s-2); }
+  .chip {
+    font-size: var(--t-xs); padding: 1px var(--s-2); border-radius: var(--r-full);
+    border: 1px solid var(--line-strong); color: var(--ink-muted);
+  }
+  .chip.build, .chip.change { color: var(--live); border-color: var(--live-dim); }
+  .chip.fix { color: var(--warn); border-color: var(--warn-dim); }
+  .chip.review, .chip.query { color: var(--info); border-color: var(--info); }
+  .chip.landed { color: var(--landed); border-color: var(--landed-dim); }
+  .chip.dv { font-family: var(--font-mono); font-size: 0.65rem; }
+  .bar { height: 3px; border-radius: var(--r-full); background: var(--line); overflow: hidden; margin-bottom: var(--s-2); }
+  .bar > i { display: block; height: 100%; background: var(--live); }
+  .bar.ok > i { background: var(--landed); }
+  .foot { display: flex; justify-content: space-between; font-size: var(--t-xs); color: var(--ink-faint); }
+
+  /* ---- goal detail ---- */
+  .detail { display: grid; grid-template-columns: minmax(0,1fr) 340px; gap: var(--s-4); align-items: start; }
+  .kv { padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: var(--s-4); font-size: var(--t-sm); }
+  .kv:last-child { border-bottom: 0; }
+  .kv .k { color: var(--ink-faint); }
+  .claim { padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--line); font-size: var(--t-sm); }
+  .claim:last-child { border-bottom: 0; }
+  .claim .s { font-size: var(--t-xs); color: var(--ink-faint); margin-top: var(--s-1); }
+  .warnbox {
+    margin: var(--s-4); padding: var(--s-3); border-radius: var(--r-md);
+    border: 1px solid var(--warn); background: var(--warn-wash);
+    font-size: var(--t-sm);
+  }
+  .sticky { display: flex; gap: var(--s-2); padding: var(--s-3) var(--s-4); border-top: 1px solid var(--line); flex-wrap: wrap; }
+
+  .rules { columns: 2; column-gap: var(--s-5); font-size: var(--t-sm); color: var(--ink-muted); }
+  .rules li { margin-bottom: var(--s-2); break-inside: avoid; }
+  .rules strong { color: var(--ink); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-4); align-items: start; }
+  @media (max-width: 1100px) {
+    .chatwrap, .detail, .grid2 { grid-template-columns: 1fr; }
+    .lanes { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <img src="../../assets/icon/icon-32.png" alt="">
+  <span class="brand">Work Director</span>
+  <span class="status">
+    <span><i class="dot live"></i> drive running · 2 active</span>
+    <span><i class="dot warn"></i> 1 needs you</span>
+    <span><i class="dot"></i> 2 attention</span>
+  </span>
+</header>
+<nav>
+  <button aria-current="true">Talk</button>
+  <button>Board</button>
+  <button>Goal</button>
+  <button>Review</button>
+</nav>
+
+<main>
+
+<section>
+  <h1>Web UI — preview of the consensus design</h1>
+  <p class="sub">
+    Three free models designed this independently. They converged on three surfaces, a
+    preview-before-every-write rule, and exactly one new backend route. This page shows what
+    that consensus looks like. It is a static mock: the real thing reads <code>wd serve</code>.
+    Full reasoning in <a href="README.md">docs/design/README.md</a>.
+  </p>
+</section>
+
+<section>
+  <h2>1 · Talk — the defining interaction</h2>
+  <p class="sub">
+    Chat-to-goal writes to a durable ledger, so <strong>nothing commits on Enter</strong>. Enter
+    classifies; the card below is what the system understood and the exact <code>argv</code> it
+    will run. Only Confirm writes. All three models independently named this the most important
+    screen in the product.
+  </p>
+  <div class="chatwrap">
+    <div class="panel">
+      <div class="panel-h"><span>Talk</span><span class="mono">wd-1f2a · login session</span></div>
+      <div class="thread">
+        <div class="msg you"><p>why is the build red?</p></div>
+        <div class="msg">
+          <div class="who">answer</div>
+          <div class="answer">
+            <p>Verify failed on <code>internal/serve</code>: the delivery field the board reads was
+            omitted from <code>goalView</code>, so the JSON rail test failed.</p>
+            <div class="src">From: decision on wd-1f2a, 2h ago · report on wd-1f2a, 1h ago</div>
+          </div>
+        </div>
+
+        <div class="msg you"><p>make the login page remember me</p></div>
+        <div class="interp">
+          <div class="k">I READ THIS AS · NEW GOAL</div>
+          <h3>Remember-me on the login page</h3>
+          <div class="row">
+            <span class="chip build">build</span>
+            <span class="chip">roadmap: sample-app</span>
+          </div>
+          <div class="argv">wd add sample-app "Remember-me on the login page" --goal 4c747287 --type build</div>
+          <div class="row">
+            <button class="act primary">Create goal</button>
+            <button class="act">Edit</button>
+            <button class="act quiet">It's a question</button>
+          </div>
+        </div>
+      </div>
+      <div class="composer">
+        <div class="fake">Talk plain English, or <span class="mono">/</span> for commands.</div>
+        <button class="act primary">Send</button>
+      </div>
+      <div class="slash">
+        <div><span>reopen — more work on top of a finished goal</span><span class="tag">/reopen &lt;id&gt; &lt;what&gt;</span></div>
+        <div><span>release — a stop recorded as a failure, corrected to a choice</span><span class="tag">/release &lt;id&gt; &lt;what&gt;</span></div>
+        <div><span>decide — record a decision in one line</span><span class="tag">/decide &lt;id&gt; &lt;text&gt;</span></div>
+      </div>
+    </div>
+
+    <div class="panel rail">
+      <div class="panel-h"><span>Activity</span><span class="mono">live</span></div>
+      <div class="ev"><div class="t">14m ago</div>Task <span class="mono">8d0968a8</span> reached review <span class="src-tag">· drive</span></div>
+      <div class="ev"><div class="t">22m ago</div>Landed <span class="mono">f4ad4e1</span> <span class="src-tag">· git</span></div>
+      <div class="ev"><div class="t">1h ago</div>Verify passed <span class="src-tag">· drive</span></div>
+      <div class="ev"><div class="t">2h ago</div>Decision recorded: "sqlite over postgres" <span class="src-tag">· you</span></div>
+      <div class="ev"><div class="t">3h ago</div>Taste card promoted: <span class="mono">organisation</span> <span class="src-tag">· drive</span></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>2 · Board — the anti-forget surface</h2>
+  <p class="sub">
+    Delivery is derived from git, never stored, so it refines a card rather than defining a column.
+    The attention strip is the mechanism that stops a merged PR from quietly staying open.
+  </p>
+  <div class="attention">
+    <div class="flag">
+      <div class="lab">ready to close</div>
+      <p>Landed on <code>main</code> as <span class="mono">f4ad4e1</span> but the goal is still open. Close <span class="mono">ce002534</span>?</p>
+      <div class="row"><button class="act primary">Close</button><button class="act quiet">Open</button></div>
+    </div>
+    <div class="flag">
+      <div class="lab">stale pr</div>
+      <p>PR #88 has had no activity for 6 days.</p>
+      <div class="row"><button class="act">Open PR</button></div>
+    </div>
+    <div class="flag ok">
+      <div class="lab">shipped</div>
+      <p>4 tasks landed this week. Nothing left needing you.</p>
+    </div>
+  </div>
+
+  <div class="lanes">
+    <div class="lane">
+      <div class="lane-h">Needs you <span class="n">1</span></div>
+      <div class="cards">
+        <div class="card attention-card">
+          <div class="card-t">Ports for the serve daemon</div>
+          <div class="meta"><span class="chip build">build</span><span class="chip dv">pr-open</span></div>
+          <div class="foot"><span>needs input</span><span>14m · drive</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="lane-h">In flight <span class="n">2</span></div>
+      <div class="cards">
+        <div class="card">
+          <div class="card-t">Autonomous factory: the goal loop with no human present</div>
+          <div class="meta"><span class="chip build">build</span><span class="chip dv">pushed-unpr</span></div>
+          <div class="bar"><i style="width:66%"></i></div>
+          <div class="foot"><span>4/6 tasks</span><span>2m · drive</span></div>
+        </div>
+        <div class="card">
+          <div class="card-t">wd send racing a busy task in a shared worktree</div>
+          <div class="meta"><span class="chip fix">fix</span><span class="chip dv">none</span></div>
+          <div class="bar"><i style="width:30%"></i></div>
+          <div class="foot"><span>1/3 tasks</span><span>38m · drive</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="lane-h">Ready to push <span class="n">1</span></div>
+      <div class="cards">
+        <div class="card">
+          <div class="card-t">Roadmap falls off the near-term window</div>
+          <div class="meta"><span class="chip change">change</span><span class="chip dv">committed-unpushed</span></div>
+          <div class="bar ok"><i style="width:100%"></i></div>
+          <div class="foot"><span>2/2 tasks</span><span>1h · you</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="lane-h">In review <span class="n">1</span></div>
+      <div class="cards">
+        <div class="card">
+          <div class="card-t">Delivery state derived from git, not stored</div>
+          <div class="meta"><span class="chip review">review</span><span class="chip dv">pr-open</span></div>
+          <div class="bar"><i style="width:85%"></i></div>
+          <div class="foot"><span>5/6 tasks</span><span>3h · codex</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="lane-h">Ready to close <span class="n">1</span></div>
+      <div class="cards">
+        <div class="card attention-card">
+          <div class="card-t">A finished goal can be reopened, not for a question</div>
+          <div class="meta"><span class="chip build">build</span><span class="chip dv">landed-commit</span></div>
+          <div class="bar ok"><i style="width:100%"></i></div>
+          <div class="foot"><span>merged 3d ago</span><span>3d · git</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>3 · Goal — what a person sees when they open one</h2>
+  <p class="sub">
+    A goal's context is its subtree, so the timeline is the goal's own events plus every event
+    on its tasks, in one read. Decisions render in full; everything else collapses to a line.
+  </p>
+  <div class="detail">
+    <div>
+      <div class="panel">
+        <div class="panel-h"><span class="mono">wd-1f2a · login session</span><span class="row"><span class="chip build">build</span><span class="chip dv">landed-commit</span></span></div>
+        <div class="warnbox">
+          <strong>Landed but still open.</strong> commit <span class="mono">f4ad4e1</span> is on
+          <code>main</code>; this goal says running.
+          <div class="row" style="margin-top:var(--s-2)"><button class="act primary">Close</button><button class="act quiet">Keep open</button></div>
+        </div>
+        <div class="kv"><span class="k">Tasks</span><span>4/5 done · 1 running</span></div>
+        <div class="kv"><span class="k">Last activity</span><span>2m ago · drive</span></div>
+        <div class="kv"><span class="k">Delivery</span><span class="mono">landed-commit · f4ad4e1 on main</span></div>
+        <div class="kv"><span class="k">Source</span><span class="note">derived from git — no control sets this</span></div>
+      </div>
+      <div class="panel" style="margin-top:var(--s-3)">
+        <div class="panel-h">Claims<span class="note">every claim names its source</span></div>
+        <div class="claim">"SQLite over postgres — the ledger is a local file and the whole tool is one binary."
+          <div class="s">from decision on wd-1f2a · still stands</div></div>
+        <div class="claim">"A goal's context is its subtree, not its own row."
+          <div class="s">from decision on wd-1f2a/task-3 · still stands</div></div>
+        <div class="claim"><span class="note">"Expose the ledger over HTTP."</span>
+          <div class="s">superseded by decision 2h ago · reversed, not deleted</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-h">Actions</div>
+      <div class="thread" style="padding:var(--s-3);gap:var(--s-2)">
+        <div class="note">
+          <code>Reopen…</code> and <code>Release…</code> open a dialog with a required field.
+          A question never reopens a goal — asking leaves it finished.
+        </div>
+        <div class="row">
+          <button class="act">Answer / Decide</button>
+          <button class="act">Reopen…</button>
+          <button class="act">Release…</button>
+          <button class="act">Close</button>
+          <button class="act primary">Drive</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>4 · The rules the UI lives by</h2>
+  <div class="grid2">
+    <div class="panel"><div class="panel-h">Rules</div>
+      <ol class="rules" style="padding:var(--s-4) var(--s-4) var(--s-4) var(--s-6);margin:0">
+        <li><strong>The system shows its write before it writes.</strong> Any message that would write shows the exact argv first.</li>
+        <li><strong>Never show a command the ledger cannot verify.</strong> Unknown verbs error; they never silently no-op.</li>
+        <li><strong>Every claim names its source.</strong> Unsourced assertions render as <em>Unconfirmed</em>.</li>
+        <li><strong>Delivery is derived, never stored.</strong> Show the value and the git fact behind it.</li>
+        <li><strong>A finished goal is finished</strong> until someone says what is being worked on.</li>
+        <li><strong>Questions never create rows.</strong></li>
+        <li><strong>Work state and delivery never share a pill.</strong></li>
+        <li><strong>Live or loud.</strong> Never a blank screen; keep the last view and say it is stale.</li>
+      </ol>
+    </div>
+    <div class="panel"><div class="panel-h">What it must never become</div>
+      <ul class="rules" style="padding:var(--s-4) var(--s-4) var(--s-4) var(--s-6);margin:0">
+        <li><strong>A command palette as the whole UI</strong> — ⌘K and <code>wd goal new</code> is the CLI in a browser.</li>
+        <li><strong>Chat that writes on send</strong> with an undo toast. Undo doesn't un-run an agent.</li>
+        <li><strong>Command-palette cosplay</strong> — <code>/</code> verbs that are prompts rather than real CLI verbs. Power users diff against <code>wd --help</code> once and leave.</li>
+        <li><strong>A Jira-lite board</strong> — a column per state, drag-and-drop. Dragging done→running bypasses the reopen reason and breaks the invariant.</li>
+        <li><strong>Agent claims as facts</strong> — a shipped badge with no landing link is a lie you find in git.</li>
+        <li><strong>Notification spam</strong> — the loop runs unattended; interrupt only for needs-input, blocked and attention.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+</main>
+</body>
+</html>
