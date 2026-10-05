@@ -324,6 +324,25 @@ type Workspace struct {
 	Updated string `json:"updated"`
 }
 
+// RunState is where a run of a goal got to. A run is a record, not a process:
+// it outlives whatever was driving it, which is the only reason an interrupted
+// one can be told apart from one that finished.
+type RunState string
+
+const (
+	// RunRunning means a process was driving it and has not said otherwise. It
+	// is a claim, not a fact: a machine that lost power leaves a row saying
+	// running with nothing behind it, which is what Recovered is for.
+	RunRunning RunState = "running"
+	// RunInterrupted means the process went away without deciding anything. A
+	// dead battery, a crash and a closed laptop all land here, and none of them
+	// is the loop giving up.
+	RunInterrupted RunState = "interrupted"
+	// RunFinished means the run reached a stop of its own accord, with the stop
+	// and the reason recorded beside it.
+	RunFinished RunState = "finished"
+)
+
 type Conflict struct {
 	A     string   `json:"a"`
 	B     string   `json:"b"`
@@ -331,8 +350,8 @@ type Conflict struct {
 }
 
 var Transitions = map[State][]State{
-	StateQueued:     {StateBriefed, StateRunning, StateBlocked, StateDone, StateDropped, StateAbandoned},
-	StateBriefed:    {StateRunning, StateQueued, StateBlocked, StateDone, StateDropped, StateAbandoned},
+	StateQueued:     {StateBriefed, StateRunning, StateBlocked, StateDone, StateDropped},
+	StateBriefed:    {StateRunning, StateQueued, StateBlocked, StateDone, StateDropped},
 	StateRunning:    {StateNeedsInput, StateReview, StateBlocked, StateDropped, StateAbandoned},
 	StateNeedsInput: {StateRunning, StateBlocked, StateDropped, StateAbandoned},
 	StateReview:     {StateSoftDone, StateRunning, StateBlocked, StateDropped, StateAbandoned},

@@ -422,6 +422,8 @@ func TestLedger(t *testing.T) {
 	t.Run("Work Can End Abandoned And Says Why", func(t *testing.T) {
 		l := newTestLedger(t)
 		goal := add(t, l, "p", "G", AddOptions{Kind: core.WorkGoal})
+		// Abandon is only allowed from states where work was attempted.
+		move(t, l, goal.ID, core.StateRunning)
 		got, err := l.Abandon(goal.ID, core.AbandonNoPR, "no branch was ever pushed")
 		wantNoErr(t, err)
 		if got.State != core.StateAbandoned {
@@ -435,6 +437,7 @@ func TestLedger(t *testing.T) {
 		}
 		// A reason nobody can verify is not spellable.
 		other := add(t, l, "p", "G2", AddOptions{Kind: core.WorkGoal})
+		move(t, l, other.ID, core.StateRunning)
 		_, err = l.Abandon(other.ID, "ran-out-of-enthusiasm", "")
 		wantErr(t, err, `unknown abandon reason "ran-out-of-enthusiasm"`)
 		// Abandoned is terminal: it does not transition back out.
@@ -442,6 +445,7 @@ func TestLedger(t *testing.T) {
 		wantErr(t, err, "illegal transition abandoned → running")
 		// The other machine-checkable reason.
 		third := add(t, l, "p", "G3", AddOptions{Kind: core.WorkGoal})
+		move(t, l, third.ID, core.StateRunning)
 		got, err = l.Abandon(third.ID, core.AbandonUnmerged, "PR 12 never merged")
 		wantNoErr(t, err)
 		if got.State != core.StateAbandoned {
@@ -1097,6 +1101,8 @@ func TestFinishedWorkIsReopenedWithAReasonOrNotAtAll(t *testing.T) {
 		{"abandoned", core.StateAbandoned},
 	} {
 		d := add(t, l, "p", "Finished with, on purpose "+ending.name, AddOptions{})
+		// Dropped/abandoned are only reachable from states where work was attempted.
+		move(t, l, d.ID, core.StateRunning)
 		move(t, l, d.ID, ending.to)
 		_, err := l.Reopen(d.ID, "on reflection")
 		if err == nil || !strings.Contains(err.Error(), "only done work is reopened") {

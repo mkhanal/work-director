@@ -411,24 +411,14 @@ func (c *Cli) drive(rest []string) error {
 	if err != nil {
 		return err
 	}
-	// A run that stopped because a bound ran out or nothing moved did not ship,
-	// and the goal comes to rest saying so. A run that stopped because the loop
-	// itself could not run is a different thing: the work is untouched, and
-	// ending a goal because a runner could not read a transcript would throw away
-	// real work over a failure that says nothing about it. That one is reported.
-	if res.Stop == driver.StopBudget || res.Stop == driver.StopStalled {
-		if err := c.endUnshipped(goal, res); err != nil {
-			return err
-		}
-	}
-	// A run that landed every task drives the goal's own gates, because a goal
-	// left in running with all its work shipped is the last thing a person has to
-	// come and do. Where a gate needs a fact the loop cannot have — the work is
-	// not pushed, so there is nowhere to point at — it stops there and says so.
-	// A goal with a task that stopped without shipping is not this case: it came
-	// to rest short of its own plan, and only a person decides whether that goal
-	// was worth finishing another way. A goal that dropped a task is this case —
-	// it chose not to do the work, and what it did do still has to land.
+	// A run that stopped because the loop itself could not run is a different
+	// thing: the work is untouched, and ending a goal because a runner could
+	// not read a transcript would throw away real work over a failure that says
+	// nothing about it. That one is reported.
+	// A run that stopped on a bound or stalled with work left does not end the
+	// goal: only a complete stop ships work, and abandonment requires a reason
+	// someone wrote. The work stays open and the run reports where a person is
+	// still needed.
 	gates := []string{}
 	if res.Shipped {
 		gates, err = c.goalGates(goal, res)
@@ -727,35 +717,6 @@ func (c *Cli) sendAnswer(p *project.Project) func(work, answer string) error {
 // that were still open with it. A task left running under a goal that has come
 // to rest would claim work is in progress when nothing is driving it, and the
 // board is read as a statement about the world.
-func (c *Cli) endUnshipped(goal core.Work, res driver.Result) error {
-	detail := fmt.Sprintf("stopped on %s: %s", res.Stop, res.Why)
-	// The work that was left is named in the reason, so the goal and the tasks
-	// under it cannot be read as telling different stories about one run. A
-	// question nobody settled is named too, because a run that stopped on a
-	// question a person could have answered is a different fact from one that
-	// stopped on a bound, and the reason is where a reader looks for it.
-	if len(res.Unanswered) > 0 {
-		asked := make([]string, 0, len(res.Unanswered))
-		for _, q := range res.Unanswered {
-			asked = append(asked, q.Work)
-		}
-		detail += "; unsettled: " + strings.Join(asked, ", ")
-	}
-	if len(res.Unfinished) > 0 {
-		detail += "; unfinished: " + strings.Join(res.Unfinished, ", ")
-	}
-	// Every open task ends for the same reason and with the same words, so the
-	// goal and the work under it cannot be read as telling different stories
-	// about one run.
-	for _, id := range res.Open {
-		if _, err := c.Ledger.Abandon(id, core.AbandonNoPR, detail); err != nil {
-			return err
-		}
-	}
-	_, err := c.Ledger.Abandon(goal.ID, core.AbandonNoPR, detail)
-	return err
-}
-
 // turnLine prints what a turn did, so a run watched at a distance says
 // something as it goes rather than only at the end.
 func (c *Cli) turnLine(turn int, t driver.Turn, used driver.Budget) {
@@ -871,7 +832,7 @@ func (c *Cli) printDrive(goal core.Work, res driver.Result, gates []string) erro
 			// a person knows whether that goal was worth finishing another way.
 			out = append(out, "came to rest without shipping: "+strings.Join(res.Unlanded, ", "))
 		} else if res.Stop != driver.StopFailed {
-			out = append(out, "the goal is abandoned: it did not ship")
+			out = append(out, fmt.Sprintf("work left open (%s: %s)", res.Stop, res.Why))
 		}
 	}
 	return c.out(res, strings.Join(out, "\n"))

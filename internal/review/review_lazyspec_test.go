@@ -308,6 +308,10 @@ func TestWorkThatStoppedWithoutShippingIsInTheSamePass(t *testing.T) {
 		if err != nil {
 			t.Fatalf("add: %v", err)
 		}
+		// Abandon is only allowed from states where work was attempted.
+		if _, err := l.Transition(w.ID, core.StateRunning); err != nil {
+			t.Fatalf("transition to running: %v", err)
+		}
 		if _, err := l.Abandon(w.ID, core.AbandonUnmerged, "PR 12 never merged"); err != nil {
 			t.Fatalf("abandon: %v", err)
 		}

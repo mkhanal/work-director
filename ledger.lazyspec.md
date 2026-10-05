@@ -76,12 +76,13 @@ is wrong and reads as right is worse than a missing one. A type on work that is
 not a goal is refused, and a type outside the set is not spellable.
 
 ## Work Can End Abandoned And Says Why
-`Abandon` moves work to abandoned from any state that allows it, records an
-abandon event whose body is the reason and the detail, and records the state
-change. The reason is one of `no-pr` or `unmerged` and nothing else is
-spellable, because a reason nobody can verify is not a reason. Abandoned is
-terminal: work comes to rest there, and a reversal is a new decision against
-the same goal rather than a transition back out.
+`Abandon` moves work to abandoned from states where work was attempted —
+running, needs-input, review, soft-done, blocked — records an abandon event
+whose body is the reason and the detail, and records the state change. The
+reason is one of `no-pr` or `unmerged` and nothing else is spellable, because a
+reason nobody can verify is not a reason. Abandoned is terminal: work comes to
+rest there, and a reversal is a new decision against the same goal rather than
+a transition back out.
 
 ## Concerns Resolve With A Decision
 `AddConcern` records an unresolved concern; `ResolveConcern` marks it resolved with the decision and files a note event; resolving it again fails and keeps the first decision.

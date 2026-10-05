@@ -346,15 +346,15 @@ place. A question is judged from the project's settled position and the model
 may decline, and a decline is recorded as a decline — never as a decision the
 ledger then believes was made. Only a goal can be driven.
 
-## A Run That Did Not Ship Ends The Goal Abandoned, And Says Why
+## A Run That Did Not Ship Leaves The Goal Open And Reports Why
 When a run stops because a bound ran out or nothing moved with work left, `wd
-drive` ends the goal abandoned with the stop and the reason in it, and ends
-every task that was still open with the same words. A task left running under a
-goal that has come to rest would claim work is in progress when nothing is
-driving it, and the board is read as a statement about the world. A run that
-stopped because the loop itself could not run does not end anything: the work
-is untouched, and ending a goal because a runner could not read a transcript
-would throw away real work over a failure that says nothing about it.
+drive` leaves the goal and its open tasks in their current states and reports
+the stop condition and what is still open. Only a complete stop (every task at
+rest) ships work. Abandonment is an explicit human action with a written reason,
+not an automatic consequence of a bound. A run that stopped because the loop
+itself could not run does not end anything: the work is untouched, and ending a
+goal because a runner could not read a transcript would throw away real work
+over a failure that says nothing about it.
 
 ## A Run That Lands Every Task Closes The Goal
 Each turn puts the goal's finished work through the gates that are left, and a

@@ -748,6 +748,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 	// Abandonment is a one-way door, so it gets work of its own rather than
 	// taking one the rest of the census still needs.
 	unshipped := jsonString(t, f.runOK(t, "add", "sample-app", "Never shipped", "--json"), "id")
+	f.runOK(t, "set", unshipped, "running")
 	// A stop released into a choice needs an abandoned row of its own, and both
 	// endings are one-way enough that neither borrows a row the census needs.
 	released := jsonString(t, f.runOK(t, "add", "sample-app", "Never shipped, on purpose", "--json"), "id")
@@ -2543,6 +2544,7 @@ func TestWorkEndsAbandonedAndSaysWhyItDidNotShip(t *testing.T) {
 
 	// With no reason given it is computed from the ledger: no PR at all.
 	never := f.ids["standalone"]
+	f.runOK(t, "set", never, "running")
 	out := f.runOK(t, "abandon", never, "--reason", "never started", "--json")
 	if !strings.Contains(out, `"state": "abandoned"`) {
 		t.Fatalf("abandon = %q, want the goal abandoned", out)
@@ -2566,6 +2568,7 @@ func TestWorkEndsAbandonedAndSaysWhyItDidNotShip(t *testing.T) {
 
 	// A PR that was raised and never merged reads unmerged.
 	raised := jsonString(t, f.runOK(t, "add", "sample-app", "Raised but never merged", "--json"), "id")
+	f.runOK(t, "set", raised, "running")
 	if code, _, errStr := f.run(t, "pr", raised, "https://example.test/pr/1", "--json"); code != 0 {
 		t.Fatalf("pr: exit %d: %s", code, errStr)
 	}
@@ -2653,6 +2656,7 @@ func TestReviewIsADiffOverWhatTheLoopDecided(t *testing.T) {
 	f.runOK(t, "feedback", "add", "shared worktrees beat one per task", "--project", "sample-app")
 	// And work that stopped without shipping.
 	unshipped := jsonString(t, f.runOK(t, "add", "sample-app", "Never landed", "--json"), "id")
+	f.runOK(t, "set", unshipped, "running")
 	f.runOK(t, "abandon", unshipped)
 
 	out := f.runOK(t, "review", "--project", "sample-app")
@@ -3017,7 +3021,7 @@ func TestAGoalRunsItsLoopWithNobodyWatching(t *testing.T) {
 	}
 }
 
-func TestARunThatDidNotShipEndsTheGoalAbandonedAndSaysWhy(t *testing.T) {
+func TestARunThatDidNotShipLeavesTheGoalOpenAndReportsWhy(t *testing.T) {
 	f := newCLIFixture(t)
 	driveProject(t, f)
 	goal, task := drivenGoal(t, f, "Serve on a fixed port")
@@ -3026,15 +3030,15 @@ func TestARunThatDidNotShipEndsTheGoalAbandonedAndSaysWhy(t *testing.T) {
 	// The model settles the question once, so the second turn finds the
 	// executor reporting DONE and nothing moves after that.
 	out := f.runOK(t, "drive", goal, "--turns", "1", "--judgements", "1", "--stalled", "0", "--poll-seconds", "1")
-	if !strings.Contains(out, "the goal is abandoned") {
-		t.Errorf("drive = %q, want it to say the goal did not ship", out)
+	if !strings.Contains(out, "work left open") {
+		t.Errorf("drive = %q, want it to say work is left open", out)
 	}
 
-	// The goal came to rest, and it says why: the stop and the reason, with the
-	// unfinished work named.
+	// The goal stays open; it does not end abandoned. Only a complete stop
+	// ships work, and abandonment requires a reason someone wrote.
 	got := f.workRow(t, goal)
-	if got.State != core.StateAbandoned {
-		t.Errorf("goal state = %s, want abandoned", got.State)
+	if got.State == core.StateAbandoned {
+		t.Errorf("goal state = %s, want it left open (not abandoned)", got.State)
 	}
 	var goalEvents []struct {
 		Kind core.EventKind `json:"kind"`
@@ -3043,30 +3047,23 @@ func TestARunThatDidNotShipEndsTheGoalAbandonedAndSaysWhy(t *testing.T) {
 	if err := json.Unmarshal([]byte(f.runOK(t, "events", goal, "--json")), &goalEvents); err != nil {
 		t.Fatalf("events: %v", err)
 	}
-	var abandon string
+	// No abandon event should be recorded
 	for _, e := range goalEvents {
 		if e.Kind == core.EventAbandon {
-			abandon = e.Body
-		}
-	}
-	if !strings.HasPrefix(abandon, "no-pr: ") {
-		t.Fatalf("abandon body = %q, want it to name the reason", abandon)
-	}
-	for _, want := range []string{"stopped on", "unfinished: ", task} {
-		if !strings.Contains(abandon, want) {
-			t.Errorf("abandon body = %q, want it to contain %q", abandon, want)
+			t.Errorf("abandon event should not be recorded on a budget stop, got %q", e.Body)
 		}
 	}
 
-	// A task left running under a goal that has come to rest would claim work
-	// is in progress when nothing is driving it.
-	if got := f.workRow(t, task); got.State != core.StateAbandoned {
-		t.Errorf("task state = %s, want abandoned with its goal", got.State)
+	// The task also stays open.
+	if got := f.workRow(t, task); got.State == core.StateAbandoned {
+		t.Errorf("task state = %s, want it left open", got.State)
 	}
-	// A goal that has come to rest has no loop to run, and running one anyway
-	// would report a run that never happened as a run that finished.
-	if errStr := f.runFail(t, "drive", goal); !strings.Contains(errStr, "nothing left to run") {
-		t.Errorf("drive a goal that came to rest: %q, want it refused", errStr)
+	// A goal with work left can be driven again. This time it completes the
+	// task but the goal still needs to go through its gates.
+	judgeAnswer(t, f, true)
+	out = f.runOK(t, "drive", goal, "--turns", "1", "--judgements", "1", "--stalled", "0", "--poll-seconds", "1")
+	if !strings.Contains(out, "every task landed") || !strings.Contains(out, "the goal still owes") {
+		t.Errorf("second drive = %q, want it to continue and name the remaining gate", out)
 	}
 
 	// A run that stopped because the loop could not run ends nothing: the work is
@@ -3444,10 +3441,11 @@ func TestARefusedGateIsHeldOnTheWorkAndTriedOnce(t *testing.T) {
 	if stops != 1 {
 		t.Errorf("%d stop notes, want 1: a refused gate is tried once, not every turn", stops)
 	}
-	// A goal with a task the gate would not let past has not shipped, and the run
-	// ends it saying so rather than quietly.
-	if got := f.workRow(t, goal).State; got != core.StateAbandoned {
-		t.Errorf("goal state = %s, want abandoned: its work did not land", got)
+	// A goal with a task the gate would not let past has not shipped, but it
+	// stays open. The run names the gate that stopped it and leaves the work
+	// for a person to decide.
+	if got := f.workRow(t, goal).State; got == core.StateAbandoned {
+		t.Errorf("goal state = %s, want it left open (not abandoned)", got)
 	}
 }
 
