@@ -1,91 +1,81 @@
-# driver
+> **lazyspec.** Humans edit freely. Agents change this only through
+> `/lazyspec`, with its tests, in one edit.
+>
+> Each `##` heading is one requirement. Its test repeats that heading
+> as its own name — to find it, search the tests for that text.
 
-An unattended goal loop with a stop condition. The stop condition is the point:
-autonomy without one is a loop that runs until something is killed, which is not
-autonomy, it is an absence of attention.
+# Driver
+
+`Drive` runs a goal's loop unattended until a stop condition the ledger holds.
+Each turn runs one coordination pass, then judges what the pass could not answer.
 
 ## A Run Stops On A Condition The Ledger Already Holds
-`Drive` never asks whether to continue. It checks every bound before each turn
-rather than after, so a budget of nothing stops without spending one more pass
-first. `StopComplete` means every task has come to rest, and "came to rest" is
-not "nothing is running": a goal whose tasks are all still queued has not been
-driven, and calling that complete would report a run that never ran. `StopBudget`
-means a bound ran out with work left. `StopStalled` means nothing moved for the
-bound number of turns. `StopFailed` means the loop could not run, with why.
-Every one of these is a fact about work, not a judgement about it, and every one
-says which fact ran out: "it stopped" is not something a person can act on.
-`Shipped` is not the same question as the stop. A run can stop complete and still
-not ship, because an abandoned task is an ending rather than a landing; those are
-named in `Unlanded`, and a caller must not close a goal as shipped while one is
-on that list. A dropped task is not on that list. Dropped is work the goal chose
-not to do, so the goal still ships what it set out to do as revised, and calling
-it unshipped would report a goal as stopped-without-shipping over a decision to
-leave the mobile app out. The two states are not the same kind of fact and the
-run reads them differently. What the run finished is computed from the open set
-rather than reported by the pass, because a pass moves work between states and
-only the ledger sees a task come to rest. `Blocked` is the work a turn found
-ready to close and a gate would not let it past, each naming the gate; it is
-kept across every turn of the run, because a gate that refused is the one thing
-a person is still needed for and hiding it would report a clean run over work
-the loop never closed.
+- Every bound is checked before a turn, so a bound of zero spends no turn.
+- `Drive` never asks whether to continue.
+- `StopComplete`: every task has come to rest.
+- `StopBudget`: a bound (turns, judgements, tokens, deadline) ran out with work left; `Why` names the bound.
+- `StopFailed`: the loop could not run; `Why` carries the failure.
+
+## Nothing Running Is Not The Same As Nothing Left
+A goal whose tasks are all still queued does not stop complete; those tasks are
+listed in `Unfinished`, and `Open` holds only running work.
+
+## Nothing Moving Is A Stop
+`StopStalled` ends a run when no task changed state for the stalled bound of
+turns, naming the stall in `Why`.
+
+## A Run That Comes To Rest Without Landing Is Not Shipped
+- A goal whose tasks are all at rest, one of them abandoned, stops complete.
+- `Shipped` is false and the abandoned task is in `Unlanded`.
+- `Unfinished` and `Open` are empty.
+
+## A Dropped Task Does Not Stop A Goal Shipping
+A goal whose other tasks landed and one task was dropped stops complete with
+`Shipped` true and `Unlanded` empty.
+
+## A Gate That Refused Is Held On The Run
+- Work a turn found ready to close and a gate refused is in `Blocked`, naming the gate.
+- `Blocked` keeps every refusal for the whole run.
+- Held work is not in `Closed`.
 
 ## A Run Judges A Question In A Person's Place, Up To A Bound
-Each turn runs a coordination pass, and the questions the pass could not answer
-go to the judge — with the work that is settled, so the judgement is made from
-what the project has already settled. The bound on judgements is the tightest
-one by default, because it counts how often the loop is allowed to act in a
-person's place; a run that needs a hundred human decisions was never
-autonomous. A question beyond the bound is not dropped: it becomes the list of
-where a person is still needed. A judge that could not run is a failure and is
-reported as one, not quietly counted as an answer.
+- Questions the pass could not answer go to the judge with the goal's settled work.
+- With no bounds given a run gets 20 turns, 5 judgements, 200,000 tokens and 3 stalled turns.
+- Each judgement spends from the judgement bound and the token bound, by what the turn reported.
+- A question past either bound is not judged; it is listed in `Unanswered`.
+- A judge that could not run is a `StopFailed`, not an answer.
 
 ## A Refusal Is An Answer, And It Is Retried Never
-A verdict with a decline is recorded, counted against the bound, and left
-unanswered. Retrying a question a model has declined to settle spends the run's
-budget on a question it has already said it cannot answer. A hedged reply counts
-as a refusal for the same reason.
+- A decline is recorded once and counted against the bound.
+- Nothing is delivered for a decline.
+- The declined question is not put to the judge again in the run; it stays in `Unanswered`.
 
 ## Taste Is Judged From The Same Budget, And Only Once
-Each turn, after the work's own questions are settled, the driver asks about the
-taste: the cards waiting to be judged come from `Candidates`, and the question is
-put through `TasteJudge`, `Spend` and the same judgement bound as an executor's.
-A second judge function because the brief is a different one, not a second
-budget — promoting a card changes what every future session in every project
-believes, so a change that loud gets the same scrutiny as a decision delivered to
-a running task, not less. Each card is asked once a run and skipped thereafter:
-a card stays a candidate until it is promoted, so without that the loop would ask
-about the same card every turn and reach the same answer every turn, spending the
-whole budget to do it. A later run asks again, because more evidence is a
-different question. A decline holds the card and the run names it as judged not
-global, so a reader can see the loop looked rather than left to wonder. A driver
-with no taste judge leaves its taste alone, which is the smaller mistake of the
-two.
+- After the work's questions, each turn puts `Candidates` cards to `TasteJudge`.
+- A taste judgement spends from the same judgement bound and is recorded the same way, on the work that supplied the newest evidence.
+- A decided card is applied once and named in `Promoted`.
+- A card is asked at most once per run.
+
+## A Card The Model Declines Is Held And Named
+A declined card is not promoted, is named in `Held`, and the ledger gains a
+decline and no decision.
 
 ## A Workful Turn Spends Its Judgement On The Work Before The Taste
-An executor's question is somebody waiting to work; a card that could be promoted
-one turn later is nobody waiting. So a turn answers the work's questions first and
-taste takes what is left, and a run whose judgement bound is spent on its own
-work promotes nothing rather than promoting a stranger's rule while its own task
-sits stuck. A question past the bound is not dropped either way: it is named as
-where a person is still needed.
+When the work's questions use up the judgement bound, no card is judged that
+turn and the work's unanswered question is named in `Unanswered`.
+
+## A Driver Without A Taste Judge Leaves Taste Alone
+With no `TasteJudge`, no card is asked, promoted or held.
 
 ## A Judgement Is Recorded Before It Is Delivered
-A judgement is recorded on the work before the answer is handed to the executor
-waiting on it, and the spend is what the turn actually reported rather than
-what the driver meant to do, so the budget cannot drift from reality. An
-unrecorded decision is one the review surface cannot show a reader, and a
-judgement that is delivered but not recorded is a decision nobody can audit.
+The judgement is recorded on the work before the answer is sent to the executor.
 
 ## A Run Reports What A Person Is Still Needed For
-The result carries the questions it settled, the questions it could not and the
-tasks that were still open. Unanswered is empty only when the goal shipped, so
-a run that ended honestly is one whose bill says exactly where a person is
-still required — and a caller ending a goal that did not ship can read that
-bill instead of inferring what stopped from silence.
+- `Answered` lists the questions the run settled.
+- `Unanswered` lists every question it did not settle, each with its work.
+- `Open` lists tasks still open; `Closed` lists tasks that came to rest during the run, read from the ledger.
+- `Unanswered` is empty only when the goal shipped.
 
-## A Driver With No Judge Is The Old Supervised Behaviour
-With no judge wired, every question stays unanswered and the run stops at the
-first one, naming it. That is not a degraded mode to be apologised for: it is
-the behaviour before judgement existed, it works, and it is honest about where
-it stopped. What a driver must never do is decide without spending from a
-bound that says how much deciding was allowed.
+## A Driver With No Judge Stops At The First Question
+With no judge, the run spends no judgement and stops at the first question,
+naming it in `Unanswered`.

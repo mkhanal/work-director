@@ -79,7 +79,7 @@ func TestLedgerObjectsKeepTheirColumnNames(t *testing.T) {
 		[]string{"key", "count", "texts"})
 }
 
-func TestEmptyCollectionsSerializeAsEmptyArrays(t *testing.T) {
+func TestJsonCollectionsAreEmptyArraysNeverNull(t *testing.T) {
 	f := newCLIFixture(t)
 	// An epic with no tasks: tasks --json is [], not null.
 	out := f.runOK(t, "tasks", f.ids["planEpic"], "--json")
@@ -2603,7 +2603,7 @@ func TestWorkEndsAbandonedAndSaysWhyItDidNotShip(t *testing.T) {
 	}
 }
 
-func TestWdEpicIsTheOldSpellingOfWdGoal(t *testing.T) {
+func TestEpicSpellingsReachTheGoalCommands(t *testing.T) {
 	f := newCLIFixture(t)
 	goal := f.ids["epic"]
 
@@ -2809,7 +2809,7 @@ func TestADecisionCanBeRecordedInOneLineOrInItsParts(t *testing.T) {
 	}
 }
 
-func TestAReversalIsANewDecisionNotAnEdit(t *testing.T) {
+func TestWdReviewReverseRecordsAReversal(t *testing.T) {
 	f := newCLIFixture(t)
 	work := jsonString(t, f.runOK(t, "add", "sample-app", "Work", "--json"), "id")
 	original := jsonNumber(t, f.runOK(t, "decide", work, "use postgres",
@@ -3099,7 +3099,7 @@ func TestARunThatDidNotShipLeavesTheGoalOpenAndReportsWhy(t *testing.T) {
 	}
 }
 
-func TestARunReportsWhereAPersonIsStillNeeded(t *testing.T) {
+func TestWdDrivePrintsWhereAPersonIsStillNeeded(t *testing.T) {
 	f := newCLIFixture(t)
 	driveProject(t, f)
 	goal, task := drivenGoal(t, f, "Serve on a fixed port")
@@ -3411,9 +3411,28 @@ func TestARunThatLandsEveryTaskClosesTheGoal(t *testing.T) {
 	}
 }
 
-// A gate that refuses is written on the work and named by the run, and it is
-// tried once. Re-running a failing build on a loop is how a run spends its whole
-// budget proving the same thing.
+func TestAGoalWhoseTaskEndedWithoutShippingIsLeftAlone(t *testing.T) {
+	f := newCLIFixture(t)
+	publish(t, f.sample)
+	driveProject(t, f)
+	goal, task := drivenGoal(t, f, "Half of it stopped")
+	f.runOK(t, "abandon", task, "no-pr")
+	before := f.workRow(t, goal).State
+
+	out := f.runOK(t, "drive", goal, "--turns", "2", "--judgements", "1", "--stalled", "0", "--poll-seconds", "1")
+	if !strings.Contains(out, "came to rest without shipping: "+task) {
+		t.Errorf("drive = %q, want the task that stopped it named", out)
+	}
+	if got := f.workRow(t, goal).State; got != before {
+		t.Errorf("goal state = %s, want it left as it was (%s)", got, before)
+	}
+	for _, kind := range []core.EventKind{core.EventReport, core.EventVerify, core.EventPr, core.EventAbandon} {
+		if got := f.bodies(t, goal, kind); len(got) != 0 {
+			t.Errorf("goal %s events = %v, want none: the goal is left alone", kind, got)
+		}
+	}
+}
+
 func TestARefusedGateIsHeldOnTheWorkAndTriedOnce(t *testing.T) {
 	f := newCLIFixture(t)
 	publish(t, f.sample)

@@ -7,7 +7,7 @@
 # Coordinator (Go)
 
 The coordinator owns the planning brief, the plan
-parser, the known-answer lookup and one coordination pass over an epic's
+parser, the known-answer lookup and one coordination pass over a goal's
 children. The ledger's claims, impacts, conflicts, concerns and worktrees
 are specified in `ledger.lazyspec.md`.
 
@@ -28,11 +28,11 @@ title trimmed; other lines are ignored.
 Task lines before any heading line parse under the heading `(no heading)`.
 
 ## A Resolved Concern's Decision Can Answer
-`KnownAnswer` finds a resolved concern's decision on the epic or one of its
+`KnownAnswer` finds a resolved concern's decision on the goal or one of its
 children that shares ≥2 significant words with the question.
 
 ## A Decision Event Can Answer
-`KnownAnswer` finds a `decision` event on the epic or one of its children
+`KnownAnswer` finds a `decision` event on the goal or one of its children
 that shares ≥2 significant words with the question.
 
 ## Exact Containment Wins
@@ -86,11 +86,11 @@ transcript entry, or from a new session — is filed and answered or
 escalated again.
 
 ## A Child Without Its Own Runner Or Directory Uses Its Goal's Then Its Project's
-A child with no runner coordinates with its epic's runner, else its
-project's; with no cwd it works in its epic's active shared worktree, else
+A child with no runner coordinates with its goal's runner, else its
+project's; with no cwd it works in its goal's active shared worktree, else
 the project's path.
 
 ## Sending Records The Ref The Runner Returns
 `Send` continues a child's session and records the ref the runner returns,
 so a status check reaches the process now serving it; the child's runner
-and directory still follow its epic.
+and directory still follow its goal.

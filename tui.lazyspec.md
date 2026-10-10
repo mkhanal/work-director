@@ -12,13 +12,13 @@ stores, and keeps no state of its own — every frame is rendered from a fresh
 read.
 
 ## The Board Renders The Ledger
-The board lists every goal and epic with its per-state task rollup, then the
+The board lists every goal with its per-state task rollup, then the
 standalone open work; each row shows id, state, project and title, and work
 with a session shows its runner and session id.
 
 ## A Detail View Shows One Work Item's Ledger
-Opening a work item shows its title, state, kind and project, its tasks (for an
-epic), its events, its open concerns, and — when it has a session — the live
+Opening a work item shows its title, state, kind and project, its tasks (for a
+goal), its events, its open concerns, and — when it has a session — the live
 transcript of that session with the runner's status.
 
 ## A Goal Is Readable In One Place

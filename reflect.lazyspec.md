@@ -42,6 +42,3 @@ own outcome, so shipping a feature is not filed as an insight.
 `Event` records the runner, the model, the token count and every durable
 verdict with its card, and says `nothing durable` when there were none, so a
 later reader can see what was asked and what it cost.
-
-What is then done with that event — filed as feedback in `auto`, proposed and
-not filed in `ask` — is the CLI's requirement, not this package's.

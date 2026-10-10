@@ -194,6 +194,9 @@ func TestARunStopsOnAConditionTheLedgerAlreadyHolds(t *testing.T) {
 }
 
 func TestARunJudgesAQuestionInAPersonsPlaceUpToABound(t *testing.T) {
+	if d := Default(); d.Judgements != 5 || d.Turns != 20 || d.Tokens != 200_000 || d.Stalled != 3 {
+		t.Errorf("Default() = %+v, want 20 turns, 5 judgements, 200000 tokens, 3 stalled turns", d)
+	}
 	h := newHarness(t, 1)
 	h.answer["which driver?"] = Verdict{Answer: "modernc.org/sqlite", Tokens: 900, Runner: "opencode", Model: "big-pickle"}
 	h.unanswer = []Question{{Work: h.tasks[0].ID, Text: "which driver?"}}
@@ -257,6 +260,18 @@ func TestARunJudgesAQuestionInAPersonsPlaceUpToABound(t *testing.T) {
 	if len(spent2.Unanswered) != 1 {
 		t.Errorf("unanswered = %+v, want the question past the ceiling named", spent2.Unanswered)
 	}
+
+	// A judge that could not run is a failure, not an answer.
+	h4 := newHarness(t, 1)
+	h4.unanswer = []Question{{Work: h4.tasks[0].ID, Text: "which driver?"}}
+	h4.d.Judge = func(string, []core.Work) (Verdict, error) { return Verdict{}, fmt.Errorf("no quota") }
+	broken, err := h4.drive(Budget{Turns: 2, Judgements: 1})
+	if err != nil {
+		t.Fatalf("Drive: %v", err)
+	}
+	if broken.Stop != StopFailed || !strings.Contains(broken.Why, "no quota") || len(h4.sent) != 0 {
+		t.Errorf("stop = %s (%q), sent %v; want a failure naming the judge's error and nothing delivered", broken.Stop, broken.Why, h4.sent)
+	}
 }
 
 func TestARefusalIsAnAnswerAndItIsRetriedNever(t *testing.T) {
@@ -319,7 +334,7 @@ func TestAJudgementIsRecordedBeforeItIsDelivered(t *testing.T) {
 	}
 }
 
-func TestADriverWithNoJudgeIsTheOldSupervisedBehaviour(t *testing.T) {
+func TestADriverWithNoJudgeStopsAtTheFirstQuestion(t *testing.T) {
 	h := newHarness(t, 1)
 	h.d.Judge = nil
 	h.unanswer = []Question{{Work: h.tasks[0].ID, Text: "which database?"}}

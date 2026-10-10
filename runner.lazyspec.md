@@ -11,59 +11,28 @@ parsing and error messages. The three foundation adapters are code; every other
 provider is a TOML file of commands under `~/.work-director/runners/`.
 
 ## A Role Takes The Cheapest Model That Also Does The Job
-`Pick` chooses the model one role should use, and a role is a job rather than a
-price: `interpret` classifies text into a closed vocabulary, `taste` judges
-whether a rule generalises. The ladder is forced, then a preferred model that
-meets the floor, then the cheapest model that meets the floor, then a runner's
-own default when nothing could be ranked, then a refusal. Cheapest alone is not
-the rule — a free but weak model judging whether a taste rule generalises
-promotes bad taste globally, which is worse than not automating it — so
-candidates are walked cheapest-first and probed in that order and the first that
-passes is by construction the cheapest that can do the job. Probing in cost
-order rather than probing everything is what keeps it cheap: it stops at the
-first pass rather than paying to rank forty models. A model whose cost nobody has
-stated is unrankable rather than free, because unknown is not zero and guessing
-it as zero is how a judgement starts costing money without anyone deciding that
-it should. A probe that could not be asked at all — no runner, no quota, no
-session — is recorded as not reached, which is not the same as the model failing,
-and the two never collapse. Every candidate tried and its verdict are returned,
-so the ladder is inspectable rather than a result with no explanation.
+- `Pick` chooses a role's model: `interpret` classifies text into a closed vocabulary, `taste` judges whether a rule generalises.
+- The order is: the forced model; else a preferred model that passes the probe; else the cheapest model that passes, probing cheapest first and stopping at the first pass; else the runner's own default when nothing could be ranked; else a refusal.
+- A model with no declared cost is unrankable, never free.
+- A probe that could not be asked (no runner, quota or session) is recorded as not reached, distinct from failing.
+- Every candidate tried is returned with its verdict.
 
 ## A Project Narrows The Policy And Can Never Widen It
-A role's policy is its runners, the models it prefers, and optionally one model
-that overrides both. `Resolve` narrows a machine's global policy with a project's
-own and refuses anything a project asks for the global policy does not allow: a
-runner list on the project is checked against the global list rather than
-replacing it, and a forced model is refused when its runner is not among the
-runners allowed here. The asymmetry is the whole of the safety property — a
-project forbidden from reaching a provider cannot re-allow it in its own file,
-or closing a provider globally would be one project file away from undone. A
-project may forbid and may reorder; it may never permit. `PromoteGlobal` defaults
-true, because global taste is the director's own engineering taste and travels
-by design while project rules live in the project; it is available for a team
-that wants even their own cards to stay put. Every refusal names what is
-allowed instead, because a refusal that only says no is a dead end.
+- A role's policy is its runners, its preferred models, and optionally one forced model.
+- `Resolve` narrows the global policy with the project's: a project runner list is checked against the global list, not substituted for it.
+- A project may remove and reorder runners; a runner the global policy does not allow is refused.
+- A forced model whose runner is not allowed is refused.
+- `PromoteGlobal` defaults to true.
+- Every refusal names what is allowed.
 
 ## A Model Outside The Allowed Runners Is Refused By Name
-`RolePolicy.Allowed` reports whether a model may be used under a policy, and it
-is what makes a `/model` switch checkable rather than decorative: the switch
-changes the preference inside the allowlist and cannot leave it. A model whose
-runner is not listed is refused naming the runners that are, and a role with a
-forced model refuses anything but that model. This holds for agents as much as
-for people, because the loop reads the same set.
+- `RolePolicy.Allowed` refuses a model whose runner is not listed, naming the runners that are.
+- Under a forced model, every other model is refused.
 
 ## A Runner That Reports Nothing Is Asked Rather Than Guessed At
-No runner's CLI reports what its models cost — opencode lists ids and no prices,
-claude lists nothing at all — so cost comes from a declaration in
-`$WD_HOME/models.json`, which is a person stating a number rather than wd
-inferring one from a model name, because a name-based guess is right until the
-free tier carrying that name is replaced. An absent file is not an error. With
-nothing declared and nothing rankable, `Pick` returns that runner with no model
-named, so the runner's own default is used: the provider's choice is very likely
-what a person would have got, and is never a guess wd invented. Every model name
-the ladder carries is either detected from a runner's own listing or declared by
-a person; none is hardcoded, because a hardcoded free-tier id is right for about
-as long as that tier exists.
+- Model costs come only from `$WD_HOME/models.json`; an absent file is not an error.
+- With nothing declared and nothing rankable, `Pick` returns the runner with no model, so the runner's default is used.
+- Every model name the ladder uses comes from a runner's own listing or from that file; none is hardcoded.
 
 ## Spawning Records Runner Session And Attach Hint
 `spawn` returns a handle with the runner's session id and a hint a human can run to join the session.

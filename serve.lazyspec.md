@@ -15,22 +15,17 @@ the standard streams of a client that bundles `wd`. Writes are CLI actions.
 never binds to 0.0.0.0 or a public interface.
 
 ## JSON Endpoints Serve The Board
-`GET /api/board` returns the board view: every epic with its rollup and
+`GET /api/board` returns the board view: every goal with its rollup and
 every open standalone work item. `GET /api/goals` returns the same data.
-`GET /api/goal/<id>` returns one epic with its children, rollup and
-events; unknown or non-epic ids return 404.
+`GET /api/goal/<id>` returns one goal with its children, rollup and
+events; unknown ids and ids that are not goals return 404.
 
 ## A Goal Serves What The Loop Decided And Where It Reached
-`GET /api/goal/<id>` also returns `claims` and `landings`, read out of the
-events it already serves rather than fetched again — a client showing the goal's
-decisions and its event log must not be reading the ledger twice and disagreeing
-with itself. A claim carries the work it belongs to and whether it still stands; a
-landing carries the kind of place the work reached, so a client can tell a change
-that went straight into the product from one still waiting on a merge, which is
-the difference between "reviewed" and "landed". Both arrays are `[]` rather than
-absent when empty, and a landing whose work row is not among the goal's is still
-listed with its link, because the link is the fact and the row is only the
-caption.
+- `GET /api/goal/<id>` also returns `claims` and `landings`, derived from the `events` in the same response.
+- A claim carries its work and whether it still stands.
+- A landing carries its kind, `commit` or `pull-request`.
+- Both are `[]` when empty.
+- A landing whose work is not among the goal's is still listed with its link.
 
 ## The Board Places Every Item In One Band
 Every goal and standalone item on the board carries `band`:
