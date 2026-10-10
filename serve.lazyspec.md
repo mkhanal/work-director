@@ -6,10 +6,9 @@
 
 # Serve (Go)
 
-The Go serve adapter is a loopback HTTP and WebSocket server over the core
-and ledger: JSON endpoints for the board, live events and action dispatch. It
-binds to 127.0.0.1 only — it is a local adapter for native clients, not a remote
-server.
+The serve adapter computes the views every client renders — board, goal, work,
+events — and serves them over two transports: loopback HTTP and WebSocket, and
+the standard streams of a client that bundles `wd`. Writes are CLI actions.
 
 ## The Server Binds To Loopback
 `serve.Start` listens on 127.0.0.1 at the given port (default 8787). It
@@ -32,6 +31,29 @@ the difference between "reviewed" and "landed". Both arrays are `[]` rather than
 absent when empty, and a landing whose work row is not among the goal's is still
 listed with its link, because the link is the fact and the row is only the
 caption.
+
+## The Board Places Every Item In One Band
+Every goal and standalone item on the board carries `band`:
+- `needs-you` — the item is needs-input or blocked, or is a goal with a task that is.
+- `in-flight` — queued, briefed or running.
+- `ready-to-push` — in review with no landing since its last reopening.
+- `in-review` — in review with a landing since its last reopening.
+- `ready-to-close` — soft-done.
+- `at-rest` — done, dropped or abandoned.
+
+Standalone items serve as `{work, band}`, goals as `{work, rollup, band}`.
+
+## A Client Can Hold The Server On Its Standard Streams
+`wd serve --stdio` reads one JSON request per line from stdin and writes one
+JSON message per line to stdout:
+- A request is `{"id": n, "method": m, "params": {...}}`; `m` is `board`,
+  `goal` (`id`), `work` (`id`), `events` (`id`) or `action` (`argv`).
+- Its reply is `{"id": n, "result": ...}` with the value the HTTP route serves,
+  or `{"id": n, "error": {"kind": k, "message": "..."}}`, `k` one of
+  `not-found`, `bad-request`, `internal`.
+- A line that is not a request gets an error with no `id`.
+- Every ledger event, from any process, is pushed as `{"push": "event", "data": event}`.
+- End of stdin ends the server without error.
 
 ## Work Items Serve Over HTTP
 `GET /api/work` lists all work items. `GET /api/work/<id>` returns one

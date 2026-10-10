@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -32,6 +33,8 @@ func TestServe(t *testing.T) {
 	t.Run("The Server Binds To Loopback", serverBindsToLoopback)
 	t.Run("JSON Endpoints Serve The Board", jsonEndpointsServeTheBoard)
 	t.Run("A Goal Serves What The Loop Decided And Where It Reached", aGoalServesWhatTheLoopDecidedAndWhereItReached)
+	t.Run("The Board Places Every Item In One Band", theBoardPlacesEveryItemInOneBand)
+	t.Run("A Client Can Hold The Server On Its Standard Streams", aClientCanHoldTheServerOnItsStandardStreams)
 	t.Run("Work Items Serve Over HTTP", workItemsServeOverHTTP)
 	t.Run("Actions Dispatch To The CLI", actionsDispatchToTheCLI)
 	t.Run("WebSocket Serves Live Events", webSocketServesLiveEvents)
@@ -74,7 +77,9 @@ func jsonEndpointsServeTheBoard(t *testing.T) {
 	defer resp.Body.Close()
 	var board struct {
 		Goals      []map[string]any `json:"goals"`
-		Standalone []core.Work      `json:"standalone"`
+		Standalone []struct {
+			Work core.Work `json:"work"`
+		} `json:"standalone"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&board); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -621,5 +626,292 @@ func errorsReturnJSON(t *testing.T) {
 	requireJSON(t, resp, http.StatusMethodNotAllowed, &method)
 	if method["error"] == "" {
 		t.Fatal("method not allowed error = empty, want message")
+	}
+}
+
+// walk moves work through each state in turn, failing the test on the first
+// transition the ledger refuses.
+func walk(t *testing.T, l *ledger.Ledger, id string, states ...core.State) {
+	t.Helper()
+	for _, st := range states {
+		if _, err := l.Transition(id, st); err != nil {
+			t.Fatalf("%s -> %s: %v", id, st, err)
+		}
+	}
+}
+
+func event(t *testing.T, l *ledger.Ledger, id string, kind core.EventKind, body string) {
+	t.Helper()
+	if _, err := l.AddEvent(id, kind, body); err != nil {
+		t.Fatalf("event %s on %s: %v", kind, id, err)
+	}
+}
+
+func theBoardPlacesEveryItemInOneBand(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	add := func(title string, o ledger.AddOptions) core.Work {
+		t.Helper()
+		w, err := l.Add("p", title, o)
+		if err != nil {
+			t.Fatalf("add %s: %v", title, err)
+		}
+		return w
+	}
+	queued := add("queued", ledger.AddOptions{})
+	running := add("running", ledger.AddOptions{})
+	walk(t, l, running.ID, core.StateBriefed, core.StateRunning)
+	asking := add("asking", ledger.AddOptions{})
+	walk(t, l, asking.ID, core.StateRunning, core.StateNeedsInput)
+	blocked := add("blocked", ledger.AddOptions{})
+	walk(t, l, blocked.ID, core.StateRunning, core.StateBlocked)
+	unpushed := add("unpushed", ledger.AddOptions{})
+	walk(t, l, unpushed.ID, core.StateRunning, core.StateReview)
+	pushed := add("pushed", ledger.AddOptions{})
+	walk(t, l, pushed.ID, core.StateRunning, core.StateReview)
+	event(t, l, pushed.ID, core.EventPr, "pull-request https://github.com/o/r/pull/1")
+	closing := add("closing", ledger.AddOptions{})
+	walk(t, l, closing.ID, core.StateRunning, core.StateReview)
+	event(t, l, closing.ID, core.EventReport, "DONE")
+	event(t, l, closing.ID, core.EventVerify, "pass")
+	event(t, l, closing.ID, core.EventPr, "pull-request https://github.com/o/r/pull/2")
+	if _, err := l.SoftDone(closing.ID, true); err != nil {
+		t.Fatalf("soft-done: %v", err)
+	}
+	// Landed once, closed, reopened and back in review with nothing new pushed:
+	// the old landing belongs to the run before.
+	again := add("again", ledger.AddOptions{})
+	walk(t, l, again.ID, core.StateRunning, core.StateReview)
+	event(t, l, again.ID, core.EventReport, "DONE")
+	event(t, l, again.ID, core.EventVerify, "pass")
+	event(t, l, again.ID, core.EventPr, "pull-request https://github.com/o/r/pull/3")
+	if _, err := l.SoftDone(again.ID, true); err != nil {
+		t.Fatalf("soft-done: %v", err)
+	}
+	walk(t, l, again.ID, core.StateDone)
+	if _, err := l.Reopen(again.ID, "a second half"); err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	walk(t, l, again.ID, core.StateReview)
+
+	quiet := add("quiet goal", ledger.AddOptions{Kind: core.WorkGoal})
+	walk(t, l, quiet.ID, core.StateRunning)
+	add("calm task", ledger.AddOptions{Parent: &quiet.ID})
+	stuck := add("stuck goal", ledger.AddOptions{Kind: core.WorkGoal})
+	walk(t, l, stuck.ID, core.StateRunning)
+	task := add("stuck task", ledger.AddOptions{Parent: &stuck.ID})
+	walk(t, l, task.ID, core.StateRunning, core.StateBlocked)
+	finished := add("finished goal", ledger.AddOptions{Kind: core.WorkGoal})
+	walk(t, l, finished.ID, core.StateDone)
+
+	b, err := s.board()
+	if err != nil {
+		t.Fatalf("board: %v", err)
+	}
+	got := map[string]Band{}
+	for _, g := range b.Goals {
+		got[g.Work.ID] = g.Band
+	}
+	for _, w := range b.Standalone {
+		got[w.Work.ID] = w.Band
+	}
+	want := map[string]Band{
+		queued.ID: BandInFlight, running.ID: BandInFlight,
+		asking.ID: BandNeedsYou, blocked.ID: BandNeedsYou,
+		unpushed.ID: BandReadyToPush, pushed.ID: BandInReview, again.ID: BandReadyToPush,
+		closing.ID: BandReadyToClose,
+		quiet.ID: BandInFlight, stuck.ID: BandNeedsYou, finished.ID: BandAtRest,
+	}
+	for id, band := range want {
+		if got[id] != band {
+			t.Errorf("%s band = %q, want %q", id, got[id], band)
+		}
+	}
+
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	var wire struct {
+		Goals      []map[string]any `json:"goals"`
+		Standalone []map[string]any `json:"standalone"`
+	}
+	getJSON(t, api.URL+"/api/board", http.StatusOK, &wire)
+	for _, g := range wire.Goals {
+		for _, k := range []string{"work", "rollup", "band"} {
+			if _, ok := g[k]; !ok {
+				t.Errorf("goal on the wire lacks %q: %v", k, g)
+			}
+		}
+	}
+	for _, w := range wire.Standalone {
+		for _, k := range []string{"work", "band"} {
+			if _, ok := w[k]; !ok {
+				t.Errorf("standalone item on the wire lacks %q: %v", k, w)
+			}
+		}
+	}
+}
+
+// stdioClient speaks the line protocol to a server reading in and writing out.
+type stdioClient struct {
+	t    *testing.T
+	in   *io.PipeWriter
+	out  *bufio.Scanner
+	done chan error
+}
+
+func startStdio(t *testing.T, s *Server) *stdioClient {
+	t.Helper()
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		err := s.ServeStdio(inR, outW)
+		outW.Close()
+		done <- err
+	}()
+	sc := bufio.NewScanner(outR)
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	return &stdioClient{t: t, in: inW, out: sc, done: done}
+}
+
+func (c *stdioClient) send(line string) {
+	c.t.Helper()
+	if _, err := io.WriteString(c.in, line+"\n"); err != nil {
+		c.t.Fatalf("write %s: %v", line, err)
+	}
+}
+
+// next reads messages until keep accepts one, returning it.
+func (c *stdioClient) next(keep func(map[string]json.RawMessage) bool) map[string]json.RawMessage {
+	c.t.Helper()
+	deadline := time.After(5 * time.Second)
+	lines := make(chan map[string]json.RawMessage)
+	go func() {
+		for c.out.Scan() {
+			var m map[string]json.RawMessage
+			if err := json.Unmarshal(c.out.Bytes(), &m); err != nil {
+				c.t.Errorf("line %q is not JSON: %v", c.out.Text(), err)
+				continue
+			}
+			if keep(m) {
+				lines <- m
+				return
+			}
+		}
+		close(lines)
+	}()
+	select {
+	case m, ok := <-lines:
+		if !ok {
+			c.t.Fatalf("stdout ended before the expected message")
+		}
+		return m
+	case <-deadline:
+		c.t.Fatalf("no expected message within 5s")
+	}
+	return nil
+}
+
+func (c *stdioClient) reply(id int) map[string]json.RawMessage {
+	c.t.Helper()
+	want := fmt.Sprint(id)
+	return c.next(func(m map[string]json.RawMessage) bool { return string(m["id"]) == want })
+}
+
+func replyErrorKind(t *testing.T, m map[string]json.RawMessage) string {
+	t.Helper()
+	var e struct {
+		Kind    string `json:"kind"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(m["error"], &e); err != nil || e.Message == "" {
+		t.Fatalf("error = %s, want {kind, message}", m["error"])
+	}
+	return e.Kind
+}
+
+func aClientCanHoldTheServerOnItsStandardStreams(t *testing.T) {
+	s := newTestServer(t)
+	s.cliPath = "/bin/echo"
+	goal, err := s.ledger.Add("p", "Goal", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatalf("add goal: %v", err)
+	}
+	task, err := s.ledger.Add("p", "Task", ledger.AddOptions{Parent: &goal.ID})
+	if err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+	c := startStdio(t, s)
+
+	c.send(`{"id": 1, "method": "board"}`)
+	var board boardView
+	if err := json.Unmarshal(c.reply(1)["result"], &board); err != nil || len(board.Goals) != 1 || board.Goals[0].Band != BandInFlight {
+		t.Fatalf("board = %+v (%v), want the one goal in flight", board, err)
+	}
+	c.send(`{"id": 2, "method": "goal", "params": {"id": "` + goal.ID + `"}}`)
+	var g goalView
+	if err := json.Unmarshal(c.reply(2)["result"], &g); err != nil || g.Goal.ID != goal.ID || len(g.Tasks) != 1 {
+		t.Fatalf("goal = %+v (%v), want %s with its task", g, err, goal.ID)
+	}
+	c.send(`{"id": 3, "method": "work", "params": {"id": "` + task.ID + `"}}`)
+	var w core.Work
+	if err := json.Unmarshal(c.reply(3)["result"], &w); err != nil || w.ID != task.ID {
+		t.Fatalf("work = %+v (%v), want %s", w, err, task.ID)
+	}
+	c.send(`{"id": 4, "method": "events", "params": {"id": "` + task.ID + `"}}`)
+	var evs []core.Event
+	if err := json.Unmarshal(c.reply(4)["result"], &evs); err != nil || len(evs) == 0 {
+		t.Fatalf("events = %v (%v), want the task's state event", evs, err)
+	}
+	c.send(`{"id": 5, "method": "action", "params": {"argv": ["status", "--json"]}}`)
+	var act actionResult
+	if err := json.Unmarshal(c.reply(5)["result"], &act); err != nil || act.Code != 0 || act.Stdout != "status --json" {
+		t.Fatalf("action = %+v (%v), want the CLI run with the argv", act, err)
+	}
+
+	c.send(`{"id": 6, "method": "goal", "params": {"id": "nope"}}`)
+	if k := replyErrorKind(t, c.reply(6)); k != "not-found" {
+		t.Fatalf("unknown goal kind = %q, want not-found", k)
+	}
+	c.send(`{"id": 7, "method": "goal", "params": {"id": "` + task.ID + `"}}`)
+	if k := replyErrorKind(t, c.reply(7)); k != "not-found" {
+		t.Fatalf("goal on a task kind = %q, want not-found", k)
+	}
+	c.send(`{"id": 8, "method": "teleport"}`)
+	if k := replyErrorKind(t, c.reply(8)); k != "bad-request" {
+		t.Fatalf("unknown method kind = %q, want bad-request", k)
+	}
+	c.send(`{"id": 9, "method": "work"}`)
+	if k := replyErrorKind(t, c.reply(9)); k != "bad-request" {
+		t.Fatalf("missing id kind = %q, want bad-request", k)
+	}
+	c.send(`not json`)
+	m := c.next(func(m map[string]json.RawMessage) bool { _, isErr := m["error"]; return isErr })
+	if _, hasID := m["id"]; hasID {
+		t.Fatalf("reply to a line that is not a request = %v, want an error with no id", m)
+	}
+	if k := replyErrorKind(t, m); k != "bad-request" {
+		t.Fatalf("malformed line kind = %q, want bad-request", k)
+	}
+
+	// Written by the ledger directly, as another wd process would.
+	e, err := s.ledger.AddEvent(task.ID, core.EventNote, "from elsewhere")
+	if err != nil {
+		t.Fatalf("event: %v", err)
+	}
+	push := c.next(func(m map[string]json.RawMessage) bool { return string(m["push"]) == `"event"` })
+	var pushed core.Event
+	if err := json.Unmarshal(push["data"], &pushed); err != nil || pushed.ID != e.ID {
+		t.Fatalf("push = %v (%v), want event %d", push, err, e.ID)
+	}
+
+	c.in.Close()
+	select {
+	case err := <-c.done:
+		if err != nil {
+			t.Fatalf("serve after end of stdin = %v, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("serve still running 5s after end of stdin")
 	}
 }

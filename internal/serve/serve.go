@@ -12,9 +12,7 @@ import (
 	"time"
 
 	"wd/internal/core"
-	"wd/internal/delivery"
 	"wd/internal/ledger"
-	"wd/internal/review"
 )
 
 // DefaultPort is the port serve binds to when --port is not given.
@@ -37,39 +35,6 @@ func New(l *ledger.Ledger, cliPath string) *Server {
 		cliPath: cliPath,
 		hub:     newWSHub(),
 	}
-}
-
-// rollup is a goal's status rolled up from its children.
-type rollup struct {
-	Counts map[core.State]int `json:"counts"`
-	Done   int                `json:"done"`
-	Total  int                `json:"total"`
-}
-
-type boardGoal struct {
-	Work   core.Work `json:"work"`
-	Rollup rollup    `json:"rollup"`
-}
-
-// boardView is every goal with its rollup and every open standalone work item.
-type boardView struct {
-	Goals      []boardGoal `json:"goals"`
-	Standalone []core.Work `json:"standalone"`
-}
-
-// goalView is one goal with its children, rollup and events, plus the two facts
-// that make a goal legible on its own: what the loop decided in a person's place,
-// and where the work reached. They are read out of the events rather than fetched
-// again, because a client rendering the goal's decisions and its event log must
-// not be looking at two reads of the same ledger.
-type goalView struct {
-	Goal     core.Work       `json:"goal"`
-	Tasks    []core.Work     `json:"tasks"`
-	Rollup   rollup          `json:"rollup"`
-	Events   []core.Event    `json:"events"`
-	Claims   []review.Claim  `json:"claims"`
-	Landings []review.Landed `json:"landings"`
-	Delivery delivery.State  `json:"delivery,omitempty"`
 }
 
 // actionResult is a CLI run: its exit code and combined output.
@@ -143,17 +108,30 @@ const eventPoll = 250 * time.Millisecond
 // broadcastEvents sends every ledger event with an id above last to all
 // WebSocket clients, in id order, until reading the ledger fails.
 func (s *Server) broadcastEvents(last int) error {
+	return s.followEvents(last, nil, func(e core.Event) error {
+		return s.hub.broadcast(wsEvent{Type: "event", Data: e})
+	})
+}
+
+// followEvents hands send every ledger event with an id above last, in id
+// order, until stop closes (nil never does) or reading the ledger or sending
+// fails.
+func (s *Server) followEvents(last int, stop <-chan struct{}, send func(core.Event) error) error {
 	tick := time.NewTicker(eventPoll)
 	defer tick.Stop()
 	sent := last
 	for {
-		<-tick.C
+		select {
+		case <-stop:
+			return nil
+		case <-tick.C:
+		}
 		events, err := s.ledger.EventsAfter(sent)
 		if err != nil {
 			return err
 		}
 		for _, e := range events {
-			if err := s.hub.broadcast(wsEvent{Type: "event", Data: e}); err != nil {
+			if err := send(e); err != nil {
 				return err
 			}
 			sent = e.ID
@@ -198,40 +176,12 @@ func (s *Server) handleGoal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing goal id")
 		return
 	}
-	goal, ok := s.work(w, id)
-	if !ok {
-		return
-	}
-	if !core.IsGoal(goal.Kind) {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("%s is not a goal", id))
-		return
-	}
-	children, err := s.ledger.Tasks(id)
+	g, err := s.goal(id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeViewError(w, err)
 		return
 	}
-	events, err := s.ledger.EventsUnder(id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	// Every work this goal is made of: the goal itself and its tasks, which is
-	// what a claim or a landing can name, and which the events above may be
-	// filed against.
-	works := map[string]core.Work{goal.ID: goal}
-	for _, t := range children {
-		works[t.ID] = t
-	}
-	writeJSON(w, http.StatusOK, goalView{
-		Goal:     goal,
-		Tasks:    children,
-		Rollup:   goalRollup(children),
-		Events:   events,
-		Claims:   review.ClaimsUnder(events, works),
-		Landings: review.LandingsUnder(events, works),
-		Delivery: delivery.StatusFor(s.ledger.Dir(), events, goal, children),
-	})
+	writeJSON(w, http.StatusOK, g)
 }
 
 // handleWork lists all work items.
@@ -263,40 +213,21 @@ func (s *Server) handleWorkItem(w http.ResponseWriter, r *http.Request) {
 		handleNotFound(w, r)
 		return
 	}
-	item, ok := s.work(w, id)
-	if !ok {
+	if events {
+		list, err := s.events(id)
+		if err != nil {
+			writeViewError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, list)
 		return
 	}
-	if !events {
-		writeJSON(w, http.StatusOK, item)
+	item, err := s.work(id)
+	if err != nil {
+		writeViewError(w, err)
 		return
 	}
-	list, err := s.ledger.Events(id, nil)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, list)
-}
-
-// work returns the work item id, or answers 404 for an unknown id and 500
-// for a ledger failure and returns false.
-func (s *Server) work(w http.ResponseWriter, id string) (core.Work, bool) {
-	known, err := s.ledger.Has(id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return core.Work{}, false
-	}
-	if !known {
-		writeError(w, http.StatusNotFound, "no work "+id)
-		return core.Work{}, false
-	}
-	item, err := s.ledger.Get(id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return core.Work{}, false
-	}
-	return item, true
+	writeJSON(w, http.StatusOK, item)
 }
 
 // handleAction runs a wd CLI action and returns the result.
@@ -372,36 +303,6 @@ func (s *Server) answerWS(c *wsConn, payload []byte) error {
 	return c.writeJSON(wsAction{Type: "action", actionResult: res})
 }
 
-// board returns every goal with its rollup and every open standalone work item.
-func (s *Server) board() (boardView, error) {
-	items, err := s.ledger.List(ledger.ListFilter{})
-	if err != nil {
-		return boardView{}, err
-	}
-	b := boardView{Goals: []boardGoal{}, Standalone: []core.Work{}}
-	for _, w := range items {
-		if core.IsGoal(w.Kind) {
-			children, err := s.ledger.Tasks(w.ID)
-			if err != nil {
-				return boardView{}, err
-			}
-			b.Goals = append(b.Goals, boardGoal{Work: w, Rollup: goalRollup(children)})
-		} else if w.Parent == nil && w.State != core.StateDone && w.State != core.StateDropped {
-			b.Standalone = append(b.Standalone, w)
-		}
-	}
-	return b, nil
-}
-
-// goalRollup counts a goal's children per state.
-func goalRollup(children []core.Work) rollup {
-	counts := map[core.State]int{}
-	for _, c := range children {
-		counts[c.State]++
-	}
-	return rollup{Counts: counts, Done: counts[core.StateDone], Total: len(children)}
-}
-
 // runCLI runs the wd CLI with argv. A non-zero exit is a result; failing to
 // run the CLI at all is an error.
 func (s *Server) runCLI(argv []string) (actionResult, error) {
@@ -425,6 +326,18 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	// A failed write means the client is gone; there is no one left to tell.
 	w.Write(data)
+}
+
+// writeViewError answers a view's failure with the status its kind maps to.
+func writeViewError(w http.ResponseWriter, err error) {
+	switch errorKind(err) {
+	case "not-found":
+		writeError(w, http.StatusNotFound, err.Error())
+	case "bad-request":
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, err.Error())
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

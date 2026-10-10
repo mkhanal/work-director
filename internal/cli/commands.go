@@ -2436,16 +2436,25 @@ func (c *Cli) distill(rest []string) error {
 }
 
 func (c *Cli) serve(rest []string) error {
-	port, err := positiveInt(c.Args, "port", serve.DefaultPort)
-	if err != nil {
-		return err
-	}
 	// Board actions run this same binary, so they can never drift from it.
 	cliPath, err := os.Executable()
 	if err != nil {
 		return err
 	}
 	srv := serve.New(c.Ledger, cliPath)
+	if flag(c.Args, "stdio") {
+		if c.JSON {
+			return fail("wd serve --stdio speaks its own protocol on stdout and has no --json document")
+		}
+		if _, ok := c.Args.Values["port"]; ok {
+			return fail("wd serve --stdio listens on no port; drop --port")
+		}
+		return srv.ServeStdio(os.Stdin, os.Stdout)
+	}
+	port, err := positiveInt(c.Args, "port", serve.DefaultPort)
+	if err != nil {
+		return err
+	}
 	addr, failed, err := srv.Start(port)
 	if err != nil {
 		return err

@@ -1239,19 +1239,9 @@ func (l *Ledger) SoftDone(id string, codeChanged bool) (core.Work, error) {
 	if err != nil {
 		return core.Work{}, err
 	}
-	evs, err := l.Events(id, nil)
+	evs, err := l.CurrentRun(id)
 	if err != nil {
 		return core.Work{}, err
-	}
-	// Readiness is judged on this run's evidence. A goal that was finished once
-	// and then reopened still holds the report, the verify and the pull request
-	// of that first run, and a reopened goal with no new task would otherwise
-	// walk straight back to soft-done on the strength of work already shipped —
-	// a completion nobody did. What closed the previous run is what a reopen
-	// takes back: the events stay, because they are the history, but they no
-	// longer count as evidence for the next one.
-	if since := reopenedAt(evs); since > 0 {
-		evs = slices.DeleteFunc(evs, func(e core.Event) bool { return e.ID <= since })
 	}
 	last := func(k core.EventKind) *core.Event {
 		for i := len(evs) - 1; i >= 0; i-- {
@@ -1304,6 +1294,21 @@ func (l *Ledger) SoftDone(id string, codeChanged bool) (core.Work, error) {
 		return core.Work{}, core.NotReady{Missing: missing}
 	}
 	return l.transition(id, core.StateSoftDone)
+}
+
+// CurrentRun returns a work item's events since its most recent reopening, or
+// all of them when it was never reopened. A reopened goal still holds the
+// report, verify and landing that closed its first run; the events stay as
+// history, but only this run's count as evidence of where the work stands now.
+func (l *Ledger) CurrentRun(id string) ([]core.Event, error) {
+	evs, err := l.Events(id, nil)
+	if err != nil {
+		return nil, err
+	}
+	if since := reopenedAt(evs); since > 0 {
+		evs = slices.DeleteFunc(evs, func(e core.Event) bool { return e.ID <= since })
+	}
+	return evs, nil
 }
 
 // reopenedAt is the event id of the most recent reopening, or 0 when the work has

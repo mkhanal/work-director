@@ -880,6 +880,12 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 	if code, out, errStr := f.run(t, "tui", "--json"); code != 1 || out != "" || !strings.Contains(errStr, "--json") {
 		t.Errorf("wd tui --json: exit %d, stdout %q, stderr %q; want 1 refusing --json with nothing on stdout", code, out, errStr)
 	}
+	for _, flag := range [][]string{{"--json"}, {"--port", "9"}} {
+		args := append([]string{"serve", "--stdio"}, flag...)
+		if code, out, errStr := f.run(t, args...); code != 1 || out != "" || !strings.Contains(errStr, flag[0]) {
+			t.Errorf("wd %s: exit %d, stdout %q, stderr %q; want 1 refusing %s with nothing on stdout", strings.Join(args, " "), code, out, errStr, flag[0])
+		}
+	}
 	for cmd := range commands {
 		if !covered[cmd] {
 			t.Errorf("wd %s --json is not exercised", cmd)
