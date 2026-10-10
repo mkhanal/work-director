@@ -10,6 +10,9 @@ struct WorkDirectorApp: App {
         // Run from `swift run` there is no bundle to make the app a regular,
         // frontmost application; inside Work Director.app this is already so.
         NSApplication.shared.setActivationPolicy(.regular)
+        // A write to a wd that has exited must fail as an error the window can
+        // show; the default SIGPIPE would end the app instead.
+        signal(SIGPIPE, SIG_IGN)
     }
 
     var body: some Scene {
