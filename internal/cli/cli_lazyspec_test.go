@@ -849,6 +849,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"conflict", epic},
 		{"worktree", "list", epic}, {"worktree", "attach", t3, filepath.Join(f.dir, "elsewhere")},
 		{"archive", attached, "census"}, {"unarchive", attached},
+		{"pause", epic}, {"resume", epic, "census"},
 		{"verify", t2}, {"merge", t2},
 		{"concern", "add", t3, "a worry"}, {"concern", "list"}, {"concern", "list", epic},
 		{"concern", "resolve", "2", "settled"},
@@ -865,6 +866,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"feedback", "add", "a note"}, {"feedback"}, {"feedback", "list"},
 		{"distill"},
 		{"doctor"},
+		{"cancel", t3, "census"},
 	} {
 		covered[args[0]] = true
 		args = append(args, "--json")
@@ -3917,5 +3919,188 @@ func TestProjectNoLongerUsedIsArchivedWithItsWork(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(f.runOK(t, "status", "--all", "--json")), &left); err != nil || len(left) == 0 {
 		t.Errorf("work of an unarchived project is not back: %v (%v)", left, err)
+	}
+}
+
+// liveClaude gives the fixture's running task t2 a claude session the fake
+// claude reports on, with the background id it stops by, and returns the fake's
+// state directory.
+func liveClaude(t *testing.T, f *cliFixture) string {
+	t.Helper()
+	state := filepath.Join(f.dir, "fake-state")
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatalf("state: %v", err)
+	}
+	for name, v := range map[string]string{"bgid": "ab000002", "sid": "ses_000002"} {
+		if err := os.WriteFile(filepath.Join(state, name), []byte(v+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	f.runOK(t, "attach", f.ids["t2"], "ses_000002", "--runner", "claude", "--ref", "ab000002")
+	return state
+}
+
+// sends reads every message the fake claude was resumed with, in order.
+func sends(t *testing.T, state string) []string {
+	t.Helper()
+	var out []string
+	for i := 0; ; i++ {
+		b, err := os.ReadFile(filepath.Join(state, fmt.Sprintf("resumed-%d", i)))
+		if os.IsNotExist(err) {
+			return out
+		}
+		if err != nil {
+			t.Fatalf("read send %d: %v", i, err)
+		}
+		out = append(out, string(b))
+	}
+}
+
+func stateOf(t *testing.T, f *cliFixture, id string) core.State {
+	t.Helper()
+	var rows []core.Work
+	if err := json.Unmarshal([]byte(f.runOK(t, "status", "--all", "--json")), &rows); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	for _, w := range rows {
+		if w.ID == id {
+			return w.State
+		}
+	}
+	t.Fatalf("%s is not on wd status --all", id)
+	return ""
+}
+
+func TestWdSendQueuesForABusySessionAndNeverForksIt(t *testing.T) {
+	f := newCLIFixture(t)
+	state := liveClaude(t, f)
+	t2 := f.ids["t2"]
+	busy := filepath.Join(state, "claude-busy")
+	if err := os.WriteFile(busy, nil, 0o644); err != nil {
+		t.Fatalf("busy: %v", err)
+	}
+	if out := f.runOK(t, "send", t2, "use postgres"); !strings.Contains(out, "queued") {
+		t.Fatalf("send to a busy session: %q, want it queued", out)
+	}
+	if got := sends(t, state); len(got) != 0 {
+		t.Fatalf("a busy session was resumed with %q; resuming it would fork a copy", got)
+	}
+	if err := os.Remove(busy); err != nil {
+		t.Fatalf("idle: %v", err)
+	}
+	if out := f.runOK(t, "send", t2, "and keep the old API"); !strings.Contains(out, "delivered") {
+		t.Fatalf("send to an idle session: %q, want it delivered", out)
+	}
+	if got := sends(t, state); len(got) != 1 || got[0] != "use postgres\n\nand keep the old API" {
+		t.Fatalf("sends = %q, want the waiting message and the new one as one send", got)
+	}
+
+	if err := os.WriteFile(busy, nil, 0o644); err != nil {
+		t.Fatalf("busy: %v", err)
+	}
+	f.runOK(t, "send", t2, "one more thing")
+	if err := os.Remove(busy); err != nil {
+		t.Fatalf("idle: %v", err)
+	}
+	f.runOK(t, "epic", "review", f.ids["epic"])
+	if got := sends(t, state); len(got) != 2 || got[1] != "one more thing" {
+		t.Fatalf("sends = %q, want the coordination pass to deliver the queued message", got)
+	}
+}
+
+func TestWdSendToAGoalTellsEveryOpenTaskAndKeepsItAsADecision(t *testing.T) {
+	f := newCLIFixture(t)
+	state := liveClaude(t, f)
+	epic, t1, t2, t3 := f.ids["epic"], f.ids["t1"], f.ids["t2"], f.ids["t3"]
+	out := f.runOK(t, "send", epic, "drop the mobile app", "--json")
+	var told struct {
+		Delivered []string `json:"delivered"`
+		Queued    []string `json:"queued"`
+		Brief     []string `json:"brief"`
+	}
+	if err := json.Unmarshal([]byte(out), &told); err != nil {
+		t.Fatalf("send --json: %v\n%s", err, out)
+	}
+	if !slices.Equal(told.Delivered, []string{t2}) || len(told.Queued) != 0 || !slices.Equal(told.Brief, []string{t3}) {
+		t.Fatalf("told = %+v, want %s delivered and %s told through its brief (%s is done)", told, t2, t3, t1)
+	}
+	if got := sends(t, state); len(got) != 1 || got[0] != "drop the mobile app" {
+		t.Fatalf("sends = %q, want the message delivered to %s", got, t2)
+	}
+	if events := f.runOK(t, "events", epic); !strings.Contains(events, "decision\tdrop the mobile app") {
+		t.Fatalf("goal events lack the decision:\n%s", events)
+	}
+	if brief := f.runOK(t, "brief", t3); !strings.Contains(brief, "drop the mobile app") {
+		t.Fatalf("a task not yet started does not read the goal's decision in its brief:\n%s", brief)
+	}
+}
+
+func TestWdPauseStopsRunningSessionsAndKeepsTheirConversations(t *testing.T) {
+	f := newCLIFixture(t)
+	state := liveClaude(t, f)
+	epic, t1, t2, t3 := f.ids["epic"], f.ids["t1"], f.ids["t2"], f.ids["t3"]
+	if err := os.WriteFile(filepath.Join(state, "claude-busy"), nil, 0o644); err != nil {
+		t.Fatalf("busy: %v", err)
+	}
+	f.runOK(t, "pause", epic)
+	if _, err := os.Stat(filepath.Join(state, "claude-stopped-ab000002")); err != nil {
+		t.Fatalf("the running session was not stopped: %v", err)
+	}
+	for id, want := range map[string]core.State{epic: core.StatePaused, t2: core.StatePaused, t3: core.StatePaused, t1: core.StateDone} {
+		if got := stateOf(t, f, id); got != want {
+			t.Errorf("%s = %s, want %s", id, got, want)
+		}
+	}
+	if errStr := f.runFail(t, "drive", epic); !strings.Contains(errStr, "wd resume") {
+		t.Errorf("drive on a paused goal: %q, want it refused naming wd resume", errStr)
+	}
+}
+
+func TestWdResumeContinuesWhatWasPaused(t *testing.T) {
+	f := newCLIFixture(t)
+	state := liveClaude(t, f)
+	epic, t2, t3 := f.ids["epic"], f.ids["t2"], f.ids["t3"]
+	before := map[string]core.State{epic: stateOf(t, f, epic), t2: stateOf(t, f, t2), t3: stateOf(t, f, t3)}
+	f.runOK(t, "pause", epic)
+	f.runOK(t, "resume", epic, "carry on with sqlite")
+	for id, want := range before {
+		if got := stateOf(t, f, id); got != want {
+			t.Errorf("%s = %s after resume, want %s as before the pause", id, got, want)
+		}
+	}
+	if got := sends(t, state); len(got) != 1 || got[0] != "Resume where you left off.\n\ncarry on with sqlite" {
+		t.Fatalf("sends = %q, want one resume carrying the note to %s", got, t2)
+	}
+}
+
+func TestWdCancelStopsAndDropsWorkWithAReason(t *testing.T) {
+	f := newCLIFixture(t)
+	state := liveClaude(t, f)
+	epic, t1, t2, t3 := f.ids["epic"], f.ids["t1"], f.ids["t2"], f.ids["t3"]
+	if err := os.WriteFile(filepath.Join(state, "claude-busy"), nil, 0o644); err != nil {
+		t.Fatalf("busy: %v", err)
+	}
+	f.runFail(t, "cancel", epic)
+	if _, err := os.Stat(filepath.Join(state, "claude-stopped-ab000002")); err == nil {
+		t.Fatalf("a refused cancel stopped a session")
+	}
+	f.runOK(t, "cancel", epic, "the client cancelled the migration")
+	if _, err := os.Stat(filepath.Join(state, "claude-stopped-ab000002")); err != nil {
+		t.Fatalf("cancel did not stop the running session: %v", err)
+	}
+	for id, want := range map[string]core.State{epic: core.StateDropped, t2: core.StateDropped, t3: core.StateDropped, t1: core.StateDone} {
+		if got := stateOf(t, f, id); got != want {
+			t.Errorf("%s = %s, want %s", id, got, want)
+		}
+	}
+
+	g := newCLIFixture(t)
+	gstate := liveClaude(t, g)
+	if err := os.WriteFile(filepath.Join(gstate, "claude-busy"), nil, 0o644); err != nil {
+		t.Fatalf("busy: %v", err)
+	}
+	g.runOK(t, "archive", g.ids["epic"], "not wanted")
+	if _, err := os.Stat(filepath.Join(gstate, "claude-stopped-ab000002")); err != nil {
+		t.Fatalf("archiving open work did not stop its running session: %v", err)
 	}
 }

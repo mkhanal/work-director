@@ -66,7 +66,7 @@ func TestTuiSource(t *testing.T) {
 		f := newCLIFixture(t)
 		// A logging fake claude: it records its argv and answers the resume.
 		bin := t.TempDir()
-		script := fmt.Sprintf("#!/usr/bin/env bash\necho \"claude $*\" >> %q\ncase \"$1 $2\" in\n  \"--bg --resume\") echo \"backgrounded · bg1\";;\n  *) echo \"unhandled claude $*\" >&2; exit 1;;\nesac\n", filepath.Join(bin, "calls.log"))
+		script := fmt.Sprintf("#!/usr/bin/env bash\necho \"claude $*\" >> %q\ncase \"$1 $2\" in\n  \"--bg --resume\") echo \"backgrounded · bg1\";;\n  \"agents --json\") echo \"[]\";;\n  *) echo \"unhandled claude $*\" >&2; exit 1;;\nesac\n", filepath.Join(bin, "calls.log"))
 		if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o755); err != nil {
 			t.Fatalf("write fake claude: %v", err)
 		}

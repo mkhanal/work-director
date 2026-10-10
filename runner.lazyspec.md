@@ -40,6 +40,12 @@ provider is a TOML file of commands under `~/.work-director/runners/`.
 ## Sending Continues The Same Session
 `send` addresses the runner with the handle's session id, never starting a new session.
 
+## A Runner Stops A Session And Keeps Its Conversation
+- `stop` ends the session's current run; a later `send` continues the same conversation.
+- claude runs `claude stop <bg id>`; a handle with no bg id is refused naming it, and a failing stop carries claude's stderr.
+- opencode and codex end the process serving the session; a process already gone is already stopped.
+- A runner file stops through its optional `stop` command, which takes the same placeholders as `status`; a file without one is refused naming the file.
+
 ## A Transcript Yields The Executor Messages
 `transcript` returns the assistant texts of the session, oldest first, from the runner's own store.
 

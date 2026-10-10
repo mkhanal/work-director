@@ -8,3 +8,4 @@ waiting = 'state: *waiting'
 exited = 'state: *exited'
 transcript = "advisor export {session}"
 attach = "cd {cwd} && advisor attach {session}"
+stop = "advisor stop {session}"

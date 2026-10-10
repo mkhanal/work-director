@@ -15,6 +15,7 @@ and the work state machine. It opens every ledger an earlier wd wrote.
 ## Only Listed Transitions Are Allowed
 - queued→briefed→running→(needs-input|review)→soft-done→done.
 - blocked and dropped are reachable from every open state.
+- paused is reachable from queued, briefed, running, needs-input, review and blocked, and goes back to any of them, or to dropped or abandoned.
 - queued→running is allowed, for attaching a conversation already under way.
 - queued, briefed and blocked work may go straight to done.
 - Any other transition fails with IllegalTransition naming both states.
@@ -135,6 +136,16 @@ Work added to a file-backed ledger is still there after closing and reopening it
 ## Evidence From A Session Knows The Work It Came From
 - Feedback carries a nullable `work`: set when it came out of a session running that work, null when typed by hand.
 - Feedback naming a work that does not exist fails.
+
+## Dropping Work Drops Everything Open Under It With A Reason
+- `Drop(id, why)` moves the work and every open work under it to dropped and files `why` as a decision on each.
+- Work at rest under it keeps its state.
+- With no `why`, or on work already at rest, it is refused and nothing changes.
+
+## A Message To Work Waits In The Ledger Until It Is Delivered
+- `QueueMessage(work, text)` stores the message undelivered; blank text and unknown work are refused.
+- `Undelivered(work)` lists that work's undelivered messages, oldest first.
+- `MarkDelivered(id)` stamps the message delivered and files a `sent` event carrying its text; a message already delivered is refused.
 
 ## Archiving Puts Work Out Of Sight With Everything Under It
 - `Archive(id, why)` stamps `archived` on the work and every work under it, and files an `archived` note on each.

@@ -9,3 +9,4 @@ exited = 'state: *exited'
 transcript = "myagent export {session}"
 models = "myagent models"
 attach = "cd {cwd} && myagent attach {session}"
+stop = "myagent stop {session}"

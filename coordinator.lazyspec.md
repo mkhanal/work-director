@@ -94,3 +94,8 @@ the project's path.
 `Send` continues a child's session and records the ref the runner returns,
 so a status check reaches the process now serving it; the child's runner
 and directory still follow its goal.
+
+## A Queued Message Reaches Its Session Once The Session Is Idle
+- Each pass delivers a running or needs-input child's undelivered messages when its runner reports the session is not running: as one message, oldest first, since a session busy with the first would fork on the second. Each is marked delivered and the child is listed under `delivered`.
+- A child whose session is running keeps its messages queued.
+- A needs-input child that was sent a message returns to running.

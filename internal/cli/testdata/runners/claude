@@ -18,9 +18,19 @@ case "$1 $2" in
       '{"type":"assistant","message":{"content":[{"type":"text","text":"STATUS: DONE\\nFILES: none\\nVERIFY: test -f README.md -> 0\\nPR: none\\nNOTES: done in the fixture"}]}}' \
       > "$sdir/$sid.jsonl"
     echo "backgrounded · $bgid · $3";;
-  "--bg --resume") echo "backgrounded · $(cat "$WD_FAKE_STATE/bgid")";;
+  "--bg --resume")
+    # Each send is kept, numbered, so a test can count them and read the text.
+    n=$(ls "$WD_FAKE_STATE"/resumed-* 2>/dev/null | wc -l | tr -d ' ')
+    printf '%s' "$4" > "$WD_FAKE_STATE/resumed-$n"
+    echo "backgrounded · $(cat "$WD_FAKE_STATE/bgid")";;
   "agents --json")
-    row="[{\"id\":\"$(cat "$WD_FAKE_STATE/bgid")\",\"sessionId\":\"$(cat "$WD_FAKE_STATE/sid")\",\"cwd\":\"$PWD\",\"kind\":\"background\",\"status\":\"idle\",\"state\":\"done\"}]"
+    # A test makes the session look busy by creating $WD_FAKE_STATE/claude-busy.
+    status=idle state=done
+    [ -f "$WD_FAKE_STATE/claude-busy" ] && status=busy state=working
+    row="[{\"id\":\"$(cat "$WD_FAKE_STATE/bgid")\",\"sessionId\":\"$(cat "$WD_FAKE_STATE/sid")\",\"cwd\":\"$PWD\",\"kind\":\"background\",\"status\":\"$status\",\"state\":\"$state\"}]"
     echo "$row";;
+  "stop "*)
+    touch "$WD_FAKE_STATE/claude-stopped-$2"
+    echo "stopped $2";;
   *) echo "unhandled claude $*" >&2; exit 1;;
 esac

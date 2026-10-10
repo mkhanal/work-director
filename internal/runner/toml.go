@@ -81,6 +81,8 @@ func (s *RunnerSpec) set(key, value string) error {
 		s.Models = value
 	case "attach":
 		s.Attach = value
+	case "stop":
+		s.Stop = value
 	case "detach":
 		if value == "true" {
 			s.Detach = true

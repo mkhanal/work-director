@@ -103,6 +103,22 @@ func (claudeRunner) Send(h *Handle, text string) error {
 	return nil
 }
 
+// Stop stops the background session by the id claude printed at spawn;
+// claude keeps its conversation for a later resume.
+func (claudeRunner) Stop(h Handle) error {
+	if h.Ref == nil {
+		return &RunnerError{Runner: "claude", Detail: "session " + h.Session + " has no background id to stop"}
+	}
+	r, err := Run([]string{"claude", "stop", *h.Ref}, h.Cwd)
+	if err != nil {
+		return err
+	}
+	if r.Code != 0 {
+		return &RunnerError{Runner: "claude", Detail: "stop failed: " + stderrOrStdout(r)}
+	}
+	return nil
+}
+
 func (claudeRunner) Status(h Handle) (RunnerStatus, error) {
 	rows, err := agents(h.Cwd)
 	if err != nil {

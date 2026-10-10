@@ -9,3 +9,4 @@ exited = 'state: *exited'
 transcript = "broken export {session}"
 models = "broken models"
 attach = "cd {cwd} && broken attach {session}"
+stop = "broken stop {session}"

@@ -674,6 +674,8 @@ func theBoardPlacesEveryItemInOneBand(t *testing.T) {
 	pushed := add("pushed", ledger.AddOptions{})
 	walk(t, l, pushed.ID, core.StateRunning, core.StateReview)
 	event(t, l, pushed.ID, core.EventPr, "pull-request https://github.com/o/r/pull/1")
+	held := add("held", ledger.AddOptions{})
+	walk(t, l, held.ID, core.StateRunning, core.StatePaused)
 	closing := add("closing", ledger.AddOptions{})
 	walk(t, l, closing.ID, core.StateRunning, core.StateReview)
 	event(t, l, closing.ID, core.EventReport, "DONE")
@@ -720,7 +722,7 @@ func theBoardPlacesEveryItemInOneBand(t *testing.T) {
 		got[w.Work.ID] = w.Band
 	}
 	want := map[string]Band{
-		queued.ID: BandInFlight, running.ID: BandInFlight,
+		queued.ID: BandInFlight, running.ID: BandInFlight, held.ID: BandPaused,
 		asking.ID: BandNeedsYou, blocked.ID: BandNeedsYou,
 		unpushed.ID: BandReadyToPush, pushed.ID: BandInReview, again.ID: BandReadyToPush,
 		closing.ID: BandReadyToClose,

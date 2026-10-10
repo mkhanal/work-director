@@ -15,6 +15,7 @@ public enum WorkState: String, Codable, Sendable, CaseIterable {
     case blocked
     case dropped
     case abandoned
+    case paused
 }
 
 public enum WorkKind: String, Codable, Sendable {
@@ -37,6 +38,7 @@ public enum GoalType: String, Codable, Sendable {
 public enum Band: String, Codable, Sendable, CaseIterable {
     case needsYou = "needs-you"
     case inFlight = "in-flight"
+    case paused
     case readyToPush = "ready-to-push"
     case inReview = "in-review"
     case readyToClose = "ready-to-close"
@@ -63,6 +65,9 @@ public struct Work: Codable, Sendable, Hashable, Identifiable {
     public let goalType: GoalType?
     /// When the work was put out of sight; nil while it is on the board.
     public let archived: String?
+
+    /// Work a person can still pause, tell or cancel.
+    public var live: Bool { [.running, .needsInput, .review, .blocked, .queued, .briefed].contains(state) }
 
     public var atRest: Bool { state == .done || state == .dropped || state == .abandoned }
 

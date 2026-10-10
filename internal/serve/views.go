@@ -16,6 +16,7 @@ type Band string
 const (
 	BandNeedsYou     Band = "needs-you"
 	BandInFlight     Band = "in-flight"
+	BandPaused       Band = "paused"
 	BandReadyToPush  Band = "ready-to-push"
 	BandInReview     Band = "in-review"
 	BandReadyToClose Band = "ready-to-close"
@@ -113,6 +114,8 @@ func (s *Server) band(w core.Work, tasks []core.Work) (Band, error) {
 	switch {
 	case needsYou(w.State):
 		return BandNeedsYou, nil
+	case w.State == core.StatePaused:
+		return BandPaused, nil
 	case w.State == core.StateSoftDone:
 		return BandReadyToClose, nil
 	case w.State == core.StateDone || w.State == core.StateDropped || w.State == core.StateAbandoned:

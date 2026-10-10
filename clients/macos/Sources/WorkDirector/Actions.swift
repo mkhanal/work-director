@@ -3,7 +3,7 @@ import WorkDirectorKit
 
 /// A write that needs words from the person before it can be planned.
 struct Ask: Identifiable {
-    enum Kind { case reopen, release, decide, abandon, archive }
+    enum Kind { case reopen, release, decide, abandon, archive, cancel, resume }
     let kind: Kind
     let work: Work
 
@@ -16,6 +16,8 @@ struct Ask: Identifiable {
         case .decide: "Record a decision on \(work.title)"
         case .abandon: "Abandon \(work.title)"
         case .archive: "Drop and archive \(work.title)"
+        case .cancel: "Cancel \(work.title)"
+        case .resume: "Resume \(work.title)"
         }
     }
 
@@ -26,6 +28,8 @@ struct Ask: Identifiable {
         case .decide: "The decision, in one line."
         case .abandon: "Detail (optional). The reason, no-pr or unmerged, is worked out from the ledger."
         case .archive: "Why it is no longer wanted. It is dropped with this reason, then archived with everything under it."
+        case .cancel: "Why it is being cancelled. Running sessions stop and the open work is dropped with this reason."
+        case .resume: "Anything to add before it carries on (optional). Every paused session continues where it left off."
         }
     }
 
@@ -36,6 +40,8 @@ struct Ask: Identifiable {
         case .decide: try Plan.decide(work.id, text: text)
         case .abandon: Plan.abandon(work.id, detail: text)
         case .archive: try Plan.archive(work, reason: text)
+        case .cancel: try Plan.cancel(work.id, reason: text)
+        case .resume: Plan.resume(work.id, note: text)
         }
     }
 }
@@ -48,7 +54,14 @@ struct Actions: ToolbarContent {
 
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
-            if work.kind.isGoal && open {
+            if work.state == .paused {
+                Button { asking = Ask(kind: .resume, work: work) } label: { Label("Resume", systemImage: "play.fill") }
+                    .help("Continue every paused session where it left off")
+            } else if work.live {
+                Button { plan = .pause(work.id) } label: { Label("Pause", systemImage: "pause.fill") }
+                    .help("Stop the running sessions and keep their conversations")
+            }
+            if work.kind.isGoal && open && work.state != .paused {
                 Button { plan = .drive(work.id) } label: { Label("Drive", systemImage: "steeringwheel") }
                     .help("Run the goal's loop until a stop condition")
             }
@@ -64,8 +77,11 @@ struct Actions: ToolbarContent {
                 if work.state == .done {
                     Button("Reopen…") { asking = Ask(kind: .reopen, work: work) }
                 }
-                if attempted {
+                if open {
                     Divider()
+                    Button("Cancel…", role: .destructive) { asking = Ask(kind: .cancel, work: work) }
+                }
+                if attempted {
                     Button("Abandon…", role: .destructive) { asking = Ask(kind: .abandon, work: work) }
                 }
                 if work.state == .abandoned {

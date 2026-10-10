@@ -30,8 +30,8 @@ that same argv.
 - A leading `wd` is dropped. An unclosed quote is refused.
 
 ## Reopening, Releasing And Dropping Need A Reason
-- A reopen, a release, or an archive of open work cannot be planned with a
-  reason that is empty or only whitespace.
+- A reopen, a release, a cancel, or an archive of open work cannot be planned
+  with a reason that is empty or only whitespace.
 - Archiving work at rest needs no reason.
 
 ## Needs-Input And Blocked Never Look The Same

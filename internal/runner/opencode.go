@@ -125,6 +125,10 @@ func (opencodeRunner) Send(h *Handle, text string) error {
 	return nil
 }
 
+// Stop ends the run serving the session; opencode keeps the session, and Send
+// continues it with -s.
+func (opencodeRunner) Stop(h Handle) error { return stopPid(h.Ref) }
+
 func (opencodeRunner) Status(h Handle) (RunnerStatus, error) {
 	if pid, ok := pidOf(h.Ref); ok && alive(pid) {
 		return StatusRunning, nil

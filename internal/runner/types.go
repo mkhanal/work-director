@@ -53,6 +53,9 @@ type Runner interface {
 	Command() string
 	Spawn(o SpawnOptions) (Handle, error)
 	Send(h *Handle, text string) error
+	// Stop ends the session's current run and keeps its conversation, so a
+	// later Send continues it.
+	Stop(h Handle) error
 	Status(h Handle) (RunnerStatus, error)
 	Transcript(h Handle) ([]string, error)
 	Models() ([]string, error)
@@ -127,6 +130,19 @@ func waitFor[T any](probe func() (T, bool, error), timeout time.Duration, every 
 }
 
 // alive reports whether the process exists (signal 0 probes without killing).
+// stopPid ends the process serving a session. A process already gone is
+// already stopped.
+func stopPid(ref *string) error {
+	pid, ok := pidOf(ref)
+	if !ok || !alive(pid) {
+		return nil
+	}
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return err
+	}
+	return nil
+}
+
 func alive(pid int) bool {
 	return syscall.Kill(pid, 0) == nil
 }

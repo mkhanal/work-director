@@ -11,7 +11,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -255,7 +254,7 @@ func tasteCheckout() (string, error) {
 	return "", nil
 }
 
-const usage = "wd <projects|workspace|add|tasks|brief|spawn|models|runner|roadmap|goal|drive|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|review|abandon|release|reopen|feedback|distill|archive|unarchive|tui|serve|doctor> [--json]\n\nwd --version   what release this binary is\nwd serve       the JSON API over loopback HTTP; --stdio serves a desktop app on its standard streams\nwd doctor     which runner CLIs are detected, and whether this is a repo"
+const usage = "wd <projects|workspace|add|tasks|brief|spawn|models|runner|roadmap|goal|drive|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|review|abandon|release|reopen|feedback|distill|archive|unarchive|pause|resume|cancel|tui|serve|doctor> [--json]\n\nwd --version   what release this binary is\nwd serve       the JSON API over loopback HTTP; --stdio serves a desktop app on its standard streams\nwd doctor     which runner CLIs are detected, and whether this is a repo"
 
 // commands maps each wd command to its handler, given the arguments after it.
 var commands = map[string]func(c *Cli, rest []string) error{
@@ -304,6 +303,9 @@ var commands = map[string]func(c *Cli, rest []string) error{
 	"serve":     (*Cli).serve,
 	"doctor":    (*Cli).doctor,
 	"archive":   (*Cli).archive,
+	"pause":     (*Cli).pause,
+	"resume":    (*Cli).resume,
+	"cancel":    (*Cli).cancel,
 	"unarchive": (*Cli).unarchive,
 }
 
@@ -439,53 +441,22 @@ func (c *Cli) handle(id string) (runner.Handle, error) {
 	return h, nil
 }
 
-// sendTo continues work's recorded session with text and moves the work to
-// running. Work that cannot return to running is refused before anything is
-// sent.
-func (c *Cli) sendTo(id, text string) error {
-	w, err := c.Ledger.Get(id)
-	if err != nil {
-		return err
-	}
-	// Finished work is refused here rather than downstream: sending to it
-	// records the message before the state check would run, so a goal someone is
-	// asking a question of would end up carrying a sent event it never accepted.
-	// The check is on being finished, not on the state machine, because the
-	// machine now has a done → running edge that only Reopen may take and a
-	// message is not a reason.
-	if core.Reopenable(w.State) {
-		return fail("%s is done; a message is not a reason to work on it again — wd reopen %s \"<what is being worked on>\", or wd context %s to ask it something", w.ID, w.ID, w.ID)
-	}
-	if w.State != core.StateRunning && !slices.Contains(core.Transitions[w.State], core.StateRunning) {
-		return fail("%s", core.IllegalTransition{From: w.State, To: core.StateRunning}.Error())
-	}
-	h, err := c.handle(id)
-	if err != nil {
-		return err
-	}
-	r, err := runner.RunnerNamed(h.Runner)
-	if err != nil {
-		return err
-	}
-	if err := coordinator.Send(c.Ledger, id, r, h, text); err != nil {
-		return err
-	}
-	if _, err := c.Ledger.AddEvent(id, core.EventSent, text); err != nil {
-		return err
-	}
-	if w.State != core.StateRunning {
-		if _, err := c.Ledger.Transition(id, core.StateRunning); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // cycle gathers the brief context for work: decisions, history, roadmap.
 func (c *Cli) cycle(id string) (brief.Context, error) {
 	decided, err := c.Ledger.Events(id, kindPtr(core.EventDecision))
 	if err != nil {
 		return brief.Context{}, err
+	}
+	// A goal's decisions are settled for every task under it, including what a
+	// person told the goal before this task had a session to hear it.
+	if w, err := c.Ledger.Get(id); err != nil {
+		return brief.Context{}, err
+	} else if w.Parent != nil {
+		goalDecided, err := c.Ledger.Events(*w.Parent, kindPtr(core.EventDecision))
+		if err != nil {
+			return brief.Context{}, err
+		}
+		decided = append(goalDecided, decided...)
 	}
 	concerns, err := c.Ledger.Concerns(&id)
 	if err != nil {
@@ -570,7 +541,7 @@ func (c *Cli) briefFor(id string) (string, error) {
 				claimList = append(claimList, t)
 			}
 		}
-		return brief.ComposeSlice(w, goal, claimList, p, cards)
+		return brief.ComposeSlice(w, goal, claimList, p, cards, ctx)
 	}
 	return brief.Compose(w, p, cards, ctx)
 }

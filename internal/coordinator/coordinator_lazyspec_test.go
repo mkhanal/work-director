@@ -60,6 +60,7 @@ func eventBodies(t *testing.T, l *ledger.Ledger, work string, kind core.EventKin
 
 // fakeRunner is a Runner with a canned transcript that records its sends.
 type fakeRunner struct {
+	busy     bool
 	texts    []string
 	sends    []string
 	sentTo   []runner.Handle
@@ -84,6 +85,9 @@ func (f *fakeRunner) Send(h *runner.Handle, text string) error {
 	return nil
 }
 func (f *fakeRunner) Status(h runner.Handle) (runner.RunnerStatus, error) {
+	if f.busy {
+		return runner.StatusRunning, nil
+	}
 	return runner.StatusIdle, nil
 }
 func (f *fakeRunner) Transcript(h runner.Handle) ([]string, error) {
@@ -93,6 +97,7 @@ func (f *fakeRunner) Transcript(h runner.Handle) ([]string, error) {
 }
 func (f *fakeRunner) Models() ([]string, error)         { return nil, nil }
 func (f *fakeRunner) AttachHint(h runner.Handle) string { return "fake attach" }
+func (f *fakeRunner) Stop(h runner.Handle) error        { return nil }
 
 func resolveFake(fr *fakeRunner) func(name string) (runner.Runner, error) {
 	return func(name string) (runner.Runner, error) {
@@ -387,6 +392,44 @@ func TestCoordinator(t *testing.T) {
 		}
 		if w.State != core.StateBlocked {
 			t.Fatalf("state = %s, want blocked", w.State)
+		}
+	})
+
+	t.Run("A Queued Message Reaches Its Session Once The Session Is Idle", func(t *testing.T) {
+		l := newTestLedger(t)
+		goal := add(t, l, "proj", "goal", ledger.AddOptions{Kind: core.WorkGoal})
+		child := add(t, l, "proj", "child", ledger.AddOptions{Parent: &goal.ID})
+		setSession(t, l, child.ID, "ses_1")
+		move(t, l, child.ID, core.StateRunning)
+		move(t, l, child.ID, core.StateNeedsInput)
+		for _, text := range []string{"use postgres", "keep the old API"} {
+			if _, err := l.QueueMessage(child.ID, text); err != nil {
+				t.Fatalf("queue: %v", err)
+			}
+		}
+		fr := &fakeRunner{busy: true, texts: []string{"working"}}
+		res, err := CoordinateOnce(goal, proj, l, resolveFake(fr))
+		if err != nil {
+			t.Fatalf("coordinateOnce: %v", err)
+		}
+		if len(fr.sends) != 0 || len(res.Delivered) != 0 {
+			t.Fatalf("a busy session was sent %v (delivered %v), want nothing yet", fr.sends, res.Delivered)
+		}
+		fr.busy = false
+		res, err = CoordinateOnce(goal, proj, l, resolveFake(fr))
+		if err != nil {
+			t.Fatalf("coordinateOnce: %v", err)
+		}
+		if !slices.Equal(fr.sends, []string{"use postgres\n\nkeep the old API"}) || !slices.Equal(res.Delivered, []string{child.ID}) {
+			t.Fatalf("sends = %q, delivered = %v, want both messages as one send, in order, to %s", fr.sends, res.Delivered, child.ID)
+		}
+		left, err := l.Undelivered(child.ID)
+		if err != nil || len(left) != 0 {
+			t.Fatalf("undelivered = %v (%v), want none", left, err)
+		}
+		w, err := l.Get(child.ID)
+		if err != nil || w.State != core.StateRunning {
+			t.Fatalf("child = %s (%v), want running once it was told something", w.State, err)
 		}
 	})
 

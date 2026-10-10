@@ -3,6 +3,7 @@ package runner
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -60,6 +61,8 @@ func TestRunner(t *testing.T) {
   "--bg -n") echo "backgrounded · b765c0a2 · $3";;
   "--bg --resume") echo "backgrounded · b765c0a2";;
   "agents --json") echo '[{"id":"b765c0a2","sessionId":"`+testSID+`","cwd":"`+cwd+`","kind":"background","status":"idle","state":"done"}]';;
+  "stop deadbeef") echo 'no background session deadbeef' >&2; exit 1;;
+  "stop "*) echo "stopped $2";;
 esac`)
 	writeFake(t, bin, "opencode", `case "$1" in
   run) echo '{"type":"step_start","sessionID":"ses_abc123"}'; echo '{"type":"text","sessionID":"ses_abc123","part":{"type":"text","text":"READY"}}';;
@@ -79,6 +82,7 @@ esac`)
   status) [ "$2" = dead ] && { echo 'no such session' >&2; exit 3; }; echo 'state: waiting';;
   export) echo 'row one'; echo 'row two';;
   models) echo 'victory/1';;
+  stop) echo stopped;;
 esac`)
 
 	claudeDir := filepath.Join(home, ".claude", "projects", projectSlug(cwd))
@@ -110,6 +114,7 @@ exited = 'state: *exited'
 transcript = "myagent export {session} {slug_cwd}"
 models = "myagent models"
 attach = "myagent attach {session}"
+stop = "myagent stop {session}"
 `
 	if err := os.WriteFile(filepath.Join(specDir, "myagent.toml"), []byte(myagent), 0o644); err != nil {
 		t.Fatalf("write myagent.toml: %v", err)
@@ -395,6 +400,74 @@ transcript = "cat {log}"
 				}
 			}
 		}
+	})
+
+	t.Run("A Runner Stops A Session And Keeps Its Conversation", func(t *testing.T) {
+		t.Run("claude stops by its background id", func(t *testing.T) {
+			h := Handle{Runner: "claude", Session: testSID, Ref: strPtr("b765c0a2"), Cwd: cwd}
+			if err := claude.Stop(h); err != nil {
+				t.Fatalf("claude stop: %v", err)
+			}
+			if !strings.Contains(calls(t, bin), "claude stop b765c0a2") {
+				t.Fatalf("calls.log missing claude stop:\n%s", calls(t, bin))
+			}
+			if err := claude.Stop(Handle{Runner: "claude", Session: testSID, Cwd: cwd}); err == nil || !strings.Contains(err.Error(), "no background id") {
+				t.Fatalf("claude stop with no ref = %v, want it refused naming the missing id", err)
+			}
+			failing := Handle{Runner: "claude", Session: testSID, Ref: strPtr("deadbeef"), Cwd: cwd}
+			if err := claude.Stop(failing); err == nil || !strings.Contains(err.Error(), "no background session deadbeef") {
+				t.Fatalf("claude stop failing = %v, want its stderr", err)
+			}
+		})
+		t.Run("opencode and codex end the process serving the session", func(t *testing.T) {
+			for _, r := range []Runner{opencode, codex} {
+				proc := exec.Command("sleep", "30")
+				if err := proc.Start(); err != nil {
+					t.Fatalf("start: %v", err)
+				}
+				ended := make(chan error, 1)
+				go func() { ended <- proc.Wait() }()
+				h := Handle{Runner: r.Name(), Session: "s", Ref: pidRef(proc.Process.Pid), Cwd: cwd}
+				if err := r.Stop(h); err != nil {
+					t.Fatalf("%s stop: %v", r.Name(), err)
+				}
+				select {
+				case <-ended:
+				case <-time.After(5 * time.Second):
+					proc.Process.Kill()
+					t.Fatalf("%s stop left the process running", r.Name())
+				}
+				if err := r.Stop(h); err != nil {
+					t.Fatalf("%s stop of a process already gone = %v, want nil", r.Name(), err)
+				}
+				if err := r.Stop(Handle{Runner: r.Name(), Session: "s", Cwd: cwd}); err != nil {
+					t.Fatalf("%s stop with no process = %v, want nil", r.Name(), err)
+				}
+			}
+		})
+		t.Run("a runner file stops through its stop command, or says it has none", func(t *testing.T) {
+			r, err := RunnerNamed("myagent")
+			if err != nil {
+				t.Fatalf("RunnerNamed: %v", err)
+			}
+			if err := r.Stop(Handle{Runner: "myagent", Session: "victory-001", Cwd: cwd}); err != nil {
+				t.Fatalf("myagent stop: %v", err)
+			}
+			if !strings.Contains(calls(t, bin), "myagent stop victory-001") {
+				t.Fatalf("calls.log missing myagent stop:\n%s", calls(t, bin))
+			}
+			bare, err := RunnerNamed("detached")
+			if err != nil {
+				t.Fatalf("RunnerNamed: %v", err)
+			}
+			err = bare.Stop(Handle{Runner: "detached", Session: "s", Cwd: cwd})
+			if err == nil || !strings.Contains(err.Error(), "no stop command") || !strings.Contains(err.Error(), "detached.toml") {
+				t.Fatalf("stop on a file with none = %v, want it naming the file", err)
+			}
+			if _, err := WriteSpec("badstop", "spawn = \"x {brief}\"\nsession_id = 's=(x)'\nstop = \"x stop {text}\"\n"); err == nil || !strings.Contains(err.Error(), "stop uses {text}") {
+				t.Fatalf("a stop line using {text} = %v, want it rejected", err)
+			}
+		})
 	})
 
 	t.Run("A Runner Can Be Defined By A File Of Commands", func(t *testing.T) {

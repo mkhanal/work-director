@@ -79,6 +79,25 @@ public struct Plan: Hashable, Sendable, Identifiable {
 
     public static func unarchive(_ id: String) -> Plan { Plan(title: "Unarchive", argv: ["unarchive", id]) }
 
+    /// Something said to work while it runs: a goal passes it to every open
+    /// task and keeps it as a decision; a running session gets it when idle.
+    public static func send(_ id: String, text: String) throws -> Plan {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw PlanError.empty }
+        return Plan(title: "Send", argv: ["send", id, text])
+    }
+
+    public static func pause(_ id: String) -> Plan { Plan(title: "Pause", argv: ["pause", id]) }
+
+    public static func resume(_ id: String, note: String) -> Plan {
+        let note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Plan(title: "Resume", argv: ["resume", id] + (note.isEmpty ? [] : [note]))
+    }
+
+    public static func cancel(_ id: String, reason: String) throws -> Plan {
+        Plan(title: "Cancel", argv: ["cancel", id, try required(reason, for: "cancelling")])
+    }
+
     public static func drive(_ id: String) -> Plan { Plan(title: "Drive", argv: ["drive", id]) }
     public static func softDone(_ id: String) -> Plan { Plan(title: "Soft-done", argv: ["soft-done", id]) }
     public static func done(_ id: String) -> Plan { Plan(title: "Done", argv: ["done", id]) }

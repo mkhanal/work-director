@@ -197,6 +197,43 @@ func TestLedger(t *testing.T) {
 				t.Fatalf("soft-done: state = %q, want blocked", got.State)
 			}
 		})
+		t.Run("paused is reachable from open states and returns", func(t *testing.T) {
+			l := newTestLedger(t)
+			for _, path := range [][]core.State{
+				{},
+				{core.StateBriefed},
+				{core.StateRunning},
+				{core.StateRunning, core.StateNeedsInput},
+				{core.StateRunning, core.StateReview},
+				{core.StateBlocked},
+			} {
+				w := add(t, l, "p", "t", AddOptions{})
+				for _, s := range path {
+					move(t, l, w.ID, s)
+				}
+				if got := move(t, l, w.ID, core.StatePaused); got.State != core.StatePaused {
+					t.Fatalf("after %v: state = %q, want paused", path, got.State)
+				}
+				back := core.StateQueued
+				if len(path) > 0 {
+					back = path[len(path)-1]
+				}
+				if got := move(t, l, w.ID, back); got.State != back {
+					t.Fatalf("paused -> %s: state = %q", back, got.State)
+				}
+			}
+			for _, to := range []core.State{core.StateBlocked, core.StateDropped, core.StateAbandoned} {
+				w := add(t, l, "p", "t", AddOptions{})
+				move(t, l, w.ID, core.StatePaused)
+				if got := move(t, l, w.ID, to); got.State != to {
+					t.Fatalf("paused -> %s: state = %q", to, got.State)
+				}
+			}
+			w := add(t, l, "p", "t", AddOptions{})
+			move(t, l, w.ID, core.StatePaused)
+			_, err := l.Transition(w.ID, core.StateDone)
+			wantErr(t, err, "illegal transition paused → done")
+		})
 		t.Run("done and dropped are terminal", func(t *testing.T) {
 			l := newTestLedger(t)
 			w := add(t, l, "p", "t", AddOptions{})
@@ -1558,4 +1595,69 @@ func TestAListCanLeaveArchivedWorkOutOrShowOnlyIt(t *testing.T) {
 	if got := ids(ListFilter{Archived: &yes}); len(got) != 1 || got[0] != gone.ID {
 		t.Errorf("archived true = %v, want only %s", got, gone.ID)
 	}
+}
+
+func TestDroppingWorkDropsEverythingOpenUnderItWithAReason(t *testing.T) {
+	l := newTestLedger(t)
+	goal := add(t, l, "p", "Goal", AddOptions{Kind: core.WorkGoal})
+	shipped := add(t, l, "p", "Shipped", AddOptions{Parent: &goal.ID})
+	move(t, l, shipped.ID, core.StateDone)
+	paused := add(t, l, "p", "Paused", AddOptions{Parent: &goal.ID})
+	move(t, l, paused.ID, core.StatePaused)
+
+	_, err := l.Drop(goal.ID, " ")
+	wantErrNaming(t, err, "why")
+	if w, _ := l.Get(goal.ID); w.State != core.StateQueued {
+		t.Fatalf("a refused drop changed the goal to %s", w.State)
+	}
+	dropped, err := l.Drop(goal.ID, "the client cancelled")
+	wantNoErr(t, err)
+	if len(dropped) != 2 {
+		t.Fatalf("dropped %d, want the goal and its paused task", len(dropped))
+	}
+	decision := core.EventDecision
+	for id, want := range map[string]core.State{goal.ID: core.StateDropped, paused.ID: core.StateDropped, shipped.ID: core.StateDone} {
+		w, err := l.Get(id)
+		wantNoErr(t, err)
+		if w.State != want {
+			t.Errorf("%s = %s, want %s", id, w.State, want)
+		}
+		ds := allEvents(t, l, id, &decision)
+		if want == core.StateDropped && (len(ds) == 0 || !strings.Contains(ds[len(ds)-1].Body, "the client cancelled")) {
+			t.Errorf("%s decisions = %v, want the reason", id, ds)
+		}
+	}
+	_, err = l.Drop(goal.ID, "again")
+	wantErrNaming(t, err, "at rest")
+}
+
+func TestAMessageToWorkWaitsInTheLedgerUntilItIsDelivered(t *testing.T) {
+	l := newTestLedger(t)
+	w := add(t, l, "p", "t", AddOptions{})
+	_, err := l.QueueMessage(w.ID, "  ")
+	wantErrNaming(t, err, "empty")
+	_, err = l.QueueMessage("nope", "hello")
+	wantErrNaming(t, err, "no work nope")
+
+	first, err := l.QueueMessage(w.ID, "use postgres, not sqlite")
+	wantNoErr(t, err)
+	second, err := l.QueueMessage(w.ID, "and keep the old API")
+	wantNoErr(t, err)
+	pending, err := l.Undelivered(w.ID)
+	wantNoErr(t, err)
+	if len(pending) != 2 || pending[0].ID != first.ID || pending[1].ID != second.ID || pending[0].Delivered != nil {
+		t.Fatalf("undelivered = %+v, want both, oldest first", pending)
+	}
+	wantNoErr(t, l.MarkDelivered(first.ID))
+	pending, err = l.Undelivered(w.ID)
+	wantNoErr(t, err)
+	if len(pending) != 1 || pending[0].ID != second.ID {
+		t.Fatalf("undelivered = %+v, want only the second", pending)
+	}
+	sent := core.EventSent
+	evs := allEvents(t, l, w.ID, &sent)
+	if len(evs) != 1 || evs[0].Body != "use postgres, not sqlite" {
+		t.Fatalf("sent events = %v, want the delivered text", evs)
+	}
+	wantErrNaming(t, l.MarkDelivered(first.ID), "already delivered")
 }

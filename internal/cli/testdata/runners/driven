@@ -39,6 +39,7 @@ case "$1" in
         ;;
     esac
     ;;
+  stop) echo "driven $2" >> "$WD_FAKE_STATE/stopped"; echo stopped;;
   status) echo 'state: waiting';;
   send)
     printf '%s\n' "$3" > "$state/executor-answered"

@@ -7,6 +7,7 @@ case "$1" in
     echo "session=myagent-s$(printf '%05x' "$n")"
     ;;
   send) echo ok;;
+  stop) echo "myagent $2" >> "$WD_FAKE_STATE/stopped"; echo stopped;;
   status) echo 'state: idle';;
   export) echo 'I handled the task.';;
   models) echo 'victory/1';;

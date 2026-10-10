@@ -6,6 +6,7 @@ set -u
 case "$1" in
   run) echo 'session=broken-s00001';;
   export) echo 'cannot read session broken-s00001' >&2; exit 1;;
+  stop) echo "broken $2" >> "$WD_FAKE_STATE/stopped"; echo stopped;;
   status) echo 'state: waiting';;
   send) echo ok;;
   models) echo 'broken/m1';;

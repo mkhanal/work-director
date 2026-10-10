@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS worktree (id INTEGER PRIMARY KEY, work TEXT NOT NULL 
 CREATE TABLE IF NOT EXISTS filed (work TEXT PRIMARY KEY REFERENCES work(id), session TEXT NOT NULL, entries INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS cursor (project TEXT NOT NULL, name TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (project, name));
 CREATE UNIQUE INDEX IF NOT EXISTS worktree_one_active_shared ON worktree(work) WHERE kind = 'shared' AND state = 'active';
+CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), text TEXT NOT NULL, at TEXT NOT NULL, delivered TEXT);
 CREATE TABLE IF NOT EXISTS workspace (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, creates INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL, updated TEXT NOT NULL);
 `
 
@@ -744,21 +745,10 @@ func (l *Ledger) Archive(id, why string) ([]core.Work, error) {
 			return fmt.Errorf("archiving %s drops open work: %s; say why: wd archive %s \"<why>\"", id, strings.Join(open, ", "), id)
 		}
 		at := now()
+		if _, err := dropOpen(tx, tree, why, at); err != nil {
+			return err
+		}
 		for _, w := range tree {
-			if !core.AtRest(w.State) {
-				if !slices.Contains(core.Transitions[w.State], core.StateDropped) {
-					return core.IllegalTransition{From: w.State, To: core.StateDropped}
-				}
-				if _, err := tx.Exec(`UPDATE work SET state = ? WHERE id = ?`, string(core.StateDropped), w.ID); err != nil {
-					return err
-				}
-				if _, err := addEvent(tx, w.ID, core.EventState, string(core.StateDropped), at); err != nil {
-					return err
-				}
-				if _, err := addEvent(tx, w.ID, core.EventDecision, "dropped: "+why, at); err != nil {
-					return err
-				}
-			}
 			if _, err := tx.Exec(`UPDATE work SET archived = ? WHERE id = ?`, at, w.ID); err != nil {
 				return err
 			}
@@ -772,6 +762,125 @@ func (l *Ledger) Archive(id, why string) ([]core.Work, error) {
 		return nil, err
 	}
 	return l.reread(tree)
+}
+
+// Drop lets go of work and everything open under it, on purpose: each moves
+// to dropped with why filed as a decision. Work at rest under it is left as it
+// is. It returns the work it dropped.
+func (l *Ledger) Drop(id, why string) ([]core.Work, error) {
+	why = strings.TrimSpace(why)
+	var dropped []core.Work
+	err := l.inTx(func(tx *sql.Tx) error {
+		tree, err := subtree(tx, id)
+		if err != nil {
+			return err
+		}
+		if core.AtRest(tree[0].State) {
+			return fmt.Errorf("work %s is %s: it is already at rest", id, tree[0].State)
+		}
+		if why == "" {
+			return fmt.Errorf("dropping %s needs a reason: say why", id)
+		}
+		dropped, err = dropOpen(tx, tree, why, now())
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return l.reread(dropped)
+}
+
+// dropOpen moves every open work in tree to dropped, filing why as a decision
+// on each, and returns them.
+func dropOpen(tx *sql.Tx, tree []core.Work, why, at string) ([]core.Work, error) {
+	var dropped []core.Work
+	for _, w := range tree {
+		if core.AtRest(w.State) {
+			continue
+		}
+		if !slices.Contains(core.Transitions[w.State], core.StateDropped) {
+			return nil, core.IllegalTransition{From: w.State, To: core.StateDropped}
+		}
+		if _, err := tx.Exec(`UPDATE work SET state = ? WHERE id = ?`, string(core.StateDropped), w.ID); err != nil {
+			return nil, err
+		}
+		if _, err := addEvent(tx, w.ID, core.EventState, string(core.StateDropped), at); err != nil {
+			return nil, err
+		}
+		if _, err := addEvent(tx, w.ID, core.EventDecision, "dropped: "+why, at); err != nil {
+			return nil, err
+		}
+		dropped = append(dropped, w)
+	}
+	return dropped, nil
+}
+
+// QueueMessage stores something said to work, undelivered.
+func (l *Ledger) QueueMessage(work, text string) (core.Message, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return core.Message{}, fmt.Errorf("a message to %s is empty", work)
+	}
+	var m core.Message
+	err := l.inTx(func(tx *sql.Tx) error {
+		if _, err := getWork(tx, work); err != nil {
+			return err
+		}
+		at := now()
+		res, err := tx.Exec(`INSERT INTO message (work, text, at) VALUES (?, ?, ?)`, work, text, at)
+		if err != nil {
+			return err
+		}
+		id, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		m = core.Message{ID: int(id), Work: work, Text: text, At: at}
+		return nil
+	})
+	return m, err
+}
+
+// Undelivered lists work's messages not yet delivered, oldest first.
+func (l *Ledger) Undelivered(work string) ([]core.Message, error) {
+	rows, err := l.db.Query(`SELECT id, work, text, at FROM message WHERE work = ? AND delivered IS NULL ORDER BY id`, work)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []core.Message{}
+	for rows.Next() {
+		var m core.Message
+		if err := rows.Scan(&m.ID, &m.Work, &m.Text, &m.At); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// MarkDelivered stamps a message delivered and files a sent event with its text.
+func (l *Ledger) MarkDelivered(id int) error {
+	return l.inTx(func(tx *sql.Tx) error {
+		var work, text string
+		var delivered sql.NullString
+		err := tx.QueryRow(`SELECT work, text, delivered FROM message WHERE id = ?`, id).Scan(&work, &text, &delivered)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("no message %d", id)
+		}
+		if err != nil {
+			return err
+		}
+		if delivered.Valid {
+			return fmt.Errorf("message %d was already delivered at %s", id, delivered.String)
+		}
+		at := now()
+		if _, err := tx.Exec(`UPDATE message SET delivered = ? WHERE id = ?`, at, id); err != nil {
+			return err
+		}
+		_, err = addEvent(tx, work, core.EventSent, text, at)
+		return err
+	})
 }
 
 // Unarchive brings work and everything under it back into sight, in the states
@@ -801,6 +910,17 @@ func (l *Ledger) Unarchive(id string) ([]core.Work, error) {
 		return nil, err
 	}
 	return l.reread(tree)
+}
+
+// Under returns work and everything under it, parents before children.
+func (l *Ledger) Under(id string) ([]core.Work, error) {
+	var tree []core.Work
+	err := l.inTx(func(tx *sql.Tx) error {
+		var err error
+		tree, err = subtree(tx, id)
+		return err
+	})
+	return tree, err
 }
 
 // subtree is a work item followed by everything under it, parents before

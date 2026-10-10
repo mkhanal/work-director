@@ -13,6 +13,7 @@ case "$1" in
     echo '- [ ] parse the config into a domain type'
     echo '- [ ] wire the decision into the schema'
     ;;
+  stop) echo "planner $2" >> "$WD_FAKE_STATE/stopped"; echo stopped;;
   status) echo 'state: waiting';;
   send) echo ok;;
   models) echo 'planner/m1';;

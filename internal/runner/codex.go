@@ -86,6 +86,10 @@ func (codexRunner) Send(h *Handle, text string) error {
 	return nil
 }
 
+// Stop ends the turn serving the session; codex keeps the session, and Send
+// resumes it.
+func (codexRunner) Stop(h Handle) error { return stopPid(h.Ref) }
+
 func (codexRunner) Status(h Handle) (RunnerStatus, error) {
 	if pid, ok := pidOf(h.Ref); ok && alive(pid) {
 		return StatusRunning, nil

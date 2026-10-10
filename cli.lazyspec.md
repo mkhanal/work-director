@@ -71,7 +71,7 @@ not-detected guidance; the work's state and worktrees stay as they were.
 
 ## A Decision Is Recorded In One Line And Reaches The Brief
 - `wd decide <id> <text>` records a `decision` event on existing work.
-- The work's brief lists its decisions and its resolved concerns' decisions under "Decisions already made", and nothing else there.
+- The work's brief lists its decisions, its goal's decisions and its resolved concerns' decisions under "Decisions already made", and nothing else there.
 
 ## Every Json Command Writes One Document
 - With `--json`, every command writes exactly one JSON document to stdout: no progress lines, no document per spawned session.
@@ -305,3 +305,28 @@ could not with their work, the bound that ran out, and the work still open.
 - `wd projects archive <name> ["<why>"]` archives every work of the project and moves its file to `projects/archive/`, after which the project does not load.
 - With open work and no `<why>` it is refused naming that work, and nothing moves.
 - `wd projects unarchive <name>` moves the file back and unarchives the project's work.
+
+## Wd Send Queues For A Busy Session And Never Forks It
+- `wd send <task> "<text>"` queues the text and delivers it at once when the task's session is not running, saying `delivered`.
+- To a running session it stays queued, saying `queued`, and the next coordination pass (`wd drive`, `wd goal review`) delivers it once the session is idle.
+- Messages already waiting go out with it, as one message.
+
+## Wd Send To A Goal Tells Every Open Task And Keeps It As A Decision
+- `wd send <goal> "<text>"` files the text as a decision on the goal and sends it, as `wd send` does, to every open task with a session.
+- An open task with no session yet reads it in its brief.
+- `--json` prints the task ids under `delivered`, `queued` and `brief`.
+
+## Wd Pause Stops Running Sessions And Keeps Their Conversations
+- `wd pause <id>` stops the session of a task that is running through its runner, which keeps the conversation, and moves the task to paused.
+- On a goal it pauses every open task under it, then the goal.
+- A session that cannot be stopped is named, its task keeps its state, the goal is not paused, and the command exits 1.
+- `wd drive` on a paused goal is refused naming `wd resume`.
+
+## Wd Resume Continues What Was Paused
+- `wd resume <id> ["<note>"]` returns each paused task, and a paused goal, to the state it had before it was paused.
+- Each task with a session is sent "Resume where you left off." followed by the note, as `wd send` does.
+
+## Wd Cancel Stops And Drops Work With A Reason
+- `wd cancel <id> "<why>"` stops every running session under the work and drops it and its open work with the reason, as `Drop` does.
+- Without a reason it is refused and nothing stops.
+- `wd archive` of open work stops running sessions the same way before it drops them.

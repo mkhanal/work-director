@@ -9,3 +9,4 @@ exited = 'state: *exited'
 transcript = "planner export {session}"
 models = "planner models"
 attach = "cd {cwd} && planner attach {session}"
+stop = "planner stop {session}"

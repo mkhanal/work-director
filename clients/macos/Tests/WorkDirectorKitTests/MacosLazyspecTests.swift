@@ -173,9 +173,11 @@ func tempDir() -> URL {
             #expect(throws: PlanError.reasonRequired("reopening")) { try Plan.reopen("g1", reason: blank) }
             #expect(throws: PlanError.reasonRequired("releasing")) { try Plan.release("g1", reason: blank) }
             #expect(throws: PlanError.reasonRequired("archiving open work")) { try Plan.archive(open, reason: blank) }
+            #expect(throws: PlanError.reasonRequired("cancelling")) { try Plan.cancel("g1", reason: blank) }
         }
         #expect(try Plan.archive(rest, reason: "").argv == ["archive", "w1"])
         #expect(try Plan.archive(open, reason: " not wanted ").argv == ["archive", "w1", "not wanted"])
+        #expect(try Plan.cancel("g1", reason: "client said stop").argv == ["cancel", "g1", "client said stop"])
         #expect(try Plan.reopen("g1", reason: " add search ").argv == ["reopen", "g1", "add search"])
         #expect(try Plan.release("g1", reason: "duplicate of g2").argv == ["release", "g1", "duplicate of g2"])
     }

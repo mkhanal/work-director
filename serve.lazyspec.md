@@ -35,6 +35,7 @@ events; unknown ids and ids that are not goals return 404.
 Every goal and standalone item on the board carries `band`:
 - `needs-you` — the item is needs-input or blocked, or is a goal with a task that is.
 - `in-flight` — queued, briefed or running.
+- `paused` — paused by a person.
 - `ready-to-push` — in review with no landing since its last reopening.
 - `in-review` — in review with a landing since its last reopening.
 - `ready-to-close` — soft-done.

@@ -26,6 +26,10 @@ const (
 	// raised, or one was raised and never merged. It is not done and not
 	// dropped — the attempt was real and the result is not in the product.
 	StateAbandoned State = "abandoned"
+	// StatePaused is work a person stopped on purpose, with its session's
+	// conversation kept. It is not blocked: nothing is waiting on an answer,
+	// someone chose to hold it.
+	StatePaused State = "paused"
 )
 
 type WorkKind string
@@ -353,13 +357,14 @@ type Conflict struct {
 }
 
 var Transitions = map[State][]State{
-	StateQueued:     {StateBriefed, StateRunning, StateBlocked, StateDone, StateDropped},
-	StateBriefed:    {StateRunning, StateQueued, StateBlocked, StateDone, StateDropped},
-	StateRunning:    {StateNeedsInput, StateReview, StateBlocked, StateDropped, StateAbandoned},
-	StateNeedsInput: {StateRunning, StateBlocked, StateDropped, StateAbandoned},
-	StateReview:     {StateSoftDone, StateRunning, StateBlocked, StateDropped, StateAbandoned},
+	StateQueued:     {StateBriefed, StateRunning, StateBlocked, StateDone, StateDropped, StatePaused},
+	StateBriefed:    {StateRunning, StateQueued, StateBlocked, StateDone, StateDropped, StatePaused},
+	StateRunning:    {StateNeedsInput, StateReview, StateBlocked, StateDropped, StateAbandoned, StatePaused},
+	StateNeedsInput: {StateRunning, StateBlocked, StateDropped, StateAbandoned, StatePaused},
+	StateReview:     {StateSoftDone, StateRunning, StateBlocked, StateDropped, StateAbandoned, StatePaused},
+	StatePaused:     {StateQueued, StateBriefed, StateRunning, StateNeedsInput, StateReview, StateBlocked, StateDropped, StateAbandoned},
 	StateSoftDone:   {StateDone, StateRunning, StateBlocked, StateDropped, StateAbandoned},
-	StateBlocked:    {StateQueued, StateRunning, StateDone, StateDropped, StateAbandoned},
+	StateBlocked:    {StateQueued, StateRunning, StateDone, StateDropped, StateAbandoned, StatePaused},
 	// Done is not terminal. Work that is finished and then built on again — a
 	// goal someone keeps extending — has to come back to life rather than
 	// forcing a near-copy of the same work under a new id, which loses the
@@ -382,6 +387,17 @@ var Transitions = map[State][]State{
 // work is. Dropped is a choice and abandoned is a stop, and neither is work that
 // is in progress; reopening either would make a deliberate ending reversible by
 // accident.
+// Message is something a person said to work while it runs. It waits in the
+// ledger until the work's session is idle, because a running session handed a
+// message would fork rather than read it.
+type Message struct {
+	ID        int     `json:"id"`
+	Work      string  `json:"work"`
+	Text      string  `json:"text"`
+	At        string  `json:"at"`
+	Delivered *string `json:"delivered"`
+}
+
 // AtRest reports whether work has come to rest: done, dropped or abandoned.
 func AtRest(s State) bool {
 	return s == StateDone || s == StateDropped || s == StateAbandoned

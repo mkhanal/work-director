@@ -101,6 +101,11 @@ func (c *Cli) archive(rest []string) error {
 		return fail("usage: wd archive <id> [\"<why it is no longer wanted>\"]")
 	}
 	why := strings.Join(rest[1:], " ")
+	if strings.TrimSpace(why) != "" {
+		if err := c.stopUnder(rest[0]); err != nil {
+			return err
+		}
+	}
 	works, err := c.Ledger.Archive(rest[0], why)
 	if err != nil {
 		return fail("%v", err)
@@ -1318,16 +1323,6 @@ func (c *Cli) goalStatus(kindWord string, goal core.Work) error {
 	}
 	return c.out(map[string]any{"goal": goal, "open": len(tasks), "tasks": tasks},
 		fmt.Sprintf("%s (%s) · %d open\n%s", goal.Title, goal.State, len(tasks), brief.RenderTaskBlock(tasks)))
-}
-
-func (c *Cli) send(rest []string) error {
-	if len(rest) < 2 {
-		return fail("usage: wd send <id> <text>")
-	}
-	if err := c.sendTo(rest[0], rest[1]); err != nil {
-		return err
-	}
-	return c.out(map[string]any{"ok": true}, "sent")
 }
 
 func (c *Cli) attach(rest []string) error {

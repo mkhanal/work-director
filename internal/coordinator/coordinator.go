@@ -148,6 +148,7 @@ type PassResult struct {
 	Reviewed  []string `json:"reviewed"`
 	Blocked   []string `json:"blocked"`
 	Waiting   []string `json:"waiting"`
+	Delivered []string `json:"delivered"`
 }
 
 var askRe = regexp.MustCompile(`ASK:\s*(\S.*)`)
@@ -219,6 +220,39 @@ func Send(l *ledger.Ledger, id string, r runner.Runner, h runner.Handle, text st
 	return l.SetRef(id, h.Ref)
 }
 
+// Deliver hands work's queued messages to its session, oldest first, when the
+// session is not running, and returns how many it delivered. A running session
+// keeps them queued: handing it a message would start a copy rather than reach
+// the session that is working.
+func Deliver(l *ledger.Ledger, w core.Work, r runner.Runner, h runner.Handle) (int, error) {
+	pending, err := l.Undelivered(w.ID)
+	if err != nil || len(pending) == 0 {
+		return 0, err
+	}
+	status, err := r.Status(h)
+	if err != nil {
+		return 0, err
+	}
+	if status == runner.StatusRunning {
+		return 0, nil
+	}
+	// One send: the session is busy with the first message the moment it
+	// arrives, and a second send would start a copy of it.
+	texts := make([]string, 0, len(pending))
+	for _, m := range pending {
+		texts = append(texts, m.Text)
+	}
+	if err := Send(l, w.ID, r, h, strings.Join(texts, "\n\n")); err != nil {
+		return 0, err
+	}
+	for _, m := range pending {
+		if err := l.MarkDelivered(m.ID); err != nil {
+			return 0, err
+		}
+	}
+	return len(pending), nil
+}
+
 // Outcome is what one coordination pass did with a work item.
 type Outcome string
 
@@ -261,6 +295,7 @@ func CoordinateOnce(goal core.Work, p *project.Project, l *ledger.Ledger, resolv
 		Reviewed:  []string{},
 		Blocked:   []string{},
 		Waiting:   []string{},
+		Delivered: []string{},
 	}
 	listed := map[Outcome]*[]string{
 		Answered:  &res.Answered,
@@ -284,6 +319,20 @@ func CoordinateOnce(goal core.Work, p *project.Project, l *ledger.Ledger, resolv
 		r, err := resolve(h.Runner)
 		if err != nil {
 			return PassResult{}, err
+		}
+		sent, err := Deliver(l, w, r, h)
+		if err != nil {
+			return PassResult{}, err
+		}
+		if sent > 0 {
+			res.Delivered = append(res.Delivered, w.ID)
+			// The executor was waiting on a person and has now heard from one.
+			if w.State == core.StateNeedsInput {
+				if w, err = l.Transition(w.ID, core.StateRunning); err != nil {
+					return PassResult{}, err
+				}
+			}
+			continue
 		}
 		texts, err := r.Transcript(h)
 		if err != nil {

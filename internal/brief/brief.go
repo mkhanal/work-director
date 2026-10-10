@@ -202,7 +202,7 @@ Global rules are in your taste constitution and /taste-* skills. Specific to thi
 
 // ComposeSlice renders one task of a goal: the goal goal, the task, and the
 // other executors' live claims. No backlog, no history.
-func ComposeSlice(w core.Work, goal core.Work, claims []core.Work, p *project.Project, cards []taste.Card) (string, error) {
+func ComposeSlice(w core.Work, goal core.Work, claims []core.Work, p *project.Project, cards []taste.Card, ctx Context) (string, error) {
 	if err := AssertNoHumanHours(w.Title + "\n" + w.Detail); err != nil {
 		return "", err
 	}
@@ -236,6 +236,9 @@ func ComposeSlice(w core.Work, goal core.Work, claims []core.Work, p *project.Pr
 ` + goal.Title + `
 — this task:
 ` + w.Title + detail + `
+
+Decisions already made (do not re-open):
+` + ctx.decisionsOr() + `
 
 ## Co-workers on this branch — do not touch these paths
 ` + claimLines + `

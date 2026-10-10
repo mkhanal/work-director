@@ -37,6 +37,7 @@ type RunnerSpec struct {
 	Transcript string
 	Models     string
 	Attach     string
+	Stop       string
 }
 
 // checkedSpec is a RunnerSpec that can run: required commands present,
@@ -51,6 +52,8 @@ type checkedSpec struct {
 	home string
 	// logDir holds a detached spawn's output, one file per session.
 	logDir string
+	// file is the runner file the spec was read from.
+	file string
 }
 
 // specCommand is one command line of a spec and the placeholders it can fill.
@@ -73,6 +76,7 @@ func commandPlaceholders(s RunnerSpec) []specCommand {
 		{"status", s.Status, session},
 		{"transcript", s.Transcript, session},
 		{"attach", s.Attach, session},
+		{"stop", s.Stop, session},
 		{"models", s.Models, []string{"home"}},
 	}
 }
@@ -88,7 +92,7 @@ func checkSpec(s RunnerSpec, dir string) (checkedSpec, error) {
 	if s.SessionID == "" {
 		return fail("session_id regex is required (capture the session id in spawn output)")
 	}
-	c := checkedSpec{RunnerSpec: s, logDir: filepath.Join(dir, "logs", s.Name)}
+	c := checkedSpec{RunnerSpec: s, logDir: filepath.Join(dir, "logs", s.Name), file: filepath.Join(dir, s.Name+".toml")}
 	for _, re := range []struct {
 		key  string
 		text string
@@ -161,6 +165,7 @@ func loadSpecs(dir string) ([]checkedSpec, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", e.Name(), err)
 		}
+		checked.file = filepath.Join(dir, e.Name())
 		out = append(out, checked)
 	}
 	return out, nil
@@ -210,7 +215,7 @@ func WriteSpec(name, text string) (string, error) {
 func SpecTemplate(name string) string {
 	return `# ` + name + ` — a runner is one file of commands against a provider's CLI.
 # Placeholders are shell-quoted automatically. spawn: {cwd} {name} {name20}
-# {brief} {model} {agent} {home} {slug_cwd}. send, status, transcript, attach:
+# {brief} {model} {agent} {home} {slug_cwd}. send, status, transcript, attach, stop:
 # {cwd} {session} {home} {slug_cwd}, send also {text}, and {log} (the session's
 # spawn output) when detach = true. models: {home}. Write commands exactly as
 # you would run them, including pipes and redirects.
@@ -225,10 +230,13 @@ exited = 'state: *exited'
 transcript = "` + name + ` export --session {session}"
 models = "` + name + ` models"
 attach = "cd {cwd} && ` + name + ` -s {session}"
+stop = "` + name + ` stop --session {session}"
 
 # status: omit to report liveness only; include to classify output by these regexes
 # (exited, then waiting, then running). transcript/models return one item per line.
 # session_id is required: the first match in spawn output names the session.
+# stop ends the session's current run and keeps its conversation; without it,
+# pausing work on this runner is refused.
 # A spawn line without {model} refuses a spawn that names a model.
 `
 }
@@ -356,6 +364,20 @@ func (r *specRunnerAdapter) Send(h *Handle, text string) error {
 	}
 	if res.Code != 0 {
 		return &RunnerError{Runner: r.spec.Name, Detail: "send failed: " + res.Stderr}
+	}
+	return nil
+}
+
+func (r *specRunnerAdapter) Stop(h Handle) error {
+	if r.spec.Stop == "" {
+		return &RunnerError{Runner: r.spec.Name, Detail: "no stop command in " + r.spec.file + "; add stop = \"...\" to stop a session and keep its conversation"}
+	}
+	res, err := shell(fill(r.spec.Stop, r.placeholders(h, "")), h.Cwd)
+	if err != nil {
+		return err
+	}
+	if res.Code != 0 {
+		return &RunnerError{Runner: r.spec.Name, Detail: "stop failed: " + stderrOrStdout(res)}
 	}
 	return nil
 }

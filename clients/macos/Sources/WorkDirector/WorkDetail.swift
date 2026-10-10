@@ -39,6 +39,11 @@ struct WorkDetail: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .toolbar { Actions(work: loaded.work, plan: $plan, asking: $asking) }
+                .safeAreaInset(edge: .bottom) {
+                    if !loaded.work.atRest {
+                        MessageBar(store: store, work: loaded.work)
+                    }
+                }
             } else if let failure {
                 ContentUnavailableView("Cannot read \(id)", systemImage: "exclamationmark.triangle", description: Text(failure))
             } else {
@@ -248,5 +253,76 @@ struct EventsSection: View {
         } label: {
             SectionTitle("Events", detail: "\(events.count)")
         }
+    }
+}
+
+/// Typing to work while it runs, as in a conversation. A goal passes the
+/// message to every open task and keeps it as a decision; a session that is
+/// busy reads it when it is ready.
+struct MessageBar: View {
+    let store: Store
+    let work: Work
+    @State private var text = ""
+    @State private var sending = false
+    @State private var outcome: String?
+    @State private var failed = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let outcome {
+                Label(outcome, systemImage: failed ? "exclamationmark.triangle.fill" : "paperplane")
+                    .font(.caption)
+                    .foregroundStyle(failed ? .red : .secondary)
+                    .lineLimit(2)
+            }
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField(work.kind.isGoal ? "Tell this goal… every task gets it, and it is kept as a decision" : "Message this task… it reads it when it is ready",
+                          text: $text, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...6)
+                    .focused($focused)
+                    .onSubmit { Task { await send() } }
+                    .disabled(sending)
+                Button { Task { await send() } } label: {
+                    Image(systemName: "arrow.up.circle.fill").font(.title2)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(plan == nil ? Color.secondary : Color.accentColor)
+                .disabled(plan == nil || sending)
+                .help(plan?.commandLine ?? "Type a message")
+            }
+            .padding(10)
+            .background(.background, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
+            if let plan {
+                Text(plan.commandLine)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
+    private var plan: Plan? { try? Plan.send(work.id, text: text) }
+
+    private func send() async {
+        guard let plan else { return }
+        sending = true
+        defer { sending = false }
+        do {
+            let result = try await store.run(plan)
+            failed = result.code != 0
+            outcome = failed ? (result.stderr.isEmpty ? result.stdout : result.stderr) : result.stdout
+            if !failed { text = "" }
+        } catch {
+            failed = true
+            outcome = String(describing: error)
+        }
+        await store.refresh()
     }
 }

@@ -208,7 +208,7 @@ func TestStoredValuesOutsideTheDomainFailNamingTheValue(t *testing.T) {
 		read               func(l *Ledger, w core.Work) error
 	}{
 		{"work kind", `UPDATE work SET kind = 'chore'`, "chore", func(l *Ledger, w core.Work) error { _, err := l.Get(w.ID); return err }},
-		{"work state", `UPDATE work SET state = 'paused'`, "paused", func(l *Ledger, w core.Work) error { _, err := l.Get(w.ID); return err }},
+		{"work state", `UPDATE work SET state = 'hibernating'`, "hibernating", func(l *Ledger, w core.Work) error { _, err := l.Get(w.ID); return err }},
 		{"event kind", `UPDATE event SET kind = 'shout'`, "shout", func(l *Ledger, w core.Work) error { _, err := l.Events(w.ID, nil); return err }},
 		{"feedback source", `UPDATE feedback SET source = 'rumour'`, "rumour", func(l *Ledger, w core.Work) error { _, err := l.Feedback(); return err }},
 		{"worktree kind", `UPDATE worktree SET kind = 'borrowed'`, "borrowed", func(l *Ledger, w core.Work) error { _, err := l.Worktrees(w.ID); return err }},

@@ -24,6 +24,7 @@ extension WorkState {
         case .done: StateLook(label: "Done", symbol: "checkmark.seal", tint: .green)
         case .dropped: StateLook(label: "Dropped", symbol: "minus.circle", tint: .gray)
         case .abandoned: StateLook(label: "Abandoned", symbol: "xmark.octagon", tint: .brown)
+        case .paused: StateLook(label: "Paused", symbol: "pause.circle", tint: .purple)
         }
     }
 }
@@ -33,6 +34,7 @@ extension Band {
         switch self {
         case .needsYou: "Needs You"
         case .inFlight: "In Flight"
+        case .paused: "Paused"
         case .readyToPush: "Ready to Push"
         case .inReview: "In Review"
         case .readyToClose: "Ready to Close"
@@ -44,6 +46,7 @@ extension Band {
         switch self {
         case .needsYou: "person.crop.circle.badge.exclamationmark"
         case .inFlight: "airplane"
+        case .paused: "pause.circle"
         case .readyToPush: "arrow.up.circle"
         case .inReview: "eye"
         case .readyToClose: "checkmark.circle"

@@ -9,3 +9,4 @@ exited = 'state: *exited'
 transcript = "driven export {session}"
 models = "driven models"
 attach = "cd {cwd} && driven attach {session}"
+stop = "driven stop {session}"
