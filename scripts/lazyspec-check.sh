@@ -33,5 +33,25 @@ for t in internal/*/*_lazyspec_test.go; do
   [ -f "$stem.lazyspec.md" ] || { echo "orphan test: $t (no $stem.lazyspec.md)"; fail=1; }
 done
 
+# The macOS app: clients/macos/<stem>.lazyspec.md is married to
+# clients/macos/Tests/WorkDirectorKitTests/<Stem>LazyspecTests.swift by @Test("<heading>").
+swift_tests=clients/macos/Tests/WorkDirectorKitTests
+for spec in clients/macos/*.lazyspec.md; do
+  [ -f "$spec" ] || continue
+  stem=$(basename "$spec" .lazyspec.md)
+  test="$swift_tests/$(printf '%s' "$stem" | awk '{print toupper(substr($0, 1, 1)) substr($0, 2)}')LazyspecTests.swift"
+  [ -f "$test" ] || { echo "orphan spec: $spec (no $test)"; fail=1; continue; }
+  while IFS= read -r h; do
+    grep -qF "@Test(\"$h\"" "$test" && continue
+    echo "unmarried: $spec :: $h"
+    fail=1
+  done < <(grep '^## ' "$spec" | grep -v 'no-test:' | sed 's/^## //')
+done
+for t in "$swift_tests"/*LazyspecTests.swift; do
+  [ -f "$t" ] || continue
+  stem=$(basename "$t" LazyspecTests.swift | awk '{print tolower(substr($0, 1, 1)) substr($0, 2)}')
+  [ -f "clients/macos/$stem.lazyspec.md" ] || { echo "orphan test: $t (no clients/macos/$stem.lazyspec.md)"; fail=1; }
+done
+
 [ $fail -eq 0 ] && echo "lazyspec: all requirements married"
 exit $fail
