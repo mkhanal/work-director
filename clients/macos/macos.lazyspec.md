@@ -40,3 +40,16 @@ Every state has a symbol and a label of its own; no two states share either.
 ## A Change Made Elsewhere Reaches The Board
 When any `wd` process records an event, the app's board is read again within
 two seconds.
+
+## The App Opens On A New Goal <!-- no-test: a window's first selection is not observable outside SwiftUI; checked by launching the app -->
+The app opens on the new-goal page of the product in scope, laid out like a
+goal page and typed into the same bar as a running goal.
+
+## A Product Scope Shows Only That Product's Work
+With a product in scope, the board's bands, their counts and the recent goals
+hold only that product's work; with none, every product's.
+
+## A New Goal First Offers The Goals It May Continue
+- Submitting a request asks `wd goal find` first and starts nothing while matches are offered.
+- With no match it starts the goal in the same step.
+- Continuing an offered goal runs `wd goal continue` with the request.

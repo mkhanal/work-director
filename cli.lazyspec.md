@@ -330,3 +330,15 @@ could not with their work, the bound that ran out, and the work still open.
 - `wd cancel <id> "<why>"` stops every running session under the work and drops it and its open work with the reason, as `Drop` does.
 - Without a reason it is refused and nothing stops.
 - `wd archive` of open work stops running sessions the same way before it drops them.
+
+## Wd Goal Find Asks A Model Which Goals A Request Continues
+- `wd goal find <project> "<text>"` shows the project's goals, finished and archived ones included, to one bounded model call with the `interpret` role's model, through the project's runner or `--runner`.
+- `--json` prints `[{goal, why}]`, the goal as its whole work row, most relevant first.
+- A project with no goals answers `[]` without asking a model.
+
+## Wd Goal Continue Picks A Goal Up Where It Stands
+- `wd goal continue <goal> "<text>"` on an open goal sends it the text, as `wd send` to a goal does.
+- On a paused goal it resumes the goal with the text as the note.
+- On a done goal it unarchives it when archived, reopens it with the text as the reason, plans it and spawns its tasks, as `wd goal start` does.
+- On a dropped or abandoned goal it is refused naming `wd goal start`.
+- `--json` prints `{goal, tasks}`.

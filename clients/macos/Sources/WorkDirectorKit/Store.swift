@@ -86,7 +86,12 @@ public final class Store {
         try decode([Work].self, try await channel.action(["status", "--archived", "--json"]))
     }
 
-    /// Runs a confirmed start plan and reads back the goal it filed.
+    /// Asks one bounded model call which of a product's goals a request continues.
+    public func find(project: String, text: String) async throws -> [Found] {
+        try decode([Found].self, try await channel.action(["goal", "find", project, text, "--json"]))
+    }
+
+    /// Runs a start or continue plan and reads back the goal and its tasks.
     public func start(_ plan: Plan) async throws -> Started {
         let started = try decode(Started.self, try await channel.action(plan.argv))
         await refresh()

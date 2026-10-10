@@ -125,9 +125,18 @@ public struct Board: Codable, Sendable, Hashable {
     public let goals: [BoardGoal]
     public let standalone: [BoardItem]
 
-    /// Every item in one band, goals first.
-    public func items(in band: Band) -> [Work] {
-        goals.filter { $0.band == band }.map(\.work) + standalone.filter { $0.band == band }.map(\.work)
+    /// Every item in one band, goals first, within one product when one is named.
+    public func items(in band: Band, project: String? = nil) -> [Work] {
+        let mine = { (w: Work) in project == nil || w.project == project }
+        return goals.filter { $0.band == band && mine($0.work) }.map(\.work)
+            + standalone.filter { $0.band == band && mine($0.work) }.map(\.work)
+    }
+
+    /// Goals on the board, most recently active first, within one product when one is named.
+    public func recentGoals(project: String? = nil) -> [Work] {
+        goals.map(\.work)
+            .filter { project == nil || $0.project == project }
+            .sorted { $0.updated > $1.updated }
     }
 
     public func rollup(of id: String) -> Rollup? {
@@ -217,4 +226,10 @@ public struct ReviewPass: Codable, Sendable, Hashable {
 public struct Started: Codable, Sendable, Hashable {
     public let goal: Work
     public let tasks: [Work]
+}
+
+/// A goal a request may continue, and why the model thinks so.
+public struct Found: Codable, Sendable, Hashable {
+    public let goal: Work
+    public let why: String
 }

@@ -68,6 +68,13 @@ public struct Plan: Hashable, Sendable, Identifiable {
         return Plan(title: "Start goal", argv: ["goal", "start", project, text, "--json"])
     }
 
+    /// Picks a goal up where it stands with what the person typed.
+    public static func continueGoal(_ id: String, text: String) throws -> Plan {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw PlanError.empty }
+        return Plan(title: "Continue goal", argv: ["goal", "continue", id, text, "--json"])
+    }
+
     /// Archives work. Work at rest needs no reason; open work is dropped first,
     /// which is a choice someone has to state.
     public static func archive(_ work: Work, reason: String) throws -> Plan {

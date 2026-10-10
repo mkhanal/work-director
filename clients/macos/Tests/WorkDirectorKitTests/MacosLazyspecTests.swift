@@ -32,6 +32,8 @@ struct Home {
         try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
         var env = ProcessInfo.processInfo.environment
         env["WD_HOME"] = dir.path
+        env["WD_FAKE_STATE"] = dir.appendingPathComponent("fake-state").path
+        env["PATH"] = dir.appendingPathComponent("bin").path + ":" + (env["PATH"] ?? "")
         environment = env
         try wd("projects", "add", "demo", project.path, "--runner", "claude", "--lazyspec", "n")
     }
@@ -55,6 +57,11 @@ struct Home {
         return text
     }
 
+    /// Files a goal and returns its id.
+    func goal(_ project: String, _ title: String) throws -> String {
+        try JSONDecoder().decode(Work.self, from: Data(try wd("goal", "add", project, title, "--json").utf8)).id
+    }
+
     func channel() throws -> Channel {
         try Channel(wd: builtWD, environment: environment)
     }
@@ -76,6 +83,48 @@ func workJSON(state: String) -> String {
 
 func tempDir() -> URL {
     FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+}
+
+/// A runner that matches requests to goals and plans goals the way a model
+/// would, with no model: it answers a find brief with the goal mentioning CSV,
+/// and any other brief with a two-task plan.
+func fakeRunner(_ home: Home) throws {
+    let bin = home.dir.appendingPathComponent("bin")
+    try executable(bin.appendingPathComponent("fake"), #"""
+    #!/bin/sh
+    state="$WD_FAKE_STATE"; mkdir -p "$state"
+    case "$1" in
+      run)
+        n=$(( $(cat "$state/n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$state/n"
+        printf '%s' "$2" > "$state/brief-$n"; echo "session=s$n";;
+      export)
+        brief="$state/brief-${2#s}"
+        if grep -q '^You match a request' "$brief"; then
+          hit=""
+          grep -q 'CSV export' "$brief" && hit=$(grep -m1 '^- .*CSV' "$brief" | sed 's/^- \([0-9a-f]*\) .*/\1/')
+          if [ -n "$hit" ]; then echo "MATCH: $hit | extends the CSV export"; else echo NONE; fi
+        else
+          printf '## Work\n- [ ] first step\n- [ ] second step\n'
+        fi;;
+      status) echo 'state: exited';;
+      *) echo ok;;
+    esac
+    """#)
+    try FileManager.default.createDirectory(at: home.dir.appendingPathComponent("runners"), withIntermediateDirectories: true)
+    try """
+    name = "fake"
+    spawn = "fake run {brief}"
+    session_id = 'session=([A-Za-z0-9-]+)'
+    send = "fake send {session} {text}"
+    status = "fake status {session}"
+    running = 'state: *running'
+    waiting = 'state: *waiting'
+    exited = 'state: *exited'
+    transcript = "fake export {session}"
+    models = "fake models"
+    attach = "fake attach {session}"
+    stop = "fake stop {session}"
+    """.write(to: home.dir.appendingPathComponent("runners/fake.toml"), atomically: true, encoding: .utf8)
 }
 
 @Suite struct Macos {
@@ -208,6 +257,72 @@ func tempDir() -> URL {
             try await Task.sleep(for: .milliseconds(50))
         }
         #expect(seen, "work filed by another wd process is not on the board within 2s")
+        await store.stop()
+    }
+
+    @Test("A Product Scope Shows Only That Product's Work")
+    func productScope() async throws {
+        let home = try Home()
+        let other = home.dir.appendingPathComponent("other-repo")
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        try home.wd("projects", "add", "other", other.path, "--runner", "claude", "--lazyspec", "n")
+        let mine = try home.goal("demo", "Mine")
+        let theirs = try home.goal("other", "Theirs")
+        let task = try home.wd("add", "other", "Their task")
+        let store = await Store(channel: try home.channel())
+        await store.start()
+        let board = try #require(await store.board)
+        #expect(board.items(in: .inFlight, project: "demo").map(\.id) == [mine])
+        #expect(Set(board.items(in: .inFlight, project: "other").map(\.id)) == Set([theirs, task]))
+        #expect(board.items(in: .inFlight).count == 3)
+        #expect(board.recentGoals(project: "other").map(\.id) == [theirs])
+        #expect(board.recentGoals().count == 2)
+        await store.stop()
+    }
+
+    @Test("A New Goal First Offers The Goals It May Continue")
+    func newGoalOffersFirst() async throws {
+        let home = try Home()
+        try fakeRunner(home)
+        let repo = home.dir.appendingPathComponent("fake-repo")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        for args in [["init", "-q", "-b", "main"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"]] {
+            let git = Process()
+            git.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            git.arguments = ["git"] + args
+            git.currentDirectoryURL = repo
+            try git.run()
+            git.waitUntilExit()
+        }
+        try home.wd("projects", "add", "tracker", repo.path, "--runner", "fake", "--lazyspec", "n")
+        let csv = try home.goal("tracker", "Export tasks to CSV")
+        try home.wd("done", csv, "--cancelled", "the first version shipped")
+        let store = await Store(channel: try home.channel())
+        await store.start()
+        let flow = await NewGoal(store: store)
+
+        await flow.submit(project: "tracker", text: "add tags to the CSV export")
+        guard case .offering(let found) = await flow.phase else {
+            Issue.record("phase = \(await flow.phase), want the CSV goal offered")
+            return
+        }
+        #expect(found.map(\.goal.id) == [csv])
+        #expect(try home.wd("status", "--all").contains("\(csv)\tdone"))
+
+        await flow.continueGoal(csv, text: "add tags to the CSV export")
+        guard case .started(let continued) = await flow.phase else {
+            Issue.record("phase = \(await flow.phase), want the CSV goal continued")
+            return
+        }
+        #expect(continued.goal.id == csv && continued.tasks.count == 2)
+
+        await flow.reset()
+        await flow.submit(project: "tracker", text: "A dark mode for the settings page")
+        guard case .started(let fresh) = await flow.phase else {
+            Issue.record("phase = \(await flow.phase), want a new goal started in one step")
+            return
+        }
+        #expect(fresh.goal.title == "A dark mode for the settings page" && fresh.tasks.count == 2)
         await store.stop()
     }
 }

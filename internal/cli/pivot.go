@@ -33,7 +33,12 @@ func (c *Cli) send(rest []string) error {
 		return err
 	}
 	if core.IsGoal(w.Kind) {
-		return c.tellGoal(w, rest[1])
+		out, err := c.tellGoal(w, rest[1])
+		if err != nil {
+			return err
+		}
+		return c.out(out, fmt.Sprintf("kept as a decision on %s; delivered to %d task(s), queued for %d, in the brief of %d",
+			w.ID, len(out["delivered"]), len(out["queued"]), len(out["brief"])))
 	}
 	where, err := c.tellTask(w, rest[1])
 	if err != nil {
@@ -100,19 +105,19 @@ func (c *Cli) tellTask(w core.Work, text string) (told, error) {
 
 // tellGoal keeps text as a decision on the goal, which every later brief and
 // judgement reads, and passes it to every open task that has a session.
-func (c *Cli) tellGoal(goal core.Work, text string) error {
+func (c *Cli) tellGoal(goal core.Work, text string) (map[string][]string, error) {
 	if core.Reopenable(goal.State) {
-		return fail("%s is done; a message is not a reason to work on it again — wd reopen %s \"<what is being worked on>\"", goal.ID, goal.ID)
+		return nil, fail("%s is done; a message is not a reason to work on it again — wd reopen %s \"<what is being worked on>\"", goal.ID, goal.ID)
 	}
 	if core.AtRest(goal.State) {
-		return fail("goal %s is %s: there is nothing running to tell", goal.ID, goal.State)
+		return nil, fail("goal %s is %s: there is nothing running to tell", goal.ID, goal.State)
 	}
 	if _, err := c.Ledger.AddEvent(goal.ID, core.EventDecision, text); err != nil {
-		return err
+		return nil, err
 	}
 	tasks, err := c.Ledger.Tasks(goal.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	out := map[string][]string{"delivered": {}, "queued": {}, "brief": {}}
 	for _, t := range tasks {
@@ -121,22 +126,21 @@ func (c *Cli) tellGoal(goal core.Work, text string) error {
 		}
 		p, err := c.project(t.Project)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if _, ok, err := coordinator.Handle(c.Ledger, t, p); err != nil {
-			return err
+			return nil, err
 		} else if !ok {
 			out["brief"] = append(out["brief"], t.ID)
 			continue
 		}
 		where, err := c.tellTask(t, text)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		out[string(where)] = append(out[string(where)], t.ID)
 	}
-	return c.out(out, fmt.Sprintf("kept as a decision on %s; delivered to %d task(s), queued for %d, in the brief of %d",
-		goal.ID, len(out["delivered"]), len(out["queued"]), len(out["brief"])))
+	return out, nil
 }
 
 // pause stops running sessions, keeping their conversations, and holds the
@@ -193,22 +197,33 @@ func (c *Cli) resume(rest []string) error {
 	if err != nil {
 		return err
 	}
-	note := strings.TrimSpace(strings.Join(rest[1:], " "))
+	resumed, err := c.resumeWork(w, strings.Join(rest[1:], " "))
+	if err != nil {
+		return err
+	}
+	return c.out(map[string]any{"resumed": resumed}, fmt.Sprintf("%s resumed with %d task(s)", w.ID, len(resumed)))
+}
+
+// resumeWork returns paused work to where it was and tells each task that was
+// working to carry on, with the note; it returns the ids it resumed.
+func (c *Cli) resumeWork(w core.Work, note string) ([]string, error) {
+	note = strings.TrimSpace(note)
 	message := resumeText
 	if note != "" {
 		message += "\n\n" + note
 	}
 	targets := []core.Work{w}
+	var err error
 	if core.IsGoal(w.Kind) {
 		if targets, err = c.Ledger.Tasks(w.ID); err != nil {
-			return err
+			return nil, err
 		}
 	} else if w.State != core.StatePaused {
-		return fail("%s is %s, not paused", w.ID, w.State)
+		return nil, fail("%s is %s, not paused", w.ID, w.State)
 	}
 	if core.IsGoal(w.Kind) && w.State == core.StatePaused {
 		if err := c.unpause(w); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	resumed := []string{}
@@ -217,28 +232,28 @@ func (c *Cli) resume(rest []string) error {
 			continue
 		}
 		if err := c.unpause(t); err != nil {
-			return err
+			return nil, err
 		}
 		resumed = append(resumed, t.ID)
 		if t, err = c.Ledger.Get(t.ID); err != nil {
-			return err
+			return nil, err
 		}
 		if t.State != core.StateRunning && t.State != core.StateNeedsInput {
 			continue
 		}
 		p, err := c.project(t.Project)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if _, ok, err := coordinator.Handle(c.Ledger, t, p); err != nil {
-			return err
+			return nil, err
 		} else if ok {
 			if _, err := c.tellTask(t, message); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
-	return c.out(map[string]any{"resumed": resumed}, fmt.Sprintf("%s resumed with %d task(s)", w.ID, len(resumed)))
+	return resumed, nil
 }
 
 // unpause moves paused work back to the state its ledger says it was paused from.
@@ -321,4 +336,54 @@ func (c *Cli) stopSession(w core.Work) error {
 		return nil
 	}
 	return r.Stop(h)
+}
+
+// goalContinue picks a goal up where it stands: an open goal is told the text,
+// a paused one is resumed with it, and a done one is reopened with it as the
+// reason, planned and started again. A goal let go of is not continued.
+func (c *Cli) goalContinue(goal core.Work, text string) error {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return fail("usage: wd goal continue <id> \"<what is being worked on>\"")
+	}
+	var lines []string
+	switch {
+	case goal.State == core.StateDropped || goal.State == core.StateAbandoned:
+		return fail("goal %s is %s and is not picked up again; start a new one: wd goal start %s \"<what you want done>\"", goal.ID, goal.State, goal.Project)
+	case goal.State == core.StatePaused:
+		if _, err := c.resumeWork(goal, text); err != nil {
+			return err
+		}
+	case core.Reopenable(goal.State):
+		if goal.Archived != nil {
+			if _, err := c.Ledger.Unarchive(goal.ID); err != nil {
+				return err
+			}
+		}
+		reopened, err := c.Ledger.Reopen(goal.ID, text)
+		if err != nil {
+			return err
+		}
+		p, err := c.project(goal.Project)
+		if err != nil {
+			return err
+		}
+		if _, _, lines, err = c.planAndSpawn(reopened, p); err != nil {
+			return fmt.Errorf("goal %s reopened; %w", goal.ID, err)
+		}
+	default:
+		if _, err := c.tellGoal(goal, text); err != nil {
+			return err
+		}
+	}
+	goal, err := c.Ledger.Get(goal.ID)
+	if err != nil {
+		return err
+	}
+	tasks, err := c.Ledger.Tasks(goal.ID)
+	if err != nil {
+		return err
+	}
+	return c.out(map[string]any{"goal": goal, "tasks": tasks},
+		strings.TrimSpace(fmt.Sprintf("goal %s continued: %s (%s)\n%s", goal.ID, goal.Title, goal.State, strings.Join(lines, "\n"))))
 }

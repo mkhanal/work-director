@@ -646,6 +646,12 @@ func (c *Cli) goalLike(cmd string, rest []string) error {
 		}
 		return c.goalStart(rest[1], rest[2])
 	}
+	if cmd == "goal" && sub == "find" {
+		if len(rest) < 3 {
+			return fail("usage: wd goal find <project> \"<what you want done>\" [--runner <runner>]")
+		}
+		return c.goalFind(rest[1], rest[2])
+	}
 	if cmd == "goal" && sub == "add" {
 		if len(rest) < 3 {
 			return fail("usage: wd goal add <project> <title> [--detail text] [--type query|build|fix|change|review]")
@@ -720,6 +726,11 @@ func (c *Cli) goalLike(cmd string, rest []string) error {
 		return c.goalReopen(goal, rest)
 	case "release":
 		return c.goalRelease(goal, rest)
+	case "continue":
+		if goal == nil || len(rest) < 3 {
+			return fail("usage: wd goal continue <id> \"<what is being worked on>\" [--runner <runner>]")
+		}
+		return c.goalContinue(*goal, rest[2])
 	}
 	return fail("%s", usage)
 }
@@ -739,37 +750,45 @@ func (c *Cli) goalStart(name, text string) error {
 	if err != nil {
 		return err
 	}
-	tasks, err := c.planGoal(goal, p)
+	goal, tasks, lines, err := c.planAndSpawn(goal, p)
 	if err != nil {
 		return fmt.Errorf("goal %s filed; %w", goal.ID, err)
 	}
+	text = fmt.Sprintf("goal %s started: %s\n%s", goal.ID, goal.Title, strings.Join(lines, "\n"))
+	return c.out(map[string]any{"goal": goal, "tasks": tasks}, text)
+}
+
+// planAndSpawn plans a goal and spawns its open tasks, returning the goal and
+// all its tasks as they now stand.
+func (c *Cli) planAndSpawn(goal core.Work, p *project.Project) (core.Work, []core.Work, []string, error) {
+	tasks, err := c.planGoal(goal, p)
+	if err != nil {
+		return goal, nil, nil, err
+	}
 	runners, err := project.ParseRunnerList(strOr(c.Args, "runner", p.Runner), p.Runner, runner.AllRunnerNames)
 	if err != nil {
-		return err
+		return goal, nil, nil, err
 	}
 	detected, err := detectedRunners(runners)
 	if err != nil {
-		return err
+		return goal, nil, nil, err
 	}
 	cwd, err := c.ensureSharedWorktree(goal, p)
 	if err != nil {
-		return err
+		return goal, nil, nil, err
 	}
 	if goal, err = c.Ledger.Get(goal.ID); err != nil {
-		return err
+		return goal, nil, nil, err
 	}
 	_, lines, err := c.spawnTasks(goal, p, runners, detected, tasks, cwd)
 	if err != nil {
-		return err
+		return goal, nil, nil, err
 	}
 	if goal, err = c.Ledger.Get(goal.ID); err != nil {
-		return err
+		return goal, nil, nil, err
 	}
-	if tasks, err = c.Ledger.Tasks(goal.ID); err != nil {
-		return err
-	}
-	text = fmt.Sprintf("goal %s started: %s\n%s", goal.ID, goal.Title, strings.Join(lines, "\n"))
-	return c.out(map[string]any{"goal": goal, "tasks": tasks}, text)
+	all, err := c.Ledger.Tasks(goal.ID)
+	return goal, all, lines, err
 }
 
 // goalTitle is the first line of what someone typed, cut at a word to at most

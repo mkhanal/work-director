@@ -1,0 +1,12 @@
+name = "finder"
+spawn = "finder run {brief}"
+session_id = 'session=([A-Za-z0-9-]+)'
+send = "finder send {session} {text}"
+status = "finder status {session}"
+running = 'state: *waiting'
+waiting = 'state: *waiting'
+exited = 'state: *exited'
+transcript = "finder export {session}"
+models = "finder models"
+attach = "cd {cwd} && finder attach {session}"
+stop = "finder stop {session}"

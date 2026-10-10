@@ -40,7 +40,7 @@ struct WorkDetail: View {
                 }
                 .toolbar { Actions(work: loaded.work, plan: $plan, asking: $asking) }
                 .safeAreaInset(edge: .bottom) {
-                    if !loaded.work.atRest {
+                    if !loaded.work.atRest || (loaded.work.kind.isGoal && loaded.work.state == .done) {
                         MessageBar(store: store, work: loaded.work)
                     }
                 }
@@ -266,55 +266,39 @@ struct MessageBar: View {
     @State private var sending = false
     @State private var outcome: String?
     @State private var failed = false
-    @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let outcome {
-                Label(outcome, systemImage: failed ? "exclamationmark.triangle.fill" : "paperplane")
-                    .font(.caption)
-                    .foregroundStyle(failed ? .red : .secondary)
-                    .lineLimit(2)
-            }
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField(work.kind.isGoal ? "Tell this goal… every task gets it, and it is kept as a decision" : "Message this task… it reads it when it is ready",
-                          text: $text, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...6)
-                    .focused($focused)
-                    .onSubmit { Task { await send() } }
-                    .disabled(sending)
-                Button { Task { await send() } } label: {
-                    Image(systemName: "arrow.up.circle.fill").font(.title2)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(plan == nil ? Color.secondary : Color.accentColor)
-                .disabled(plan == nil || sending)
-                .help(plan?.commandLine ?? "Type a message")
-            }
-            .padding(10)
-            .background(.background, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
-            if let plan {
-                Text(plan.commandLine)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.bar)
+        InputBar(
+            text: $text,
+            placeholder: continuing ? "Continue this goal… say what is being worked on; it is planned and started again"
+                : work.kind.isGoal ? "Tell this goal… every task gets it, and it is kept as a decision" : "Message this task… it reads it when it is ready",
+            command: plan?.commandLine,
+            busy: sending,
+            note: outcome,
+            noteIsError: failed
+        ) { Task { await send() } }
     }
 
-    private var plan: Plan? { try? Plan.send(work.id, text: text) }
+    /// A finished goal is picked up again rather than told: continuing it
+    /// reopens it with this text as the reason.
+    private var continuing: Bool { work.kind.isGoal && work.state == .done }
+
+    private var plan: Plan? {
+        continuing ? try? Plan.continueGoal(work.id, text: text) : try? Plan.send(work.id, text: text)
+    }
 
     private func send() async {
         guard let plan else { return }
         sending = true
         defer { sending = false }
         do {
+            if continuing {
+                _ = try await store.start(plan)
+                failed = false
+                outcome = "continued: planned and started again"
+                text = ""
+                return
+            }
             let result = try await store.run(plan)
             failed = result.code != 0
             outcome = failed ? (result.stderr.isEmpty ? result.stdout : result.stderr) : result.stdout
@@ -324,5 +308,64 @@ struct MessageBar: View {
             outcome = String(describing: error)
         }
         await store.refresh()
+    }
+}
+
+/// The one place a person types to Work Director: a new goal and a running one
+/// read the same. The command it will run shows under it, so sending is the
+/// confirmation.
+struct InputBar: View {
+    @Binding var text: String
+    let placeholder: String
+    let command: String?
+    let busy: Bool
+    var note: String? = nil
+    var noteIsError = false
+    let submit: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let note {
+                Label(note, systemImage: noteIsError ? "exclamationmark.triangle.fill" : "paperplane")
+                    .font(.caption)
+                    .foregroundStyle(noteIsError ? .red : .secondary)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+            }
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField(placeholder, text: $text, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...8)
+                    .focused($focused)
+                    .onSubmit { if command != nil && !busy { submit() } }
+                    .disabled(busy)
+                if busy {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button(action: submit) {
+                        Image(systemName: "arrow.up.circle.fill").font(.title2)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(command == nil ? Color.secondary : Color.accentColor)
+                    .disabled(command == nil)
+                    .help(command ?? "Type what you want")
+                }
+            }
+            .padding(10)
+            .background(.background, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
+            if let command {
+                Text(command)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+        .onAppear { focused = true }
     }
 }

@@ -4104,3 +4104,84 @@ func TestWdCancelStopsAndDropsWorkWithAReason(t *testing.T) {
 		t.Fatalf("archiving open work did not stop its running session: %v", err)
 	}
 }
+
+func TestWdGoalFindAsksAModelWhichGoalsARequestContinues(t *testing.T) {
+	f := newCLIFixture(t)
+	var filed core.Work
+	if err := json.Unmarshal([]byte(f.runOK(t, "goal", "add", "sample-app", "Export tasks to CSV", "--json")), &filed); err != nil {
+		t.Fatalf("goal add: %v", err)
+	}
+	f.runOK(t, "done", filed.ID, "--cancelled", "shipped elsewhere")
+	f.runOK(t, "archive", filed.ID)
+
+	var found []struct {
+		Goal core.Work `json:"goal"`
+		Why  string    `json:"why"`
+	}
+	out := f.runOK(t, "goal", "find", "sample-app", "add tags to the CSV export", "--runner", "finder", "--json")
+	if err := json.Unmarshal([]byte(out), &found); err != nil {
+		t.Fatalf("goal find --json: %v\n%s", err, out)
+	}
+	if len(found) != 1 || found[0].Goal.ID != filed.ID || found[0].Goal.Title != "Export tasks to CSV" || found[0].Why != "extends the CSV export" {
+		t.Fatalf("found = %+v, want the archived CSV goal with the model's reason", found)
+	}
+	brief, err := os.ReadFile(filepath.Join(f.dir, "fake-state", "finder-brief"))
+	if err != nil || !strings.Contains(string(brief), f.ids["epic"]) {
+		t.Fatalf("the model was not shown the project's other goals: %v\n%s", err, brief)
+	}
+
+	empty := filepath.Join(f.dir, "empty-repo")
+	if err := os.MkdirAll(empty, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	f.runOK(t, "projects", "add", "empty", empty, "--lazyspec", "n")
+	asked, _ := os.ReadFile(filepath.Join(f.dir, "fake-state", "finder-n"))
+	out = f.runOK(t, "goal", "find", "empty", "anything", "--runner", "finder", "--json")
+	if strings.TrimSpace(out) != "[]" {
+		t.Fatalf("a project with no goals: %q, want []", out)
+	}
+	if again, _ := os.ReadFile(filepath.Join(f.dir, "fake-state", "finder-n")); string(again) != string(asked) {
+		t.Fatalf("a project with no goals asked a model")
+	}
+}
+
+func TestWdGoalContinuePicksAGoalUpWhereItStands(t *testing.T) {
+	f := newCLIFixture(t)
+	var done core.Work
+	if err := json.Unmarshal([]byte(f.runOK(t, "goal", "add", "sample-app", "Export tasks to CSV", "--json")), &done); err != nil {
+		t.Fatalf("goal add: %v", err)
+	}
+	f.runOK(t, "done", done.ID, "--cancelled", "first version shipped")
+	f.runOK(t, "archive", done.ID)
+	out := f.runOK(t, "goal", "continue", done.ID, "add tags and due dates to the export", "--runner", "planner", "--json")
+	var continued struct {
+		Goal  core.Work   `json:"goal"`
+		Tasks []core.Work `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(out), &continued); err != nil {
+		t.Fatalf("goal continue --json: %v\n%s", err, out)
+	}
+	if continued.Goal.ID != done.ID || continued.Goal.Archived != nil || continued.Goal.State != core.StateRunning || len(continued.Tasks) != 2 {
+		t.Fatalf("continued = %+v with %d tasks, want the goal unarchived, running, with the planner's two tasks", continued.Goal, len(continued.Tasks))
+	}
+	if events := f.runOK(t, "events", done.ID); !strings.Contains(events, "reopened: add tags and due dates to the export") {
+		t.Fatalf("the done goal was not reopened with the text as its reason:\n%s", events)
+	}
+
+	epic := f.ids["epic"]
+	f.runOK(t, "goal", "continue", epic, "keep the old dashboards read-only")
+	if events := f.runOK(t, "events", epic); !strings.Contains(events, "decision\tkeep the old dashboards read-only") {
+		t.Fatalf("an open goal was not told the text:\n%s", events)
+	}
+
+	f.runOK(t, "pause", epic)
+	f.runOK(t, "goal", "continue", epic, "carry on")
+	if got := stateOf(t, f, epic); got == core.StatePaused {
+		t.Fatalf("a paused goal was not resumed")
+	}
+
+	f.runOK(t, "cancel", f.ids["planEpic"], "not needed")
+	if errStr := f.runFail(t, "goal", "continue", f.ids["planEpic"], "again"); !strings.Contains(errStr, "wd goal start") {
+		t.Fatalf("continuing a dropped goal: %q, want it refused naming wd goal start", errStr)
+	}
+}

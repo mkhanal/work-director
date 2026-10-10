@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -u
+state=${WD_FAKE_STATE:?WD_FAKE_STATE needed}
+mkdir -p "$state"
+case "$1" in
+  run)
+    n=$(cat "$state/finder-n" 2>/dev/null || echo 0)
+    n=$((n + 1))
+    echo "$n" > "$state/finder-n"
+    printf '%s' "$2" > "$state/finder-brief"
+    printf 'session=finder-s%05x\n' "$n"
+    ;;
+  export)
+    # Matches the first goal whose line mentions CSV, as a model reading the list would.
+    hit=$(grep -m1 '^- .*CSV' "$state/finder-brief" | sed 's/^- \([0-9a-f]*\) .*/\1/')
+    if [ -n "$hit" ]; then echo "MATCH: $hit | extends the CSV export"; else echo NONE; fi
+    ;;
+  status) echo 'state: exited';;
+  stop) echo "finder $2" >> "$state/stopped";;
+  send) echo ok;;
+  models) echo 'finder/m1';;
+  *) echo "unhandled finder $*" >&2; exit 1;;
+esac

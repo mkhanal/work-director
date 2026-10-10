@@ -2,6 +2,7 @@ import SwiftUI
 import WorkDirectorKit
 
 enum Place: Hashable {
+    case home
     case band(Band)
     case archived
     case review(String)
@@ -9,39 +10,49 @@ enum Place: Hashable {
 
 struct RootView: View {
     let store: Store
-    @State private var place: Place? = .band(.needsYou)
+    /// The product everything is scoped to; empty is all products.
+    @AppStorage("scope") private var scopeName = ""
+    @State private var place: Place? = .home
     @State private var selected: String?
     @State private var plan: Plan?
     @State private var typing = false
-    @State private var composing = false
+
+    private var scope: String? { scopeName.isEmpty ? nil : scopeName }
 
     var body: some View {
         NavigationSplitView {
-            Sidebar(store: store, place: $place, compose: { composing = true })
-                .navigationSplitViewColumnWidth(min: 200, ideal: 230)
+            Sidebar(store: store, scopeName: $scopeName, place: $place)
+                .navigationSplitViewColumnWidth(min: 210, ideal: 240)
         } content: {
             Group {
                 switch place {
+                case .home, nil:
+                    RecentGoals(store: store, scope: scope, selected: $selected)
                 case .band(let band):
-                    BandList(store: store, band: band, selected: $selected)
+                    BandList(store: store, band: band, scope: scope, selected: $selected)
                 case .archived:
-                    ArchivedList(store: store, selected: $selected, plan: $plan)
+                    ArchivedList(store: store, scope: scope, selected: $selected, plan: $plan)
                 case .review(let project):
                     ReviewList(store: store, project: project, selected: $selected, plan: $plan)
-                case nil:
-                    ContentUnavailableView("Choose a band", systemImage: "sidebar.left")
                 }
             }
-            .navigationSplitViewColumnWidth(min: 300, ideal: 380)
+            .navigationSplitViewColumnWidth(min: 280, ideal: 340)
         } detail: {
             if let selected {
                 WorkDetail(store: store, id: selected, plan: $plan)
                     .id(selected)
+            } else if place == .home || place == nil {
+                NewGoalPage(store: store, scope: scope) { id in selected = id }
+                    .id(scopeName)
             } else {
                 ContentUnavailableView("Nothing selected", systemImage: "square.dashed", description: Text("Choose a goal or a task."))
             }
         }
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button(action: newGoal) { Label("New Goal", systemImage: "square.and.pencil") }
+                    .help("Start a goal (⌘N)")
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button { typing = true } label: { Label("Run a wd Command", systemImage: "terminal") }
                     .help("Run a wd command (⌘K)")
@@ -58,15 +69,12 @@ struct RootView: View {
             }
         }
         .onChange(of: place) { selected = nil }
-        .onReceive(NotificationCenter.default.publisher(for: .openCommandBar)) { _ in typing = true }
-        .onReceive(NotificationCenter.default.publisher(for: .newGoal)) { _ in composing = true }
-        .sheet(isPresented: $composing) {
-            Composer(store: store) { started in
-                composing = false
-                place = .band(.inFlight)
-                Task { @MainActor in selected = started.goal.id }
-            }
+        .onChange(of: scopeName) {
+            selected = nil
+            if case .review = place { place = .home }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openCommandBar)) { _ in typing = true }
+        .onReceive(NotificationCenter.default.publisher(for: .newGoal)) { _ in newGoal() }
         .onReceive(NotificationCenter.default.publisher(for: .reload)) { _ in Task { await store.refresh() } }
         .sheet(isPresented: $typing) {
             CommandBar { typed in
@@ -78,25 +86,38 @@ struct RootView: View {
             ConfirmSheet(store: store, plan: plan)
         }
     }
+
+    private func newGoal() {
+        place = .home
+        selected = nil
+    }
 }
 
 struct Sidebar: View {
     let store: Store
+    @Binding var scopeName: String
     @Binding var place: Place?
-    let compose: () -> Void
+
+    private var scope: String? { scopeName.isEmpty ? nil : scopeName }
 
     var body: some View {
         List(selection: $place) {
-            Button(action: compose) {
-                Label("New Goal", systemImage: "square.and.pencil")
+            Picker(selection: $scopeName) {
+                Text("All products").tag("")
+                Divider()
+                ForEach(store.projects) { p in Text(p.name).tag(p.name) }
+            } label: {
+                Label("Product", systemImage: "shippingbox")
             }
-            .buttonStyle(.plain)
-            .help("Start a goal (⌘N)")
-            .padding(.vertical, 4)
+            .pickerStyle(.menu)
+            .padding(.bottom, 4)
+
+            Label("New Goal", systemImage: "square.and.pencil")
+                .tag(Place.home)
 
             Section("Board") {
                 ForEach(Band.allCases, id: \.self) { band in
-                    let count = store.board?.items(in: band).count ?? 0
+                    let count = store.board?.items(in: band, project: scope).count ?? 0
                     Label(band.label, systemImage: band.symbol)
                         .badge(band == .atRest ? 0 : count)
                         .tag(Place.band(band))
@@ -104,8 +125,11 @@ struct Sidebar: View {
                 Label("Archived", systemImage: "archivebox")
                     .tag(Place.archived)
             }
-            if !store.projects.isEmpty {
-                Section("Review") {
+            Section("Review") {
+                if let scope {
+                    Label("What the loop decided", systemImage: "checklist")
+                        .tag(Place.review(scope))
+                } else {
                     ForEach(store.projects) { project in
                         Label(project.name, systemImage: "checklist")
                             .tag(Place.review(project.name))
@@ -120,10 +144,11 @@ struct Sidebar: View {
 struct BandList: View {
     let store: Store
     let band: Band
+    let scope: String?
     @Binding var selected: String?
 
     var body: some View {
-        let items = store.board?.items(in: band) ?? []
+        let items = store.board?.items(in: band, project: scope) ?? []
         Group {
             if items.isEmpty {
                 ContentUnavailableView("Nothing \(band.label.lowercased())", systemImage: band.symbol)
@@ -135,7 +160,7 @@ struct BandList: View {
             }
         }
         .navigationTitle(band.label)
-        .navigationSubtitle("\(items.count) item\(items.count == 1 ? "" : "s")")
+        .navigationSubtitle("\(scope ?? "All products") · \(items.count) item\(items.count == 1 ? "" : "s")")
     }
 }
 
