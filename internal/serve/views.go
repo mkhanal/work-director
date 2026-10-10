@@ -58,7 +58,7 @@ type goalView struct {
 	Events   []core.Event    `json:"events"`
 	Claims   []review.Claim  `json:"claims"`
 	Landings []review.Landed `json:"landings"`
-	Delivery delivery.State  `json:"delivery,omitempty"`
+	Delivery *delivery.State `json:"delivery,omitempty"`
 }
 
 // notFound is a view asked of work that does not exist, or of the wrong kind.
@@ -160,15 +160,34 @@ func (s *Server) goal(id string) (goalView, error) {
 	for _, t := range children {
 		works[t.ID] = t
 	}
-	return goalView{
+	view := goalView{
 		Goal:     goal,
 		Tasks:    children,
 		Rollup:   goalRollup(children),
 		Events:   events,
 		Claims:   review.ClaimsUnder(events, works),
 		Landings: review.LandingsUnder(events, works),
-		Delivery: delivery.StatusFor(s.ledger.Dir(), events, goal, children),
-	}, nil
+	}
+	if dir := goalDir(goal, children); dir != "" {
+		d := delivery.StatusFor(dir, events, goal, children)
+		view.Delivery = &d
+	}
+	return view, nil
+}
+
+// goalDir is where a goal's work happens: its tasks' directory, else its own,
+// else none. With none, delivery is not derived at all, because git run
+// anywhere else answers for somebody else's repository.
+func goalDir(goal core.Work, tasks []core.Work) string {
+	for _, t := range tasks {
+		if t.Cwd != nil && *t.Cwd != "" {
+			return *t.Cwd
+		}
+	}
+	if goal.Cwd != nil {
+		return *goal.Cwd
+	}
+	return ""
 }
 
 // work returns one work item, or notFound naming it.

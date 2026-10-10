@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,6 +34,7 @@ func TestServe(t *testing.T) {
 	t.Run("The Server Binds To Loopback", serverBindsToLoopback)
 	t.Run("JSON Endpoints Serve The Board", jsonEndpointsServeTheBoard)
 	t.Run("A Goal Serves What The Loop Decided And Where It Reached", aGoalServesWhatTheLoopDecidedAndWhereItReached)
+	t.Run("A Goal's Delivery Is Read In The Goal's Own Directory", aGoalsDeliveryIsReadInTheGoalsOwnDirectory)
 	t.Run("The Board Places Every Item In One Band", theBoardPlacesEveryItemInOneBand)
 	t.Run("Archived Work Is Not On The Board", archivedWorkIsNotOnTheBoard)
 	t.Run("A Client Can Hold The Server On Its Standard Streams", aClientCanHoldTheServerOnItsStandardStreams)
@@ -945,5 +947,51 @@ func archivedWorkIsNotOnTheBoard(t *testing.T) {
 	}
 	if len(b.Goals) != 0 || len(b.Standalone) != 1 || b.Standalone[0].Work.ID != kept.ID {
 		t.Fatalf("board = %+v, want only %s", b, kept.ID)
+	}
+}
+
+func aGoalsDeliveryIsReadInTheGoalsOwnDirectory(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	repo := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"},
+		{"switch", "-q", "-c", "goal-branch"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	goal, err := l.Add("p", "Goal", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	task, err := l.Add("p", "Task", ledger.AddOptions{Parent: &goal.ID})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	var bare map[string]json.RawMessage
+	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &bare)
+	if d, ok := bare["delivery"]; ok {
+		t.Fatalf("a goal with no directory has delivery %s, want no delivery key", d)
+	}
+
+	if err := l.SetCwd(task.ID, repo); err != nil {
+		t.Fatalf("cwd: %v", err)
+	}
+	var placed struct {
+		Delivery *struct {
+			Branch string `json:"branch"`
+		} `json:"delivery"`
+	}
+	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &placed)
+	if placed.Delivery == nil || placed.Delivery.Branch != "goal-branch" {
+		t.Fatalf("delivery = %+v, want it read in the task's directory on goal-branch", placed.Delivery)
 	}
 }

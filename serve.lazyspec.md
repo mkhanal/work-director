@@ -27,6 +27,10 @@ events; unknown ids and ids that are not goals return 404.
 - Both are `[]` when empty.
 - A landing whose work is not among the goal's is still listed with its link.
 
+## A Goal's Delivery Is Read In The Goal's Own Directory
+- `delivery` on `GET /api/goal/<id>` is derived from git in the goal's working directory: its tasks' directory, else the goal's own.
+- A goal with no working directory has no `delivery` key.
+
 ## The Board Places Every Item In One Band
 Every goal and standalone item on the board carries `band`:
 - `needs-you` — the item is needs-input or blocked, or is a goal with a task that is.
