@@ -61,10 +61,14 @@ public struct Work: Codable, Sendable, Hashable, Identifiable {
     public let claim: String?
     public let impact: String?
     public let goalType: GoalType?
+    /// When the work was put out of sight; nil while it is on the board.
+    public let archived: String?
+
+    public var atRest: Bool { state == .done || state == .dropped || state == .abandoned }
 
     enum CodingKeys: String, CodingKey {
         case id, project, title, detail, kind, state, runner, session, ref, cwd
-        case created, updated, parent, heading, claim, impact
+        case created, updated, parent, heading, claim, impact, archived
         case goalType = "goal_type"
     }
 }
@@ -165,6 +169,7 @@ public struct GoalDetail: Codable, Sendable, Hashable {
 public struct ActionResult: Codable, Sendable, Hashable {
     public let code: Int
     public let stdout: String
+    public let stderr: String
 }
 
 public struct Project: Codable, Sendable, Hashable, Identifiable {
@@ -201,4 +206,10 @@ public struct ReviewPass: Codable, Sendable, Hashable {
     public let reversals: Int
 
     public var isEmpty: Bool { claims.isEmpty && cards.isEmpty && unshipped.isEmpty && landed.isEmpty }
+}
+
+/// A goal just started: filed, planned, and its tasks spawned.
+public struct Started: Codable, Sendable, Hashable {
+    public let goal: Work
+    public let tasks: [Work]
 }

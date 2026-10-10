@@ -34,6 +34,7 @@ func TestServe(t *testing.T) {
 	t.Run("JSON Endpoints Serve The Board", jsonEndpointsServeTheBoard)
 	t.Run("A Goal Serves What The Loop Decided And Where It Reached", aGoalServesWhatTheLoopDecidedAndWhereItReached)
 	t.Run("The Board Places Every Item In One Band", theBoardPlacesEveryItemInOneBand)
+	t.Run("Archived Work Is Not On The Board", archivedWorkIsNotOnTheBoard)
 	t.Run("A Client Can Hold The Server On Its Standard Streams", aClientCanHoldTheServerOnItsStandardStreams)
 	t.Run("Work Items Serve Over HTTP", workItemsServeOverHTTP)
 	t.Run("Actions Dispatch To The CLI", actionsDispatchToTheCLI)
@@ -297,6 +298,7 @@ func actionsDispatchToTheCLI(t *testing.T) {
 	var result struct {
 		Code   int    `json:"code"`
 		Stdout string `json:"stdout"`
+		Stderr string `json:"stderr"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -309,14 +311,14 @@ func actionsDispatchToTheCLI(t *testing.T) {
 	}
 
 	s.cliPath = "/bin/sh"
-	resp, err = http.Post(srv.URL, "application/json", strings.NewReader(`{"argv":["-c","echo out; exit 3"]}`))
+	resp, err = http.Post(srv.URL, "application/json", strings.NewReader(`{"argv":["-c","echo out; echo progress >&2; exit 3"]}`))
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
 	defer resp.Body.Close()
 	requireJSON(t, resp, http.StatusOK, &result)
-	if result.Code != 3 || result.Stdout != "out" {
-		t.Fatalf("result = %+v, want code 3 with the CLI's output", result)
+	if result.Code != 3 || result.Stdout != "out" || result.Stderr != "progress" {
+		t.Fatalf("result = %+v, want code 3 with stdout and stderr kept apart", result)
 	}
 
 	s.cliPath = filepath.Join(t.TempDir(), "missing-wd")
@@ -720,7 +722,7 @@ func theBoardPlacesEveryItemInOneBand(t *testing.T) {
 		asking.ID: BandNeedsYou, blocked.ID: BandNeedsYou,
 		unpushed.ID: BandReadyToPush, pushed.ID: BandInReview, again.ID: BandReadyToPush,
 		closing.ID: BandReadyToClose,
-		quiet.ID: BandInFlight, stuck.ID: BandNeedsYou, finished.ID: BandAtRest,
+		quiet.ID:   BandInFlight, stuck.ID: BandNeedsYou, finished.ID: BandAtRest,
 	}
 	for id, band := range want {
 		if got[id] != band {
@@ -913,5 +915,35 @@ func aClientCanHoldTheServerOnItsStandardStreams(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatalf("serve still running 5s after end of stdin")
+	}
+}
+
+func archivedWorkIsNotOnTheBoard(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	goal, err := l.Add("p", "Old goal", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	walk(t, l, goal.ID, core.StateDone)
+	loose, err := l.Add("p", "Unwanted", ledger.AddOptions{})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	kept, err := l.Add("p", "Kept", ledger.AddOptions{})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	for id, why := range map[string]string{goal.ID: "", loose.ID: "not wanted"} {
+		if _, err := l.Archive(id, why); err != nil {
+			t.Fatalf("archive %s: %v", id, err)
+		}
+	}
+	b, err := s.board()
+	if err != nil {
+		t.Fatalf("board: %v", err)
+	}
+	if len(b.Goals) != 0 || len(b.Standalone) != 1 || b.Standalone[0].Work.ID != kept.ID {
+		t.Fatalf("board = %+v, want only %s", b, kept.ID)
 	}
 }

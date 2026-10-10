@@ -24,7 +24,7 @@ import (
 const schema = `
 CREATE TABLE IF NOT EXISTS work (id TEXT PRIMARY KEY, project TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
   kind TEXT NOT NULL, state TEXT NOT NULL, runner TEXT, session TEXT, ref TEXT, cwd TEXT, created TEXT NOT NULL, updated TEXT NOT NULL,
-  parent TEXT, heading TEXT, claim TEXT, impact TEXT, goal_type TEXT);
+  parent TEXT, heading TEXT, claim TEXT, impact TEXT, goal_type TEXT, archived TEXT);
 CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), kind TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL, effective TEXT, payload TEXT);
 CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT, card TEXT, source TEXT NOT NULL, at TEXT NOT NULL, work TEXT REFERENCES work(id));
 CREATE TABLE IF NOT EXISTS concern (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), text TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, decision TEXT, at TEXT NOT NULL, resolved_at TEXT);
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS workspace (id TEXT PRIMARY KEY, name TEXT NOT NULL, p
 // written before the rename still opens and still says what it meant.
 var addedColumns = []struct{ table, col, decl string }{
 	{"work", "parent", "TEXT"}, {"work", "heading", "TEXT"}, {"work", "claim", "TEXT"}, {"work", "impact", "TEXT"},
-	{"work", "goal_type", "TEXT"},
+	{"work", "goal_type", "TEXT"}, {"work", "archived", "TEXT"},
 	{"worktree", "origin", "TEXT NOT NULL DEFAULT 'attached'"},
 	// effective is null on an event whose effective moment is its recorded
 	// moment, and payload is null on an event with no structured claim. Both
@@ -191,7 +191,7 @@ func updateWork(e execer, id, query string, args ...any) error {
 }
 
 const workColumns = `id, project, title, detail, kind, state, runner, session, ref, cwd,
-	created, updated, parent, heading, claim, impact, goal_type`
+	created, updated, parent, heading, claim, impact, goal_type, archived`
 
 const eventColumns = `id, work, kind, body, at, effective, payload`
 
@@ -207,10 +207,10 @@ func scanWork(s rowScanner) (core.Work, error) {
 	var w core.Work
 	var kind, state string
 	var runner, session, ref, cwd, parent, heading, claim, impact sql.NullString
-	var goalType sql.NullString
+	var goalType, archived sql.NullString
 	err := s.Scan(&w.ID, &w.Project, &w.Title, &w.Detail, &kind, &state,
 		&runner, &session, &ref, &cwd, &w.Created, &w.Updated,
-		&parent, &heading, &claim, &impact, &goalType)
+		&parent, &heading, &claim, &impact, &goalType, &archived)
 	if err != nil {
 		return core.Work{}, err
 	}
@@ -241,6 +241,7 @@ func scanWork(s rowScanner) (core.Work, error) {
 		}
 		w.GoalType = &gt
 	}
+	w.Archived = nullStr(archived)
 	return w, nil
 }
 
@@ -436,6 +437,9 @@ type ListFilter struct {
 	Project *string
 	States  []core.State
 	Kinds   []core.WorkKind
+	// Archived unset lists all work; false leaves archived work out; true lists
+	// only archived work.
+	Archived *bool
 }
 
 func (l *Ledger) List(filter ListFilter) ([]core.Work, error) {
@@ -457,6 +461,9 @@ func (l *Ledger) List(filter ListFilter) ([]core.Work, error) {
 			continue
 		}
 		if filter.Kinds != nil && !slices.Contains(filter.Kinds, w.Kind) {
+			continue
+		}
+		if filter.Archived != nil && *filter.Archived != (w.Archived != nil) {
 			continue
 		}
 		out = append(out, w)
@@ -711,6 +718,133 @@ func (l *Ledger) transition(id string, to core.State) (core.Work, error) {
 		return core.Work{}, err
 	}
 	return l.Get(id)
+}
+
+// Archive puts work and everything under it out of sight. Work at rest keeps
+// its state; open work is dropped first, and dropping is a choice, so it takes
+// a reason that is filed as a decision. It returns every work it archived.
+func (l *Ledger) Archive(id, why string) ([]core.Work, error) {
+	why = strings.TrimSpace(why)
+	var tree []core.Work
+	err := l.inTx(func(tx *sql.Tx) error {
+		var err error
+		if tree, err = subtree(tx, id); err != nil {
+			return err
+		}
+		if tree[0].Archived != nil {
+			return fmt.Errorf("work %s is already archived; wd unarchive %s brings it back", id, id)
+		}
+		var open []string
+		for _, w := range tree {
+			if !core.AtRest(w.State) {
+				open = append(open, fmt.Sprintf("%s (%s)", w.ID, w.State))
+			}
+		}
+		if len(open) > 0 && why == "" {
+			return fmt.Errorf("archiving %s drops open work: %s; say why: wd archive %s \"<why>\"", id, strings.Join(open, ", "), id)
+		}
+		at := now()
+		for _, w := range tree {
+			if !core.AtRest(w.State) {
+				if !slices.Contains(core.Transitions[w.State], core.StateDropped) {
+					return core.IllegalTransition{From: w.State, To: core.StateDropped}
+				}
+				if _, err := tx.Exec(`UPDATE work SET state = ? WHERE id = ?`, string(core.StateDropped), w.ID); err != nil {
+					return err
+				}
+				if _, err := addEvent(tx, w.ID, core.EventState, string(core.StateDropped), at); err != nil {
+					return err
+				}
+				if _, err := addEvent(tx, w.ID, core.EventDecision, "dropped: "+why, at); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.Exec(`UPDATE work SET archived = ? WHERE id = ?`, at, w.ID); err != nil {
+				return err
+			}
+			if _, err := addEvent(tx, w.ID, core.EventNote, "archived", at); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return l.reread(tree)
+}
+
+// Unarchive brings work and everything under it back into sight, in the states
+// it rested in. It returns every work it brought back.
+func (l *Ledger) Unarchive(id string) ([]core.Work, error) {
+	var tree []core.Work
+	err := l.inTx(func(tx *sql.Tx) error {
+		var err error
+		if tree, err = subtree(tx, id); err != nil {
+			return err
+		}
+		if tree[0].Archived == nil {
+			return fmt.Errorf("work %s is not archived", id)
+		}
+		at := now()
+		for _, w := range tree {
+			if _, err := tx.Exec(`UPDATE work SET archived = NULL WHERE id = ?`, w.ID); err != nil {
+				return err
+			}
+			if _, err := addEvent(tx, w.ID, core.EventNote, "unarchived", at); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return l.reread(tree)
+}
+
+// subtree is a work item followed by everything under it, parents before
+// children.
+func subtree(tx *sql.Tx, id string) ([]core.Work, error) {
+	root, err := getWork(tx, id)
+	if err != nil {
+		return nil, err
+	}
+	out := []core.Work{root}
+	for i := 0; i < len(out); i++ {
+		rows, err := tx.Query(`SELECT `+workColumns+` FROM work WHERE parent = ? ORDER BY created`, out[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			w, err := scanWork(rows)
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out = append(out, w)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (l *Ledger) reread(works []core.Work) ([]core.Work, error) {
+	out := make([]core.Work, 0, len(works))
+	for _, w := range works {
+		fresh, err := l.Get(w.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, fresh)
+	}
+	return out, nil
 }
 
 type SessionInfo struct {

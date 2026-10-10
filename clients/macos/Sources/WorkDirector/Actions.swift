@@ -3,7 +3,7 @@ import WorkDirectorKit
 
 /// A write that needs words from the person before it can be planned.
 struct Ask: Identifiable {
-    enum Kind { case reopen, release, decide, abandon }
+    enum Kind { case reopen, release, decide, abandon, archive }
     let kind: Kind
     let work: Work
 
@@ -15,6 +15,7 @@ struct Ask: Identifiable {
         case .release: "Release \(work.title)"
         case .decide: "Record a decision on \(work.title)"
         case .abandon: "Abandon \(work.title)"
+        case .archive: "Drop and archive \(work.title)"
         }
     }
 
@@ -24,6 +25,7 @@ struct Ask: Identifiable {
         case .release: "What was true instead? The stop stays on the record; this says it was a choice."
         case .decide: "The decision, in one line."
         case .abandon: "Detail (optional). The reason, no-pr or unmerged, is worked out from the ledger."
+        case .archive: "Why it is no longer wanted. It is dropped with this reason, then archived with everything under it."
         }
     }
 
@@ -33,6 +35,7 @@ struct Ask: Identifiable {
         case .release: try Plan.release(work.id, reason: text)
         case .decide: try Plan.decide(work.id, text: text)
         case .abandon: Plan.abandon(work.id, detail: text)
+        case .archive: try Plan.archive(work, reason: text)
         }
     }
 }
@@ -67,6 +70,14 @@ struct Actions: ToolbarContent {
                 }
                 if work.state == .abandoned {
                     Button("Release…") { asking = Ask(kind: .release, work: work) }
+                }
+                Divider()
+                if work.archived != nil {
+                    Button("Unarchive") { plan = .unarchive(work.id) }
+                } else if work.atRest {
+                    Button("Archive") { plan = try? .archive(work, reason: "") }
+                } else {
+                    Button("Drop and Archive…") { asking = Ask(kind: .archive, work: work) }
                 }
             } label: {
                 Label("Actions", systemImage: "ellipsis.circle")
@@ -144,7 +155,7 @@ struct ConfirmSheet: View {
             case nil:
                 Text("This runs exactly the command above.").font(.caption).foregroundStyle(.secondary)
             case .success(let r):
-                Output(code: r.code, text: r.stdout)
+                Output(code: r.code, text: [r.stdout, r.stderr].filter { !$0.isEmpty }.joined(separator: "\n"))
             case .failure(let error):
                 Output(code: nil, text: "\(error)")
             }

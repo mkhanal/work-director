@@ -29,9 +29,10 @@ that same argv.
 - Nothing is expanded: `$HOME`, `~` and `*` reach `wd` as typed.
 - A leading `wd` is dropped. An unclosed quote is refused.
 
-## Reopening And Releasing Need A Reason
-A reopen or release plan cannot be made with a reason that is empty or only
-whitespace.
+## Reopening, Releasing And Dropping Need A Reason
+- A reopen, a release, or an archive of open work cannot be planned with a
+  reason that is empty or only whitespace.
+- Archiving work at rest needs no reason.
 
 ## Needs-Input And Blocked Never Look The Same
 Every state has a symbol and a label of its own; no two states share either.

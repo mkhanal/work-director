@@ -12,8 +12,8 @@ here is only what the CLI adds: the command, its flags, its output and its exit.
 
 ## Work Items Serialize With The Wire Schema
 Work objects carry exactly the keys id, project, title, detail, kind, state,
-runner, session, ref, cwd, created, updated, parent, heading, claim, impact —
-strings or null, kind and state from the closed enums.
+runner, session, ref, cwd, created, updated, parent, heading, claim, impact,
+goal_type, archived — strings or null, kind, state and goal_type from the closed enums.
 
 ## Ledger Objects Keep Their Column Names
 Event, feedback, concern, worktree and conflict objects serialize with the
@@ -290,3 +290,18 @@ rest without shipping and leaves the goal's state and gates untouched.
 ## Wd Drive Prints Where A Person Is Still Needed
 A run that stopped without shipping prints the questions it settled, those it
 could not with their work, the bound that ran out, and the work still open.
+
+## A Goal Starts From One Sentence
+- `wd goal start <project> "<text>"` files a goal titled by the text's first line, cut at a word to at most 72 characters, with the whole text as its detail.
+- It plans the goal with the project's runner, or `--runner`, and spawns its tasks, as `wd goal plan` and `wd goal run` do.
+- `--json` prints `{goal, tasks}`, read after the tasks are spawned.
+- A plan that yields no tasks leaves the goal filed and exits 1 naming the plan session.
+
+## Wd Archive Hides Work And Wd Unarchive Brings It Back
+- `wd archive <id> ["<why>"]` and `wd unarchive <id>` apply the ledger's archive rules and exit 1 with its refusals.
+- `wd status` and `wd status --all` leave archived work out; `wd status --archived` lists only archived work.
+
+## A Project No Longer Used Is Archived With Its Work
+- `wd projects archive <name> ["<why>"]` archives every work of the project and moves its file to `projects/archive/`, after which the project does not load.
+- With open work and no `<why>` it is refused naming that work, and nothing moves.
+- `wd projects unarchive <name>` moves the file back and unarchives the project's work.

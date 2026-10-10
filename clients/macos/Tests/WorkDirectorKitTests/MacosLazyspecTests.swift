@@ -66,6 +66,14 @@ func executable(_ url: URL, _ script: String) throws {
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
 }
 
+func workJSON(state: String) -> String {
+    """
+    {"id":"w1","project":"demo","title":"T","detail":"","kind":"task","state":"\(state)",
+     "runner":null,"session":null,"ref":null,"cwd":null,"created":"c","updated":"u",
+     "parent":null,"heading":null,"claim":null,"impact":null,"goal_type":null,"archived":null}
+    """
+}
+
 func tempDir() -> URL {
     FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
 }
@@ -109,11 +117,11 @@ func tempDir() -> URL {
         let fake = tempDir().appendingPathComponent("wd")
         try executable(fake, #"""
         #!/bin/sh
-        id() { echo "$1" | sed 's/.*"id":\([0-9]*\).*/\1/'; }
+        id() { echo "$1" | sed 's/.*"id":\([0-9][0-9]*\).*/\1/'; }
         arg() { echo "$1" | sed 's/.*"argv":\["\([^"]*\)".*/\1/'; }
         read -r a; read -r b
-        echo "{\"id\":$(id "$b"),\"result\":{\"code\":0,\"stdout\":\"$(arg "$b")\"}}"
-        echo "{\"id\":$(id "$a"),\"result\":{\"code\":0,\"stdout\":\"$(arg "$a")\"}}"
+        echo "{\"id\":$(id "$b"),\"result\":{\"code\":0,\"stdout\":\"$(arg "$b")\",\"stderr\":\"\"}}"
+        echo "{\"id\":$(id "$a"),\"result\":{\"code\":0,\"stdout\":\"$(arg "$a")\",\"stderr\":\"\"}}"
         read -r c
         echo "{\"id\":$(id "$c"),\"error\":{\"kind\":\"not-found\",\"message\":\"no work x\"}}"
         read -r d
@@ -157,12 +165,17 @@ func tempDir() -> URL {
         #expect(throws: PlanError.empty) { try Plan.typed("wd") }
     }
 
-    @Test("Reopening And Releasing Need A Reason")
-    func reopenAndReleaseNeedAReason() throws {
+    @Test("Reopening, Releasing And Dropping Need A Reason")
+    func reopenReleaseAndDropNeedAReason() throws {
+        let open = try JSONDecoder().decode(Work.self, from: Data(workJSON(state: "running").utf8))
+        let rest = try JSONDecoder().decode(Work.self, from: Data(workJSON(state: "done").utf8))
         for blank in ["", "  ", "\n\t"] {
             #expect(throws: PlanError.reasonRequired("reopening")) { try Plan.reopen("g1", reason: blank) }
             #expect(throws: PlanError.reasonRequired("releasing")) { try Plan.release("g1", reason: blank) }
+            #expect(throws: PlanError.reasonRequired("archiving open work")) { try Plan.archive(open, reason: blank) }
         }
+        #expect(try Plan.archive(rest, reason: "").argv == ["archive", "w1"])
+        #expect(try Plan.archive(open, reason: " not wanted ").argv == ["archive", "w1", "not wanted"])
         #expect(try Plan.reopen("g1", reason: " add search ").argv == ["reopen", "g1", "add search"])
         #expect(try Plan.release("g1", reason: "duplicate of g2").argv == ["release", "g1", "duplicate of g2"])
     }

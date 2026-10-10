@@ -74,7 +74,8 @@ func (e badRequest) Error() string { return e.msg }
 // board returns every goal with its rollup and every open standalone work item,
 // each in its band.
 func (s *Server) board() (boardView, error) {
-	items, err := s.ledger.List(ledger.ListFilter{})
+	onBoard := false
+	items, err := s.ledger.List(ledger.ListFilter{Archived: &onBoard})
 	if err != nil {
 		return boardView{}, err
 	}

@@ -807,10 +807,10 @@ CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT,
 
 		// The schema grew in place: five nullable columns and new tables.
 		after := workColumns(t, openDirect(t, path))
-		if len(after) != 17 {
-			t.Fatalf("migrated schema has %d work columns, want 17", len(after))
+		if len(after) != 18 {
+			t.Fatalf("migrated schema has %d work columns, want 18", len(after))
 		}
-		for _, col := range []string{"parent", "heading", "claim", "impact", "goal_type"} {
+		for _, col := range []string{"parent", "heading", "claim", "impact", "goal_type", "archived"} {
 			if _, ok := after[col]; !ok {
 				t.Fatalf("column %s missing after migration", col)
 			}
@@ -1439,5 +1439,123 @@ func TestWorkspacesAreRegisteredAndNewOnesAreOnlyMadeUnderAParentThatAllowsIt(t 
 	_, err = l.Workspace("shared")
 	if err == nil || !strings.Contains(err.Error(), "names 2 workspaces") {
 		t.Errorf("ambiguous name = %v, want it refused naming the ids to choose between", err)
+	}
+}
+
+// wantErrNaming fails unless err is an error whose message contains part.
+func wantErrNaming(t *testing.T, err error, part string) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), part) {
+		t.Fatalf("error = %v, want one naming %q", err, part)
+	}
+}
+
+func TestArchivingPutsWorkOutOfSightWithEverythingUnderIt(t *testing.T) {
+	l := newTestLedger(t)
+	goal := add(t, l, "p", "Goal", AddOptions{Kind: core.WorkGoal})
+	shipped := add(t, l, "p", "Shipped", AddOptions{Parent: &goal.ID})
+	move(t, l, shipped.ID, core.StateDone)
+	running := add(t, l, "p", "Running", AddOptions{Parent: &goal.ID})
+	move(t, l, running.ID, core.StateRunning)
+	loose := add(t, l, "p", "Loose", AddOptions{})
+
+	_, err := l.Archive(goal.ID, "  ")
+	wantErrNaming(t, err, goal.ID)
+	wantErrNaming(t, err, running.ID)
+	for _, id := range []string{goal.ID, shipped.ID, running.ID} {
+		if w, _ := l.Get(id); w.Archived != nil {
+			t.Fatalf("%s archived by a refused archive", id)
+		}
+	}
+
+	archived, err := l.Archive(goal.ID, "the mobile app is out of scope")
+	wantNoErr(t, err)
+	if len(archived) != 3 {
+		t.Fatalf("archived %d works, want the goal and both tasks", len(archived))
+	}
+	want := map[string]core.State{goal.ID: core.StateDropped, shipped.ID: core.StateDone, running.ID: core.StateDropped}
+	note := core.EventNote
+	decision := core.EventDecision
+	for id, state := range want {
+		w, err := l.Get(id)
+		wantNoErr(t, err)
+		if w.Archived == nil || w.State != state {
+			t.Errorf("%s = %s archived %v, want %s and archived", id, w.State, w.Archived, state)
+		}
+		notes := allEvents(t, l, id, &note)
+		if len(notes) == 0 || notes[len(notes)-1].Body != "archived" {
+			t.Errorf("%s notes = %v, want one saying archived", id, notes)
+		}
+		decisions := allEvents(t, l, id, &decision)
+		dropped := state == core.StateDropped && id != shipped.ID
+		if dropped && (len(decisions) == 0 || !strings.Contains(decisions[len(decisions)-1].Body, "the mobile app is out of scope")) {
+			t.Errorf("%s decisions = %v, want the reason it was dropped", id, decisions)
+		}
+		if !dropped && len(decisions) != 0 {
+			t.Errorf("%s at rest gained decisions %v", id, decisions)
+		}
+	}
+	if w, _ := l.Get(loose.ID); w.Archived != nil {
+		t.Errorf("work outside the goal was archived")
+	}
+	_, err = l.Archive(goal.ID, "again")
+	wantErrNaming(t, err, "already archived")
+}
+
+func TestUnarchivingBringsWorkBackAsItWas(t *testing.T) {
+	l := newTestLedger(t)
+	goal := add(t, l, "p", "Goal", AddOptions{Kind: core.WorkGoal})
+	task := add(t, l, "p", "Task", AddOptions{Parent: &goal.ID})
+	move(t, l, task.ID, core.StateDone)
+	move(t, l, goal.ID, core.StateDone)
+	_, err := l.Archive(goal.ID, "")
+	wantNoErr(t, err)
+
+	back, err := l.Unarchive(goal.ID)
+	wantNoErr(t, err)
+	if len(back) != 2 {
+		t.Fatalf("unarchived %d works, want the goal and its task", len(back))
+	}
+	note := core.EventNote
+	for _, id := range []string{goal.ID, task.ID} {
+		w, err := l.Get(id)
+		wantNoErr(t, err)
+		if w.Archived != nil || w.State != core.StateDone {
+			t.Errorf("%s = %s archived %v, want done and on the board", id, w.State, w.Archived)
+		}
+		notes := allEvents(t, l, id, &note)
+		if len(notes) == 0 || notes[len(notes)-1].Body != "unarchived" {
+			t.Errorf("%s notes = %v, want one saying unarchived", id, notes)
+		}
+	}
+	_, err = l.Unarchive(goal.ID)
+	wantErrNaming(t, err, "not archived")
+}
+
+func TestAListCanLeaveArchivedWorkOutOrShowOnlyIt(t *testing.T) {
+	l := newTestLedger(t)
+	kept := add(t, l, "p", "Kept", AddOptions{})
+	gone := add(t, l, "p", "Gone", AddOptions{})
+	move(t, l, gone.ID, core.StateDone)
+	_, err := l.Archive(gone.ID, "")
+	wantNoErr(t, err)
+	ids := func(f ListFilter) []string {
+		items, err := l.List(f)
+		wantNoErr(t, err)
+		out := []string{}
+		for _, w := range items {
+			out = append(out, w.ID)
+		}
+		return out
+	}
+	no, yes := false, true
+	if got := ids(ListFilter{}); len(got) != 2 {
+		t.Errorf("unset = %v, want both", got)
+	}
+	if got := ids(ListFilter{Archived: &no}); len(got) != 1 || got[0] != kept.ID {
+		t.Errorf("archived false = %v, want only %s", got, kept.ID)
+	}
+	if got := ids(ListFilter{Archived: &yes}); len(got) != 1 || got[0] != gone.ID {
+		t.Errorf("archived true = %v, want only %s", got, gone.ID)
 	}
 }

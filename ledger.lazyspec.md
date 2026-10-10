@@ -117,7 +117,7 @@ For a goal, `SoftDone` also requires every task done or dropped.
 Work added to a file-backed ledger is still there after closing and reopening it.
 
 ## Old Ledgers Stay Readable
-- `New` opens a ledger lacking any later column or table — work without parent, heading, claim, impact or goal_type; event without effective or payload; no concern, worktree, filed or cursor tables.
+- `New` opens a ledger lacking any later column or table — work without parent, heading, claim, impact, goal_type or archived; event without effective or payload; no concern, worktree, filed or cursor tables.
 - It reads every existing row, adds what is missing in place, and changes no stored value.
 - A row stored with kind `epic` reads as `goal`.
 - An event stored without effective or payload reads with both absent.
@@ -135,6 +135,20 @@ Work added to a file-backed ledger is still there after closing and reopening it
 ## Evidence From A Session Knows The Work It Came From
 - Feedback carries a nullable `work`: set when it came out of a session running that work, null when typed by hand.
 - Feedback naming a work that does not exist fails.
+
+## Archiving Puts Work Out Of Sight With Everything Under It
+- `Archive(id, why)` stamps `archived` on the work and every work under it, and files an `archived` note on each.
+- Work at rest (done, dropped, abandoned) keeps its state.
+- Open work is dropped first and `why` is filed as a decision on it; with no `why` the archive is refused naming the open work, and nothing is stored.
+- Archiving work that is already archived is refused.
+
+## Unarchiving Brings Work Back As It Was
+- `Unarchive(id)` clears the stamp on the work and everything under it and files an `unarchived` note on each; states are unchanged.
+- Unarchiving work that is not archived is refused.
+
+## A List Can Leave Archived Work Out Or Show Only It
+`List` returns all work when `Archived` is unset, leaves archived work out when it
+is false, and returns only archived work when it is true.
 
 ## Events Concerns And Worktrees Belong To Existing Work
 `AddEvent`, `AddConcern` and `AddWorktree` for a work id that does not exist

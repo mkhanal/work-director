@@ -3,6 +3,7 @@ import WorkDirectorKit
 
 enum Place: Hashable {
     case band(Band)
+    case archived
     case review(String)
 }
 
@@ -12,16 +13,19 @@ struct RootView: View {
     @State private var selected: String?
     @State private var plan: Plan?
     @State private var typing = false
+    @State private var composing = false
 
     var body: some View {
         NavigationSplitView {
-            Sidebar(store: store, place: $place)
+            Sidebar(store: store, place: $place, compose: { composing = true })
                 .navigationSplitViewColumnWidth(min: 200, ideal: 230)
         } content: {
             Group {
                 switch place {
                 case .band(let band):
                     BandList(store: store, band: band, selected: $selected)
+                case .archived:
+                    ArchivedList(store: store, selected: $selected, plan: $plan)
                 case .review(let project):
                     ReviewList(store: store, project: project, selected: $selected, plan: $plan)
                 case nil:
@@ -55,6 +59,14 @@ struct RootView: View {
         }
         .onChange(of: place) { selected = nil }
         .onReceive(NotificationCenter.default.publisher(for: .openCommandBar)) { _ in typing = true }
+        .onReceive(NotificationCenter.default.publisher(for: .newGoal)) { _ in composing = true }
+        .sheet(isPresented: $composing) {
+            Composer(store: store) { started in
+                composing = false
+                place = .band(.inFlight)
+                Task { @MainActor in selected = started.goal.id }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .reload)) { _ in Task { await store.refresh() } }
         .sheet(isPresented: $typing) {
             CommandBar { typed in
@@ -71,9 +83,17 @@ struct RootView: View {
 struct Sidebar: View {
     let store: Store
     @Binding var place: Place?
+    let compose: () -> Void
 
     var body: some View {
         List(selection: $place) {
+            Button(action: compose) {
+                Label("New Goal", systemImage: "square.and.pencil")
+            }
+            .buttonStyle(.plain)
+            .help("Start a goal (⌘N)")
+            .padding(.vertical, 4)
+
             Section("Board") {
                 ForEach(Band.allCases, id: \.self) { band in
                     let count = store.board?.items(in: band).count ?? 0
@@ -81,6 +101,8 @@ struct Sidebar: View {
                         .badge(band == .atRest ? 0 : count)
                         .tag(Place.band(band))
                 }
+                Label("Archived", systemImage: "archivebox")
+                    .tag(Place.archived)
             }
             if !store.projects.isEmpty {
                 Section("Review") {

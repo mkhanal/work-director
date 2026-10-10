@@ -32,6 +32,10 @@ struct WorkDirectorApp: App {
         }
         .defaultSize(width: 1180, height: 760)
         .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("New Goal…") { NotificationCenter.default.post(name: .newGoal, object: nil) }
+                    .keyboardShortcut("n", modifiers: .command)
+            }
             CommandGroup(after: .newItem) {
                 Button("Run a wd Command…") { NotificationCenter.default.post(name: .openCommandBar, object: nil) }
                     .keyboardShortcut("k", modifiers: .command)
@@ -47,6 +51,7 @@ struct WorkDirectorApp: App {
 extension Notification.Name {
     static let openCommandBar = Notification.Name("openCommandBar")
     static let reload = Notification.Name("reload")
+    static let newGoal = Notification.Name("newGoal")
 }
 
 @MainActor

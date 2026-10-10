@@ -196,6 +196,9 @@ type Work struct {
 	// null until classified; a goal is never silently given a default, because
 	// a wrong type is a lie a reader cannot see.
 	GoalType *GoalType `json:"goal_type"`
+	// Archived is when the work was put out of sight, or null while it is on
+	// the board. It is not a state: archived work keeps the state it rests in.
+	Archived *string `json:"archived"`
 }
 
 type Event struct {
@@ -379,6 +382,11 @@ var Transitions = map[State][]State{
 // work is. Dropped is a choice and abandoned is a stop, and neither is work that
 // is in progress; reopening either would make a deliberate ending reversible by
 // accident.
+// AtRest reports whether work has come to rest: done, dropped or abandoned.
+func AtRest(s State) bool {
+	return s == StateDone || s == StateDropped || s == StateAbandoned
+}
+
 func Reopenable(s State) bool {
 	return s == StateDone
 }

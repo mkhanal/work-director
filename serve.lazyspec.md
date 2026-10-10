@@ -38,6 +38,9 @@ Every goal and standalone item on the board carries `band`:
 
 Standalone items serve as `{work, band}`, goals as `{work, rollup, band}`.
 
+## Archived Work Is Not On The Board
+Archived goals and standalone items are left off the board.
+
 ## A Client Can Hold The Server On Its Standard Streams
 `wd serve --stdio` reads one JSON request per line from stdin and writes one
 JSON message per line to stdout:
@@ -57,8 +60,9 @@ the events for one work item.
 
 ## Actions Dispatch To The CLI
 `POST /api/action` with `{"argv": [...]}` runs the wd CLI with those
-arguments and returns `{"code": N, "stdout": "..."}`. Every board
-action is a wrapper over the CLI.
+arguments and returns `{"code": N, "stdout": "...", "stderr": "..."}`, the two
+streams kept apart so a `--json` document reads on its own. Every board action
+is a wrapper over the CLI.
 
 ## WebSocket Serves Live Events
 `GET /ws` upgrades to a WebSocket connection. The server sends a

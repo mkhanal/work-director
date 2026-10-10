@@ -77,8 +77,11 @@ func (c *Cli) projects(rest []string) error {
 	if sub == "policy" {
 		return c.projectPolicy(rest)
 	}
+	if sub == "archive" || sub == "unarchive" {
+		return c.projectArchive(sub, rest[1:])
+	}
 	if sub != "" && sub != "list" {
-		return fail("usage: wd projects (list | add <name> <path> | policy <name>)")
+		return fail("usage: wd projects (list | add <name> <path> | policy <name> | archive <name> [\"<why>\"] | unarchive <name>)")
 	}
 	list := []*project.Project{}
 	for _, name := range c.projectNames() {
@@ -89,6 +92,112 @@ func (c *Cli) projects(rest []string) error {
 		table = append(table, fmt.Sprintf("%s\t%s\t%s\t%s", p.Name, p.Runner, p.Mode, p.Path))
 	}
 	return c.out(list, strings.Join(table, "\n"))
+}
+
+// archive puts work and everything under it out of sight; open work is dropped
+// with the reason given.
+func (c *Cli) archive(rest []string) error {
+	if len(rest) < 1 {
+		return fail("usage: wd archive <id> [\"<why it is no longer wanted>\"]")
+	}
+	why := strings.Join(rest[1:], " ")
+	works, err := c.Ledger.Archive(rest[0], why)
+	if err != nil {
+		return fail("%v", err)
+	}
+	return c.out(works, fmt.Sprintf("archived %d work item(s) under %s", len(works), rest[0]))
+}
+
+func (c *Cli) unarchive(rest []string) error {
+	if len(rest) != 1 {
+		return fail("usage: wd unarchive <id>")
+	}
+	works, err := c.Ledger.Unarchive(rest[0])
+	if err != nil {
+		return fail("%v", err)
+	}
+	return c.out(works, fmt.Sprintf("unarchived %d work item(s) under %s", len(works), rest[0]))
+}
+
+// projectArchive retires a project: its work is archived and its file moves to
+// projects/archive/, where it no longer loads; unarchive reverses both.
+func (c *Cli) projectArchive(sub string, rest []string) error {
+	if len(rest) < 1 || (sub == "unarchive" && len(rest) != 1) {
+		return fail("usage: wd projects archive <name> [\"<why>\"] | wd projects unarchive <name>")
+	}
+	name := rest[0]
+	live := filepath.Join(c.ProjectsDir, name+".md")
+	shelf := filepath.Join(c.ProjectsDir, "archive", name+".md")
+	if sub == "unarchive" {
+		if err := os.Rename(shelf, live); err != nil {
+			return fail("no archived project %s: %v", name, err)
+		}
+		archived := true
+		roots, err := c.projectRoots(name, &archived)
+		if err != nil {
+			return err
+		}
+		for _, w := range roots {
+			if _, err := c.Ledger.Unarchive(w.ID); err != nil {
+				return err
+			}
+		}
+		return c.out(map[string]any{"project": name, "unarchived": len(roots)},
+			fmt.Sprintf("project %s is back with %d work item(s)", name, len(roots)))
+	}
+	if _, err := c.project(name); err != nil {
+		return err
+	}
+	onBoard := false
+	roots, err := c.projectRoots(name, &onBoard)
+	if err != nil {
+		return err
+	}
+	why := strings.Join(rest[1:], " ")
+	if strings.TrimSpace(why) == "" {
+		var open []string
+		all, err := c.Ledger.List(ledger.ListFilter{Project: &name, Archived: &onBoard})
+		if err != nil {
+			return err
+		}
+		for _, w := range all {
+			if !core.AtRest(w.State) {
+				open = append(open, fmt.Sprintf("%s (%s)", w.ID, w.State))
+			}
+		}
+		if len(open) > 0 {
+			return fail("archiving project %s drops its open work: %s; say why: wd projects archive %s \"<why>\"", name, strings.Join(open, ", "), name)
+		}
+	}
+	for _, w := range roots {
+		if _, err := c.Ledger.Archive(w.ID, why); err != nil {
+			return err
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(shelf), 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(live, shelf); err != nil {
+		return err
+	}
+	return c.out(map[string]any{"project": name, "archived": len(roots)},
+		fmt.Sprintf("project %s archived with %d work item(s); wd projects unarchive %s brings it back", name, len(roots), name))
+}
+
+// projectRoots is a project's work that sits under no other work, filtered by
+// whether it is archived.
+func (c *Cli) projectRoots(name string, archived *bool) ([]core.Work, error) {
+	all, err := c.Ledger.List(ledger.ListFilter{Project: &name, Archived: archived})
+	if err != nil {
+		return nil, err
+	}
+	var roots []core.Work
+	for _, w := range all {
+		if w.Parent == nil {
+			roots = append(roots, w)
+		}
+	}
+	return roots, nil
 }
 
 // projectValues lists each value a project file holds as (what sets it,
@@ -439,6 +548,85 @@ type handleWithAttach struct {
 	Attach string `json:"attach"`
 }
 
+// spawnTasks starts every spawnable child on the goal's shared worktree,
+// round-robin over runners, and moves the goal to running once any started.
+func (c *Cli) spawnTasks(goal core.Work, p *project.Project, runners []string, detected map[string]runner.Runner, children []core.Work, cwd string) ([]handleWithAttach, []string, error) {
+	a := c.Args
+	spawned := []handleWithAttach{}
+	var lines []string
+	for i, child := range children {
+		// Work past briefed has a session of its own, a claimed one, or is
+		// waiting on a human; spawning would orphan it.
+		spawnable := child.State == core.StateQueued || child.State == core.StateBriefed ||
+			(child.State == core.StateRunning && child.Session == nil && child.Claim == nil)
+		if !spawnable {
+			continue
+		}
+		runnerName := runners[i%len(runners)]
+		rn := detected[runnerName]
+		if err := c.Ledger.SetCwd(child.ID, cwd); err != nil {
+			return nil, nil, err
+		}
+		briefText, err := c.briefFor(child.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		agent := str(a, "agent")
+		if agent == nil {
+			agent = p.Agent
+		}
+		model := str(a, "model")
+		if model == nil {
+			model = p.Model
+		}
+		h, err := rn.Spawn(runner.SpawnOptions{
+			Cwd:   cwd,
+			Name:  slice60(fmt.Sprintf("wd-%s %s", child.ID, child.Title)),
+			Brief: briefText,
+			Agent: agent,
+			Model: model,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := c.Ledger.SetSession(child.ID, ledger.SessionInfo{
+			Runner:  runnerName,
+			Session: h.Session,
+			Ref:     h.Ref,
+			Cwd:     cwd,
+		}); err != nil {
+			return nil, nil, err
+		}
+		if child.Claim == nil {
+			if _, err := c.Ledger.SetClaim(child.ID, &h.Session); err != nil {
+				return nil, nil, err
+			}
+		}
+		if child.State == core.StateQueued {
+			if _, err := c.Ledger.Transition(child.ID, core.StateBriefed); err != nil {
+				return nil, nil, err
+			}
+		}
+		if child.State != core.StateRunning {
+			if _, err := c.Ledger.Transition(child.ID, core.StateRunning); err != nil {
+				return nil, nil, err
+			}
+		}
+		if _, err := c.Ledger.AddEvent(goal.ID, core.EventSpawn, fmt.Sprintf("%s:%s", runnerName, h.Session)); err != nil {
+			return nil, nil, err
+		}
+		hint := rn.AttachHint(h)
+		spawned = append(spawned, handleWithAttach{Handle: h, Attach: hint})
+		lines = append(lines, fmt.Sprintf("%s  %s", h.Session, hint))
+	}
+	if len(spawned) > 0 && goal.State != core.StateRunning {
+		if _, err := c.Ledger.Transition(goal.ID, core.StateRunning); err != nil {
+			return nil, nil, err
+		}
+	}
+	return spawned, lines, nil
+}
+
 // goalLike is the goal command. `wd goal` reaches the same code so anything
 // written before the rename keeps working; only the word a reader sees changed.
 func (c *Cli) goalLike(cmd string, rest []string) error {
@@ -446,6 +634,12 @@ func (c *Cli) goalLike(cmd string, rest []string) error {
 	sub := ""
 	if len(rest) > 0 {
 		sub = rest[0]
+	}
+	if cmd == "goal" && sub == "start" {
+		if len(rest) < 3 {
+			return fail("usage: wd goal start <project> \"<what you want done>\" [--runner <runner>] [--timeout s]")
+		}
+		return c.goalStart(rest[1], rest[2])
 	}
 	if cmd == "goal" && sub == "add" {
 		if len(rest) < 3 {
@@ -523,6 +717,69 @@ func (c *Cli) goalLike(cmd string, rest []string) error {
 		return c.goalRelease(goal, rest)
 	}
 	return fail("%s", usage)
+}
+
+// goalStart files a goal from what someone typed, plans it and spawns its
+// tasks: the whole of starting a goal, as one act.
+func (c *Cli) goalStart(name, text string) error {
+	p, err := c.project(name)
+	if err != nil {
+		return err
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return fail("usage: wd goal start <project> \"<what you want done>\"")
+	}
+	goal, err := c.Ledger.Add(name, goalTitle(text), ledger.AddOptions{Kind: core.WorkGoal, Detail: text})
+	if err != nil {
+		return err
+	}
+	tasks, err := c.planGoal(goal, p)
+	if err != nil {
+		return fmt.Errorf("goal %s filed; %w", goal.ID, err)
+	}
+	runners, err := project.ParseRunnerList(strOr(c.Args, "runner", p.Runner), p.Runner, runner.AllRunnerNames)
+	if err != nil {
+		return err
+	}
+	detected, err := detectedRunners(runners)
+	if err != nil {
+		return err
+	}
+	cwd, err := c.ensureSharedWorktree(goal, p)
+	if err != nil {
+		return err
+	}
+	if goal, err = c.Ledger.Get(goal.ID); err != nil {
+		return err
+	}
+	_, lines, err := c.spawnTasks(goal, p, runners, detected, tasks, cwd)
+	if err != nil {
+		return err
+	}
+	if goal, err = c.Ledger.Get(goal.ID); err != nil {
+		return err
+	}
+	if tasks, err = c.Ledger.Tasks(goal.ID); err != nil {
+		return err
+	}
+	text = fmt.Sprintf("goal %s started: %s\n%s", goal.ID, goal.Title, strings.Join(lines, "\n"))
+	return c.out(map[string]any{"goal": goal, "tasks": tasks}, text)
+}
+
+// goalTitle is the first line of what someone typed, cut at a word to at most
+// 72 characters.
+func goalTitle(text string) string {
+	line, _, _ := strings.Cut(text, "\n")
+	runes := []rune(strings.TrimSpace(line))
+	if len(runes) <= 72 {
+		return string(runes)
+	}
+	cut := string(runes[:72])
+	if i := strings.LastIndex(cut, " "); i > 0 {
+		cut = cut[:i]
+	}
+	return strings.TrimSpace(cut)
 }
 
 // abandon ends work that stopped without shipping, whatever kind it is: a
@@ -673,15 +930,41 @@ func (c *Cli) abandonReason(w core.Work) (string, error) {
 }
 
 func (c *Cli) goalPlan(cmd string, goal core.Work) error {
-	a := c.Args
 	p, err := c.project(goal.Project)
 	if err != nil {
 		return err
 	}
+	rows, err := c.planGoal(goal, p)
+	if err != nil {
+		return err
+	}
+	type planRow struct {
+		ID      string  `json:"id"`
+		Heading *string `json:"heading"`
+		Title   string  `json:"title"`
+	}
+	out := make([]planRow, 0, len(rows))
+	table := make([]string, 0, len(rows))
+	for _, w := range rows {
+		out = append(out, planRow{ID: w.ID, Heading: w.Heading, Title: w.Title})
+		table = append(table, fmt.Sprintf("%s\t%s\t%s", w.ID, strOrEmpty(w.Heading), w.Title))
+	}
+	return c.out(out, strings.Join(table, "\n"))
+}
+
+// planGoal asks the project's runner, or --runner, for the goal's task list,
+// files each task under the goal, and returns them. --timeout bounds the wait
+// for the list, 120 seconds by default.
+func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) {
+	a := c.Args
+	wait, err := positiveInt(a, "timeout", 120)
+	if err != nil {
+		return nil, err
+	}
 	runnerName := strOr(a, "runner", p.Runner)
 	rn, err := runner.DetectedRunner(runnerName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	agent := str(a, "agent")
 	if agent == nil {
@@ -699,14 +982,14 @@ func (c *Cli) goalPlan(cmd string, goal core.Work) error {
 		Model: model,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	deadline := time.Now().Add(120 * time.Second)
+	deadline := time.Now().Add(time.Duration(wait) * time.Second)
 	var tasks []coordinator.PlanTask
 	for time.Now().Before(deadline) {
 		texts, err := rn.Transcript(h)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if ts := coordinator.ParsePlan(texts); len(ts) > 0 {
 			tasks = ts
@@ -715,7 +998,7 @@ func (c *Cli) goalPlan(cmd string, goal core.Work) error {
 		time.Sleep(500 * time.Millisecond)
 	}
 	if tasks == nil {
-		return fail("plan session %s produced no task list", h.Session)
+		return nil, fail("plan session %s produced no task list", h.Session)
 	}
 	rows := make([]core.Work, 0, len(tasks))
 	for _, t := range tasks {
@@ -724,30 +1007,19 @@ func (c *Cli) goalPlan(cmd string, goal core.Work) error {
 			Heading: &t.Heading,
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		rows = append(rows, w)
 	}
 	if _, err := c.Ledger.AddEvent(goal.ID, core.EventNote, fmt.Sprintf("plan: %d tasks", len(rows))); err != nil {
-		return err
+		return nil, err
 	}
 	if goal.State == core.StateQueued {
 		if _, err := c.Ledger.Transition(goal.ID, core.StateBriefed); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	type planRow struct {
-		ID      string  `json:"id"`
-		Heading *string `json:"heading"`
-		Title   string  `json:"title"`
-	}
-	out := make([]planRow, 0, len(rows))
-	table := make([]string, 0, len(rows))
-	for _, w := range rows {
-		out = append(out, planRow{ID: w.ID, Heading: w.Heading, Title: w.Title})
-		table = append(table, fmt.Sprintf("%s\t%s\t%s", w.ID, strOrEmpty(w.Heading), w.Title))
-	}
-	return c.out(out, strings.Join(table, "\n"))
+	return rows, nil
 }
 
 func (c *Cli) goalSpawn(cmd string, goal core.Work) error {
@@ -901,77 +1173,9 @@ func (c *Cli) goalRun(cmd, kindWord string, goal core.Work) error {
 	if err != nil {
 		return err
 	}
-	spawned := []handleWithAttach{}
-	var lines []string
-	for i, child := range children {
-		// Work past briefed has a session of its own, a claimed one, or is
-		// waiting on a human; spawning would orphan it.
-		spawnable := child.State == core.StateQueued || child.State == core.StateBriefed ||
-			(child.State == core.StateRunning && child.Session == nil && child.Claim == nil)
-		if !spawnable {
-			continue
-		}
-		runnerName := runners[i%len(runners)]
-		rn := detected[runnerName]
-		if err := c.Ledger.SetCwd(child.ID, cwd); err != nil {
-			return err
-		}
-		briefText, err := c.briefFor(child.ID)
-		if err != nil {
-			return err
-		}
-		agent := str(a, "agent")
-		if agent == nil {
-			agent = p.Agent
-		}
-		model := str(a, "model")
-		if model == nil {
-			model = p.Model
-		}
-		h, err := rn.Spawn(runner.SpawnOptions{
-			Cwd:   cwd,
-			Name:  slice60(fmt.Sprintf("wd-%s %s", child.ID, child.Title)),
-			Brief: briefText,
-			Agent: agent,
-			Model: model,
-		})
-		if err != nil {
-			return err
-		}
-		if err := c.Ledger.SetSession(child.ID, ledger.SessionInfo{
-			Runner:  runnerName,
-			Session: h.Session,
-			Ref:     h.Ref,
-			Cwd:     cwd,
-		}); err != nil {
-			return err
-		}
-		if child.Claim == nil {
-			if _, err := c.Ledger.SetClaim(child.ID, &h.Session); err != nil {
-				return err
-			}
-		}
-		if child.State == core.StateQueued {
-			if _, err := c.Ledger.Transition(child.ID, core.StateBriefed); err != nil {
-				return err
-			}
-		}
-		if child.State != core.StateRunning {
-			if _, err := c.Ledger.Transition(child.ID, core.StateRunning); err != nil {
-				return err
-			}
-		}
-		if _, err := c.Ledger.AddEvent(goal.ID, core.EventSpawn, fmt.Sprintf("%s:%s", runnerName, h.Session)); err != nil {
-			return err
-		}
-		hint := rn.AttachHint(h)
-		spawned = append(spawned, handleWithAttach{Handle: h, Attach: hint})
-		lines = append(lines, fmt.Sprintf("%s  %s", h.Session, hint))
-	}
-	if len(spawned) > 0 && goal.State != core.StateRunning {
-		if _, err := c.Ledger.Transition(goal.ID, core.StateRunning); err != nil {
-			return err
-		}
+	spawned, lines, err := c.spawnTasks(goal, p, runners, detected, children, cwd)
+	if err != nil {
+		return err
 	}
 	if !flag(a, "wait") {
 		lines = append(lines, fmt.Sprintf("%d task(s) spawned on %s", len(spawned), cwd))
@@ -1720,7 +1924,8 @@ type statusRow struct {
 
 func (c *Cli) status(rest []string) error {
 	a := c.Args
-	filter := ledger.ListFilter{}
+	archived := flag(a, "archived")
+	filter := ledger.ListFilter{Archived: &archived}
 	if v := str(a, "project"); v != nil {
 		filter.Project = v
 	}
@@ -1731,7 +1936,7 @@ func (c *Cli) status(rest []string) error {
 	open := []statusRow{}
 	at := time.Now()
 	for _, w := range items {
-		if flag(a, "all") || (w.State != core.StateDone && w.State != core.StateDropped) {
+		if archived || flag(a, "all") || (w.State != core.StateDone && w.State != core.StateDropped) {
 			stale, err := core.Stale(w, at)
 			if err != nil {
 				return err

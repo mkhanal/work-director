@@ -40,7 +40,7 @@ func TestWorkItemsSerializeWithTheWireSchema(t *testing.T) {
 	}
 	assertKeys(t, w, []string{
 		"id", "project", "title", "detail", "kind", "state", "runner", "session",
-		"ref", "cwd", "created", "updated", "parent", "heading", "claim", "impact", "goal_type",
+		"ref", "cwd", "created", "updated", "parent", "heading", "claim", "impact", "goal_type", "archived",
 	})
 	// Nullable fields are null, not omitted, when unset. A goal with no type
 	// has goal_type null: never a defaulted value, because a type that reads as
@@ -48,7 +48,7 @@ func TestWorkItemsSerializeWithTheWireSchema(t *testing.T) {
 	empty := core.Work{ID: "x", Project: "p", Title: "t", Kind: core.WorkTask, State: core.StateQueued, Created: "c", Updated: "u"}
 	assertKeys(t, empty, []string{
 		"id", "project", "title", "detail", "kind", "state", "runner", "session",
-		"ref", "cwd", "created", "updated", "parent", "heading", "claim", "impact", "goal_type",
+		"ref", "cwd", "created", "updated", "parent", "heading", "claim", "impact", "goal_type", "archived",
 	})
 }
 
@@ -345,7 +345,7 @@ func TestStatusMarksWorkStaleAfterThirtyDaysWithoutActivity(t *testing.T) {
 	for _, r := range rows {
 		assertKeys(t, r, []string{
 			"id", "project", "title", "detail", "kind", "state", "runner", "session",
-			"ref", "cwd", "created", "updated", "parent", "heading", "claim", "impact", "goal_type", "stale",
+			"ref", "cwd", "created", "updated", "parent", "heading", "claim", "impact", "goal_type", "archived", "stale",
 		})
 		stale[r["id"].(string)] = r["stale"]
 	}
@@ -848,6 +848,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"impact", t3, "+src/x"}, {"impact", t3, "--clear"},
 		{"conflict", epic},
 		{"worktree", "list", epic}, {"worktree", "attach", t3, filepath.Join(f.dir, "elsewhere")},
+		{"archive", attached, "census"}, {"unarchive", attached},
 		{"verify", t2}, {"merge", t2},
 		{"concern", "add", t3, "a worry"}, {"concern", "list"}, {"concern", "list", epic},
 		{"concern", "resolve", "2", "settled"},
@@ -3786,4 +3787,135 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func TestGoalStartsFromOneSentence(t *testing.T) {
+	f := newCLIFixture(t)
+	text := "Let people export their tasks to a CSV file they can open in a spreadsheet program\nInclude tags and due dates."
+	out := f.runOK(t, "goal", "start", "sample-app", text, "--runner", "planner", "--json")
+	var started struct {
+		Goal  core.Work   `json:"goal"`
+		Tasks []core.Work `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(out), &started); err != nil {
+		t.Fatalf("goal start --json: %v\n%s", err, out)
+	}
+	g := started.Goal
+	if !core.IsGoal(g.Kind) || g.Project != "sample-app" || g.Detail != text {
+		t.Fatalf("goal = %+v, want a sample-app goal carrying the whole text", g)
+	}
+	if g.Title != "Let people export their tasks to a CSV file they can open in a" {
+		t.Fatalf("title = %q, want the first line cut at a word within 72 characters", g.Title)
+	}
+	if len(started.Tasks) != 2 {
+		t.Fatalf("tasks = %d, want the planner's two", len(started.Tasks))
+	}
+	for _, task := range started.Tasks {
+		if task.Parent == nil || *task.Parent != g.ID || task.State != core.StateRunning || task.Session == nil {
+			t.Errorf("task %+v, want a spawned task of %s", task, g.ID)
+		}
+	}
+	if g.State != core.StateRunning {
+		t.Errorf("goal state = %s, want running once its tasks were spawned", g.State)
+	}
+
+	short := f.runOK(t, "goal", "start", "sample-app", "Fix the login page", "--runner", "planner", "--json")
+	if !strings.Contains(short, `"title": "Fix the login page"`) {
+		t.Errorf("a one-line goal should keep its line as the title:\n%s", short)
+	}
+
+	code, _, errStr := f.run(t, "goal", "start", "sample-app", "Nothing to plan", "--runner", "advisor", "--timeout", "1")
+	if code != 1 || !strings.Contains(errStr, "produced no task list") || !strings.Contains(errStr, "advisor-s") {
+		t.Fatalf("an empty plan: exit %d, %q; want 1 naming the plan session", code, errStr)
+	}
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	defer l.Close()
+	items, err := l.List(ledger.ListFilter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	filed := false
+	for _, w := range items {
+		filed = filed || w.Title == "Nothing to plan"
+	}
+	if !filed {
+		t.Fatalf("a goal whose plan yielded nothing should stay filed")
+	}
+}
+
+func TestWdArchiveHidesWorkAndWdUnarchiveBringsItBack(t *testing.T) {
+	f := newCLIFixture(t)
+	standalone, epic := f.ids["standalone"], f.ids["epic"]
+	if errStr := f.runFail(t, "archive", standalone); !strings.Contains(errStr, "say why") {
+		t.Fatalf("archiving open work with no reason: %q, want the refusal", errStr)
+	}
+	f.runOK(t, "archive", standalone, "fixed upstream")
+	f.runOK(t, "archive", epic, "the migration was cancelled")
+
+	rows := func(args ...string) map[string]bool {
+		t.Helper()
+		var list []map[string]any
+		if err := json.Unmarshal([]byte(f.runOK(t, append(args, "--json")...)), &list); err != nil {
+			t.Fatalf("wd %v: %v", args, err)
+		}
+		ids := map[string]bool{}
+		for _, r := range list {
+			ids[r["id"].(string)] = true
+		}
+		return ids
+	}
+	for _, args := range [][]string{{"status"}, {"status", "--all"}} {
+		if got := rows(args...); got[standalone] || got[epic] || got[f.ids["t1"]] {
+			t.Errorf("wd %v lists archived work: %v", args, got)
+		}
+	}
+	archived := rows("status", "--archived")
+	for _, id := range []string{standalone, epic, f.ids["t1"], f.ids["t2"], f.ids["t3"]} {
+		if !archived[id] {
+			t.Errorf("wd status --archived lacks %s", id)
+		}
+	}
+	if errStr := f.runFail(t, "archive", standalone, "again"); !strings.Contains(errStr, "already archived") {
+		t.Errorf("archiving twice: %q", errStr)
+	}
+	f.runOK(t, "unarchive", standalone)
+	if !rows("status", "--all")[standalone] {
+		t.Errorf("unarchived work is not back in wd status --all")
+	}
+	if errStr := f.runFail(t, "unarchive", standalone); !strings.Contains(errStr, "not archived") {
+		t.Errorf("unarchiving twice: %q", errStr)
+	}
+}
+
+func TestProjectNoLongerUsedIsArchivedWithItsWork(t *testing.T) {
+	f := newCLIFixture(t)
+	file := filepath.Join(f.wdHome, "projects", "sample-app.md")
+	moved := filepath.Join(f.wdHome, "projects", "archive", "sample-app.md")
+	if errStr := f.runFail(t, "projects", "archive", "sample-app"); !strings.Contains(errStr, f.ids["standalone"]) {
+		t.Fatalf("archiving a project with open work and no reason: %q, want the open work named", errStr)
+	}
+	if _, err := os.Stat(file); err != nil {
+		t.Fatalf("a refused archive moved the project file: %v", err)
+	}
+	f.runOK(t, "projects", "archive", "sample-app", "the sample is retired")
+	if _, err := os.Stat(moved); err != nil {
+		t.Fatalf("project file not under projects/archive: %v", err)
+	}
+	if out := f.runOK(t, "projects"); strings.Contains(out, "sample-app") {
+		t.Errorf("an archived project still loads:\n%s", out)
+	}
+	var left []map[string]any
+	if err := json.Unmarshal([]byte(f.runOK(t, "status", "--all", "--json")), &left); err != nil || len(left) != 0 {
+		t.Errorf("work of an archived project still on status: %v (%v)", left, err)
+	}
+	f.runOK(t, "projects", "unarchive", "sample-app")
+	if _, err := os.Stat(file); err != nil {
+		t.Fatalf("project file not moved back: %v", err)
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "status", "--all", "--json")), &left); err != nil || len(left) == 0 {
+		t.Errorf("work of an unarchived project is not back: %v (%v)", left, err)
+	}
 }

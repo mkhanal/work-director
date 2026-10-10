@@ -60,6 +60,25 @@ public struct Plan: Hashable, Sendable, Identifiable {
         return Plan(title: "Abandon", argv: ["abandon", id] + (detail.isEmpty ? [] : ["--reason", detail]))
     }
 
+    /// Starts a goal from what the person typed: wd files it, plans it and
+    /// spawns its tasks.
+    public static func start(project: String, text: String) throws -> Plan {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw PlanError.empty }
+        return Plan(title: "Start goal", argv: ["goal", "start", project, text, "--json"])
+    }
+
+    /// Archives work. Work at rest needs no reason; open work is dropped first,
+    /// which is a choice someone has to state.
+    public static func archive(_ work: Work, reason: String) throws -> Plan {
+        if work.atRest {
+            return Plan(title: "Archive", argv: ["archive", work.id])
+        }
+        return Plan(title: "Drop and archive", argv: ["archive", work.id, try required(reason, for: "archiving open work")])
+    }
+
+    public static func unarchive(_ id: String) -> Plan { Plan(title: "Unarchive", argv: ["unarchive", id]) }
+
     public static func drive(_ id: String) -> Plan { Plan(title: "Drive", argv: ["drive", id]) }
     public static func softDone(_ id: String) -> Plan { Plan(title: "Soft-done", argv: ["soft-done", id]) }
     public static func done(_ id: String) -> Plan { Plan(title: "Done", argv: ["done", id]) }

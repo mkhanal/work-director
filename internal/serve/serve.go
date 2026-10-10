@@ -37,10 +37,12 @@ func New(l *ledger.Ledger, cliPath string) *Server {
 	}
 }
 
-// actionResult is a CLI run: its exit code and combined output.
+// actionResult is a CLI run: its exit code and its two streams, kept apart so a
+// --json document on stdout reads on its own.
 type actionResult struct {
 	Code   int    `json:"code"`
 	Stdout string `json:"stdout"`
+	Stderr string `json:"stderr"`
 }
 
 type errorBody struct {
@@ -307,12 +309,19 @@ func (s *Server) answerWS(c *wsConn, payload []byte) error {
 // run the CLI at all is an error.
 func (s *Server) runCLI(argv []string) (actionResult, error) {
 	cmd := exec.Command(s.cliPath, argv...)
-	out, err := cmd.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
 	var exit *exec.ExitError
 	if err != nil && !errors.As(err, &exit) {
 		return actionResult{}, fmt.Errorf("run %s: %w", s.cliPath, err)
 	}
-	return actionResult{Code: cmd.ProcessState.ExitCode(), Stdout: strings.TrimSpace(string(out))}, nil
+	return actionResult{
+		Code:   cmd.ProcessState.ExitCode(),
+		Stdout: strings.TrimSpace(stdout.String()),
+		Stderr: strings.TrimSpace(stderr.String()),
+	}, nil
 }
 
 // writeJSON writes v as a JSON response, or a 500 when v cannot be encoded.

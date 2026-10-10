@@ -81,6 +81,18 @@ public final class Store {
         return try decode(ReviewPass.self, result)
     }
 
+    /// Work put out of sight, newest first as wd lists it.
+    public func archived() async throws -> [Work] {
+        try decode([Work].self, try await channel.action(["status", "--archived", "--json"]))
+    }
+
+    /// Runs a confirmed start plan and reads back the goal it filed.
+    public func start(_ plan: Plan) async throws -> Started {
+        let started = try decode(Started.self, try await channel.action(plan.argv))
+        await refresh()
+        return started
+    }
+
     /// Runs a confirmed plan: the argv the confirmation showed, unchanged.
     public func run(_ plan: Plan) async throws -> ActionResult {
         try await channel.action(plan.argv)
@@ -88,7 +100,7 @@ public final class Store {
 
     private func decode<T: Decodable>(_ type: T.Type, _ result: ActionResult) throws -> T {
         guard result.code == 0 else {
-            throw ChannelError.refused(kind: "exit \(result.code)", message: result.stdout)
+            throw ChannelError.refused(kind: "exit \(result.code)", message: result.stderr.isEmpty ? result.stdout : result.stderr)
         }
         do {
             return try JSONDecoder().decode(T.self, from: Data(result.stdout.utf8))
