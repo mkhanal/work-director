@@ -13,6 +13,9 @@ learns taste from feedback. Design: `docs/superpowers/specs/2026-09-04-work-dire
   transport-agnostic library (functions over the sqlite ledger); `cmd/wd`, `wd serve` and `wd tui`
   are thin adapters. Domain types at the parse boundary; no `any`/`!`/panics as control flow.
   Relations live in the schema.
+- Desktop UIs are native per platform (SwiftUI on macOS, then WinUI 3, GTK4/libadwaita), never a
+  webview or a custom-drawn toolkit. Each bundles its own `wd` and talks to it only through
+  `wd serve --stdio`; views are computed in Go so a platform app only renders and confirms writes.
 - Act as head of engineering: decide scope and sequencing yourself; ask the user only business
   facts and irreversible choices. Cost is agent minutes and tokens, never human hours. Never take
   tech debt that a proper fix would clear in agent-minutes.

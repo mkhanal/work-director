@@ -1,4 +1,8 @@
-# Web UI designs — three options and what they agree on
+# UI designs — three options and what they agree on
+
+> These were written for a web client. The app is native per platform
+> (`clients/macos`, over `wd serve --stdio`); the surfaces and rules below carry
+> over, the browser does not.
 
 Three free models designed the UI independently on 2026-10-02, from the same
 brief and the same grounding (`internal/serve/serve.go`, the state machine, the

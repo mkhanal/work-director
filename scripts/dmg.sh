@@ -67,7 +67,7 @@ wd $version ($commit)
 Drag wd to Applications, then open a Terminal and run:
 
     wd doctor     # which runner CLIs are detected
-    wd serve      # the web UI and JSON API — open the address it prints
+    wd serve      # the JSON API over loopback HTTP — open the address it prints
     wd --help     # every command
 
 Your ledger lives in ~/.work-director. Nothing else is installed and nothing is

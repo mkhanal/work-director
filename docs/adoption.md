@@ -184,8 +184,9 @@ wd concern resolve <n> "<decision>"
 No private data is in the repo. The ledger (SQLite), project files, feedback and worktrees
 live under `~/.work-director` (override with `WD_HOME`).
 
-## 3. If you want the UI later
+## 3. The desktop app
 
-Every command emits `--json` (`wd tasks <e> --json`, `wd status --json`, ...). The UI is a
-reader/writer over those commands; no capability exists only in a UI. The schedule: an epic
-built on the terminal first, UI as a wrapper after.
+On macOS, `scripts/build-macos.sh` builds `dist/Work Director.app`: a native app that bundles
+its own `wd` and reads the same ledger through `wd serve --stdio`. Every command also emits
+`--json` (`wd tasks <e> --json`, `wd status --json`, ...), and the app is only a reader and
+writer over those commands; no capability exists only in the app.

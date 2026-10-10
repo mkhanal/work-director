@@ -18,11 +18,20 @@ model for a run is chosen live from the provider's own CLI via `wd models`, neve
 rules into the project's own files as a PR it accepts).
 
 
-### The web UI
+### The desktop app
 
-`wd serve` is the UI. A visual preview of the design — and the reasoning behind
-it — is in [`docs/design/`](docs/design/README.md); open
-[`docs/design/preview.html`](docs/design/preview.html) in a browser.
+**Work Director for macOS** is a native SwiftUI app (`clients/macos`). It bundles its own `wd`
+and holds `wd serve --stdio` open as its only link to the ledger: no port, no network. The
+board sorts every goal and task into the band that says what it waits on (Needs You, In
+Flight, Ready to Push, In Review, Ready to Close); a goal opens on its tasks, the decisions the
+loop made in your place, and where the work landed; Review shows what changed since you last
+acknowledged. Every write is a `wd` command, shown exactly before it runs.
+
+```
+scripts/build-macos.sh            # dist/Work Director.app, with the matching wd inside
+```
+
+Windows (WinUI 3) and Linux (GTK4) apps are planned over the same stdio channel.
 
 ## Install the taste plugin
 
@@ -123,10 +132,9 @@ questions from recorded decisions instead of guessing. Simple goals run in one g
 Goals are first-class entry points, not conversations. `wd tui` is the terminal board: every
 goal with a rolled-up goal-level status, and each item's ledger and live transcript. Opening a
 goal shows its type, what the loop decided in your place, and where the work reached — the two
-things a person has left to review. `wd serve` exposes the same board as JSON and a WebSocket
-event stream on 127.0.0.1:8787 for native clients, with the goal's `claims` and `landings` in
-`/api/goal/<id>`; each action runs through the real `wd` CLI, so a board can never drift from the
-CLI.
+things a person has left to review. `wd serve --stdio` serves the same views to a desktop app
+on its standard streams, and `wd serve` over loopback HTTP and a WebSocket on 127.0.0.1:8787;
+each action runs through the real `wd` CLI, so a board can never drift from the CLI.
 
 A goal can also run with nobody watching. `wd drive <goal>` is the loop: each turn it
 coordinates the open tasks, answers what it can from recorded decisions, asks one model the
@@ -156,7 +164,7 @@ work-director installs it in itself (its requirements are married to tests); a n
 project gets the "adopt preferred lazyspec?" question at `wd projects add`, and a "yes" files
 an evolution work item that installs it in that repo — the director never claims it applies.
 
-State lives in `~/.work-director` (SQLite ledger, project files, worktrees). The repo carries no private data. Every command emits `--json` for a future UI wrapper.
+State lives in `~/.work-director` (SQLite ledger, project files, worktrees). The repo carries no private data. Every command emits `--json`; the desktop app is a reader and writer over the same commands.
 
 ## Design
 
