@@ -63,6 +63,26 @@ func TestDoctor(t *testing.T) {
 		}
 	})
 
+	t.Run("Doctor Says Where Each Setting Comes From", func(t *testing.T) {
+		cfg := doctorReport(t, f, f.sample, gitOnlyPath(t)).Config
+		if cfg.Home != f.wdHome || cfg.HomeFrom != "WD_HOME" || cfg.Ledger != filepath.Join(f.wdHome, "ledger.db") {
+			t.Errorf("home = %+v, want %s set by WD_HOME", cfg, f.wdHome)
+		}
+		if cfg.Projects != filepath.Join(f.wdHome, "projects") || cfg.ProjectCount == 0 || cfg.Runners != filepath.Join(f.wdHome, "runners") {
+			t.Errorf("projects and runners = %+v", cfg)
+		}
+		if cfg.Cards != filepath.Join(repoRoot(t), "taste", "cards") || cfg.OwnCards != nil {
+			t.Errorf("cards = %q own %v, want the checkout's and none of your own", cfg.Cards, cfg.OwnCards)
+		}
+		own := filepath.Join(f.wdHome, "taste", "cards")
+		if err := os.MkdirAll(own, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if cfg := doctorReport(t, f, f.sample, gitOnlyPath(t)).Config; cfg.OwnCards == nil || *cfg.OwnCards != own {
+			t.Errorf("own cards = %v, want %s", cfg.OwnCards, own)
+		}
+	})
+
 	t.Run("Doctor Reports Whether The Directory Is A Repo", func(t *testing.T) {
 		inside := doctorReport(t, f, f.sample, gitOnlyPath(t)).Workspace
 		if inside.Repo == nil || inside.Branch == nil || *inside.Branch != "main" {

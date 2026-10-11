@@ -204,7 +204,7 @@ func TestDoctorEmitsItsReportOnTheJsonRail(t *testing.T) {
 	if err := json.Unmarshal([]byte(f.runOK(t, "doctor", "--json")), &report); err != nil {
 		t.Fatalf("doctor --json: %v", err)
 	}
-	assertKeys(t, report, []string{"init", "runners", "workspace"})
+	assertKeys(t, report, []string{"config", "init", "runners", "workspace"})
 	runners, ok := report["runners"].([]any)
 	if !ok || len(runners) == 0 {
 		t.Fatalf("runners = %v, want a non-empty array", report["runners"])
