@@ -1054,6 +1054,71 @@ func TestVerifyWithNoCommandsIsRefusedWithoutRecording(t *testing.T) {
 	}
 }
 
+func TestWdVerifyRunsWhatTheRepositorysToolkitGives(t *testing.T) {
+	f := newCLIFixture(t)
+	repo := t.TempDir()
+	for name, text := range map[string]string{
+		"package.json":      `{"scripts":{"lint":"true","build":"false"}}`,
+		"package-lock.json": "{}",
+	} {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.runOK(t, "projects", "add", "npmrepo", repo, "--lazyspec", "n")
+	id := jsonString(t, f.runOK(t, "add", "npmrepo", "Checked by its own scripts", "--json"), "id")
+	f.run(t, "verify", id)
+	if out := f.runOK(t, "events", id, "--json"); !strings.Contains(out, "npm run lint →") || strings.Contains(out, "npm run build") {
+		t.Fatalf("events = %s, want a verify running npm run lint and nothing the repo does not define as a check", out)
+	}
+
+	f.runOK(t, "projects", "add", "wrongtool", repo, "--verify", "pnpm lint", "--lazyspec", "n")
+	other := jsonString(t, f.runOK(t, "add", "wrongtool", "Checked with the wrong tool", "--json"), "id")
+	if errStr := f.runFail(t, "verify", other); !strings.Contains(errStr, "pnpm lint") || !strings.Contains(errStr, "uses npm") {
+		t.Fatalf("stderr = %q, want pnpm refused in an npm repository, naming both", errStr)
+	}
+	if out := f.runOK(t, "events", other, "--json"); strings.Contains(out, `"kind": "verify"`) {
+		t.Fatalf("a refused verify was recorded: %s", out)
+	}
+}
+
+func TestWdGoalStartFilesNothingWhenTheRequestSaysNothingToChange(t *testing.T) {
+	f := newCLIFixture(t)
+	state := filepath.Join(f.dir, "fake-state")
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, "planner-asks"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if errStr := f.runFail(t, "goal", "start", "sample-app", "In a new worktree,", "--runner", "planner"); !strings.Contains(errStr, "What should change in the new worktree?") {
+		t.Fatalf("stderr = %q, want the planner's question", errStr)
+	}
+	var archived []core.Work
+	if err := json.Unmarshal([]byte(f.runOK(t, "status", "--archived", "--json")), &archived); err != nil {
+		t.Fatal(err)
+	}
+	var goal *core.Work
+	for i, w := range archived {
+		if w.Title == "In a new worktree," {
+			goal = &archived[i]
+		}
+	}
+	if goal == nil || goal.State != core.StateDropped {
+		t.Fatalf("archived = %+v, want the goal dropped and archived", archived)
+	}
+	if out := f.runOK(t, "events", goal.ID, "--json"); !strings.Contains(out, "What should change in the new worktree?") {
+		t.Fatalf("events = %s, want the question as the reason", out)
+	}
+	var tasks []core.Work
+	if err := json.Unmarshal([]byte(f.runOK(t, "tasks", goal.ID, "--json")), &tasks); err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("tasks = %+v, want none", tasks)
+	}
+}
+
 func TestAnAdoptedCardLeavesThePromotionCandidates(t *testing.T) {
 	f := newCLIFixture(t)
 	root := t.TempDir()
@@ -3830,8 +3895,9 @@ func TestGoalStartsFromOneSentence(t *testing.T) {
 		t.Errorf("a one-line goal should keep its line as the title:\n%s", short)
 	}
 
-	code, _, errStr := f.run(t, "goal", "start", "sample-app", "Nothing to plan", "--runner", "advisor", "--timeout", "1")
-	if code != 1 || !strings.Contains(errStr, "produced no task list") || !strings.Contains(errStr, "advisor-s") {
+	// The finder replies with neither tasks nor a question.
+	code, _, errStr := f.run(t, "goal", "start", "sample-app", "Nothing to plan", "--runner", "finder", "--timeout", "1")
+	if code != 1 || !strings.Contains(errStr, "produced no task list") || !strings.Contains(errStr, "finder-s") {
 		t.Fatalf("an empty plan: exit %d, %q; want 1 naming the plan session", code, errStr)
 	}
 	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))

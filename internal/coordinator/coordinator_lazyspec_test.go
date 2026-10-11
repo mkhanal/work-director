@@ -118,21 +118,45 @@ func resolveFake(fr *fakeRunner) func(name string) (runner.Runner, error) {
 var proj = &project.Project{Name: "proj", Path: "/repo/proj", Runner: "project-runner"}
 
 func TestCoordinator(t *testing.T) {
-	t.Run("The Goal Plan Brief Names The Project And Verify Commands", func(t *testing.T) {
+	t.Run("The Goal Plan Brief Asks For Changes, Not Checks", func(t *testing.T) {
 		goal := core.Work{ID: "e1", Title: "Rewrite the core", Detail: "in Go", Kind: core.WorkEpic}
-		p := &project.Project{Name: "wd", Path: "/repo", Verify: []string{"go test", "go vet"}}
-		brief := GoalPlanBrief(goal, p)
+		p := &project.Project{Name: "wd", Path: "/repo"}
+		kit := project.Toolkit{PackageManager: "npm", Lockfile: "package-lock.json", Checks: []string{"npm run lint", "npm run validate"}, Specs: []string{"SPEC.md"}}
+		brief, err := GoalPlanBrief(goal, p, kit)
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, want := range []string{
-			"wd (/repo)", "`go test`", "`go vet`", "Rewrite the core", "in Go",
+			"wd (/repo)", "`npm run lint`", "`npm run validate`", "Rewrite the core", "in Go",
 			"## <heading>", "- [ ] <task title>",
+			"director runs the checks itself", "no task only runs checks, plans, sets up a worktree or finds out what the goal is",
+			"Specifications this repository keeps: SPEC.md", "ASK: <",
 		} {
 			if !strings.Contains(brief, want) {
 				t.Fatalf("brief missing %q:\n%s", want, brief)
 			}
 		}
-		none := &project.Project{Name: "wd", Path: "/repo"}
-		if brief := GoalPlanBrief(goal, none); !strings.Contains(brief, "none listed") {
-			t.Fatalf("brief without verify missing %q:\n%s", "none listed", brief)
+		bare, err := GoalPlanBrief(goal, p, project.Toolkit{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"none: the repository defines no checks", "Specifications this repository keeps: none; no task adds"} {
+			if !strings.Contains(bare, want) {
+				t.Fatalf("brief for a bare repository missing %q:\n%s", want, bare)
+			}
+		}
+		if _, err := GoalPlanBrief(goal, &project.Project{Name: "wd", Verify: []string{"pnpm lint"}}, kit); err == nil {
+			t.Fatalf("a pnpm check in an npm repository was planned with")
+		}
+	})
+
+	t.Run("A Plan Reply Asking A Question Is A Question", func(t *testing.T) {
+		q, ok := PlanQuestion([]string{"Looking at the repo.", "ASK: What should change in the new worktree?"})
+		if !ok || q != "What should change in the new worktree?" {
+			t.Fatalf("question = %q, %v", q, ok)
+		}
+		if q, ok := PlanQuestion([]string{"## Core\n- [ ] port the ledger"}); ok {
+			t.Fatalf("a plan read as a question: %q", q)
 		}
 	})
 

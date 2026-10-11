@@ -92,8 +92,17 @@ cwd on the work.
 that is not ready exits 1 with the not-ready message and keeps its state.
 
 ## Verify With No Commands Is Refused Without Recording
-`wd verify` on a project with no verify commands runs nothing, exits 1 saying
-so, and records no verify event.
+`wd verify` on a project listing no verify commands, in a repository whose
+toolkit gives no checks, runs nothing, exits 1 saying so, and records no
+verify event.
+
+## Wd Verify Runs What The Repository's Toolkit Gives
+- A project listing no verify commands is verified with its repository's checks, as `ReadToolkit` finds them.
+- A listed command for another package manager than the repository's is refused naming both, and nothing runs.
+
+## Wd Goal Start Files Nothing When The Request Says Nothing To Change
+- A planner replying `ASK: <question>` makes `wd goal start` exit 1 with the question.
+- The goal it filed is dropped with the question as the reason and archived, with no tasks.
 
 ## An Adopted Card Leaves The Promotion Candidates
 - After `wd scan --adopt <card>` writes the global candidate, `wd scan` exits 0 without listing that card.

@@ -493,8 +493,16 @@ func (c *Cli) cycle(id string) (brief.Context, error) {
 		}
 		history = append(history, "report: "+head)
 	}
+	kit, err := project.ReadToolkit(p.Path)
+	if err != nil {
+		return brief.Context{}, err
+	}
+	checks, err := project.Checks(p, kit)
+	if err != nil {
+		return brief.Context{}, err
+	}
 	roadmap := p.Roadmap
-	return brief.Context{Decisions: decisions, History: history, Roadmap: &roadmap}, nil
+	return brief.Context{Decisions: decisions, History: history, Roadmap: &roadmap, Checks: checks, Specs: kit.Specs}, nil
 }
 
 // briefFor renders the brief for work, whichever shape fits its kind.

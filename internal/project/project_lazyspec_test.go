@@ -145,3 +145,93 @@ Roadmap, most important first. The director reads this file; it never edits the 
 		}
 	})
 }
+
+// repo writes files into a fresh directory and returns it.
+func repo(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, text := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestProjectToolkit(t *testing.T) {
+	t.Run("A Repository's Toolkit Gives Its Checks", func(t *testing.T) {
+		scripts := `{"scripts":{"test":"x","validate":"x","lint":"x","build":"x"}}`
+		for lock, manager := range map[string]string{"pnpm-lock.yaml": "pnpm", "yarn.lock": "yarn", "bun.lock": "bun", "bun.lockb": "bun", "package-lock.json": "npm", "": "npm"} {
+			files := map[string]string{"package.json": scripts}
+			if lock != "" {
+				files[lock] = ""
+			}
+			kit, err := ReadToolkit(repo(t, files))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{manager + " run lint", manager + " run validate", manager + " run test"}
+			if kit.PackageManager != manager || !slices.Equal(kit.Checks, want) {
+				t.Fatalf("lock %q: kit = %+v, want %s with %q", lock, kit, manager, want)
+			}
+		}
+		kit, err := ReadToolkit(repo(t, map[string]string{"go.mod": "module x", "Cargo.toml": ""}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"go vet ./...", "go test ./...", "cargo test"}; kit.PackageManager != "" || !slices.Equal(kit.Checks, want) {
+			t.Fatalf("go and cargo kit = %+v, want %q", kit, want)
+		}
+		kit, err = ReadToolkit(repo(t, map[string]string{"README.md": "hi"}))
+		if err != nil || len(kit.Checks) != 0 {
+			t.Fatalf("bare repo kit = %+v, %v, want no checks", kit, err)
+		}
+	})
+
+	t.Run("A Repository's Toolkit Names The Specifications It Keeps", func(t *testing.T) {
+		kit, err := ReadToolkit(repo(t, map[string]string{"billing.lazyspec.md": "", "apps/web/SPEC.md": ""}))
+		if err != nil || !slices.Equal(kit.Specs, []string{"lazyspec", "SPEC.md"}) {
+			t.Fatalf("specs = %q, %v, want lazyspec and SPEC.md", kit.Specs, err)
+		}
+		hidden := map[string]string{}
+		for _, d := range []string{"node_modules", ".git", "vendor", "dist", "build"} {
+			hidden[d+"/pkg/SPEC.md"] = ""
+			hidden[d+"/x.lazyspec.md"] = ""
+		}
+		kit, err = ReadToolkit(repo(t, hidden))
+		if err != nil || len(kit.Specs) != 0 {
+			t.Fatalf("specs = %q, %v, want none: those directories are not the repository's own", kit.Specs, err)
+		}
+	})
+
+	t.Run("A Project's Checks Are Its Verify Commands, Else Its Toolkit's", func(t *testing.T) {
+		npm := Toolkit{PackageManager: "npm", Lockfile: "package-lock.json", Checks: []string{"npm run lint", "npm run validate"}}
+		got, err := Checks(&Project{Name: "eqms"}, npm)
+		if err != nil || !slices.Equal(got, npm.Checks) {
+			t.Fatalf("checks = %q, %v, want the toolkit's", got, err)
+		}
+		listed := &Project{Name: "eqms", Verify: []string{"npm run lint", "make check"}}
+		if got, err := Checks(listed, npm); err != nil || !slices.Equal(got, listed.Verify) {
+			t.Fatalf("checks = %q, %v, want the listed commands", got, err)
+		}
+		for _, kit := range []Toolkit{npm, {}} {
+			_, err := Checks(&Project{Name: "eqms", Path: "/r", Verify: []string{"pnpm lint"}}, kit)
+			want := kit.PackageManager
+			if want == "" {
+				want = "no package manager"
+			}
+			if err == nil || !strings.Contains(err.Error(), "pnpm lint") || !strings.Contains(err.Error(), want) {
+				t.Fatalf("pnpm in a %q repo: %v, want it refused naming both", kit.PackageManager, err)
+			}
+		}
+		unlocked := Toolkit{PackageManager: "npm", Checks: []string{"npm run test"}}
+		bun := &Project{Name: "demo", Verify: []string{"bun test"}}
+		if got, err := Checks(bun, unlocked); err != nil || !slices.Equal(got, bun.Verify) {
+			t.Fatalf("checks = %q, %v, want bun run as listed where no lockfile names a manager", got, err)
+		}
+	})
+}

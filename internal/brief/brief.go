@@ -71,6 +71,10 @@ type Context struct {
 	Roadmap   *string
 	Decisions []string
 	History   []string
+	// Checks are the commands that verify the work, and Specs the
+	// specification conventions the repository keeps, both as its toolkit says.
+	Checks []string
+	Specs  []string
 }
 
 func (c Context) roadmapOr(p *project.Project) string {
@@ -116,18 +120,22 @@ const coordination = `You are an executor, not the whole team. Claim what you wo
 - Something does not work or conflicts? Raise ` + "`wd concern add <id> \"<text>\"`" + ` — a concern is a decision queue for the director, not something you work around silently.
 - Own worktree for isolation? Register it: ` + "`wd worktree attach <id> <path> [--branch <b>]`" + `. Merge it back when done: ` + "`wd merge <id>`" + ` (after verify and a clean conflict scan).`
 
-func shared(p *project.Project) string {
+func shared(p *project.Project, ctx Context) string {
 	workflows := "none listed"
 	if len(p.Workflows) > 0 {
 		workflows = strings.Join(p.Workflows, ", ")
 	}
-	verify := "none listed"
-	if len(p.Verify) > 0 {
+	verify := "none: the repository defines no checks"
+	if len(ctx.Checks) > 0 {
 		var quoted []string
-		for _, v := range p.Verify {
+		for _, v := range ctx.Checks {
 			quoted = append(quoted, "`"+v+"`")
 		}
 		verify = strings.Join(quoted, ", ")
+	}
+	specs := "none; do not add a specification convention"
+	if len(ctx.Specs) > 0 {
+		specs = strings.Join(ctx.Specs, ", ") + "; change them the repository's own way"
 	}
 	modeRule := "open a draft PR when verify passes."
 	if p.Mode == "ask" {
@@ -136,6 +144,7 @@ func shared(p *project.Project) string {
 	return `- Repo: ` + p.Path + `; follow its own instructions in ` + p.InstructionsFile + `.
 - Workflows to use: ` + workflows + `.
 - Verify before reporting: ` + verify + `.
+- Specifications the repository keeps: ` + specs + `.
 - Mode ` + string(p.Mode) + `: ` + modeRule + `
 - Cost is agent minutes; never justify a shortcut with a human-hour estimate.
 - Facts you can look up, you look up. NEEDS-INPUT is for value judgments only, and carries your proposed answer.
@@ -191,7 +200,7 @@ Relevant history:
 - Capabilities available: the repo's workflows and verify commands listed here, web research, the repo's own docs.
 
 ## Constraints
-` + shared(p) + `
+` + shared(p, ctx) + `
 ## Rules
 Global rules are in your taste constitution and /taste-* skills. Specific to this project and stack:
 ` + rules(p, cards) + `
@@ -250,7 +259,7 @@ The full register is ` + "`wd tasks " + goal.ID + "`" + `; before a shared path 
 - Checkpoint: after your plan (before code) and at DONE, send a report in the format below. Nothing else in between.
 
 ## Constraints
-` + shared(p) + `
+` + shared(p, ctx) + `
 ## Rules
 Global rules are in your taste constitution and /taste-* skills. Specific to this project and stack:
 ` + rules(p, cards) + `
@@ -292,7 +301,7 @@ Relevant history:
 - Checkpoint: after your plan (before code) and at DONE, send a report in the format below. Nothing else in between.
 
 ## Constraints
-` + shared(p) + `
+` + shared(p, ctx) + `
 ## Rules
 Global rules are in your taste constitution and /taste-* skills. Specific to this project and stack:
 ` + rules(p, cards) + `

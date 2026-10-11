@@ -11,10 +11,16 @@ parser, the known-answer lookup and one coordination pass over a goal's
 children. The ledger's claims, impacts, conflicts, concerns and worktrees
 are specified in `ledger.lazyspec.md`.
 
-## The Goal Plan Brief Names The Project And Verify Commands
-`EpicPlanBrief` names the project and its path, lists the project's verify
-commands in backticks (or "none listed"), carries the goal title and detail,
-and demands the exact headed task-list shape.
+## The Goal Plan Brief Asks For Changes, Not Checks
+- `GoalPlanBrief(goal, p, kit)` names the project and its path, carries the goal's title and detail, and demands the headed task-list shape.
+- It lists the project's checks in backticks as what the director runs after each task, or says there are none.
+- It forbids tasks that only run checks, plan, set up a worktree or find out what the goal is.
+- It names the specifications the repository keeps, or says it keeps none and no task adds any.
+- It asks for `ASK: <question>` alone when the goal does not say what should change.
+
+## A Plan Reply Asking A Question Is A Question
+- `PlanQuestion(texts)` returns the question of an `ASK:` line in the planner's reply.
+- A reply with no `ASK:` line has no question.
 
 ## A Heading Line Opens A Group
 In `ParsePlan`, a `## <heading>` line sets the heading for the task lines

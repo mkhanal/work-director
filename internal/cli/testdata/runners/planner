@@ -9,6 +9,12 @@ case "$1" in
     printf 'session=planner-s%05x\n' "$n"
     ;;
   export)
+    # A test makes the planner ask instead of plan by creating $state/planner-asks.
+    if [ -f "$state/planner-asks" ]; then
+      echo 'The request stops mid-sentence.'
+      echo 'ASK: What should change in the new worktree?'
+      exit 0
+    fi
     echo '## Analysis'
     echo '- [ ] parse the config into a domain type'
     echo '- [ ] wire the decision into the schema'

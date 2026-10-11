@@ -17,14 +17,22 @@ import (
 
 // GoalPlanBrief is the planning model's brief: analyse the goal and reply
 // with only a headed task list, editing nothing.
-func GoalPlanBrief(goal core.Work, p *project.Project) string {
-	verify := "none listed"
-	if len(p.Verify) > 0 {
-		quoted := make([]string, len(p.Verify))
-		for i, v := range p.Verify {
+func GoalPlanBrief(goal core.Work, p *project.Project, kit project.Toolkit) (string, error) {
+	checks, err := project.Checks(p, kit)
+	if err != nil {
+		return "", err
+	}
+	verify := "none: the repository defines no checks"
+	if len(checks) > 0 {
+		quoted := make([]string, len(checks))
+		for i, v := range checks {
 			quoted[i] = "`" + v + "`"
 		}
 		verify = strings.Join(quoted, ", ")
+	}
+	specs := "none; no task adds a specification convention"
+	if len(kit.Specs) > 0 {
+		specs = strings.Join(kit.Specs, ", ") + "; a task changing what the software does changes its specification the repository's own way"
 	}
 	detail := ""
 	if goal.Detail != "" {
@@ -38,8 +46,24 @@ Analyse this goal and decompose it into concrete, independent tasks. Read the re
 - [ ] <task title>
 - [ ] <task title>
 
-Cover what must change and be verified; keep tasks small enough that one session can finish each. Project verify commands: %s. The goal: %s%s`,
-		p.Name, p.Path, verify, goal.Title, detail)
+Each task is a change to the repository, small enough that one session can finish it. The director runs the checks itself after each task reports: %s. So no task only runs checks, plans, sets up a worktree or finds out what the goal is.
+Specifications this repository keeps: %s.
+If the goal does not say what should change, reply with only one line, ASK: <the question that would settle it>, and no tasks.
+
+The goal: %s%s`,
+		p.Name, p.Path, verify, specs, goal.Title, detail), nil
+}
+
+// PlanQuestion is the question a planner asked instead of planning.
+func PlanQuestion(texts []string) (string, bool) {
+	for _, text := range texts {
+		for _, line := range strings.Split(text, "\n") {
+			if ask := planAskRe.FindStringSubmatch(line); ask != nil {
+				return strings.TrimSpace(ask[1]), true
+			}
+		}
+	}
+	return "", false
 }
 
 // PlanTask is one parsed planner reply line: the heading group it sits
@@ -50,6 +74,7 @@ type PlanTask struct {
 }
 
 var headingRe = regexp.MustCompile(`^##\s+(.+)`)
+var planAskRe = regexp.MustCompile(`^\s*ASK:\s*(\S.*)`)
 var taskRe = regexp.MustCompile(`^[-*]\s+\[[ xX]\]\s*(.+)`)
 
 // ParsePlan parses the planner session's reply into tasks. Heading lines

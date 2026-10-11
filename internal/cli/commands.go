@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -751,12 +752,26 @@ func (c *Cli) goalStart(name, text string) error {
 		return err
 	}
 	goal, tasks, lines, err := c.planAndSpawn(goal, p)
+	var asked planAsked
+	if errors.As(err, &asked) {
+		// A request that says nothing to change is not kept as a goal: it would
+		// sit on the board with no tasks and nothing to do.
+		if _, aerr := c.Ledger.Archive(goal.ID, "the planner asked: "+asked.question); aerr != nil {
+			return aerr
+		}
+		return fail("nothing was started: %s", asked.question)
+	}
 	if err != nil {
 		return fmt.Errorf("goal %s filed; %w", goal.ID, err)
 	}
 	text = fmt.Sprintf("goal %s started: %s\n%s", goal.ID, goal.Title, strings.Join(lines, "\n"))
 	return c.out(map[string]any{"goal": goal, "tasks": tasks}, text)
 }
+
+// planAsked is a planner that replied with a question instead of tasks.
+type planAsked struct{ question string }
+
+func (e planAsked) Error() string { return "the planner asked: " + e.question }
 
 // planAndSpawn plans a goal and spawns its open tasks, returning the goal and
 // all its tasks as they now stand.
@@ -998,10 +1013,18 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 	if model == nil {
 		model = p.Model
 	}
+	kit, err := project.ReadToolkit(p.Path)
+	if err != nil {
+		return nil, err
+	}
+	planBrief, err := coordinator.GoalPlanBrief(goal, p, kit)
+	if err != nil {
+		return nil, fail("%v", err)
+	}
 	h, err := rn.Spawn(runner.SpawnOptions{
 		Cwd:   p.Path,
 		Name:  slice60(fmt.Sprintf("wd-%s plan", goal.ID)),
-		Brief: coordinator.GoalPlanBrief(goal, p),
+		Brief: planBrief,
 		Agent: agent,
 		Model: model,
 	})
@@ -1018,6 +1041,9 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 		if ts := coordinator.ParsePlan(texts); len(ts) > 0 {
 			tasks = ts
 			break
+		}
+		if q, ok := coordinator.PlanQuestion(texts); ok {
+			return nil, planAsked{q}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -1613,12 +1639,20 @@ func (c *Cli) runVerify(id string) (pass bool, body string, results []string, er
 	if err != nil {
 		return false, "", nil, err
 	}
-	if len(p.Verify) == 0 {
-		return false, "", nil, fail("project %s lists no verify commands; add them under verify: in its project file", p.Name)
+	kit, err := project.ReadToolkit(cwd)
+	if err != nil {
+		return false, "", nil, err
+	}
+	checks, err := project.Checks(p, kit)
+	if err != nil {
+		return false, "", nil, fail("%v", err)
+	}
+	if len(checks) == 0 {
+		return false, "", nil, fail("project %s lists no verify commands and %s defines no checks; add them under verify: in its project file", p.Name, cwd)
 	}
 	results = []string{}
 	pass = true
-	for _, cmdline := range p.Verify {
+	for _, cmdline := range checks {
 		r, rerr := runner.Run([]string{"bash", "-lc", cmdline}, cwd)
 		if rerr != nil {
 			return false, "", nil, rerr
