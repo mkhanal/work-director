@@ -21,15 +21,19 @@ rules into the project's own files as a PR it accepts).
 ### The desktop app
 
 **Work Director for macOS** is a native SwiftUI app (`clients/macos`). It bundles its own `wd`
-and holds `wd serve --stdio` open as its only link to the ledger: no port, no network. The
-board sorts every goal and task into the band that says what it waits on (Needs You, In
-Flight, Ready to Push, In Review, Ready to Close); a goal opens on its tasks, the decisions the
-loop made in your place, and where the work landed; Review shows what changed since you last
-acknowledged. Every write is a `wd` command, shown exactly before it runs.
+and holds `wd serve --stdio` open as its only link to the ledger: no port, no network. Goals
+are threads on the left; the one you open reads as a conversation, from what you asked through
+the plan to what each task reported, with open questions answered in place. The **Agents**
+panel beside it shows every agent on the goal live: the planner, each task, and the subagents
+they start, with model, tokens, tools and time, and each one's conversation a click away. Every
+write is a `wd` command that runs at once and can be undone; the next gate (verify, land,
+soft-done, done) is one button.
 
 ```
 scripts/build-macos.sh            # dist/Work Director.app, with the matching wd inside
 ```
+
+New here? **`docs/quickstart.md`** goes from install to a goal being worked on in five minutes.
 
 Windows (WinUI 3) and Linux (GTK4) apps are planned over the same stdio channel.
 
