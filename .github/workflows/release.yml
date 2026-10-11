@@ -7,6 +7,11 @@ on:
     tags: ['v*']
 permissions:
   contents: write
+  # Build provenance: each asset is attested as built by this workflow from
+  # this tag, so an install can check who built it, not only that it arrived
+  # intact.
+  id-token: write
+  attestations: write
 jobs:
   release:
     runs-on: macos-latest
@@ -52,6 +57,14 @@ jobs:
           test -f /tmp/smoke/wd.1
           unzip -l dist/wd-windows-amd64.zip | grep -q 'wd.exe'
           unzip -l dist/wd-windows-amd64.zip | grep -q 'wd.1'
+
+      - name: attest where every asset was built
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/wd-*.tar.gz
+            dist/wd-*.zip
+            dist/wd-*.dmg
 
       - name: generate the homebrew formula from what was just published
         run: VERSION="${GITHUB_REF_NAME}" scripts/formula.sh

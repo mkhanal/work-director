@@ -65,6 +65,16 @@ try {
   }
   Write-Host "verified $asset"
 
+  # The checksum says the download arrived intact; the attestation says this
+  # repository's release workflow built it. gh checks it when it is installed.
+  if (Get-Command gh -ErrorAction SilentlyContinue) {
+    gh attestation verify $zip --repo mkhanal/work-director *> $null
+    if ($LASTEXITCODE -ne 0) { throw "install: $asset has no build attestation from mkhanal/work-director" }
+    Write-Host "attested: built by mkhanal/work-director's release workflow"
+  } else {
+    Write-Host "note: install gh to also check who built it (gh attestation verify)"
+  }
+
   Expand-Archive -Path $zip -DestinationPath $tmp -Force
   New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
   Copy-Item (Join-Path $tmp 'wd.exe') (Join-Path $InstallDir 'wd.exe') -Force

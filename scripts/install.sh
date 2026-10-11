@@ -70,6 +70,16 @@ if [ "$got" != "$want" ]; then
 fi
 echo "verified $asset.tar.gz"
 
+# The checksum says the download arrived intact; the attestation says this
+# repository's release workflow built it. gh checks it when it is installed.
+if command -v gh >/dev/null 2>&1; then
+  gh attestation verify "$tmp/$asset.tar.gz" --repo mkhanal/work-director >/dev/null 2>&1 || {
+    echo "install: $asset.tar.gz has no build attestation from mkhanal/work-director — refusing to install" >&2; exit 1; }
+  echo "attested: built by mkhanal/work-director's release workflow"
+else
+  echo "note: install gh to also check who built it (gh attestation verify)"
+fi
+
 tar -xzf "$tmp/$asset.tar.gz" -C "$tmp"
 mkdir -p "$dir"
 install -m 0755 "$tmp/wd" "$dir/wd"
