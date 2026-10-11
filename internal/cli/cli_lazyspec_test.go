@@ -527,6 +527,56 @@ func TestYourOwnCardsJoinTheTasteEveryBriefCarries(t *testing.T) {
 	}
 }
 
+func TestWdTasteShowsTheRulesInEffectAndWhatWasLearned(t *testing.T) {
+	f := newCLIFixture(t)
+	path := filepath.Join(f.wdHome, "taste", "cards", "judgment", "mine.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	card := "---\nid: mine\ntitle: A rule of my own\ncategory: judgment\nscope: [global]\nkind: practice\nstatus: adopted\nalways: false\nenforce: []\nevidence: []\n---\nMine.\n"
+	if err := os.WriteFile(path, []byte(card), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.runOK(t, "feedback", "add", "pin every version", "--project", "sample-app")
+	f.runOK(t, "feedback", "add", "pin it again", "--project", "sample-app")
+	var view struct {
+		Cards []struct {
+			ID     string `json:"id"`
+			Title  string `json:"title"`
+			Source string `json:"source"`
+		} `json:"cards"`
+		Learned []struct {
+			Key   string `json:"key"`
+			Count int    `json:"count"`
+		} `json:"learned"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "taste", "--json")), &view); err != nil {
+		t.Fatal(err)
+	}
+	sources := map[string]string{}
+	for _, c := range view.Cards {
+		sources[c.ID] = c.Source
+	}
+	if sources["mine"] != "yours" || len(sources) < 2 {
+		t.Fatalf("cards = %+v, want mine as yours beside the checkout's", view.Cards)
+	}
+	for id, src := range sources {
+		if id != "mine" && src != filepath.Join(repoRoot(t), "taste", "cards") {
+			t.Fatalf("%s comes from %q, want the checkout's cards", id, src)
+		}
+	}
+	grouped := false
+	for _, l := range view.Learned {
+		grouped = grouped || (l.Key == "project:sample-app" && l.Count == 2)
+	}
+	if !grouped {
+		t.Fatalf("learned = %+v, want the two notes on sample-app grouped", view.Learned)
+	}
+	if text := f.runOK(t, "taste"); !strings.Contains(text, "A rule of my own (yours)") || !strings.Contains(text, "project:sample-app ×2") {
+		t.Fatalf("wd taste = %s", text)
+	}
+}
+
 func checkoutTSCardTitles(t *testing.T) []string {
 	t.Helper()
 	cards, err := taste.LoadCards(os.DirFS(filepath.Join(repoRoot(t), "taste", "cards")), "checkout")
@@ -917,6 +967,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"cancel", t3, "census"},
 		{"answer", askingWork, "Red"},
 		{"completion", "zsh"},
+		{"taste"},
 	} {
 		covered[args[0]] = true
 		args = append(args, "--json")

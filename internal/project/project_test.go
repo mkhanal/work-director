@@ -1,9 +1,20 @@
 package project
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
+
+// setHome points the user's home at dir the way each system reads it:
+// HOME on Unix, USERPROFILE on Windows.
+func setHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
 
 func TestParseProjectExpandsOnlyTheUsersHome(t *testing.T) {
-	t.Setenv("HOME", "/home/me")
+	setHome(t, "/home/me")
 	for raw, want := range map[string]string{
 		"~":        "/home/me",
 		"~/repo":   "/home/me/repo",
@@ -14,6 +25,9 @@ func TestParseProjectExpandsOnlyTheUsersHome(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", raw, err)
 		}
+		if raw[0] == '~' && raw != "~bob/x" {
+			want = filepath.FromSlash(want)
+		}
 		if p.Path != want {
 			t.Fatalf("path %q = %q, want %q", raw, p.Path, want)
 		}
@@ -21,7 +35,7 @@ func TestParseProjectExpandsOnlyTheUsersHome(t *testing.T) {
 }
 
 func TestExpandHomeFailsOnlyWhenItNeedsAnUnknownHome(t *testing.T) {
-	t.Setenv("HOME", "")
+	setHome(t, "")
 	for _, raw := range []string{"~", "~/repo"} {
 		if got, err := ExpandHome(raw); err == nil {
 			t.Fatalf("%s expanded to %q with no home, want an error", raw, got)

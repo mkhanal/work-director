@@ -17,6 +17,8 @@ var frontmatterRe = regexp.MustCompile(`(?s)^---\n(.*?)\n---\n?(.*)$`)
 // the closing ---, trimmed. It returns nil when the text has no frontmatter
 // block or a line without a key.
 func ParseFrontmatter(text string) *Frontmatter {
+	// A file checked out on Windows ends its lines \r\n; it says the same.
+	text = strings.ReplaceAll(text, "\r\n", "\n")
 	m := frontmatterRe.FindStringSubmatch(text)
 	if m == nil {
 		return nil

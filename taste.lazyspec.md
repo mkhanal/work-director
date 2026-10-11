@@ -9,6 +9,10 @@
 ## A Card Missing A Required Field Is Rejected
 Frontmatter without id, title, category, scope, kind, status or always fails with the card path and the field.
 
+## A Card Reads The Same With Windows Line Endings
+A card whose lines end `\r\n`, as git checks text out on Windows, parses to
+exactly the card its `\n` form does.
+
 ## Only Adopted Non-Project Cards Reach The Artifacts
 Candidate and retired cards, and cards with any `project:` scope, are absent from skills and constitution.
 

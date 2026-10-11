@@ -157,7 +157,7 @@ func ExpandHome(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("expand %s: %w", path, err)
 	}
-	return home + path[1:], nil
+	return filepath.Join(home, path[1:]), nil
 }
 
 // ProjectTemplate is the file `wd projects add` writes: concrete frontmatter,

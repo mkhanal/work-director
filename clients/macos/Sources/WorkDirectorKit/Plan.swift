@@ -118,6 +118,13 @@ public struct Plan: Hashable, Sendable, Identifiable {
         return Plan(title: "Remember", argv: ["feedback", "add", text, "--work", work.id, "--project", work.project, "--source", "director"])
     }
 
+    /// Files feedback on no work in particular: a rule-to-be in a person's words.
+    public static func feedback(_ text: String, project: String?) throws -> Plan {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw PlanError.empty }
+        return Plan(title: "Feedback", argv: ["feedback", "add", text] + (project.map { ["--project", $0] } ?? []))
+    }
+
     /// Registers a folder as a product the director works in.
     public static func addProduct(name: String, path: String, runner: String, mode: String) throws -> Plan {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)

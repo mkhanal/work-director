@@ -7,6 +7,7 @@ enum Place: Hashable {
     case newGoal
     case work(String)
     case archived
+    case taste
     case review(String)
 }
 
@@ -46,6 +47,8 @@ struct RootView: View {
                     .id(id)
             case .archived:
                 ArchivedList(store: store, scope: scope, selected: opened, plan: $plan)
+            case .taste:
+                TastePage(store: store, scope: scope, plan: $plan)
             case .review(let project):
                 ReviewList(store: store, project: project, selected: opened, plan: $plan)
             }
@@ -195,6 +198,7 @@ struct ThreadSidebar: View {
                 Text("Settled (\(threads.settled.count))")
             }
             Section("More") {
+                Label("Taste", systemImage: "sparkles").tag(Place.taste)
                 Label("Archived", systemImage: "archivebox").tag(Place.archived)
                 if let scope {
                     Label("What the loop decided", systemImage: "checklist").tag(Place.review(scope))

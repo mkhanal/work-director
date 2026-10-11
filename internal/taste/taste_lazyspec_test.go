@@ -268,3 +268,18 @@ func TestTheAgentsFragmentIsWrappedInTasteMarkers(t *testing.T) {
 		t.Error("fragment does not carry the constitution")
 	}
 }
+
+func TestACardReadsTheSameWithWindowsLineEndings(t *testing.T) {
+	unix := "---\nid: x\ntitle: X\ncategory: judgment\nscope: [global]\nkind: practice\nstatus: adopted\nalways: false\nenforce: []\nevidence: []\n---\nSay it once.\n"
+	want, err := ParseCard(unix, "x.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseCard(strings.ReplaceAll(unix, "\n", "\r\n"), "x.md")
+	if err != nil {
+		t.Fatalf("a \\r\\n card: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("\\r\\n card = %+v, want %+v", got, want)
+	}
+}

@@ -70,6 +70,10 @@ not-detected guidance; the work's state and worktrees stay as they were.
 - A card there with the id of another replaces it; the rest are added.
 - A card there that does not parse fails the command naming its file.
 
+## Wd Taste Shows The Rules In Effect And What Was Learned
+- `wd taste --json` prints `{cards, learned}`: every rule card a brief can carry, each with its `source` (`built-in`, the checkout's cards directory, or `yours`), and feedback grouped as `wd distill` groups it.
+- Without `--json` it lists the cards by category, yours marked, then each group of feedback with its count.
+
 ## Errors And Exit Codes Match
 - Usage errors, illegal transitions, not-ready refusals and unknown runners print their message and exit 1.
 - A verify whose commands ran and failed records the failed verify, then exits 1.

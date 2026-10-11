@@ -247,24 +247,36 @@ func loadTasteCards() (cards []taste.Card, checkout string, err error) {
 	return cards, checkout, err
 }
 
-// withOwnCards lays the person's own cards, under $WD_HOME/taste/cards, over
-// cards: one with the id of another replaces it, the rest are added. They are
-// read on every command, so an edit reaches the next brief.
+// withOwnCards lays the person's own cards over cards. They are read on
+// every command, so an edit reaches the next brief.
 func withOwnCards(cards []taste.Card) ([]taste.Card, error) {
-	home, err := runner.WDHome()
+	own, _, err := ownCards()
 	if err != nil {
 		return nil, err
+	}
+	return layer(cards, own), nil
+}
+
+// ownCards are the cards under $WD_HOME/taste/cards, and that directory;
+// none when it does not exist.
+func ownCards() ([]taste.Card, string, error) {
+	home, err := runner.WDHome()
+	if err != nil {
+		return nil, "", err
 	}
 	dir := filepath.Join(home, "taste", "cards")
 	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
-		return cards, nil
+		return nil, dir, nil
 	} else if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	own, err := taste.LoadCards(os.DirFS(dir), dir)
-	if err != nil {
-		return nil, err
-	}
+	return own, dir, err
+}
+
+// layer puts own over cards: one with the id of another replaces it, the
+// rest are added.
+func layer(cards, own []taste.Card) []taste.Card {
 	out := slices.Clone(cards)
 	for _, c := range own {
 		if i := slices.IndexFunc(out, func(x taste.Card) bool { return x.ID == c.ID }); i >= 0 {
@@ -273,7 +285,7 @@ func withOwnCards(cards []taste.Card) ([]taste.Card, error) {
 			out = append(out, c)
 		}
 	}
-	return out, nil
+	return out
 }
 
 func tasteCheckout() (string, error) {
@@ -311,6 +323,7 @@ var commands = map[string]func(c *Cli, rest []string) error{
 	"runner":   (*Cli).runner,
 	"add":      (*Cli).add,
 	"tasks":    (*Cli).tasks,
+	"taste":    (*Cli).tasteView,
 	"brief":    (*Cli).brief,
 	"spawn":    (*Cli).spawn,
 	"goal":     func(c *Cli, rest []string) error { return c.goalLike("goal", rest) },

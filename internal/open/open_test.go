@@ -1,18 +1,24 @@
 package open
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestParseTargetKeepsAbsolutePaths(t *testing.T) {
+	// Absolute as the system running the test spells it.
+	base := filepath.Join(t.TempDir(), "base")
+	abs := filepath.Join(t.TempDir(), "etc", "hosts")
 	for _, c := range []struct {
 		file, path string
 		line       int
 	}{
-		{"/etc/hosts", "/etc/hosts", 0},
-		{"/etc/hosts:3", "/etc/hosts", 3},
-		{"src/a.go", "/base/src/a.go", 0},
-		{"src/a.go:12", "/base/src/a.go", 12},
+		{abs, abs, 0},
+		{abs + ":3", abs, 3},
+		{"src/a.go", filepath.Join(base, "src", "a.go"), 0},
+		{"src/a.go:12", filepath.Join(base, "src", "a.go"), 12},
 	} {
-		got := ParseTarget(c.file, "/base")
+		got := ParseTarget(c.file, base)
 		if got.Path != c.path {
 			t.Fatalf("%s: path = %q, want %q", c.file, got.Path, c.path)
 		}

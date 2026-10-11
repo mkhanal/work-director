@@ -95,6 +95,11 @@ public final class Store {
         return try decode(ReviewPass.self, result)
     }
 
+    /// The rules in effect and what feedback has gathered.
+    public func taste() async throws -> Taste {
+        try decode(Taste.self, try await channel.action(["taste", "--json"]))
+    }
+
     /// The runners this host can use.
     public func doctor() async throws -> Doctor {
         try decode(Doctor.self, try await channel.action(["doctor", "--json"]))

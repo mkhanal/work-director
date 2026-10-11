@@ -319,3 +319,26 @@ public struct Doctor: Codable, Sendable, Hashable {
     }
     public let runners: [Runner]
 }
+
+/// The taste every brief carries, and what feedback has gathered toward new
+/// rules, as `wd taste` gives it.
+public struct Taste: Codable, Sendable, Hashable {
+    public struct Card: Codable, Sendable, Hashable, Identifiable {
+        public let id: String
+        public let title: String
+        public let category: String
+        public let scope: [String]
+        public let statement: String
+        public let always: Bool
+        /// built-in, a checkout's cards directory, or yours.
+        public let source: String
+    }
+    public struct Learned: Codable, Sendable, Hashable, Identifiable {
+        public let key: String
+        public let count: Int
+        public let texts: [String]
+        public var id: String { key }
+    }
+    public let cards: [Card]
+    public let learned: [Learned]
+}

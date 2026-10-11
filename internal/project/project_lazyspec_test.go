@@ -13,7 +13,7 @@ func knownRunners() ([]string, error) { return []string{"claude", "opencode", "c
 func TestProject(t *testing.T) {
 	t.Run("Parse Project Reads The Frontmatter Fields", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		setHome(t, home)
 		text := "---\npath: ~/repo\nrunner: claude\nstack: [go, ts]\nworkflows: [/lazyspec]\nverify: [go test]\n---\nThe roadmap body.\n"
 		p, err := ParseProject(text, filepath.Join(home, "proj.md"))
 		if err != nil {
@@ -40,7 +40,7 @@ func TestProject(t *testing.T) {
 	})
 
 	t.Run("A Tilde Path Fails When The Home Directory Is Unknown", func(t *testing.T) {
-		t.Setenv("HOME", "")
+		setHome(t, "")
 		for _, raw := range []string{"~", "~/repo"} {
 			p, err := ParseProject("---\npath: "+raw+"\nrunner: claude\n---\n", "/home/proj.md")
 			pe, ok := err.(*ProjectError)

@@ -860,7 +860,8 @@ CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT,
 			}
 		}
 		for _, tbl := range []string{"concern", "worktree", "filed", "cursor"} {
-			if _, err := openDirect(t, path).Query("SELECT COUNT(*) FROM " + tbl); err != nil {
+			var n int
+			if err := openDirect(t, path).QueryRow("SELECT COUNT(*) FROM " + tbl).Scan(&n); err != nil {
 				t.Fatalf("table %s missing after migration: %v", tbl, err)
 			}
 		}

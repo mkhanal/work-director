@@ -22,6 +22,7 @@ var help = map[string]commandHelp{
 	"runner":     {"wd runner (list | add <name> <file.toml> | init <name>)", "List runners, or define a new one as a file of commands."},
 	"add":        {"wd add <project> <title> [--detail text] [--kind task|goal|…] [--goal <id>] [--heading h]", "File a work item."},
 	"tasks":      {"wd tasks <goal> [--all]", "List a goal's tasks."},
+	"taste":      {"wd taste", "Show the rule cards every brief carries, and what feedback has gathered toward new ones."},
 	"brief":      {"wd brief <id>", "Print the brief an executor would be given for work."},
 	"spawn":      {"wd spawn <id> [--runner r] [--model m] [--worktree]", "Start an executor session on work, with its brief."},
 	"goal":       {"wd goal (start <project> \"<text>\" [--detach] | begin <id> | find <project> \"<text>\" | add <project> <title> | plan <id> | spawn <id> | run <id> | review <id> | status <id> | continue <id> \"<text>\" | reopen | release | abandon | classify)", "Start, plan, run and look after goals: work broken into tasks."},
