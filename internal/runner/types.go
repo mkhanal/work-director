@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -161,7 +160,6 @@ func waitFor[T any](probe func() (T, bool, error), timeout time.Duration, every 
 	return zero, false, nil
 }
 
-// alive reports whether the process exists (signal 0 probes without killing).
 // stopPid ends the process serving a session. A process already gone is
 // already stopped.
 func stopPid(ref *string) error {
@@ -169,14 +167,7 @@ func stopPid(ref *string) error {
 	if !ok || !alive(pid) {
 		return nil
 	}
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return err
-	}
-	return nil
-}
-
-func alive(pid int) bool {
-	return syscall.Kill(pid, 0) == nil
+	return terminate(pid)
 }
 
 // pidOf parses a handle's string ref; a missing or non-numeric ref is not a

@@ -6,8 +6,6 @@ import (
 	"os"
 	"strings"
 	"unicode/utf8"
-
-	"golang.org/x/sys/unix"
 )
 
 // KeyKind is the kind of one input event.
@@ -35,7 +33,7 @@ type Key struct {
 type terminal struct {
 	in   *os.File
 	out  *os.File
-	old  *unix.Termios
+	old  *savedMode
 	keys chan Key
 	done chan struct{}
 	// err is why input stopped; written before keys closes.
@@ -54,21 +52,12 @@ func NewTerminal(in, out *os.File) (Terminal, error) {
 
 // raw switches the input to raw mode, saving the previous state.
 func (t *terminal) raw() error {
-	fd := int(t.in.Fd())
-	old, err := unix.IoctlGetTermios(fd, tcgets)
+	old, err := makeRaw(t.in, t.out)
 	if err != nil {
 		return err
 	}
 	t.old = old
-	raw := *old
-	raw.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP | unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON
-	raw.Oflag &^= unix.OPOST
-	raw.Lflag &^= unix.ECHO | unix.ECHONL | unix.ICANON | unix.ISIG | unix.IEXTEN
-	raw.Cflag &^= unix.CSIZE | unix.PARENB
-	raw.Cflag |= unix.CS8
-	raw.Cc[unix.VMIN] = 1
-	raw.Cc[unix.VTIME] = 0
-	return unix.IoctlSetTermios(fd, tcsets, &raw)
+	return nil
 }
 
 // read parses input into keys until input fails, then closes keys. A failure
@@ -199,21 +188,7 @@ func escapeKey(next func() (byte, bool)) (Key, bool) {
 }
 
 // setDeadline switches the input between blocking reads and 100ms reads.
-func (t *terminal) setDeadline(on bool) error {
-	fd := int(t.in.Fd())
-	cur, err := unix.IoctlGetTermios(fd, tcgets)
-	if err != nil {
-		return err
-	}
-	if on {
-		cur.Cc[unix.VMIN] = 0
-		cur.Cc[unix.VTIME] = 1
-	} else {
-		cur.Cc[unix.VMIN] = 1
-		cur.Cc[unix.VTIME] = 0
-	}
-	return unix.IoctlSetTermios(fd, tcsets, cur)
-}
+func (t *terminal) setDeadline(on bool) error { return pollInput(t.in, on) }
 
 // readByte reads one byte.
 func (t *terminal) readByte() (byte, error) {
@@ -237,13 +212,7 @@ func (t *terminal) send(k Key) {
 }
 
 // Size returns the terminal's width and height in cells.
-func (t *terminal) Size() (int, int, error) {
-	ws, err := unix.IoctlGetWinsize(int(t.out.Fd()), unix.TIOCGWINSZ)
-	if err != nil {
-		return 0, 0, err
-	}
-	return int(ws.Col), int(ws.Row), nil
-}
+func (t *terminal) Size() (int, int, error) { return size(t.out) }
 
 // Keys returns the channel of input events.
 func (t *terminal) Keys() <-chan Key { return t.keys }
@@ -276,7 +245,7 @@ func (t *terminal) Write(lines []string) error {
 func (t *terminal) Close() error {
 	var restore error
 	if t.old != nil {
-		restore = unix.IoctlSetTermios(int(t.in.Fd()), tcsets, t.old)
+		restore = restoreMode(t.in, t.old)
 		t.old = nil
 	}
 	close(t.done)
