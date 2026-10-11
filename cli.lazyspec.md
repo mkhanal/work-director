@@ -65,6 +65,11 @@ not-detected guidance; the work's state and worktrees stay as they were.
 - `$WD_ROOT/taste/cards`, else `taste/cards` beside the binary, else in the working directory, is read instead of the embedded cards.
 - An edit to a card there reaches the next brief without a rebuild.
 
+## Your Own Cards Join The Taste Every Brief Carries
+- Cards under `$WD_HOME/taste/cards` are read on every command alongside the checkout's or the embedded cards.
+- A card there with the id of another replaces it; the rest are added.
+- A card there that does not parse fails the command naming its file.
+
 ## Errors And Exit Codes Match
 - Usage errors, illegal transitions, not-ready refusals and unknown runners print their message and exit 1.
 - A verify whose commands ran and failed records the failed verify, then exits 1.

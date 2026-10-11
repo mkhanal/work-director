@@ -482,6 +482,51 @@ func TestCardsInACheckoutReplaceTheEmbeddedOnes(t *testing.T) {
 
 // checkoutTSCardTitles returns the titles of this repository's adopted
 // lang:ts cards, which reach a brief for the fixture's ts project.
+func TestYourOwnCardsJoinTheTasteEveryBriefCarries(t *testing.T) {
+	f := newCLIFixture(t)
+	standalone := f.ids["standalone"]
+	cards, err := taste.LoadCards(os.DirFS(filepath.Join(repoRoot(t), "taste", "cards")), "checkout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shipped taste.Card
+	for _, c := range cards {
+		if c.Status == taste.StatusAdopted && slices.Contains(c.Scope, taste.Scope("lang:ts")) {
+			shipped = c
+			break
+		}
+	}
+	own := func(id, title, body string) string {
+		t.Helper()
+		path := filepath.Join(f.wdHome, "taste", "cards", "judgment", id+".md")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		text := "---\nid: " + id + "\ntitle: " + title + "\ncategory: judgment\nscope: [lang:ts]\nkind: practice\nstatus: adopted\nalways: false\nenforce: []\nevidence: []\n---\n" + body + "\n"
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	own("my-own-rule", "Mine, from my own cards", "Keep it mine.")
+	brief := f.runOK(t, "brief", standalone)
+	if !strings.Contains(brief, "Mine, from my own cards") || !strings.Contains(brief, shipped.Title) {
+		t.Fatalf("brief = %s\nwant my card beside the shipped %q", brief, shipped.Title)
+	}
+	own(shipped.ID, "Mine instead of the shipped one", "Said my way.")
+	brief = f.runOK(t, "brief", standalone)
+	if !strings.Contains(brief, "Mine instead of the shipped one") || strings.Contains(brief, shipped.Title) {
+		t.Fatalf("brief = %s\nwant my card in place of %q", brief, shipped.Title)
+	}
+	broken := filepath.Join(f.wdHome, "taste", "cards", "judgment", "broken.md")
+	if err := os.WriteFile(broken, []byte("no frontmatter"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if errStr := f.runFail(t, "brief", standalone); !strings.Contains(errStr, "broken.md") {
+		t.Fatalf("a card that does not parse = %q, want it named", errStr)
+	}
+}
+
 func checkoutTSCardTitles(t *testing.T) []string {
 	t.Helper()
 	cards, err := taste.LoadCards(os.DirFS(filepath.Join(repoRoot(t), "taste", "cards")), "checkout")

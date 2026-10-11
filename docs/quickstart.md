@@ -82,5 +82,7 @@ as one button:
 ## Where things live
 
 - The ledger, projects and logs: `~/.work-director` (set `WD_HOME` to move it).
-- Your taste rules travel to every agent through the taste plugin: see the README.
+- Your taste rules travel to every agent through the taste plugin: see the README. Rules of
+  your own go in `~/.work-director/taste/cards/<category>/<id>.md`; every brief reads them on
+  the next command, and one with a shipped card's id replaces it.
 - Everything the app does is a `wd` command, so a terminal and the app always agree.
