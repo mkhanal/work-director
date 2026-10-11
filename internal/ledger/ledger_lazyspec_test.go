@@ -1661,3 +1661,40 @@ func TestAMessageToWorkWaitsInTheLedgerUntilItIsDelivered(t *testing.T) {
 	}
 	wantErrNaming(t, l.MarkDelivered(first.ID), "already delivered")
 }
+
+func TestAMessageNotYetDeliveredCanBeWithdrawn(t *testing.T) {
+	l := newTestLedger(t)
+	w := add(t, l, "p", "t", AddOptions{})
+	sent, err := l.QueueMessage(w.ID, "use postgres")
+	wantNoErr(t, err)
+	wantNoErr(t, l.MarkDelivered(sent.ID))
+	_, err = l.QueueMessage(w.ID, "drop the tables")
+	wantNoErr(t, err)
+	_, err = l.QueueMessage(w.ID, "all of them")
+	wantNoErr(t, err)
+
+	back, err := l.Withdraw(w.ID)
+	wantNoErr(t, err)
+	if len(back) != 2 || back[0].Text != "drop the tables" || back[1].Text != "all of them" {
+		t.Fatalf("withdrawn = %+v, want both undelivered, oldest first", back)
+	}
+	pending, err := l.Undelivered(w.ID)
+	wantNoErr(t, err)
+	if len(pending) != 0 {
+		t.Fatalf("undelivered after withdraw = %+v, want none", pending)
+	}
+	note := core.EventNote
+	evs := allEvents(t, l, w.ID, &note)
+	if len(evs) != 2 || evs[0].Body != "withdrawn: drop the tables" || evs[1].Body != "withdrawn: all of them" {
+		t.Fatalf("notes = %v, want one withdrawn note per message", evs)
+	}
+	kind := core.EventSent
+	if evs := allEvents(t, l, w.ID, &kind); len(evs) != 1 || evs[0].Body != "use postgres" {
+		t.Fatalf("sent events = %v, want the delivered message untouched", evs)
+	}
+	back, err = l.Withdraw(w.ID)
+	wantNoErr(t, err)
+	if len(back) != 0 {
+		t.Fatalf("a second withdraw = %+v, want nothing", back)
+	}
+}

@@ -393,4 +393,40 @@ func fakeRunner(_ home: Home) throws {
         #expect(throws: PlanError.empty) { try Plan.answer("w1", q, answers: ["teal"]) }
         #expect(throws: PlanError.empty) { try Plan.answer("w1", q, answers: ["teal", "  "]) }
     }
+
+    @Test("The Key That Sends A Message Is The Person's Choice")
+    func sendKeyIsAChoice() {
+        #expect(SendKey.standard == .return)
+        #expect(SendKey.return.press([]) == .send)
+        #expect(SendKey.return.press(.shift) == .newline)
+        for key in [SendKey.commandReturn, .optionReturn] {
+            #expect(key.press(key.chord) == .send)
+            #expect(key.press([]) == .newline, "Return starts a new line when \(key) sends")
+        }
+        #expect(SendKey.commandReturn.press(.option) == .newline)
+        #expect(SendKey.optionReturn.press([.option, .shift]) == .newline)
+        #expect(SendKey.return.press(.control) == .newline)
+    }
+
+    @Test("Stopping A Session Puts Back What It Had Not Read")
+    func stopPutsBackWhatWasNotRead() async throws {
+        let home = try Home()
+        var env = home.environment
+        env["HOME"] = home.dir.path
+        // A claude with no live session: nothing is working, so stopping only
+        // takes back what was waiting.
+        try executable(home.dir.appendingPathComponent("bin/claude"), "#!/bin/sh\necho '[]'\n")
+        let id = try home.wd("add", "demo", "Told the wrong thing")
+        try home.wd("attach", id, "c0ffee00-0000-4000-8000-000000000002", "--runner", "claude")
+        try home.wd("pause", id)
+        try home.wd("send", id, "drop the tables")
+        try home.wd("send", id, "all of them")
+
+        #expect(Plan.stop(id).argv == ["stop", id, "--json"])
+        let channel = try Channel(wd: builtWD, environment: env)
+        let store = await Store(channel: channel)
+        let back = try await store.stop(Plan.stop(id))
+        #expect(back == "drop the tables\n\nall of them")
+        try await channel.close()
+    }
 }

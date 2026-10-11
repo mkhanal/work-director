@@ -323,6 +323,12 @@ could not with their work, the bound that ran out, and the work still open.
 - An open task with no session yet reads it in its brief.
 - `--json` prints the task ids under `delivered`, `queued` and `brief`.
 
+## Wd Stop Interrupts A Session And Hands Back What It Had Not Read
+- `wd stop <id>` stops a task's running session through its runner; the task keeps its state, and the next message continues the same session.
+- Messages still queued for the task are withdrawn; `--json` prints `{ok, stopped, withdrawn}`, `withdrawn` holding their texts oldest first.
+- On a goal it stops and withdraws for every open task under it.
+- With no running session and nothing queued it is refused, saying there is nothing to stop.
+
 ## Wd Pause Stops Running Sessions And Keeps Their Conversations
 - `wd pause <id>` stops the session of a task that is running through its runner, which keeps the conversation, and moves the task to paused.
 - On a goal it pauses every open task under it, then the goal.

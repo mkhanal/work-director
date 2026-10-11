@@ -859,6 +859,44 @@ func (l *Ledger) Undelivered(work string) ([]core.Message, error) {
 	return out, rows.Err()
 }
 
+// Withdraw removes work's undelivered messages and returns them, oldest first,
+// filing a withdrawn note for each.
+func (l *Ledger) Withdraw(work string) ([]core.Message, error) {
+	out := []core.Message{}
+	err := l.inTx(func(tx *sql.Tx) error {
+		rows, err := tx.Query(`SELECT id, work, text, at FROM message WHERE work = ? AND delivered IS NULL ORDER BY id`, work)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var m core.Message
+			if err := rows.Scan(&m.ID, &m.Work, &m.Text, &m.At); err != nil {
+				rows.Close()
+				return err
+			}
+			out = append(out, m)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		at := now()
+		for _, m := range out {
+			if _, err := tx.Exec(`DELETE FROM message WHERE id = ?`, m.ID); err != nil {
+				return err
+			}
+			if _, err := addEvent(tx, work, core.EventNote, "withdrawn: "+m.Text, at); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return out, err
+}
+
 // MarkDelivered stamps a message delivered and files a sent event with its text.
 func (l *Ledger) MarkDelivered(id int) error {
 	return l.inTx(func(tx *sql.Tx) error {

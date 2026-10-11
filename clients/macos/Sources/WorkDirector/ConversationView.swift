@@ -8,11 +8,14 @@ import WorkDirectorKit
 struct ConversationView: View {
     let store: Store
     let work: Work
+    /// Told the session's status each time it changes.
+    let status: (SessionStatus) -> Void
     @State private var feed: Feed
 
-    init(store: Store, work: Work) {
+    init(store: Store, work: Work, status: @escaping (SessionStatus) -> Void) {
         self.store = store
         self.work = work
+        self.status = status
         _feed = State(initialValue: Feed(store: store, id: work.id))
     }
 
@@ -51,6 +54,7 @@ struct ConversationView: View {
             }
         }
         .task { await feed.follow() }
+        .onChange(of: feed.status, initial: true) { status(feed.status) }
     }
 }
 

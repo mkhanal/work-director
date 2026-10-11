@@ -45,6 +45,9 @@ struct WorkDirectorApp: App {
                     .keyboardShortcut("r", modifiers: .command)
             }
         }
+        Settings {
+            Preferences()
+        }
     }
 }
 
@@ -74,5 +77,24 @@ final class Launch {
         } catch {
             state = .failed("\(error)")
         }
+    }
+}
+
+/// What a person can set about how Work Director behaves for them.
+struct Preferences: View {
+    @AppStorage("sendKey") private var sendKey: SendKey = .standard
+
+    var body: some View {
+        Form {
+            Picker("Send a message with", selection: $sendKey) {
+                ForEach(SendKey.allCases) { key in Text(key.title).tag(key) }
+            }
+            .pickerStyle(.radioGroup)
+            Text("Any other chord with Return starts a new line. Esc stops a session while it works.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(20)
+        .frame(width: 460)
     }
 }

@@ -102,6 +102,10 @@ public struct Plan: Hashable, Sendable, Identifiable {
         return Plan(title: "Answer", argv: ["answer", id] + answers)
     }
 
+    /// Interrupts what work's sessions are doing and takes back the messages
+    /// they have not read; the work keeps its state.
+    public static func stop(_ id: String) -> Plan { Plan(title: "Stop", argv: ["stop", id, "--json"]) }
+
     public static func pause(_ id: String) -> Plan { Plan(title: "Pause", argv: ["pause", id]) }
 
     public static func resume(_ id: String, note: String) -> Plan {

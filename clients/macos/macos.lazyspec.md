@@ -64,3 +64,12 @@ hold only that product's work; with none, every product's.
 - Multiple-choice picks join in the order offered, then any typed words.
 - Nothing can be sent until every item has an answer.
 - Sending runs `wd answer <id>` with one answer per item, in the order asked.
+
+## The Key That Sends A Message Is The Person's Choice
+- By default Return sends and Shift-Return starts a new line.
+- With ⌘Return or ⌥Return chosen to send, that chord sends and Return starts a new line.
+- Any other chord with Return starts a new line.
+
+## Stopping A Session Puts Back What It Had Not Read
+- Stopping runs `wd stop <id>`.
+- The messages it withdraws come back as one text, oldest first, for the person to edit and send again.

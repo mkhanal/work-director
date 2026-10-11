@@ -102,6 +102,15 @@ public final class Store {
         return started
     }
 
+    /// Runs a stop plan and returns what it took back unread, oldest first, as
+    /// one text to edit and send again; empty when nothing was waiting.
+    public func stop(_ plan: Plan) async throws -> String {
+        struct Stopped: Decodable { let withdrawn: [String] }
+        let stopped = try decode(Stopped.self, try await channel.action(plan.argv))
+        await refresh()
+        return stopped.withdrawn.joined(separator: "\n\n")
+    }
+
     /// Runs a confirmed plan: the argv the confirmation showed, unchanged.
     public func run(_ plan: Plan) async throws -> ActionResult {
         try await channel.action(plan.argv)

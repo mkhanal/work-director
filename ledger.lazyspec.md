@@ -147,6 +147,11 @@ Work added to a file-backed ledger is still there after closing and reopening it
 - `Undelivered(work)` lists that work's undelivered messages, oldest first.
 - `MarkDelivered(id)` stamps the message delivered and files a `sent` event carrying its text; a message already delivered is refused.
 
+## A Message Not Yet Delivered Can Be Withdrawn
+- `Withdraw(work)` removes that work's undelivered messages and returns them, oldest first.
+- Each one withdrawn files a `note` reading `withdrawn: <text>`.
+- Delivered messages stay as they were.
+
 ## Archiving Puts Work Out Of Sight With Everything Under It
 - `Archive(id, why)` stamps `archived` on the work and every work under it, and files an `archived` note on each.
 - Work at rest (done, dropped, abandoned) keeps its state.

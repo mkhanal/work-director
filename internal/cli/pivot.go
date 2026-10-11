@@ -143,6 +143,53 @@ func (c *Cli) tellGoal(goal core.Work, text string) (map[string][]string, error)
 	return out, nil
 }
 
+// stop interrupts what a task's session is doing and takes back the messages
+// it has not read yet, so they can be said again differently. The work keeps
+// its state: the next message continues the same session.
+func (c *Cli) stop(rest []string) error {
+	if len(rest) != 1 {
+		return fail("usage: wd stop <id>")
+	}
+	w, err := c.Ledger.Get(rest[0])
+	if err != nil {
+		return err
+	}
+	targets := []core.Work{w}
+	if core.IsGoal(w.Kind) {
+		if targets, err = c.Ledger.Tasks(w.ID); err != nil {
+			return err
+		}
+	}
+	stopped, withdrawn := []string{}, []string{}
+	for _, t := range targets {
+		if core.AtRest(t.State) {
+			continue
+		}
+		was, err := c.stopSession(t)
+		if err != nil {
+			return err
+		}
+		if was {
+			stopped = append(stopped, t.ID)
+		}
+		back, err := c.Ledger.Withdraw(t.ID)
+		if err != nil {
+			return err
+		}
+		for _, m := range back {
+			withdrawn = append(withdrawn, m.Text)
+		}
+	}
+	if len(stopped) == 0 && len(withdrawn) == 0 {
+		return fail("%s has nothing to stop: no session is working and no message is waiting", w.ID)
+	}
+	text := fmt.Sprintf("stopped %d session(s); the next message continues them", len(stopped))
+	if len(withdrawn) > 0 {
+		text += fmt.Sprintf("\nwithdrawn, not read:\n%s", strings.Join(withdrawn, "\n\n"))
+	}
+	return c.out(map[string]any{"ok": true, "stopped": stopped, "withdrawn": withdrawn}, text)
+}
+
 // pause stops running sessions, keeping their conversations, and holds the
 // work in paused: a task itself, or every open task of a goal and then the goal.
 func (c *Cli) pause(rest []string) error {
@@ -167,7 +214,7 @@ func (c *Cli) pause(rest []string) error {
 		if core.AtRest(t.State) || t.State == core.StatePaused {
 			continue
 		}
-		if err := c.stopSession(t); err != nil {
+		if _, err := c.stopSession(t); err != nil {
 			failed = append(failed, fmt.Sprintf("%s: %v", t.ID, err))
 			continue
 		}
@@ -303,7 +350,7 @@ func (c *Cli) stopUnder(id string) error {
 		if core.AtRest(t.State) {
 			continue
 		}
-		if err := c.stopSession(t); err != nil {
+		if _, err := c.stopSession(t); err != nil {
 			failed = append(failed, fmt.Sprintf("%s: %v", t.ID, err))
 		}
 	}
@@ -315,27 +362,27 @@ func (c *Cli) stopUnder(id string) error {
 
 // stopSession stops work's session when its runner reports it running. Work
 // with no session, or a session that is idle, has nothing to stop.
-func (c *Cli) stopSession(w core.Work) error {
+func (c *Cli) stopSession(w core.Work) (bool, error) {
 	p, err := c.project(w.Project)
 	if err != nil {
-		return err
+		return false, err
 	}
 	h, ok, err := coordinator.Handle(c.Ledger, w, p)
 	if err != nil || !ok {
-		return err
+		return false, err
 	}
 	r, err := runner.RunnerNamed(h.Runner)
 	if err != nil {
-		return err
+		return false, err
 	}
 	status, err := r.Status(h)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if status != runner.StatusRunning {
-		return nil
+		return false, nil
 	}
-	return r.Stop(h)
+	return true, r.Stop(h)
 }
 
 // goalContinue picks a goal up where it stands: an open goal is told the text,

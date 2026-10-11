@@ -15,6 +15,8 @@ struct WorkDetail: View {
     @State private var loaded: Loaded?
     @State private var failure: String?
     @State private var asking: Ask?
+    /// The status of a task's session, as its conversation last read it.
+    @State private var session: SessionStatus = .none
     @AppStorage("detail.tab") private var tab: Tab = .conversation
 
     enum Tab: String {
@@ -54,7 +56,7 @@ struct WorkDetail: View {
                                 .fixedSize()
                             }
                             if hasSession(work) && tab == .conversation {
-                                ConversationView(store: store, work: work)
+                                ConversationView(store: store, work: work) { session = $0 }
                             } else {
                                 EventsSection(events: events, expanded: true)
                             }
@@ -69,7 +71,7 @@ struct WorkDetail: View {
                 .toolbar { Actions(work: loaded.work, plan: $plan, asking: $asking) }
                 .safeAreaInset(edge: .bottom) {
                     if !loaded.work.atRest || (loaded.work.kind.isGoal && loaded.work.state == .done) {
-                        MessageBar(store: store, work: loaded.work)
+                        MessageBar(store: store, work: loaded.work, working: working)
                     }
                 }
             } else if let failure {
@@ -81,6 +83,7 @@ struct WorkDetail: View {
         .navigationTitle(loaded?.work.title ?? id)
         .task(id: store.reads) { await load() }
         .task(id: id) {
+            session = .none
             // What a goal's tasks are doing lives in their sessions, which tell
             // the ledger nothing; while any task works, the goal is read again.
             while !Task.isCancelled {
@@ -95,6 +98,16 @@ struct WorkDetail: View {
                 asking = nil
                 plan = made
             }
+        }
+    }
+
+    /// Whether anything under this work is working now: a task's session, or
+    /// any of a goal's tasks.
+    private var working: Bool {
+        switch loaded {
+        case .goal(let g): g.tasks.contains { $0.state == .running }
+        case .work: session == .running
+        case nil: false
         }
     }
 
@@ -353,10 +366,13 @@ struct EventsSection: View {
 
 /// Typing to work while it runs, as in a conversation. A goal passes the
 /// message to every open task and keeps it as a decision; a session that is
-/// busy reads it when it is ready.
+/// busy reads it when it is ready. While something works it can be stopped, and
+/// whatever it had not read yet comes back here to be said again.
 struct MessageBar: View {
     let store: Store
     let work: Work
+    /// Whether a session under this work is working now.
+    let working: Bool
     @State private var text = ""
     @State private var sending = false
     @State private var outcome: String?
@@ -370,7 +386,9 @@ struct MessageBar: View {
             command: plan?.commandLine,
             busy: sending,
             note: outcome,
-            noteIsError: failed
+            noteIsError: failed,
+            stop: working && !continuing ? Plan.stop(work.id) : nil,
+            stopped: { Task { await stop() } }
         ) { Task { await send() } }
     }
 
@@ -404,11 +422,29 @@ struct MessageBar: View {
         }
         await store.refresh()
     }
+
+    private func stop() async {
+        sending = true
+        defer { sending = false }
+        do {
+            let back = try await store.stop(Plan.stop(work.id))
+            failed = false
+            if back.isEmpty {
+                outcome = "stopped: your next message continues it"
+            } else {
+                text = text.isEmpty ? back : back + "\n\n" + text
+                outcome = "stopped: what it had not read is back here to edit and send"
+            }
+        } catch {
+            failed = true
+            outcome = String(describing: error)
+        }
+    }
 }
 
 /// The one place a person types to Work Director: a new goal and a running one
 /// read the same. The command it will run shows under it, so sending is the
-/// confirmation.
+/// confirmation. The key that sends is the person's choice, in Settings.
 struct InputBar: View {
     @Binding var text: String
     let placeholder: String
@@ -416,8 +452,12 @@ struct InputBar: View {
     let busy: Bool
     var note: String? = nil
     var noteIsError = false
+    /// What stopping runs, while there is something to stop.
+    var stop: Plan? = nil
+    var stopped: () -> Void = {}
     let submit: () -> Void
-    @FocusState private var focused: Bool
+    @AppStorage("sendKey") private var sendKey: SendKey = .standard
+    @State private var height = MessageField.font.boundingRectForFont.height
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -429,38 +469,56 @@ struct InputBar: View {
                     .textSelection(.enabled)
             }
             HStack(alignment: .bottom, spacing: 8) {
-                TextField(placeholder, text: $text, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...8)
-                    .focused($focused)
-                    .onSubmit { if command != nil && !busy { submit() } }
-                    .disabled(busy)
+                MessageField(
+                    text: $text,
+                    placeholder: placeholder,
+                    sendKey: sendKey,
+                    enabled: !busy,
+                    height: $height,
+                    send: { if command != nil && !busy { submit() } },
+                    stop: stop == nil || busy ? nil : stopped
+                )
+                .frame(height: height)
                 if busy {
                     ProgressView().controlSize(.small)
                 } else {
+                    if let stop {
+                        Button(action: stopped) {
+                            Image(systemName: "stop.circle.fill").font(.title2)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.red)
+                        .help("Stop (Esc): \(stop.commandLine)\nWhat it has not read yet comes back here to edit")
+                    }
                     Button(action: submit) {
                         Image(systemName: "arrow.up.circle.fill").font(.title2)
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(command == nil ? Color.secondary : Color.accentColor)
                     .disabled(command == nil)
-                    .help(command ?? "Type what you want")
+                    .help(command.map { "\(sendKey.symbol) \($0)" } ?? "Type what you want")
                 }
             }
             .padding(10)
             .background(.background, in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
-            if let command {
-                Text(command)
-                    .font(.caption2.monospaced())
+            HStack(spacing: 8) {
+                if let command {
+                    Text(command)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+                Text(sendKey.title + (stop == nil ? "" : " · Esc stops"))
+                    .font(.caption2)
                     .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    .fixedSize()
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
-        .onAppear { focused = true }
     }
 }

@@ -852,7 +852,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"conflict", epic},
 		{"worktree", "list", epic}, {"worktree", "attach", t3, filepath.Join(f.dir, "elsewhere")},
 		{"archive", attached, "census"}, {"unarchive", attached},
-		{"pause", epic}, {"resume", epic, "census"},
+		{"pause", epic}, {"send", t2, "said while paused"}, {"stop", t2}, {"resume", epic, "census"},
 		{"verify", t2}, {"merge", t2},
 		{"concern", "add", t3, "a worry"}, {"concern", "list"}, {"concern", "list", epic},
 		{"concern", "resolve", "2", "settled"},
@@ -4107,6 +4107,57 @@ func TestWdSendToAGoalTellsEveryOpenTaskAndKeepsItAsADecision(t *testing.T) {
 	}
 	if brief := f.runOK(t, "brief", t3); !strings.Contains(brief, "drop the mobile app") {
 		t.Fatalf("a task not yet started does not read the goal's decision in its brief:\n%s", brief)
+	}
+}
+
+func TestWdStopInterruptsASessionAndHandsBackWhatItHadNotRead(t *testing.T) {
+	f := newCLIFixture(t)
+	state := liveClaude(t, f)
+	epic, t2 := f.ids["epic"], f.ids["t2"]
+	before := stateOf(t, f, t2)
+	if err := os.WriteFile(filepath.Join(state, "claude-busy"), nil, 0o644); err != nil {
+		t.Fatalf("busy: %v", err)
+	}
+	f.runOK(t, "send", t2, "drop the tables")
+	f.runOK(t, "send", t2, "all of them")
+	var out struct {
+		Ok        bool     `json:"ok"`
+		Stopped   []string `json:"stopped"`
+		Withdrawn []string `json:"withdrawn"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "stop", t2, "--json")), &out); err != nil {
+		t.Fatalf("stop --json: %v", err)
+	}
+	if !out.Ok || len(out.Stopped) != 1 || out.Stopped[0] != t2 || len(out.Withdrawn) != 2 || out.Withdrawn[0] != "drop the tables" || out.Withdrawn[1] != "all of them" {
+		t.Fatalf("stop = %+v, want %s stopped and both queued messages handed back, oldest first", out, t2)
+	}
+	if _, err := os.Stat(filepath.Join(state, "claude-stopped-ab000002")); err != nil {
+		t.Fatalf("the running session was not stopped: %v", err)
+	}
+	if got := stateOf(t, f, t2); got != before {
+		t.Errorf("%s = %s after stop, want %s as before", t2, got, before)
+	}
+	if errStr := f.runFail(t, "stop", t2); !strings.Contains(errStr, "nothing to stop") {
+		t.Errorf("stop with nothing running or queued: %q, want it refused saying there is nothing to stop", errStr)
+	}
+	if out := f.runOK(t, "send", t2, "keep the tables"); !strings.Contains(out, "delivered") {
+		t.Fatalf("send after stop: %q, want it delivered to the same session", out)
+	}
+	if got := sends(t, state); len(got) != 1 || got[0] != "keep the tables" {
+		t.Fatalf("sends = %q, want only the corrected message", got)
+	}
+
+	if err := os.Remove(filepath.Join(state, "claude-stopped-ab000002")); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "stop", epic, "--json")), &out); err != nil {
+		t.Fatalf("stop goal --json: %v", err)
+	}
+	if len(out.Stopped) != 1 || out.Stopped[0] != t2 {
+		t.Fatalf("stop on the goal = %+v, want its working task %s stopped", out, t2)
+	}
+	if _, err := os.Stat(filepath.Join(state, "claude-stopped-ab000002")); err != nil {
+		t.Fatalf("stop on the goal did not stop the task's session: %v", err)
 	}
 }
 
