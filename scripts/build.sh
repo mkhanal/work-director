@@ -41,6 +41,9 @@ sha256() {
 have_zip() { command -v zip >/dev/null 2>&1; }
 
 packaged=""
+dist=$(cd dist && pwd)
+# The man page goes in every archive, beside the binary it describes.
+go run ./cmd/wd man > "$dist/wd.1"
 for target in $targets; do
   os=${target%/*}
   arch=${target#*/}
@@ -53,11 +56,12 @@ for target in $targets; do
     name=wd
   fi
   CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "$ldflags" -o "$stage/$name" ./cmd/wd
+  cp "$dist/wd.1" "$stage/wd.1"
 
   asset="dist/wd-$os-$arch.$ext"
   if [ "$ext" = zip ]; then
     if have_zip; then
-      (cd "$stage" && zip -q -X "../$(basename "$asset")" "$name")
+      (cd "$stage" && zip -q -X "$dist/$(basename "$asset")" "$name" wd.1)
     else
       rm -f "$asset"
       echo "skipping $asset: no zip on PATH"
@@ -65,7 +69,7 @@ for target in $targets; do
       continue
     fi
   else
-    tar -czf "$asset" -C "$stage" "$name"
+    tar -czf "$asset" -C "$stage" "$name" wd.1
   fi
   rm -rf "$stage"
   (cd dist && sha256 "$(basename "$asset")" > "$(basename "$asset").sha256")

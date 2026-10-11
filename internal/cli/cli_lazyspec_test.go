@@ -4026,6 +4026,41 @@ func TestGoalStartsFromOneSentence(t *testing.T) {
 	}
 }
 
+func TestEveryCommandExplainsItself(t *testing.T) {
+	f := newCLIFixture(t)
+	overview := f.runOK(t, "help")
+	for name := range commands {
+		own := f.runOK(t, name, "--help")
+		if !strings.HasPrefix(own, "wd "+name) || strings.Count(strings.TrimSpace(own), "\n") < 2 {
+			t.Errorf("wd %s --help = %q, want its usage then what it does", name, own)
+		}
+		if got := f.runOK(t, "help", name); got != own {
+			t.Errorf("wd help %s differs from wd %s --help", name, name)
+		}
+		if !strings.Contains(overview, "  "+name+" ") {
+			t.Errorf("wd help does not list %s", name)
+		}
+	}
+	if got := f.runOK(t, "--help"); got != overview {
+		t.Errorf("wd --help differs from wd help")
+	}
+	if errStr := f.runFail(t); !strings.Contains(errStr, "Commands:") {
+		t.Errorf("wd alone = %q, want the command list", errStr)
+	}
+	if man := f.runOK(t, "man"); !strings.HasPrefix(man, ".TH WD 1") || !strings.Contains(man, ".B completion") {
+		t.Errorf("wd man = %.200q, want a wd(1) page listing every command", man)
+	}
+	if errStr := f.runFail(t, "help", "frobnicate"); !strings.Contains(errStr, "wd help") {
+		t.Errorf("help of an unknown command = %q, want it to point at wd help", errStr)
+	}
+	// No ledger is opened to answer.
+	fresh := t.TempDir()
+	code, _, _ := f.runEnv(t, append(f.env(t, f.bin), "WD_HOME="+fresh), "status", "--help")
+	if entries, _ := os.ReadDir(fresh); code != 0 || len(entries) != 0 {
+		t.Errorf("wd status --help exit %d left %d entries in a fresh WD_HOME", code, len(entries))
+	}
+}
+
 func TestWdCompletionPrintsAShellsCompletionScript(t *testing.T) {
 	f := newCLIFixture(t)
 	for shell, marker := range map[string]string{"bash": "complete -F", "zsh": "#compdef wd", "fish": "complete -c wd", "powershell": "Register-ArgumentCompleter"} {

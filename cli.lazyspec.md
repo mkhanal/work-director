@@ -317,6 +317,12 @@ could not with their work, the bound that ran out, and the work still open.
 - `--json` prints `{goal, tasks}`, read after the tasks are spawned.
 - A plan that yields no tasks leaves the goal filed and exits 1 naming the plan session.
 
+## Every Command Explains Itself
+- `wd <command> --help` and `wd help <command>` print the command's usage and what it does, with no ledger opened.
+- `wd help`, `wd --help` and `wd` alone list every command with what it does.
+- `wd man` prints the same as a wd(1) man page.
+- Help asked of a command wd does not have is refused, pointing at `wd help`.
+
 ## Wd Completion Prints A Shell's Completion Script
 - `wd completion <bash|zsh|fish|powershell>` prints a script that completes every `wd` command name in that shell.
 - `--json` prints `{shell, script}`.

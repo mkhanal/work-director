@@ -49,6 +49,9 @@ jobs:
         run: |
           mkdir -p /tmp/smoke && tar -xzf dist/wd-darwin-amd64.tar.gz -C /tmp/smoke
           /tmp/smoke/wd --version | grep -F "${GITHUB_REF_NAME}"
+          test -f /tmp/smoke/wd.1
+          unzip -l dist/wd-windows-amd64.zip | grep -q 'wd.exe'
+          unzip -l dist/wd-windows-amd64.zip | grep -q 'wd.1'
 
       - name: generate the homebrew formula from what was just published
         run: VERSION="${GITHUB_REF_NAME}" scripts/formula.sh

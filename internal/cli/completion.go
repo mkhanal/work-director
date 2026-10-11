@@ -15,7 +15,7 @@ func (c *Cli) completion(rest []string) error {
 	if len(rest) != 1 {
 		return fail("usage: wd completion <bash|zsh|fish|powershell>")
 	}
-	names := make([]string, 0, len(commands))
+	names := []string{"help", "man", "version"}
 	for name := range commands {
 		names = append(names, name)
 	}

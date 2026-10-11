@@ -162,8 +162,24 @@ func Run(args []string) error {
 		fmt.Fprintln(os.Stdout, out)
 		return nil
 	}
-	if parsed.Switches["help"] || (len(parsed.Positional) == 1 && parsed.Positional[0] == "help") {
-		fmt.Fprintln(os.Stdout, usage)
+	// Help and the man page need no ledger either.
+	if pos := parsed.Positional; parsed.Switches["help"] || (len(pos) > 0 && pos[0] == "help") {
+		name := ""
+		switch {
+		case len(pos) > 1 && pos[0] == "help":
+			name = pos[1]
+		case len(pos) > 0 && pos[0] != "help":
+			name = pos[0]
+		}
+		text, err := helpFor(name)
+		if err != nil {
+			return err
+		}
+		fmt.Fprint(os.Stdout, text)
+		return nil
+	}
+	if len(parsed.Positional) == 1 && parsed.Positional[0] == "man" {
+		fmt.Fprint(os.Stdout, manPage())
 		return nil
 	}
 	wdHome, err := runner.WDHome()
@@ -254,8 +270,6 @@ func tasteCheckout() (string, error) {
 	return "", nil
 }
 
-const usage = "wd <projects|workspace|add|tasks|brief|spawn|models|runner|roadmap|goal|drive|send|answer|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|review|abandon|release|reopen|feedback|distill|archive|unarchive|stop|pause|resume|cancel|tui|serve|doctor|completion> [--json]\n\nwd --version   what release this binary is\nwd serve       the JSON API over loopback HTTP; --stdio serves a desktop app on its standard streams\nwd doctor     which runner CLIs are detected, and whether this is a repo"
-
 // commands maps each wd command to its handler, given the arguments after it.
 var commands = map[string]func(c *Cli, rest []string) error{
 	"projects": (*Cli).projects,
@@ -313,11 +327,11 @@ var commands = map[string]func(c *Cli, rest []string) error{
 
 func (c *Cli) dispatch() error {
 	if len(c.Args.Positional) == 0 {
-		return fail("%s", usage)
+		return fail("%s", overview())
 	}
 	run, ok := commands[c.Args.Positional[0]]
 	if !ok {
-		return fail("%s", usage)
+		return fail("%s", overview())
 	}
 	return run(c, c.Args.Positional[1:])
 }

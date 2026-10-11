@@ -60,6 +60,7 @@ HEAD
   cat <<'TAIL'
 
     bin.install "wd"
+    man1.install "wd.1"
   end
 
   def caveats
