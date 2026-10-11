@@ -269,7 +269,8 @@ func conversationIn(file, cwd string, sidechain bool) ([]Entry, error) {
 	// stopped and resumed with an answer as the prompt that follows.
 	open := -1
 	prompt := func(at *string, s string) {
-		if strings.TrimSpace(s) == "" {
+		s, ok := typed(s)
+		if !ok || strings.TrimSpace(s) == "" {
 			return
 		}
 		if open >= 0 {
@@ -374,6 +375,29 @@ func conversationIn(file, cwd string, sidechain bool) ([]Entry, error) {
 		}
 	}
 	return out, nil
+}
+
+var (
+	commandRe = regexp.MustCompile(`(?s)<command-name>(.*?)</command-name>`)
+	argsRe    = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
+)
+
+// typed is what a person typed, as a prompt: a slash command reads as the
+// command and its arguments, and claude's own notes and output for a local
+// command are no prompt at all.
+func typed(s string) (string, bool) {
+	t := strings.TrimSpace(s)
+	if strings.HasPrefix(t, "<local-command-") {
+		return "", false
+	}
+	if m := commandRe.FindStringSubmatch(t); m != nil && strings.HasPrefix(t, "<command-") {
+		args := ""
+		if a := argsRe.FindStringSubmatch(t); a != nil {
+			args = strings.TrimSpace(a[1])
+		}
+		return strings.TrimSpace(m[1] + " " + args), true
+	}
+	return s, true
 }
 
 // resultText is a tool result's text: claude stores it as a string or as

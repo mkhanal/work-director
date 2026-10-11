@@ -13,11 +13,11 @@ struct GoalThread: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let delivery = goal.delivery {
+            if let delivery = goal.delivery, delivery.status != "none" || !goal.landings.isEmpty {
                 DeliveryLine(delivery: delivery, landings: goal.landings)
             }
             if !goal.goal.detail.isEmpty {
-                PromptRow(text: goal.goal.detail, brief: false, at: goal.goal.created)
+                PromptRow(text: goal.goal.detail, brief: false, at: goal.goal.created, label: "Asked")
             }
             PlanBlock(goal: goal, focus: focus)
             ForEach(timeline, id: \.id) { event in

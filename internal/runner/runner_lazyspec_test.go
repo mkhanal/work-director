@@ -418,6 +418,9 @@ transcript = "cat {log}"
 				map[string]any{"type": "tool_result", "tool_use_id": "t2", "is_error": true, "content": []map[string]any{{"type": "text", "text": "nope"}}},
 			),
 			map[string]any{"type": "assistant", "isSidechain": true, "message": map[string]any{"content": []map[string]any{{"type": "text", "text": "side"}}}},
+			prompt("<local-command-caveat>The command below was run directly</local-command-caveat>"),
+			prompt("<command-name>/reload-plugins</command-name>\n<command-message>reload-plugins</command-message>\n<command-args>now</command-args>"),
+			prompt("<local-command-stdout>Reloaded: 9 plugins</local-command-stdout>"),
 			ask("q1", "Which colour?"),
 			map[string]any{"type": "user", "toolUseResult": map[string]any{"answers": map[string]any{"Which colour?": "Blue"}}, "message": map[string]any{"content": []map[string]any{{"type": "tool_result", "tool_use_id": "q1", "content": "answered"}}}},
 			ask("q2", "Which colour?", "Which size?"),
@@ -435,10 +438,14 @@ transcript = "cat {log}"
 		for _, e := range got {
 			kinds = append(kinds, e.Kind)
 		}
-		want := []EntryKind{EntryPrompt, EntryThinking, EntryText, EntryTool, EntryTool, EntryTool, EntryQuestion, EntryQuestion, EntryQuestion, EntryPrompt}
+		want := []EntryKind{EntryPrompt, EntryThinking, EntryText, EntryTool, EntryTool, EntryTool, EntryPrompt, EntryQuestion, EntryQuestion, EntryQuestion, EntryPrompt}
 		if !slices.Equal(kinds, want) {
 			t.Fatalf("kinds = %v, want %v", kinds, want)
 		}
+		if got[6].Text != "/reload-plugins now" {
+			t.Fatalf("slash command = %q, want it read as the command and its arguments", got[6].Text)
+		}
+		got = append(got[:6], got[7:]...)
 		if got[0].Text != "the brief" || got[1].Text != "Weighing it" || got[2].Text != "Looking" {
 			t.Fatalf("texts = %q %q %q", got[0].Text, got[1].Text, got[2].Text)
 		}

@@ -63,6 +63,7 @@ A conversation ending on an unanswered question with options gives a transcript 
 - A question carries each item's header, question, options and whether several may be picked.
 - A question answered in the session carries the answers; one interrupted and then followed by a prompt carries that prompt as its reply, or its answers when the prompt is an answer set, which is then not a step of its own.
 - A subagent's side conversation and meta records are not part of the session's conversation.
+- A slash command typed in the session reads as the command and its arguments; claude's notes and output for a local command are not steps.
 - Runners whose store holds only what was said give text steps.
 
 ## A Claude Session Reports What It Spent And The Subagents It Started

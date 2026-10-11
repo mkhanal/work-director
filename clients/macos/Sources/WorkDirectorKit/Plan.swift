@@ -103,6 +103,9 @@ public struct Plan: Hashable, Sendable, Identifiable {
     /// they have not read; the work keeps its state.
     public static func stop(_ id: String) -> Plan { Plan(title: "Stop", argv: ["stop", id, "--json"]) }
 
+    /// Opens the directory work runs in, in the editor wd finds.
+    public static func open(_ id: String) -> Plan { Plan(title: "Open", argv: ["open", id, "."]) }
+
     public static func pause(_ id: String) -> Plan { Plan(title: "Pause", argv: ["pause", id]) }
 
     public static func resume(_ id: String, note: String) -> Plan {

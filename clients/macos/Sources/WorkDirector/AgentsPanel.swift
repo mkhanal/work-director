@@ -50,11 +50,14 @@ struct AgentsPanel: View {
     }
 
     private func row(_ card: AgentCard, depth: Int) -> some View {
-        AgentRow(card: card, focused: focused == card.id, stop: card.agent == nil && card.phase != .settled ? { stop(card.task) } : nil)
-            .padding(.leading, CGFloat(depth) * 16)
-            .contentShape(Rectangle())
-            .onTapGesture { choose(card) }
-            .contextMenu {
+        Button { choose(card) } label: {
+            AgentRow(card: card, focused: focused == card.id, stop: card.agent == nil && card.phase != .settled ? { stop(card.task) } : nil)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(card.title), \(card.kind)")
+        .padding(.leading, CGFloat(depth) * 16)
+        .contextMenu {
                 Button("Show Conversation") { choose(card) }
                 if card.agent == nil && card.phase != .settled {
                     Button("Stop") { stop(card.task) }

@@ -70,6 +70,12 @@ struct WorkDetail: View {
                 .toolbar {
                     Actions(work: loaded.work, run: { plan = $0 }, ask: { asking = $0 })
                     ToolbarItem(placement: .primaryAction) {
+                        if let target = openTarget(loaded) {
+                            Button { plan = Plan.open(target) } label: { Label("Open", systemImage: "arrow.up.forward.app") }
+                                .help("Open where this work is done in your editor: wd open \(target) .")
+                        }
+                    }
+                    ToolbarItem(placement: .primaryAction) {
                         Button { showAgents.toggle() } label: { Label("Agents", systemImage: "sidebar.right") }
                             .help(showAgents ? "Hide the agents" : "Show the agents")
                     }
@@ -82,7 +88,7 @@ struct WorkDetail: View {
                 }
                 .safeAreaInset(edge: .bottom) {
                     if let target = messaged(loaded), !target.atRest || (target.kind.isGoal && target.state == .done) {
-                        MessageBar(store: store, work: target, working: working(loaded))
+                        MessageBar(store: store, work: target, working: working(loaded), about: about(target, in: loaded))
                             .id(target.id)
                     }
                 }
@@ -209,6 +215,37 @@ struct WorkDetail: View {
         switch loaded {
         case .goal(let g): return g.activity.values.contains { $0.status?.live == true }
         case .work: return feed.status.live
+        }
+    }
+
+    /// Chips for what a message reaches: runner, model, the folder it works in.
+    private func about(_ target: Work, in loaded: Loaded) -> [String] {
+        var chips: [String] = []
+        if let runner = target.runner { chips.append(runner) }
+        let usage: Usage? = {
+            if let focus, let focusFeed, focus.agent == nil { return focusFeed.usage }
+            switch loaded {
+            case .goal(let g): return g.activity[target.id]?.usage
+            case .work: return feed.usage
+            }
+        }()
+        if let model = usage?.model, !model.isEmpty { chips.append(model.replacingOccurrences(of: "claude-", with: "")) }
+        if let cwd = target.cwd ?? workingDir(loaded) { chips.append((cwd as NSString).lastPathComponent) }
+        return chips
+    }
+
+    private func workingDir(_ loaded: Loaded) -> String? {
+        if case .goal(let g) = loaded { return g.tasks.compactMap(\.cwd).first }
+        return nil
+    }
+
+    /// Opens where the work is done in the editor: the task in focus, this
+    /// task, or a goal's first task with a session.
+    private func openTarget(_ loaded: Loaded) -> String? {
+        if let focus { return focus.task }
+        switch loaded {
+        case .goal(let g): return g.tasks.first { hasSession($0) }?.id
+        case .work(let w, _): return hasSession(w) ? w.id : nil
         }
     }
 
@@ -426,6 +463,7 @@ struct MessageBar: View {
     let work: Work
     /// Whether a session under this work is working now.
     let working: Bool
+    var about: [String] = []
     @State private var text = ""
     @State private var sending = false
     @State private var outcome: String?
@@ -441,6 +479,7 @@ struct MessageBar: View {
             note: outcome,
             noteIsError: failed,
             stop: working && !continuing ? Plan.stop(work.id) : nil,
+            about: about,
             stopped: { Task { await stop() } }
         ) { Task { await send() } }
     }
@@ -507,6 +546,8 @@ struct InputBar: View {
     var noteIsError = false
     /// What stopping runs, while there is something to stop.
     var stop: Plan? = nil
+    /// What the message goes to: runner, model, where it works.
+    var about: [String] = []
     var stopped: () -> Void = {}
     let submit: () -> Void
     @AppStorage("sendKey") private var sendKey: SendKey = .standard
@@ -560,6 +601,15 @@ struct InputBar: View {
             .background(.background, in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
             HStack(spacing: 8) {
+                ForEach(about, id: \.self) { chip in
+                    Text(chip)
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.quaternary.opacity(0.6), in: Capsule())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
                 if let command {
                     Text(command)
                         .font(.caption2.monospaced())

@@ -85,13 +85,14 @@ struct PromptRow: View {
     let text: String
     let brief: Bool
     let at: String?
+    var label: String? = nil
     @State private var expanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: brief ? "doc.text" : "person.fill")
-                Text(brief ? "Brief" : "Told").font(.caption.weight(.semibold))
+                Text(label ?? (brief ? "Brief" : "Told")).font(.caption.weight(.semibold))
                 if let at { Text(when(at)).font(.caption).foregroundStyle(.tertiary) }
                 Spacer()
                 if folds {
