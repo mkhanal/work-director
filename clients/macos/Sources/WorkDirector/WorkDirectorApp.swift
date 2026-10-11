@@ -37,6 +37,7 @@ struct WorkDirectorApp: App {
                     .keyboardShortcut("n", modifiers: .command)
             }
             CommandGroup(after: .newItem) {
+                Button("Add Product…") { NotificationCenter.default.post(name: .addProduct, object: nil) }
                 Button("Run a wd Command…") { NotificationCenter.default.post(name: .openCommandBar, object: nil) }
                     .keyboardShortcut("k", modifiers: .command)
             }
@@ -55,6 +56,7 @@ extension Notification.Name {
     static let openCommandBar = Notification.Name("openCommandBar")
     static let reload = Notification.Name("reload")
     static let newGoal = Notification.Name("newGoal")
+    static let addProduct = Notification.Name("addProduct")
     /// Opens one work item; its id is the notification's object.
     static let openWork = Notification.Name("openWork")
 }

@@ -575,4 +575,23 @@ func fakeRunner(_ home: Home) throws {
         #expect(Set(second.arrivals(since: first).map(\.work.id)) == ["a", "c"])
         #expect(second.arrivals(since: second).isEmpty, "staying put is not news")
     }
+
+    @Test("A Product Is Added From A Folder")
+    func productAddedFromFolder() async throws {
+        #expect(Plan.productName(forFolder: "/Users/me/code/My App_v2") == "my-app-v2")
+        let home = try Home()
+        let folder = home.dir.appendingPathComponent("My App")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let store = await Store(channel: try home.channel())
+        await store.start()
+        let runners = try await store.doctor().runners.map(\.runner)
+        #expect(Set(["claude", "opencode", "codex"]).isSubset(of: Set(runners)))
+        let plan = try Plan.addProduct(name: Plan.productName(forFolder: folder.path), path: folder.path, runner: "claude", mode: "ask")
+        #expect(plan.argv.prefix(7) == ["projects", "add", "my-app", folder.path, "--runner", "claude", "--mode"])
+        #expect(try await store.run(plan).code == 0)
+        try await store.reloadProjects()
+        #expect(await store.projects.contains { $0.name == "my-app" && $0.mode == "ask" })
+        #expect(throws: PlanError.empty) { try Plan.addProduct(name: " ", path: folder.path, runner: "claude", mode: "auto") }
+        await store.stop()
+    }
 }

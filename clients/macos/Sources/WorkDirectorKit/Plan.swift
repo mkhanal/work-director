@@ -110,6 +110,21 @@ public struct Plan: Hashable, Sendable, Identifiable {
         gate.argv.isEmpty ? nil : Plan(title: gate.title ?? gate.gate, argv: gate.argv)
     }
 
+    /// Registers a folder as a product the director works in.
+    public static func addProduct(name: String, path: String, runner: String, mode: String) throws -> Plan {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !path.isEmpty, !runner.isEmpty else { throw PlanError.empty }
+        return Plan(title: "Add product", argv: ["projects", "add", name, path, "--runner", runner, "--mode", mode, "--lazyspec", "n", "--json"])
+    }
+
+    /// The name a product in a folder is offered: the folder's own name, in
+    /// lower case, its words joined by hyphens.
+    public static func productName(forFolder path: String) -> String {
+        let base = (path as NSString).lastPathComponent.lowercased()
+        let words = base.split { !$0.isLetter && !$0.isNumber }
+        return words.joined(separator: "-")
+    }
+
     /// Opens the directory work runs in, in the editor wd finds.
     public static func open(_ id: String) -> Plan { Plan(title: "Open", argv: ["open", id, "."]) }
 

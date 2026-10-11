@@ -309,3 +309,13 @@ extension Board {
 extension Threads {
     var all: [BoardThread] { open + queued + settled }
 }
+
+/// What `wd doctor` says the host offers: which runners are on PATH.
+public struct Doctor: Codable, Sendable, Hashable {
+    public struct Runner: Codable, Sendable, Hashable, Identifiable {
+        public let runner: String
+        public let detected: Bool
+        public var id: String { runner }
+    }
+    public let runners: [Runner]
+}

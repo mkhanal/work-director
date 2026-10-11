@@ -23,6 +23,7 @@ struct RootView: View {
     @State private var asking: Ask?
     @State private var writes: Writes
     @State private var typing = false
+    @State private var addingProduct = false
 
     init(store: Store) {
         self.store = store
@@ -90,6 +91,10 @@ struct RootView: View {
             if let id = note.object as? String { place = .work(id) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .reload)) { _ in Task { await store.refresh() } }
+        .sheet(isPresented: $addingProduct) {
+            AddProductSheet(store: store) { name in scopeName = name }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .addProduct)) { _ in addingProduct = true }
         .sheet(isPresented: $typing) {
             CommandBar { typed in
                 typing = false
@@ -203,14 +208,21 @@ struct ThreadSidebar: View {
         .listStyle(.sidebar)
         .searchable(text: $search, placement: .sidebar, prompt: "Search goals")
         .safeAreaInset(edge: .top) {
-            Picker(selection: $scopeName) {
-                Text("All products").tag("")
-                Divider()
-                ForEach(store.projects) { p in Text(p.name).tag(p.name) }
-            } label: {
-                Label("Product", systemImage: "shippingbox")
+            HStack(spacing: 4) {
+                Picker(selection: $scopeName) {
+                    Text("All products").tag("")
+                    Divider()
+                    ForEach(store.projects) { p in Text(p.name).tag(p.name) }
+                } label: {
+                    Label("Product", systemImage: "shippingbox")
+                }
+                .pickerStyle(.menu)
+                Button { NotificationCenter.default.post(name: .addProduct, object: nil) } label: {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.borderless)
+                .help("Add a product: a repository the director works in")
             }
-            .pickerStyle(.menu)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
         }

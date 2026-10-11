@@ -101,3 +101,8 @@ hold only that product's work; with none, every product's.
 - Nothing is announced from the first read.
 - Work that stays in its band, or moves into any other, is not announced.
 
+## A Product Is Added From A Folder
+- Adding a product runs `wd projects add <name> <folder> --runner <runner> --mode <mode>`, and the product is offered once it is added.
+- The name offered is the folder's own name in lower case, its words joined by hyphens.
+- The agents offered are the runners `wd doctor` lists, those on PATH first chosen.
+

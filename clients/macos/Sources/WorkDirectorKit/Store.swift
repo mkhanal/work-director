@@ -95,6 +95,16 @@ public final class Store {
         return try decode(ReviewPass.self, result)
     }
 
+    /// The runners this host can use.
+    public func doctor() async throws -> Doctor {
+        try decode(Doctor.self, try await channel.action(["doctor", "--json"]))
+    }
+
+    /// Reads the products again, after one is added.
+    public func reloadProjects() async throws {
+        projects = try decode([Project].self, try await channel.action(["projects", "--json"]))
+    }
+
     /// Work put out of sight, newest first as wd lists it.
     public func archived() async throws -> [Work] {
         try decode([Work].self, try await channel.action(["status", "--archived", "--json"]))

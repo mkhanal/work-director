@@ -39,6 +39,16 @@ struct NewGoalPage: View {
                         }
                     }
                 }
+                if store.projects.isEmpty {
+                    ContentUnavailableView {
+                        Label("No product yet", systemImage: "shippingbox")
+                    } description: {
+                        Text("Add the repository you want worked on, then say what you want done.")
+                    } actions: {
+                        Button("Add Product…") { NotificationCenter.default.post(name: .addProduct, object: nil) }
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
                 phaseView(flow)
             }
             .padding(24)
