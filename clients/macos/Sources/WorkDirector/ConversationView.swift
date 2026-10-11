@@ -13,7 +13,9 @@ struct ConversationView: View {
     let feed: Feed
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        // Lazy: a long session has thousands of steps, and only those on
+        // screen are laid out on each read.
+        LazyVStack(alignment: .leading, spacing: 14) {
             if let failure = feed.failure {
                 Label(failure, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
@@ -476,7 +478,19 @@ struct MarkdownText: View {
         case paragraph(String)
     }
 
-    init(_ text: String) { blocks = Self.parse(text) }
+    init(_ text: String) {
+        if let parsed = Self.parsed[text] {
+            blocks = parsed
+        } else {
+            blocks = Self.parse(text)
+            Self.parsed[text] = blocks
+        }
+    }
+
+    /// Each text is parsed once: a step is drawn again on every read of its
+    /// conversation, and its text never changes. Bounded, so a long-running
+    /// app does not keep every text it ever showed.
+    @MainActor private static var parsed = BoundedCache<String, [Block]>(limit: 2000)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -564,4 +578,21 @@ func when(_ iso: String) -> String {
     return Calendar.current.isDateInToday(date)
         ? date.formatted(date: .omitted, time: .shortened)
         : date.formatted(date: .abbreviated, time: .shortened)
+}
+
+/// A dictionary that forgets everything once it holds limit entries; enough for
+/// a cache whose entries are cheap to make again.
+struct BoundedCache<Key: Hashable, Value> {
+    let limit: Int
+    private var store: [Key: Value] = [:]
+
+    init(limit: Int) { self.limit = limit }
+
+    subscript(key: Key) -> Value? {
+        get { store[key] }
+        set {
+            if store.count >= limit { store.removeAll(keepingCapacity: true) }
+            store[key] = newValue
+        }
+    }
 }

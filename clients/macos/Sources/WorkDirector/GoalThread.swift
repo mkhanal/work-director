@@ -12,7 +12,7 @@ struct GoalThread: View {
     let answered: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        LazyVStack(alignment: .leading, spacing: 16) {
             if let delivery = goal.delivery, delivery.status != "none" || delivery.error != nil || !goal.landings.isEmpty {
                 DeliveryLine(delivery: delivery, landings: goal.landings)
             }

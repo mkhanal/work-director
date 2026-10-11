@@ -1,13 +1,13 @@
 package runner
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -21,7 +21,46 @@ type agentRow struct {
 	State     string `json:"state"`
 }
 
+// agentListing is the last `claude agents` listing, shared for ttl by a
+// process that reads many sessions' status at once: one listing a few times a
+// second rather than one per session per read. Zero ttl shares nothing.
+var agentListing struct {
+	sync.Mutex
+	ttl  time.Duration
+	at   time.Time
+	rows []agentRow
+}
+
+// ShareAgentListing has every status read within ttl of a listing use it.
+func ShareAgentListing(ttl time.Duration) {
+	agentListing.Lock()
+	defer agentListing.Unlock()
+	agentListing.ttl = ttl
+}
+
+// forgetAgents drops the shared listing: what this process just did to a
+// session is read fresh.
+func forgetAgents() {
+	agentListing.Lock()
+	defer agentListing.Unlock()
+	agentListing.at = time.Time{}
+}
+
 func agents(cwd string) ([]agentRow, error) {
+	agentListing.Lock()
+	defer agentListing.Unlock()
+	if agentListing.ttl > 0 && time.Since(agentListing.at) < agentListing.ttl {
+		return agentListing.rows, nil
+	}
+	rows, err := listAgents(cwd)
+	if err != nil {
+		return nil, err
+	}
+	agentListing.rows, agentListing.at = rows, time.Now()
+	return rows, nil
+}
+
+func listAgents(cwd string) ([]agentRow, error) {
 	r, err := Run([]string{"claude", "agents", "--json", "--all"}, cwd)
 	if err != nil {
 		return nil, err
@@ -56,6 +95,7 @@ func (claudeRunner) Name() string { return "claude" }
 func (claudeRunner) Command() string { return "claude" }
 
 func (claudeRunner) Spawn(o SpawnOptions) (Handle, error) {
+	defer forgetAgents()
 	permissionMode := "bypassPermissions"
 	if o.PermissionMode != nil {
 		permissionMode = *o.PermissionMode
@@ -103,6 +143,7 @@ func (claudeRunner) Spawn(o SpawnOptions) (Handle, error) {
 // is stopped first; one still working is refused, because stopping it would
 // cut its work short.
 func (c claudeRunner) Send(h *Handle, text string) error {
+	defer forgetAgents()
 	rows, err := agents(h.Cwd)
 	if err != nil {
 		return err
@@ -141,6 +182,7 @@ func (c claudeRunner) Send(h *Handle, text string) error {
 // Stop stops the background session by the id claude printed at spawn;
 // claude keeps its conversation for a later resume.
 func (claudeRunner) Stop(h Handle) error {
+	defer forgetAgents()
 	if h.Ref == nil {
 		return &RunnerError{Runner: "claude", Detail: "session " + h.Session + " has no background id to stop"}
 	}
@@ -211,6 +253,13 @@ type claudeRecord struct {
 	IsSidechain   bool            `json:"isSidechain"`
 	ToolUseResult json.RawMessage `json:"toolUseResult"`
 	Message       struct {
+		Model      string `json:"model"`
+		StopReason string `json:"stop_reason"`
+		Usage      struct {
+			Input         int `json:"input_tokens"`
+			CacheCreation int `json:"cache_creation_input_tokens"`
+			Output        int `json:"output_tokens"`
+		} `json:"usage"`
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
 }
@@ -258,123 +307,13 @@ func (claudeRunner) Conversation(h Handle) ([]Entry, error) {
 // conversationIn reads one claude store. A subagent's own store is all
 // sidechain; a session's store skips the sidechain records it carries.
 func conversationIn(file, cwd string, sidechain bool) ([]Entry, error) {
-	text, err := os.ReadFile(file)
+	t, err := readTranscript(file, cwd, sidechain)
 	if err != nil {
 		return nil, err
 	}
-	out := []Entry{}
-	calls := map[string]int{}
-	// open is the question still waiting for its reply, or -1: claude records
-	// an answer typed in the session as the tool's result, and a session
-	// stopped and resumed with an answer as the prompt that follows.
-	open := -1
-	prompt := func(at *string, s string) {
-		s, ok := typed(s)
-		if !ok || strings.TrimSpace(s) == "" {
-			return
-		}
-		if open >= 0 {
-			q := out[open].Question
-			q.settle(s)
-			open = -1
-			// A set of answers is shown on its question; it is not said twice.
-			if q.Answers != nil {
-				return
-			}
-		}
-		out = append(out, Entry{Kind: EntryPrompt, At: at, Text: s})
-	}
-	for i, line := range jsonlRecords(string(text)) {
-		if line == "" {
-			continue
-		}
-		var rec claudeRecord
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			return nil, fmt.Errorf("%s:%d: %w", file, i+1, err)
-		}
-		if (rec.Type != "user" && rec.Type != "assistant") || rec.IsSidechain != sidechain || rec.IsMeta || len(rec.Message.Content) == 0 {
-			continue
-		}
-		if !bytes.HasPrefix(bytes.TrimSpace(rec.Message.Content), []byte("[")) {
-			var s string
-			if err := json.Unmarshal(rec.Message.Content, &s); err != nil {
-				return nil, fmt.Errorf("%s:%d: %w", file, i+1, err)
-			}
-			if rec.Type == "user" {
-				prompt(rec.Timestamp, s)
-			}
-			continue
-		}
-		var parts []claudePart
-		if err := json.Unmarshal(rec.Message.Content, &parts); err != nil {
-			return nil, fmt.Errorf("%s:%d: %w", file, i+1, err)
-		}
-		for _, p := range parts {
-			switch {
-			case rec.Type == "user" && p.Type == "text":
-				prompt(rec.Timestamp, p.Text)
-			case rec.Type == "user" && p.Type == "tool_result":
-				at, ok := calls[p.ToolUseID]
-				if !ok {
-					continue
-				}
-				if q := out[at].Question; q != nil {
-					// An interrupted question is still waiting: the reply
-					// arrives as the next prompt.
-					if p.IsError || !q.Pending() {
-						continue
-					}
-					var res claudeQuestions
-					if len(rec.ToolUseResult) > 0 && json.Unmarshal(rec.ToolUseResult, &res) == nil && len(res.Answers) > 0 {
-						answers := make([]string, len(q.Items))
-						for k, it := range q.Items {
-							answers[k] = res.Answers[it.Question]
-						}
-						q.Answers = answers
-					} else {
-						q.settle(resultText(p.Content))
-					}
-					open = -1
-					continue
-				}
-				r := clipped(resultText(p.Content))
-				out[at].Tool.Result = &r
-				out[at].Tool.Failed = p.IsError
-			case rec.Type == "assistant" && p.Type == "text" && p.Text != "":
-				out = append(out, Entry{Kind: EntryText, At: rec.Timestamp, Text: p.Text})
-			case rec.Type == "assistant" && p.Type == "thinking" && strings.TrimSpace(p.Thinking) != "":
-				out = append(out, Entry{Kind: EntryThinking, At: rec.Timestamp, Text: strings.TrimSpace(p.Thinking)})
-			case rec.Type == "assistant" && p.Type == "tool_use" && p.Name == askUserQuestion:
-				var in claudeQuestions
-				if err := json.Unmarshal(p.Input, &in); err != nil {
-					return nil, fmt.Errorf("%s:%d: %s input: %w", file, i+1, askUserQuestion, err)
-				}
-				q := &Question{ID: p.ID, Items: []QuestionItem{}}
-				for _, item := range in.Questions {
-					it := QuestionItem{Header: item.Header, Question: item.Question, Multi: item.MultiSelect, Options: []Option{}}
-					for _, o := range item.Options {
-						it.Options = append(it.Options, Option{Label: o.Label, Description: o.Description})
-					}
-					q.Items = append(q.Items, it)
-				}
-				calls[p.ID] = len(out)
-				open = len(out)
-				out = append(out, Entry{Kind: EntryQuestion, At: rec.Timestamp, Question: q})
-			case rec.Type == "assistant" && p.Type == "tool_use":
-				input := map[string]any{}
-				if len(p.Input) > 0 {
-					if err := json.Unmarshal(p.Input, &input); err != nil {
-						return nil, fmt.Errorf("%s:%d: %s input: %w", file, i+1, p.Name, err)
-					}
-				}
-				calls[p.ID] = len(out)
-				out = append(out, Entry{Kind: EntryTool, At: rec.Timestamp, Tool: &ToolCall{
-					ID: p.ID, Name: p.Name, Summary: toolSummary(p.Name, input, cwd), Input: toolInput(input),
-				}})
-			}
-		}
-	}
-	return out, nil
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.entries(), nil
 }
 
 var (

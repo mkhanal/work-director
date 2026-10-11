@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,77 +42,16 @@ type Inspector interface {
 	SubagentConversation(h Handle, agent string) ([]Entry, error)
 }
 
-type claudeUsage struct {
-	Type        string  `json:"type"`
-	Timestamp   *string `json:"timestamp"`
-	IsSidechain bool    `json:"isSidechain"`
-	Message     struct {
-		Model      string `json:"model"`
-		StopReason string `json:"stop_reason"`
-		Usage      struct {
-			Input         int `json:"input_tokens"`
-			CacheCreation int `json:"cache_creation_input_tokens"`
-			Output        int `json:"output_tokens"`
-		} `json:"usage"`
-		Content json.RawMessage `json:"content"`
-	} `json:"message"`
-}
-
-// spent reads a store's usage. Tokens leave out cache reads: those are the
-// same context read again, and counting them makes every long session look
-// a hundred times its size. It also reports whether the last reply ended its
-// turn, and the first line of the last thing said.
-func spent(file string, sidechain bool) (Usage, bool, string, error) {
-	text, err := os.ReadFile(file)
+// spent reads a store's usage, whether its last reply ended its turn, and
+// the first line of the last thing said.
+func spent(file, cwd string, sidechain bool) (Usage, bool, string, error) {
+	t, err := readTranscript(file, cwd, sidechain)
 	if err != nil {
 		return Usage{}, false, "", err
 	}
-	var u Usage
-	ended := false
-	said := ""
-	for i, line := range jsonlRecords(string(text)) {
-		if line == "" {
-			continue
-		}
-		var rec claudeUsage
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			return Usage{}, false, "", fmt.Errorf("%s:%d: %w", file, i+1, err)
-		}
-		if rec.IsSidechain != sidechain || rec.Timestamp == nil {
-			continue
-		}
-		if u.Started == nil {
-			u.Started = rec.Timestamp
-		}
-		u.Last = rec.Timestamp
-		if rec.Type != "assistant" {
-			continue
-		}
-		m := rec.Message
-		if m.Model != "" && !strings.HasPrefix(m.Model, "<") {
-			u.Model = m.Model
-		}
-		u.Tokens += m.Usage.Input + m.Usage.CacheCreation + m.Usage.Output
-		ended = m.StopReason == "end_turn"
-		if !bytes.HasPrefix(bytes.TrimSpace(m.Content), []byte("[")) {
-			continue
-		}
-		var parts []claudePart
-		if err := json.Unmarshal(m.Content, &parts); err != nil {
-			return Usage{}, false, "", fmt.Errorf("%s:%d: %w", file, i+1, err)
-		}
-		for _, p := range parts {
-			switch p.Type {
-			case "tool_use":
-				u.Tools++
-			case "text":
-				if line := firstLine(p.Text); line != "" {
-					said = line
-				}
-			}
-		}
-	}
-	return u, ended, said, nil
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.usage, t.ended, t.said, nil
 }
 
 func firstLine(s string) string {
@@ -126,7 +64,7 @@ func (claudeRunner) Usage(h Handle) (Usage, error) {
 	if err != nil || file == "" {
 		return Usage{}, err
 	}
-	u, _, _, err := spent(file, false)
+	u, _, _, err := spent(file, h.Cwd, false)
 	return u, err
 }
 
@@ -167,7 +105,7 @@ func (claudeRunner) Subagents(h Handle) ([]Subagent, error) {
 		case !errors.Is(err, fs.ErrNotExist):
 			return nil, err
 		}
-		if a.Usage, a.Done, a.Said, err = spent(store, true); err != nil {
+		if a.Usage, a.Done, a.Said, err = spent(store, h.Cwd, true); err != nil {
 			return nil, err
 		}
 		out = append(out, a)

@@ -2821,6 +2821,9 @@ func (c *Cli) serve(rest []string) error {
 	if err != nil {
 		return err
 	}
+	// A server reads every working session's status every few seconds; one
+	// claude listing a beat serves all of them.
+	runner.ShareAgentListing(1500 * time.Millisecond)
 	srv := serve.New(c.Ledger, cliPath, c.sessionOf)
 	if flag(c.Args, "stdio") {
 		if c.JSON {
