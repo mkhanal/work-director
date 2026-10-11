@@ -51,7 +51,7 @@ hold only that product's work; with none, every product's.
 
 ## A New Goal First Offers The Goals It May Continue
 - Submitting a request asks `wd goal find` first and starts nothing while matches are offered.
-- With no match it starts the goal in the same step.
+- With no match it starts the goal in the same step, returning the goal at once while it is planned in the background.
 - Continuing an offered goal runs `wd goal continue` with the request.
 
 ## A Session's Conversation Follows It, Reading Only What Can Still Change
@@ -81,6 +81,7 @@ hold only that product's work; with none, every product's.
 
 ## The Agents Panel Shows Each Task And The Subagents It Started
 - A goal's panel has a card for each task with a session, in the goal's order, with the subagents its session started under it.
+- While a goal is planned, its planning session is the first card, titled Plan.
 - A card is asking when its session waits on a question, working while its session runs, resting while it is up with nothing to do, and settled otherwise; a subagent works until its last reply ends its turn.
 - A card's time runs from its first record to now while it works, and to its last record once it does not.
 - The panel counts settled cards and adds every card's tokens, subagents included.

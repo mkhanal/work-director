@@ -46,9 +46,17 @@ public struct AgentCard: Sendable, Hashable, Identifiable {
 public struct AgentRoster: Sendable, Hashable {
     public let cards: [AgentCard]
 
-    /// Cards for a goal's tasks, in the goal's order.
-    public init(tasks: [Work], activity: [String: Activity]) {
-        cards = tasks.compactMap { task in
+    /// Cards for a goal's tasks, in the goal's order, after the goal's own
+    /// planning session while it has one.
+    public init(goal: Work? = nil, tasks: [Work], activity: [String: Activity]) {
+        let planning: [AgentCard] = goal.flatMap { g in
+            activity[g.id].map { a in
+                [AgentCard(id: g.id, task: g.id, agent: nil, title: "Plan", kind: "planner",
+                           line: a.error ?? a.now, phase: AgentRoster.phase(a.status, asking: a.asking != nil),
+                           usage: a.usage, subagents: (a.subagents ?? []).map { AgentRoster.card(g.id, $0) })]
+            }
+        } ?? []
+        cards = planning + tasks.compactMap { task in
             guard let a = activity[task.id] else { return nil }
             return AgentCard(
                 id: task.id, task: task.id, agent: nil, title: task.title, kind: task.kind.rawValue,

@@ -68,7 +68,7 @@ JSON message per line to stdout:
 - An unknown id is not-found; a negative or non-numeric `from` is bad-request.
 
 ## A Goal Serves What Each Of Its Tasks Is Doing
-- `activity` on a goal maps each task with a session to its latest step as one line (`now`), that step's `kind`, and `asking`.
+- `activity` on a goal maps each task with a session, and the goal itself while its planning session is recorded, to its latest step as one line (`now`), that step's `kind`, and `asking`.
 - Where the runner can say, each carries the session's `usage` and its `subagents`.
 - A tool step reads as its name and what it acted on; a question as its questions; others as their first line.
 - Each carries its session's `status`, `unknown` when the runner cannot say.

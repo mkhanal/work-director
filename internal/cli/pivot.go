@@ -156,9 +156,12 @@ func (c *Cli) stop(rest []string) error {
 	}
 	targets := []core.Work{w}
 	if core.IsGoal(w.Kind) {
-		if targets, err = c.Ledger.Tasks(w.ID); err != nil {
+		tasks, err := c.Ledger.Tasks(w.ID)
+		if err != nil {
 			return err
 		}
+		// The goal's own session, while it is planned, stops with its tasks.
+		targets = append(targets, tasks...)
 	}
 	stopped, withdrawn := []string{}, []string{}
 	for _, t := range targets {

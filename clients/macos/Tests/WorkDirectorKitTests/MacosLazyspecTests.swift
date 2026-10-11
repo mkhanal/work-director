@@ -331,7 +331,15 @@ func fakeRunner(_ home: Home) throws {
             Issue.record("phase = \(await flow.phase), want a new goal started in one step")
             return
         }
-        #expect(fresh.goal.title == "A dark mode for the settings page" && fresh.tasks.count == 2)
+        #expect(fresh.goal.title == "A dark mode for the settings page" && fresh.tasks.isEmpty, "the goal returns before it is planned")
+        let deadline = Date().addingTimeInterval(20)
+        var planned = 0
+        while Date() < deadline {
+            planned = try await store.goal(fresh.goal.id).tasks.count
+            if planned == 2 { break }
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        #expect(planned == 2, "the background planning gave the goal its tasks")
         await store.stop()
     }
 
@@ -478,6 +486,13 @@ func fakeRunner(_ home: Home) throws {
         let now = AgentCard.instant("2026-10-11T10:10:00Z")!
         #expect(roster.cards[0].elapsed(now: now) == 600, "a working card runs to now")
         #expect(roster.cards[2].elapsed(now: now) == 1800, "a settled card stops at its last record")
+        let goal = try task("g", "queued")
+        let planned = AgentRoster(goal: goal, tasks: [a], activity: [
+            "g": try activity("running", usage: usage(9, "2026-10-11T10:00:00Z", "2026-10-11T10:00:30Z")),
+            "a": try activity("running", usage: usage(1, "2026-10-11T10:00:00Z", "2026-10-11T10:00:30Z")),
+        ])
+        #expect(planned.cards.map(\.title) == ["Plan", "T"], "a goal's planning comes first")
+        #expect(AgentRoster(goal: goal, tasks: [a], activity: ["a": try activity("running", usage: usage(1, "2026-10-11T10:00:00Z", "2026-10-11T10:00:30Z"))]).cards.count == 1)
 
         let home = try Home()
         var env = home.environment

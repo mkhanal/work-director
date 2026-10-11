@@ -1184,6 +1184,19 @@ func aGoalServesWhatEachOfItsTasksIsDoing(t *testing.T) {
 	if a := g.Activity[broken.ID]; !strings.Contains(a.Error, "unreadable") {
 		t.Fatalf("unreadable activity = %+v, want its error", a)
 	}
+	if _, ok := g.Activity[goal.ID]; ok {
+		t.Fatal("a goal with no planning session has activity")
+	}
+	planned, err := s.ledger.Add("p", "Planned goal", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ledger.SetSession(planned.ID, ledger.SessionInfo{Runner: "fake", Session: "think"}); err != nil {
+		t.Fatal(err)
+	}
+	if pg, err := s.goal(planned.ID); err != nil || pg.Activity[planned.ID].Now != "Weighing it" {
+		t.Fatalf("planning activity = %+v (%v), want the goal's own session read", pg.Activity, err)
+	}
 	if a, ok := g.Activity[done.ID]; !ok || a.Now != "Bash · go test ./..." {
 		t.Fatalf("a task in review = %+v, want its activity too", a)
 	}

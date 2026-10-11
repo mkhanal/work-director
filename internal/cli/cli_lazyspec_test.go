@@ -1094,6 +1094,88 @@ func TestASessionStartedForOneAnswerIsStoppedOnceItAnswers(t *testing.T) {
 	}
 }
 
+func TestAGoalIsPlannedWhereItsPlanningCanBeWatchedAndStopped(t *testing.T) {
+	f := newCLIFixture(t)
+	state := filepath.Join(f.dir, "fake-state")
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Fix the login page", "--json"), "id")
+	var begun struct {
+		Tasks []core.Work `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "goal", "begin", goal, "--runner", "planner", "--json")), &begun); err != nil || len(begun.Tasks) != 2 {
+		t.Fatalf("begin = %+v, %v; want the planner's two tasks", begun, err)
+	}
+	if spawns := f.bodies(t, goal, core.EventSpawn); len(spawns) == 0 || !strings.HasPrefix(spawns[0], "plan planner planner-s") {
+		t.Fatalf("spawn events = %v, want the planning session recorded on the goal", spawns)
+	}
+	if errStr := f.runFail(t, "goal", "begin", goal); !strings.Contains(errStr, "not yet started") {
+		t.Errorf("begin of a goal already started = %q, want it refused", errStr)
+	}
+
+	// A planning session that ends with no plan ends planning then, not at
+	// the timeout.
+	quiet := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Nothing to plan", "--json"), "id")
+	start := time.Now()
+	if errStr := f.runFail(t, "goal", "begin", quiet, "--runner", "finder", "--timeout", "60"); !strings.Contains(errStr, "ended without a plan") {
+		t.Fatalf("begin with a planner that stops = %q, want it to say so", errStr)
+	}
+	if time.Since(start) > 20*time.Second {
+		t.Errorf("planning waited %s for a session that had ended", time.Since(start))
+	}
+	if notes := f.bodies(t, quiet, core.EventNote); len(notes) == 0 || !strings.Contains(notes[len(notes)-1], "planning failed") {
+		t.Errorf("notes = %v, want the failure filed on the goal", notes)
+	}
+
+	// Detached, the goal comes back at once and its tasks follow.
+	var filed struct {
+		Goal  core.Work   `json:"goal"`
+		Tasks []core.Work `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "goal", "start", "sample-app", "Export to CSV", "--detach", "--runner", "planner", "--json")), &filed); err != nil || len(filed.Tasks) != 0 {
+		t.Fatalf("detached start = %+v, %v; want the goal and no tasks yet", filed, err)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		var tasks []core.Work
+		if err := json.Unmarshal([]byte(f.runOK(t, "tasks", filed.Goal.ID, "--json")), &tasks); err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the detached planning gave no tasks; log: %s", readFile(t, filepath.Join(f.wdHome, "logs", "begin-"+filed.Goal.ID+".log")))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	// A goal still being planned stops with its tasks.
+	planning := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Being planned", "--json"), "id")
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.AddEvent(planning, core.EventSpawn, "plan planner planner-s0beef"); err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	f.runOK(t, "stop", planning)
+	if stopped := readFile(t, filepath.Join(state, "stopped")); !strings.Contains(stopped, "planner planner-s0beef") {
+		t.Fatalf("stopped = %q, want the goal's planning session stopped", stopped)
+	}
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
 func TestWdGoalStartFilesNothingWhenTheRequestSaysNothingToChange(t *testing.T) {
 	f := newCLIFixture(t)
 	state := filepath.Join(f.dir, "fake-state")

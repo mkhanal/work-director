@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -655,6 +656,23 @@ func (c *Cli) goalLike(cmd string, rest []string) error {
 		}
 		return c.goalStart(rest[1], rest[2])
 	}
+	if cmd == "goal" && sub == "begin" {
+		if len(rest) != 2 {
+			return fail("usage: wd goal begin <id> [--runner <runner>] [--timeout s]")
+		}
+		goal, err := c.Ledger.Get(rest[1])
+		if err != nil {
+			return err
+		}
+		if !core.IsGoal(goal.Kind) || (goal.State != core.StateQueued && goal.State != core.StateBriefed) {
+			return fail("%s is a %s %s; only a goal not yet started is begun", goal.ID, goal.State, goal.Kind)
+		}
+		p, err := c.project(goal.Project)
+		if err != nil {
+			return err
+		}
+		return c.begin(goal, p)
+	}
 	if cmd == "goal" && sub == "find" {
 		if len(rest) < 3 {
 			return fail("usage: wd goal find <project> \"<what you want done>\" [--runner <runner>]")
@@ -759,6 +777,52 @@ func (c *Cli) goalStart(name, text string) error {
 	if err != nil {
 		return err
 	}
+	if flag(c.Args, "detach") {
+		if err := c.beginElsewhere(goal); err != nil {
+			return err
+		}
+		return c.out(map[string]any{"goal": goal, "tasks": []core.Work{}},
+			fmt.Sprintf("goal %s filed; it is planned and started in the background — wd goal status %s", goal.ID, goal.ID))
+	}
+	return c.begin(goal, p)
+}
+
+// beginElsewhere plans and starts goal in a process of its own, so whoever
+// filed it is not held while a model plans; what that process says goes to a
+// log beside the ledger, and what it does goes to the ledger.
+func (c *Cli) beginElsewhere(goal core.Work) error {
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	logs := filepath.Join(c.Home, "logs")
+	if err := os.MkdirAll(logs, 0o755); err != nil {
+		return err
+	}
+	log, err := os.Create(filepath.Join(logs, "begin-"+goal.ID+".log"))
+	if err != nil {
+		return err
+	}
+	defer log.Close()
+	argv := []string{"goal", "begin", goal.ID}
+	for _, k := range []string{"runner", "timeout"} {
+		if v := str(c.Args, k); v != nil {
+			argv = append(argv, "--"+k, *v)
+		}
+	}
+	cmd := exec.Command(self, argv...)
+	cmd.Stdout, cmd.Stderr = log, log
+	cmd.SysProcAttr = detached()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
+}
+
+// begin plans a filed goal and spawns its tasks. A request that says nothing
+// to change is not kept; planning that fails is filed on the goal, so it is
+// read where the goal is.
+func (c *Cli) begin(goal core.Work, p *project.Project) error {
 	goal, tasks, lines, err := c.planAndSpawn(goal, p)
 	var asked planAsked
 	if errors.As(err, &asked) {
@@ -770,10 +834,12 @@ func (c *Cli) goalStart(name, text string) error {
 		return fail("nothing was started: %s", asked.question)
 	}
 	if err != nil {
+		if _, ferr := c.Ledger.AddEvent(goal.ID, core.EventNote, "planning failed: "+err.Error()); ferr != nil {
+			return ferr
+		}
 		return fmt.Errorf("goal %s filed; %w", goal.ID, err)
 	}
-	text = fmt.Sprintf("goal %s started: %s\n%s", goal.ID, goal.Title, strings.Join(lines, "\n"))
-	return c.out(map[string]any{"goal": goal, "tasks": tasks}, text)
+	return c.out(map[string]any{"goal": goal, "tasks": tasks}, fmt.Sprintf("goal %s started: %s\n%s", goal.ID, goal.Title, strings.Join(lines, "\n")))
 }
 
 // planAsked is a planner that replied with a question instead of tasks.
@@ -1042,6 +1108,9 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 	if err != nil {
 		return nil, err
 	}
+	if _, err := c.Ledger.AddEvent(goal.ID, core.EventSpawn, coordinator.PlanEvent(h)); err != nil {
+		return nil, err
+	}
 	tasks, err := awaitPlan(rn, h, time.Duration(wait)*time.Second)
 	// The planning session answers once; whatever it said, it is not left running.
 	if serr := runner.Dismiss(rn, h); serr != nil && err == nil {
@@ -1089,6 +1158,13 @@ func awaitPlan(rn runner.Runner, h runner.Handle, wait time.Duration) ([]coordin
 		}
 		if q, ok := coordinator.PlanQuestion(texts); ok {
 			return nil, planAsked{q}
+		}
+		// A planning session that stopped, or was stopped, has given all the
+		// plan it will give.
+		if st, err := rn.Status(h); err != nil {
+			return nil, err
+		} else if st == runner.StatusStopped || st == runner.StatusExited {
+			return nil, fail("planning session %s ended without a plan", h.Session)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}

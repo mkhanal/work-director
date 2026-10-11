@@ -65,7 +65,9 @@ public struct Plan: Hashable, Sendable, Identifiable {
     public static func start(project: String, text: String) throws -> Plan {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw PlanError.empty }
-        return Plan(title: "Start goal", argv: ["goal", "start", project, text, "--json"])
+        // Planning runs in its own process, so the goal opens while it is
+        // planned and its planning can be watched and stopped.
+        return Plan(title: "Start goal", argv: ["goal", "start", project, text, "--detach", "--json"])
     }
 
     /// Picks a goal up where it stands with what the person typed.

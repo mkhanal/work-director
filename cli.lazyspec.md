@@ -104,6 +104,13 @@ verify event.
 - The sessions the director starts to plan a goal, find a goal, judge and reflect are stopped once their reply is read.
 - A runner file with no `stop` command leaves them as they are.
 
+## A Goal Is Planned Where Its Planning Can Be Watched And Stopped
+- `wd goal begin <goal>` plans a goal not yet started and spawns its tasks, as `wd goal start` does; any other goal is refused.
+- `wd goal start <project> "<text>" --detach` files the goal, prints it with no tasks, and begins it in a process of its own.
+- While it plans, the planning session is the goal's own session, recorded as a `spawn` event `plan <runner> <session> [<ref>]`.
+- A planning session that ends without a plan ends planning at once, saying so, and planning that fails is filed on the goal as a note.
+- `wd stop <goal>` stops the goal's own live session as well as its tasks'.
+
 ## Wd Goal Start Files Nothing When The Request Says Nothing To Change
 - A planner replying `ASK: <question>` makes `wd goal start` exit 1 with the question.
 - The goal it filed is dropped with the question as the reason and archived, with no tasks.

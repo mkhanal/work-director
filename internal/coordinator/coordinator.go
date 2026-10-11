@@ -224,6 +224,9 @@ func Handle(l *ledger.Ledger, w core.Work, p *project.Project) (runner.Handle, b
 	if session == nil {
 		session = w.Claim
 	}
+	if session == nil && core.IsGoal(w.Kind) {
+		return planning(l, w, p)
+	}
 	if session == nil {
 		return runner.Handle{}, false, nil
 	}
@@ -233,6 +236,47 @@ func Handle(l *ledger.Ledger, w core.Work, p *project.Project) (runner.Handle, b
 	}
 	return runner.Handle{Runner: runnerName, Session: *session, Ref: w.Ref, Cwd: cwd}, true, nil
 }
+
+// planPrefix opens the spawn event that records the session planning a goal.
+const planPrefix = "plan "
+
+// PlanEvent is the spawn event body that records h as the session planning a
+// goal. A goal has no session of its own, so this is how its planning is
+// read and stopped like any session.
+func PlanEvent(h runner.Handle) string {
+	ref := ""
+	if h.Ref != nil {
+		ref = *h.Ref
+	}
+	return strings.TrimSpace(planPrefix + h.Runner + " " + h.Session + " " + ref)
+}
+
+// planning is the session that last planned a goal, run in the project's own
+// directory, as its plan event records it.
+func planning(l *ledger.Ledger, goal core.Work, p *project.Project) (runner.Handle, bool, error) {
+	spawns, err := l.Events(goal.ID, ptrKind(core.EventSpawn))
+	if err != nil {
+		return runner.Handle{}, false, err
+	}
+	for i := len(spawns) - 1; i >= 0; i-- {
+		rest, ok := strings.CutPrefix(spawns[i].Body, planPrefix)
+		if !ok {
+			continue
+		}
+		f := strings.Fields(rest)
+		if len(f) < 2 {
+			return runner.Handle{}, false, fmt.Errorf("goal %s: plan event %q names no session", goal.ID, spawns[i].Body)
+		}
+		h := runner.Handle{Runner: f[0], Session: f[1], Cwd: p.Path}
+		if len(f) > 2 {
+			h.Ref = &f[2]
+		}
+		return h, true, nil
+	}
+	return runner.Handle{}, false, nil
+}
+
+func ptrKind(k core.EventKind) *core.EventKind { return &k }
 
 // Send continues work's session and records the ref the runner returns, so a
 // status check reaches the process now serving the session. Only the ref is

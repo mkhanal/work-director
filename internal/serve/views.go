@@ -172,7 +172,7 @@ func (s *Server) goal(id string) (goalView, error) {
 		Events:   events,
 		Claims:   review.ClaimsUnder(events, works),
 		Landings: review.LandingsUnder(events, works),
-		Activity: s.activities(children),
+		Activity: s.activities(append([]core.Work{goal}, children...)),
 	}
 	if dir := goalDir(goal, children); dir != "" {
 		d := delivery.StatusFor(dir, events, goal, children)

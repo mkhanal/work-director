@@ -116,7 +116,7 @@ struct WorkDetail: View {
             // the ledger nothing; while any task works, the goal is read again.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3))
-                if case .goal(let g) = loaded, g.tasks.contains(where: { !$0.atRest }) {
+                if case .goal(let g) = loaded, !g.goal.atRest || g.tasks.contains(where: { !$0.atRest }) {
                     await load()
                 }
             }
@@ -157,7 +157,7 @@ struct WorkDetail: View {
     private func roster(_ loaded: Loaded) -> AgentRoster {
         switch loaded {
         case .goal(let g):
-            AgentRoster(tasks: g.tasks, activity: g.activity)
+            AgentRoster(goal: g.goal, tasks: g.tasks, activity: g.activity)
         case .work(let w, _):
             hasSession(w)
                 ? AgentRoster(task: w, status: feed.status, asking: feed.asking != nil,
@@ -177,7 +177,7 @@ struct WorkDetail: View {
     /// Shows an agent's conversation in the centre: a goal's task, or a
     /// subagent. A task's own card is its page.
     private func choose(_ card: AgentCard, in loaded: Loaded) {
-        if card.agent == nil && card.task == loaded.work.id {
+        if card.agent == nil && card.task == loaded.work.id && !loaded.work.kind.isGoal {
             focus = nil
             focusFeed = nil
             return
@@ -206,7 +206,7 @@ struct WorkDetail: View {
 
     private func task(_ id: String, in loaded: Loaded) -> Work? {
         switch loaded {
-        case .goal(let g): g.tasks.first { $0.id == id }
+        case .goal(let g): g.goal.id == id ? g.goal : g.tasks.first { $0.id == id }
         case .work(let w, _): w.id == id ? w : nil
         }
     }
