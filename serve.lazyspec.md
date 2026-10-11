@@ -80,6 +80,11 @@ JSON message per line to stdout:
 - A question already filed at that point of the conversation is not filed again.
 - Nothing is sent to the session.
 
+## A Running Session's Report Moves Its Work On
+- While serving, a running work item whose session ends on a `STATUS: DONE` report has it filed as a `report` event and moves to review within seconds.
+- `STATUS: BLOCKED` moves it to blocked, and `STATUS: NEEDS-INPUT` to needs-input.
+- A report already filed at that point of the conversation is not filed again.
+
 ## Work Items Serve Over HTTP
 `GET /api/work` lists all work items. `GET /api/work/<id>` returns one
 work item; unknown ids return 404. `GET /api/work/<id>/events` returns

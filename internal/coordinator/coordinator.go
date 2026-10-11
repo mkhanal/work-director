@@ -448,26 +448,38 @@ func Coordinate(w core.Work, known []core.Work, l *ledger.Ledger, r runner.Runne
 	return FileReport(l, w, status[1], report)
 }
 
-// Notice files the question a session's transcript ends on and moves its
-// work to needs-input, answering nothing, so a person sees it where work waits
-// on them. A question already filed at that point is not filed again, and the
-// next coordination pass reads it as escalated. It reports whether it filed.
+// Notice files what a running session's transcript ends on, answering
+// nothing, so the work moves without a coordination pass: a question puts it
+// in needs-input, a DONE report in review, a BLOCKED one in blocked, and a
+// NEEDS-INPUT one in needs-input. What is already filed at that point of the
+// transcript is not filed again. It reports whether it filed.
 func Notice(l *ledger.Ledger, w core.Work, h runner.Handle, texts []string) (bool, error) {
 	if w.State != core.StateRunning || len(texts) == 0 {
 		return false, nil
 	}
-	ask := askRe.FindStringSubmatch(texts[len(texts)-1])
-	if ask == nil {
+	last := texts[len(texts)-1]
+	kind, body, target := core.EventQuestion, "", core.StateNeedsInput
+	if ask := askRe.FindStringSubmatch(last); ask != nil {
+		body = strings.TrimSpace(ask[1])
+	} else if status := statusRe.FindStringSubmatch(last); status != nil {
+		kind, body = core.EventReport, status[1]+"\n"+last
+		switch status[1] {
+		case "DONE":
+			target = core.StateReview
+		case "BLOCKED":
+			target = core.StateBlocked
+		}
+	} else {
 		return false, nil
 	}
 	at := core.TranscriptMark{Session: h.Session, Entries: len(texts)}
 	if prev, ok, err := l.Filed(w.ID); err != nil || (ok && prev == at) {
 		return false, err
 	}
-	if err := l.File(w.ID, core.EventQuestion, strings.TrimSpace(ask[1]), at); err != nil {
+	if err := l.File(w.ID, kind, body, at); err != nil {
 		return false, err
 	}
-	if _, err := l.Transition(w.ID, core.StateNeedsInput); err != nil {
+	if _, err := l.Transition(w.ID, target); err != nil {
 		return false, err
 	}
 	return true, nil

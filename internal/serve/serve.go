@@ -91,7 +91,7 @@ func (s *Server) Start(port int) (string, <-chan error, error) {
 	go func() { failed <- http.Serve(ln, s.routes()) }()
 	go func() { failed <- s.broadcastEvents(last) }()
 	go func() {
-		if err := s.watchQuestions(nil); err != nil {
+		if err := s.watchSessions(nil); err != nil {
 			failed <- err
 		}
 	}()

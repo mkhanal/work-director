@@ -43,6 +43,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Work Item Serves Its Session's Conversation", aWorkItemServesItsSessionsConversation)
 	t.Run("A Goal Serves What Each Of Its Tasks Is Doing", aGoalServesWhatEachOfItsTasksIsDoing)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
+	t.Run("A Running Session's Report Moves Its Work On", aRunningSessionsReportMovesItsWorkOn)
 	t.Run("Work Items Serve Over HTTP", workItemsServeOverHTTP)
 	t.Run("A Work Item Serves The Next Gate It Waits On", aWorkItemServesTheNextGateItWaitsOn)
 	t.Run("Actions Dispatch To The CLI", actionsDispatchToTheCLI)
@@ -1202,7 +1203,7 @@ func aRunningSessionsQuestionPutsItsWorkInNeedsYou(t *testing.T) {
 	quiet := inSession(t, s, "Quiet", "quiet", nil)
 	stop := make(chan struct{})
 	done := make(chan error, 1)
-	go func() { done <- s.watchQuestions(stop) }()
+	go func() { done <- s.watchSessions(stop) }()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		w, err := s.ledger.Get(ask.ID)
@@ -1222,7 +1223,7 @@ func aRunningSessionsQuestionPutsItsWorkInNeedsYou(t *testing.T) {
 	if _, err := s.ledger.Transition(ask.ID, core.StateRunning); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(questionWatch + time.Second)
+	time.Sleep(sessionWatch + time.Second)
 	close(stop)
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -1297,5 +1298,58 @@ func aWorkItemServesTheNextGateItWaitsOn(t *testing.T) {
 	var viaStdio gateView
 	if err := json.Unmarshal(c.reply(1)["result"], &viaStdio); err != nil || viaStdio.Gate != "done" {
 		t.Fatalf("stdio gate = %+v (%v)", viaStdio, err)
+	}
+}
+
+func aRunningSessionsReportMovesItsWorkOn(t *testing.T) {
+	s := newTestServer(t)
+	r := &sessionRunner{steps: map[string][]runner.Entry{
+		"done":    {{Kind: runner.EntryText, Text: "working"}, {Kind: runner.EntryText, Text: "STATUS: DONE\nFILES: a.go"}},
+		"blocked": {{Kind: runner.EntryText, Text: "STATUS: BLOCKED\nNOTES: no access"}},
+		"needs":   {{Kind: runner.EntryText, Text: "STATUS: NEEDS-INPUT\nNOTES: which db?"}},
+	}}
+	withSessions(s, r)
+	done := inSession(t, s, "Done", "done", nil)
+	blocked := inSession(t, s, "Blocked", "blocked", nil)
+	needs := inSession(t, s, "Needs", "needs", nil)
+	stop := make(chan struct{})
+	ended := make(chan error, 1)
+	go func() { ended <- s.watchSessions(stop) }()
+	want := map[string]core.State{done.ID: core.StateReview, blocked.ID: core.StateBlocked, needs.ID: core.StateNeedsInput}
+	deadline := time.Now().Add(10 * time.Second)
+	for id, st := range want {
+		for {
+			w, err := s.ledger.Get(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if w.State == st {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s is %s, want %s", w.Title, w.State, st)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	// Told something, the work runs again while its transcript still ends on
+	// the same report: a later pass must not file it again.
+	if _, err := s.ledger.Transition(done.ID, core.StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(sessionWatch + time.Second)
+	close(stop)
+	if err := <-ended; err != nil {
+		t.Fatal(err)
+	}
+	reports, err := s.ledger.Events(done.ID, kindOf(core.EventReport))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reports) != 1 || !strings.HasPrefix(reports[0].Body, "DONE\nSTATUS: DONE") {
+		t.Fatalf("reports = %+v, want the one report once", reports)
+	}
+	if w, _ := s.ledger.Get(done.ID); w.State != core.StateRunning {
+		t.Fatalf("a filed report moved the work again: %s", w.State)
 	}
 }

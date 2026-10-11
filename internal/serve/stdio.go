@@ -74,7 +74,7 @@ func (s *Server) ServeStdio(in io.Reader, out io.Writer) error {
 	}()
 
 	watched := make(chan error, 1)
-	go func() { watched <- s.watchQuestions(stop) }()
+	go func() { watched <- s.watchSessions(stop) }()
 
 	var pending sync.WaitGroup
 	failed := make(chan error, 1)

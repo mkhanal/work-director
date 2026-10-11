@@ -185,19 +185,19 @@ func firstLine(s string) string {
 	return line
 }
 
-// questionWatch is how often running sessions are read for a question.
-const questionWatch = 3 * time.Second
+// sessionWatch is how often running sessions are read for a question or a report.
+const sessionWatch = 3 * time.Second
 
-// watchQuestions files the question a running session ends on and moves its
-// work to needs-input, until stop closes, so a question reaches a person
-// without a coordination pass. A session that cannot be read is passed over:
+// watchSessions files the question or report a running session ends on and
+// moves its work on, until stop closes, so a question reaches a person and
+// finished work reaches review without a coordination pass. A session that cannot be read is passed over:
 // the conversation and goal views report that read's error to whoever opens
 // the work.
-func (s *Server) watchQuestions(stop <-chan struct{}) error {
+func (s *Server) watchSessions(stop <-chan struct{}) error {
 	if s.sessions == nil {
 		return nil
 	}
-	tick := time.NewTicker(questionWatch)
+	tick := time.NewTicker(sessionWatch)
 	defer tick.Stop()
 	onBoard := false
 	for {
