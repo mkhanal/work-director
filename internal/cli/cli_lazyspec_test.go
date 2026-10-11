@@ -626,8 +626,8 @@ func TestErrorsAndExitCodesMatch(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{}, "wd <projects|"},
-		{[]string{"unknowncmd"}, "wd <projects|"},
+		{[]string{}, "Commands:"},
+		{[]string{"unknowncmd"}, "Commands:"},
 		{[]string{"add"}, "usage: wd add"},
 		{[]string{"tasks"}, "usage: wd tasks"},
 		{[]string{"tasks", t1}, "is not a goal"},
