@@ -576,7 +576,7 @@ func TestADecisionIsRecordedInOneLineAndReachesTheBrief(t *testing.T) {
 
 	out = f.runOK(t, "concern", "add", id, "which queue?", "--json")
 	f.runOK(t, "concern", "resolve", jsonNumber(t, out, "id"), "use the outbox table")
-	f.runOK(t, "pr", id, "https://example.test/pr-leak")
+	f.runOK(t, "pr", id, "https://github.com/x/sample-app/pull/13")
 	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
 	if err != nil {
 		t.Fatalf("ledger: %v", err)
@@ -765,7 +765,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 	f.runOK(t, "set", finished, "review")
 	f.runOK(t, "report", finished, "DONE\nSTATUS: DONE")
 	f.runOK(t, "verify", finished)
-	f.runOK(t, "pr", finished, "https://example.test/pr/finished")
+	f.runOK(t, "pr", finished, "https://github.com/x/sample-app/pull/11")
 	f.runOK(t, "soft-done", finished)
 	f.runOK(t, "done", finished)
 	finishedGoal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Finished goal, then reopened", "--json"), "id")
@@ -773,7 +773,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 	f.runOK(t, "set", finishedGoal, "review")
 	f.runOK(t, "report", finishedGoal, "DONE\nSTATUS: DONE")
 	f.runOK(t, "verify", finishedGoal)
-	f.runOK(t, "pr", finishedGoal, "https://example.test/pr/finished-goal")
+	f.runOK(t, "pr", finishedGoal, "https://github.com/x/sample-app/pull/12")
 	f.runOK(t, "soft-done", finishedGoal)
 	f.runOK(t, "done", finishedGoal)
 	driveGoal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Never driven", "--json"), "id")
@@ -807,7 +807,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 			t.Errorf("wd %s: more than one document in %q", strings.Join(args, " "), out)
 		}
 	}
-	env := f.envWithPath(t, f.pathWith(t, "claude", "opencode", "codex", "planner"))
+	env := f.envWithPath(t, f.pathWith(t, "claude", "opencode", "codex", "planner", "gh"))
 	covered := map[string]bool{}
 	// A parent workspace and one created under it, so the create path is
 	// exercised for real rather than appearing only in this census.
@@ -830,7 +830,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"spawn", standalone},
 		{"report", standalone},
 		{"verify", standalone},
-		{"pr", standalone, "https://example.test/pr/1"},
+		{"pr", standalone, "https://github.com/x/sample-app/pull/1"},
 		{"soft-done", ready},
 		{"done", ready},
 		{"epic", "plan", planEpic, "--runner", "planner"},
@@ -1587,7 +1587,7 @@ func TestAStandaloneTaskClosesThroughTheCLIAlone(t *testing.T) {
 		t.Fatalf("report = %q, want DONE", got)
 	}
 	f.runOK(t, "verify", id)
-	f.runOK(t, "pr", id, "https://example.test/pr/standalone")
+	f.runOK(t, "pr", id, "https://github.com/x/sample-app/pull/14")
 	f.runOK(t, "soft-done", id)
 	if got := jsonString(t, f.runOK(t, "done", id, "--json"), "state"); got != string(core.StateDone) {
 		t.Fatalf("state = %q, want done", got)
@@ -1615,7 +1615,7 @@ func TestAStandaloneTaskClosesThroughTheCLIAlone(t *testing.T) {
 		f.runOK(t, "set", id, "running")
 		f.runOK(t, "set", id, "review")
 		f.runOK(t, "verify", id)
-		f.runOK(t, "pr", id, "https://example.test/pr/"+status)
+		f.runOK(t, "pr", id, "https://github.com/x/sample-app/pull/15")
 		if errStr := f.runFail(t, "soft-done", id); !strings.Contains(errStr, "DONE report") {
 			t.Errorf("soft-done after a %s report: stderr %q, want DONE report named", status, errStr)
 		}
@@ -2664,7 +2664,7 @@ func TestWorkEndsAbandonedAndSaysWhyItDidNotShip(t *testing.T) {
 	// A PR that was raised and never merged reads unmerged.
 	raised := jsonString(t, f.runOK(t, "add", "sample-app", "Raised but never merged", "--json"), "id")
 	f.runOK(t, "set", raised, "running")
-	if code, _, errStr := f.run(t, "pr", raised, "https://example.test/pr/1", "--json"); code != 0 {
+	if code, _, errStr := f.run(t, "pr", raised, "https://github.com/x/sample-app/pull/1", "--json"); code != 0 {
 		t.Fatalf("pr: exit %d: %s", code, errStr)
 	}
 	f.runOK(t, "abandon", raised, "--json")
@@ -2954,7 +2954,7 @@ func TestWdReviewReverseRecordsAReversal(t *testing.T) {
 	}
 
 	// Only a decision can be reversed, and the event has to exist.
-	f.runOK(t, "pr", work, "https://example.test/pr/1")
+	f.runOK(t, "pr", work, "https://github.com/x/sample-app/pull/1")
 	var pr struct{ ID int }
 	if err := json.Unmarshal([]byte(f.runOK(t, "events", work, "--json")), &events); err != nil {
 		t.Fatalf("events: %v", err)
@@ -3365,7 +3365,7 @@ func TestAReportCanBeFiledAsTextAndTheGateIsTheSame(t *testing.T) {
 	if errStr := f.runFail(t, "soft-done", built); !strings.Contains(errStr, "pull request") {
 		t.Errorf("soft-done with no pull request: stderr %q, want the pull-request gate still standing", errStr)
 	}
-	f.runOK(t, "pr", built, "https://example.test/pr/built-by-the-director")
+	f.runOK(t, "pr", built, "https://github.com/x/sample-app/pull/16")
 	f.runOK(t, "soft-done", built)
 	if got := jsonString(t, f.runOK(t, "done", built, "--json"), "state"); got != string(core.StateDone) {
 		t.Errorf("state = %q, want done: director-built work must be able to close", got)
@@ -3569,12 +3569,20 @@ func TestTheLandingLinkIsDerivedRatherThanTyped(t *testing.T) {
 	// A url given is recorded as given: a real pull request is still a real pull
 	// request, and the tool has no business second-guessing one.
 	given := jsonString(t, f.runOK(t, "add", "sample-app", "A real pull request", "--json"), "id")
-	f.runOK(t, "pr", given, "https://example.test/pr/1")
+	f.runOK(t, "pr", given, "https://github.com/x/sample-app/pull/1")
 	// The url is recorded unedited, and the kind is the one the command knew: a
 	// url handed to wd pr is a pull request, and nothing downstream has to guess
 	// that from its shape.
-	if got := f.bodies(t, given, core.EventPr); len(got) != 1 || got[0] != "pull-request https://example.test/pr/1" {
+	if got := f.bodies(t, given, core.EventPr); len(got) != 1 || got[0] != "pull-request https://github.com/x/sample-app/pull/1" {
 		t.Errorf("link = %v, want the url given with the kind recorded", got)
+	}
+	// A link that points at nothing is refused rather than recorded: a gate
+	// passed on a pull request that does not exist proves nothing.
+	if errStr := f.runFail(t, "pr", given, "https://github.com/x/sample-app/pull/999"); !strings.Contains(errStr, "pull/999") {
+		t.Errorf("a link that does not resolve = %q, want it refused naming it", errStr)
+	}
+	if got := f.bodies(t, given, core.EventPr); len(got) != 1 {
+		t.Errorf("a refused link was recorded: %v", got)
 	}
 
 	// Pushed: the link is worked out, and it is the commit the work is at.

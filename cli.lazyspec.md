@@ -294,7 +294,7 @@ read without `--ack` is shown again.
 rest without shipping and leaves the goal's state and gates untouched.
 
 ## The Landing Link Is Derived Rather Than Typed
-- `wd pr <id> <url>` records the url as a `pull-request` landing.
+- `wd pr <id> <url>` records the url as a `pull-request` landing once `Resolve` accepts it; a link that does not resolve is refused naming it, and nothing is recorded.
 - `wd pr <id>` records a permalink to the commit the work's branch is at, on the project's remote, as a `commit` landing.
 - A commit not on any remote branch, or a project with no remote, is refused naming the commit and `wd pr <id> <url>`, and nothing is recorded.
 - SSH, `ssh://`, `https://` and `git://` remotes all yield a link.

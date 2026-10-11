@@ -13,7 +13,7 @@ struct GoalThread: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let delivery = goal.delivery, delivery.status != "none" || !goal.landings.isEmpty {
+            if let delivery = goal.delivery, delivery.status != "none" || delivery.error != nil || !goal.landings.isEmpty {
                 DeliveryLine(delivery: delivery, landings: goal.landings)
             }
             if !goal.goal.detail.isEmpty {
@@ -173,6 +173,9 @@ struct DeliveryLine: View {
                 if !delivery.detail.isEmpty {
                     Text(delivery.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
+            }
+            if let error = delivery.error {
+                Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange).textSelection(.enabled)
             }
             ForEach(landings, id: \.url) { LandingRow(landed: $0).font(.caption) }
         }

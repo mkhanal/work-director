@@ -15,6 +15,7 @@ import (
 	"wd/internal/context"
 	"wd/internal/coordinator"
 	"wd/internal/core"
+	"wd/internal/delivery"
 	"wd/internal/ledger"
 	"wd/internal/open"
 	"wd/internal/project"
@@ -1771,8 +1772,19 @@ func (c *Cli) pr(rest []string) error {
 // from the shape of a url would be guessing at a fact the tool was told.
 func (c *Cli) recordPR(id string, rest []string) (string, error) {
 	kind, url := core.LandingPullRequest, ""
+	if _, err := c.Ledger.Get(id); err != nil {
+		return "", err
+	}
 	if len(rest) > 0 {
 		url = strings.Join(rest, " ")
+		// A link may say its own kind, as the ledger records it.
+		if k, u, ok := strings.Cut(url, " "); ok && (k == string(core.LandingCommit) || k == string(core.LandingPullRequest)) {
+			kind, url = core.LandingKind(k), strings.TrimSpace(u)
+		}
+		// A gate passed on a link to nothing proves nothing.
+		if err := delivery.Resolve(url); err != nil {
+			return "", fail("%v; nothing recorded", err)
+		}
 	} else {
 		landed, err := c.landedAt(id)
 		if err != nil {

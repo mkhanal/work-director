@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# gh as the fixture's GitHub sees it: pull request 999 does not exist, every
+# other link does, open and not a draft.
+set -u
+case "$*" in
+  *pull/999*) echo "GraphQL: Could not resolve to a PullRequest with the number of 999." >&2; exit 1;;
+  "pr view "*) echo '{"number":1,"state":"OPEN","isDraft":false}';;
+  "api "*) echo 0123456789abcdef0123456789abcdef01234567;;
+  *) echo "unhandled gh $*" >&2; exit 1;;
+esac

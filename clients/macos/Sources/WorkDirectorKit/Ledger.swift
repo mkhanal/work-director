@@ -204,6 +204,8 @@ public struct Delivery: Codable, Sendable, Hashable {
     public let status: String
     public let detail: String
     public let attention: [String]?
+    /// What could not be read; the status says only what could.
+    public let error: String?
 }
 
 public struct GoalDetail: Codable, Sendable, Hashable {
