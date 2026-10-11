@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Goal Serves What Each Of Its Tasks Is Doing", aGoalServesWhatEachOfItsTasksIsDoing)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("Work Items Serve Over HTTP", workItemsServeOverHTTP)
+	t.Run("A Work Item Serves The Next Gate It Waits On", aWorkItemServesTheNextGateItWaitsOn)
 	t.Run("Actions Dispatch To The CLI", actionsDispatchToTheCLI)
 	t.Run("WebSocket Serves Live Events", webSocketServesLiveEvents)
 	t.Run("A Client That Stops Reading Never Delays The Others", aClientThatStopsReadingNeverDelaysTheOthers)
@@ -1244,3 +1246,56 @@ func aRunningSessionsQuestionPutsItsWorkInNeedsYou(t *testing.T) {
 }
 
 func kindOf(k core.EventKind) *core.EventKind { return &k }
+
+func aWorkItemServesTheNextGateItWaitsOn(t *testing.T) {
+	s := newTestServer(t)
+	w, err := s.ledger.Add("p", "Gated", ledger.AddOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+	gate := func(want string, argv ...string) {
+		t.Helper()
+		var g gateView
+		getJSON(t, ts.URL+"/api/work/"+w.ID+"/gate", http.StatusOK, &g)
+		if g.Gate != want || !slices.Equal(g.Argv, argv) || (want != "" && g.Why == "") {
+			t.Fatalf("gate = %+v, want %q %v with a reason", g, want, argv)
+		}
+	}
+	event := func(kind core.EventKind, body string) {
+		t.Helper()
+		if _, err := s.ledger.AddEvent(w.ID, kind, body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gate("")
+	for _, st := range []core.State{core.StateRunning, core.StateReview} {
+		if _, err := s.ledger.Transition(w.ID, st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	event(core.EventReport, "DONE\nSTATUS: DONE")
+	gate("verify", "verify", w.ID)
+	event(core.EventVerify, "fail\ngo test → 1")
+	gate("verify", "verify", w.ID)
+	event(core.EventVerify, "pass\ngo test → 0")
+	gate("land", "pr", w.ID)
+	event(core.EventReport, "DONE\nSTATUS: DONE\nNOTES: again")
+	gate("verify", "verify", w.ID)
+	event(core.EventVerify, "pass\ngo test → 0")
+	event(core.EventPr, "commit https://example.test/c/1")
+	gate("soft-done", "soft-done", w.ID)
+	if _, err := s.ledger.SoftDone(w.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	gate("done", "done", w.ID)
+	getJSON(t, ts.URL+"/api/work/nope/gate", http.StatusNotFound, &errorBody{})
+
+	c := startStdio(t, s)
+	c.send(`{"id": 1, "method": "gate", "params": {"id": "` + w.ID + `"}}`)
+	var viaStdio gateView
+	if err := json.Unmarshal(c.reply(1)["result"], &viaStdio); err != nil || viaStdio.Gate != "done" {
+		t.Fatalf("stdio gate = %+v (%v)", viaStdio, err)
+	}
+}

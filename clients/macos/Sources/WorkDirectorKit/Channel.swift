@@ -96,6 +96,10 @@ public actor Channel {
         try await request("events", .id(id))
     }
 
+    public func gate(of id: String) async throws -> Gate {
+        try await request("gate", .id(id))
+    }
+
     /// The work's session steps from index `from` on.
     public func conversation(_ id: String, from: Int, agent: String? = nil) async throws -> ConversationPage {
         try await request("conversation", .conversation(id, from: from, agent: agent))

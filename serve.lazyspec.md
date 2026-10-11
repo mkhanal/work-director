@@ -50,8 +50,8 @@ Archived goals and standalone items are left off the board.
 `wd serve --stdio` reads one JSON request per line from stdin and writes one
 JSON message per line to stdout:
 - A request is `{"id": n, "method": m, "params": {...}}`; `m` is `board`,
-  `goal` (`id`), `work` (`id`), `events` (`id`), `conversation` (`id`, `from`)
-  or `action` (`argv`).
+  `goal` (`id`), `work` (`id`), `events` (`id`), `gate` (`id`), `conversation`
+  (`id`, `from`, `agent`) or `action` (`argv`).
 - Its reply is `{"id": n, "result": ...}` with the value the HTTP route serves,
   or `{"id": n, "error": {"kind": k, "message": "..."}}`, `k` one of
   `not-found`, `bad-request`, `internal`.
@@ -84,6 +84,13 @@ JSON message per line to stdout:
 `GET /api/work` lists all work items. `GET /api/work/<id>` returns one
 work item; unknown ids return 404. `GET /api/work/<id>/events` returns
 the events for one work item.
+
+## A Work Item Serves The Next Gate It Waits On
+- `GET /api/work/<id>/gate` and the `gate` method return the next gate on the work's way to done, the argv that passes it, and why it is next.
+- Work in review waits on `verify` (`verify <id>`) until a verify after its latest report passes.
+- Verified and not landed, it waits on `land` (`pr <id>`); landed, on `soft-done`.
+- Soft-done work waits on `done`.
+- Work in any other state waits on no gate: `gate` is empty and `argv` is `[]`.
 
 ## Actions Dispatch To The CLI
 `POST /api/action` with `{"argv": [...]}` runs the wd CLI with those

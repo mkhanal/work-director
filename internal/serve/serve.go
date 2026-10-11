@@ -243,8 +243,18 @@ func (s *Server) handleWorkItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	events := len(parts) == 2 && parts[1] == "events"
-	if len(parts) > 1 && !events {
+	gate := len(parts) == 2 && parts[1] == "gate"
+	if len(parts) > 1 && !events && !gate {
 		handleNotFound(w, r)
+		return
+	}
+	if gate {
+		g, err := s.gate(id)
+		if err != nil {
+			writeViewError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, g)
 		return
 	}
 	if events {

@@ -76,6 +76,11 @@ public final class Store {
         try await channel.events(of: id)
     }
 
+    /// The next gate on the work's way to done.
+    public func gate(of id: String) async throws -> Gate {
+        try await channel.gate(of: id)
+    }
+
     public func conversation(_ id: String, from: Int, agent: String? = nil) async throws -> ConversationPage {
         try await channel.conversation(id, from: from, agent: agent)
     }

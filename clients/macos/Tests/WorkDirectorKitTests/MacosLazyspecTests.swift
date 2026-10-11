@@ -531,4 +531,18 @@ func fakeRunner(_ home: Home) throws {
         #expect(board.threads().open.first?.id == "elsewhere")
         #expect(board.threads(project: "demo", band: .needsYou).open.map(\.id) == ["new"])
     }
+
+    @Test("The Next Gate Is One Button")
+    func nextGateIsOneButton() async throws {
+        let home = try Home()
+        let id = try home.wd("add", "demo", "Gated")
+        let store = await Store(channel: try home.channel())
+        #expect(Plan.passing(try await store.gate(of: id)) == nil, "queued work waits on no gate")
+        try home.wd("set", id, "running")
+        try home.wd("set", id, "review")
+        try home.wd("report", id, "DONE\nSTATUS: DONE")
+        let verify = try #require(Plan.passing(try await store.gate(of: id)))
+        #expect(verify.argv == ["verify", id])
+        #expect(verify.title == "Verify")
+    }
 }

@@ -271,3 +271,13 @@ public struct Found: Codable, Sendable, Hashable {
     public let goal: Work
     public let why: String
 }
+
+/// The next gate on work's way to done, as wd works it out: verify, land,
+/// soft-done or done, with the argv that passes it. Empty when there is none.
+public struct Gate: Codable, Sendable, Hashable {
+    public let work: String
+    public let gate: String
+    public let title: String?
+    public let argv: [String]
+    public let why: String?
+}

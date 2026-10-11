@@ -91,3 +91,7 @@ hold only that product's work; with none, every product's.
 - Work not started yet is listed apart as queued, and work at rest apart as settled.
 - Choosing a band shows only the work in it.
 
+## The Next Gate Is One Button
+- A work page offers the gate `wd` serves for it as one button, which runs the gate's argv.
+- Work waiting on no gate has no such button.
+

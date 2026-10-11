@@ -103,6 +103,11 @@ public struct Plan: Hashable, Sendable, Identifiable {
     /// they have not read; the work keeps its state.
     public static func stop(_ id: String) -> Plan { Plan(title: "Stop", argv: ["stop", id, "--json"]) }
 
+    /// The write that passes a gate, exactly as wd served it.
+    public static func passing(_ gate: Gate) -> Plan? {
+        gate.argv.isEmpty ? nil : Plan(title: gate.title ?? gate.gate, argv: gate.argv)
+    }
+
     /// Opens the directory work runs in, in the editor wd finds.
     public static func open(_ id: String) -> Plan { Plan(title: "Open", argv: ["open", id, "."]) }
 

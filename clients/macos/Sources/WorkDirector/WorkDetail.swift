@@ -21,6 +21,8 @@ struct WorkDetail: View {
     /// own: a goal's task, or a subagent.
     @State private var focus: AgentCard?
     @State private var focusFeed: Feed?
+    /// The gate this work waits on next, if any.
+    @State private var gate: Gate?
     @AppStorage("detail.tab") private var tab: Tab = .conversation
     @AppStorage("detail.agents") private var showAgents = true
 
@@ -68,6 +70,14 @@ struct WorkDetail: View {
                 .defaultScrollAnchor(following ? .bottom : .top)
                 .defaultScrollAnchor(following ? .bottom : .top, for: .sizeChanges)
                 .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        if let gate, let pass = Plan.passing(gate) {
+                            Button { plan = pass } label: { Label(pass.title, systemImage: gateSymbol(gate.gate)) }
+                                .labelStyle(.titleAndIcon)
+                                .buttonStyle(.borderedProminent)
+                                .help("\(gate.why ?? "") — \(pass.commandLine)")
+                        }
+                    }
                     Actions(work: loaded.work, run: { plan = $0 }, ask: { asking = $0 })
                     ToolbarItem(placement: .primaryAction) {
                         if let target = openTarget(loaded) {
@@ -258,9 +268,19 @@ struct WorkDetail: View {
         return false
     }
 
+    private func gateSymbol(_ gate: String) -> String {
+        switch gate {
+        case "verify": "checkmark.shield"
+        case "land": "arrow.triangle.merge"
+        case "done": "checkmark.circle"
+        default: "flag.checkered"
+        }
+    }
+
     private func load() async {
         do {
             let work = try await store.work(id)
+            gate = try await store.gate(of: id)
             if work.kind.isGoal {
                 loaded = .goal(try await store.goal(id))
             } else {
