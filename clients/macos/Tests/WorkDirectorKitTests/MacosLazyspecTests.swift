@@ -594,4 +594,18 @@ func fakeRunner(_ home: Home) throws {
         #expect(throws: PlanError.empty) { try Plan.addProduct(name: " ", path: folder.path, runner: "claude", mode: "auto") }
         await store.stop()
     }
+
+    @Test("A Correction Can Be Kept As Feedback")
+    func correctionKeptAsFeedback() async throws {
+        let home = try Home()
+        let id = try home.wd("add", "demo", "Taught")
+        let store = await Store(channel: try home.channel())
+        let work = try await store.work(id)
+        let plan = try Plan.remember("  always pin versions ", work: work)
+        #expect(plan.argv == ["feedback", "add", "always pin versions", "--work", id, "--project", "demo", "--source", "director"])
+        #expect(try await store.run(plan).code == 0)
+        let listed = try home.wd("feedback", "list")
+        #expect(listed.contains("always pin versions"))
+        #expect(throws: PlanError.empty) { try Plan.remember(" ", work: work) }
+    }
 }

@@ -110,6 +110,14 @@ public struct Plan: Hashable, Sendable, Identifiable {
         gate.argv.isEmpty ? nil : Plan(title: gate.title ?? gate.gate, argv: gate.argv)
     }
 
+    /// Keeps something said to work as feedback, the evidence rules are
+    /// distilled from.
+    public static func remember(_ text: String, work: Work) throws -> Plan {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw PlanError.empty }
+        return Plan(title: "Remember", argv: ["feedback", "add", text, "--work", work.id, "--project", work.project, "--source", "director"])
+    }
+
     /// Registers a folder as a product the director works in.
     public static func addProduct(name: String, path: String, runner: String, mode: String) throws -> Plan {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)

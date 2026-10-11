@@ -106,3 +106,7 @@ hold only that product's work; with none, every product's.
 - The name offered is the folder's own name in lower case, its words joined by hyphens.
 - The agents offered are the runners `wd doctor` lists, those on PATH first chosen.
 
+## A Correction Can Be Kept As Feedback
+- With Remember on, what is said to work is sent and also filed as feedback on that work and its project, from the director.
+- A message that cannot be filed as feedback says it was sent but not remembered.
+

@@ -488,6 +488,8 @@ struct MessageBar: View {
     @State private var sending = false
     @State private var outcome: String?
     @State private var failed = false
+    /// Whether what is said is also kept as feedback, to learn from.
+    @State private var remember = false
 
     var body: some View {
         InputBar(
@@ -500,6 +502,7 @@ struct MessageBar: View {
             noteIsError: failed,
             stop: working && !continuing ? Plan.stop(work.id) : nil,
             about: about,
+            remember: continuing ? nil : $remember,
             stopped: { Task { await stop() } }
         ) { Task { await send() } }
     }
@@ -524,9 +527,19 @@ struct MessageBar: View {
                 text = ""
                 return
             }
+            let said = text
             let result = try await store.run(plan)
             failed = result.code != 0
             outcome = failed ? (result.stderr.isEmpty ? result.stdout : result.stderr) : result.stdout
+            if !failed && remember {
+                let kept = try await store.run(try Plan.remember(said, work: work))
+                if kept.code != 0 {
+                    failed = true
+                    outcome = "sent, but not remembered: " + (kept.stderr.isEmpty ? kept.stdout : kept.stderr)
+                } else {
+                    outcome = (outcome ?? "") + " · remembered as feedback"
+                }
+            }
             if !failed { text = "" }
         } catch {
             failed = true
@@ -568,6 +581,8 @@ struct InputBar: View {
     var stop: Plan? = nil
     /// What the message goes to: runner, model, where it works.
     var about: [String] = []
+    /// When given, a toggle to keep the message as feedback too.
+    var remember: Binding<Bool>? = nil
     var stopped: () -> Void = {}
     let submit: () -> Void
     @AppStorage("sendKey") private var sendKey: SendKey = .standard
@@ -600,6 +615,13 @@ struct InputBar: View {
                 if busy {
                     ProgressView().controlSize(.small)
                 } else {
+                    if let remember {
+                        Toggle(isOn: remember) { Image(systemName: "graduationcap") }
+                            .toggleStyle(.button)
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(remember.wrappedValue ? Color.accentColor : Color.secondary)
+                            .help(remember.wrappedValue ? "This message is also kept as feedback, so the director can learn a rule from it" : "Keep this message as feedback too, so the director can learn a rule from it")
+                    }
                     if let stop {
                         Button(action: stopped) {
                             Image(systemName: "stop.circle.fill").font(.title2)
