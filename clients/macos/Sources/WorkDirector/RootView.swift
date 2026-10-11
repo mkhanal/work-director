@@ -15,7 +15,14 @@ struct RootView: View {
     @State private var place: Place? = .home
     @State private var selected: String?
     @State private var plan: Plan?
+    @State private var asking: Ask?
+    @State private var writes: Writes
     @State private var typing = false
+
+    init(store: Store) {
+        self.store = store
+        _writes = State(initialValue: Writes(store: store))
+    }
 
     private var scope: String? { scopeName.isEmpty ? nil : scopeName }
 
@@ -27,9 +34,9 @@ struct RootView: View {
             Group {
                 switch place {
                 case .home, nil:
-                    RecentGoals(store: store, scope: scope, selected: $selected)
+                    RecentGoals(store: store, scope: scope, selected: $selected, plan: $plan, asking: $asking)
                 case .band(let band):
-                    BandList(store: store, band: band, scope: scope, selected: $selected)
+                    BandList(store: store, band: band, scope: scope, selected: $selected, plan: $plan, asking: $asking)
                 case .archived:
                     ArchivedList(store: store, scope: scope, selected: $selected, plan: $plan)
                 case .review(let project):
@@ -59,6 +66,10 @@ struct RootView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
+            if let done = writes.last {
+                WriteBanner(done: done, undo: { plan = $0 }) { writes.dismiss() }
+                    .id(done.id)
+            }
             if let failure = store.failure {
                 Label(failure, systemImage: "exclamationmark.triangle.fill")
                     .font(.callout)
@@ -82,8 +93,16 @@ struct RootView: View {
                 plan = typed
             }
         }
-        .sheet(item: $plan) { plan in
-            ConfirmSheet(store: store, plan: plan)
+        .onChange(of: plan) {
+            guard let chosen = plan else { return }
+            plan = nil
+            Task { await writes.run(chosen) }
+        }
+        .sheet(item: $asking) { ask in
+            ReasonSheet(ask: ask) { made in
+                asking = nil
+                plan = made
+            }
         }
     }
 
@@ -146,6 +165,8 @@ struct BandList: View {
     let band: Band
     let scope: String?
     @Binding var selected: String?
+    @Binding var plan: Plan?
+    @Binding var asking: Ask?
 
     var body: some View {
         let items = store.board?.items(in: band, project: scope) ?? []
@@ -156,6 +177,7 @@ struct BandList: View {
                 List(items, selection: $selected) { work in
                     WorkRow(work: work, rollup: store.board?.rollup(of: work.id))
                         .tag(work.id)
+                        .contextMenu { WorkMenu(work: work, run: { plan = $0 }, ask: { asking = $0 }) }
                 }
             }
         }

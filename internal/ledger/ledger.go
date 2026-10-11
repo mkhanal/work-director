@@ -706,6 +706,9 @@ func (l *Ledger) transition(id string, to core.State) (core.Work, error) {
 		if to == core.StateDropped && w.State == core.StateAbandoned {
 			return fmt.Errorf("work %s is abandoned; saying the stop was a choice goes through Release: wd release %s \"<what was true instead>\"", id, id)
 		}
+		if w.State == core.StateDropped {
+			return fmt.Errorf("work %s is dropped; bringing it back goes through Restore, with everything dropped alongside it: wd resume %s", id, id)
+		}
 		if !slices.Contains(core.Transitions[w.State], to) {
 			return core.IllegalTransition{From: w.State, To: to}
 		}
@@ -788,6 +791,89 @@ func (l *Ledger) Drop(id, why string) ([]core.Work, error) {
 		return nil, err
 	}
 	return l.reread(dropped)
+}
+
+// Restore brings dropped work back to the state it was dropped from, with
+// every work under it that the same drop let go of. Work dropped on its own,
+// at another moment, stays dropped. It returns the work it restored.
+func (l *Ledger) Restore(id string) ([]core.Work, error) {
+	var restored []core.Work
+	err := l.inTx(func(tx *sql.Tx) error {
+		tree, err := subtree(tx, id)
+		if err != nil {
+			return err
+		}
+		if tree[0].State != core.StateDropped {
+			return fmt.Errorf("work %s is %s; only dropped work is restored", id, tree[0].State)
+		}
+		if tree[0].Archived != nil {
+			return fmt.Errorf("work %s is archived; Unarchive it first: wd unarchive %s", id, id)
+		}
+		moment, _, err := droppedFrom(tx, id)
+		if err != nil {
+			return err
+		}
+		at := now()
+		for _, w := range tree {
+			if w.State != core.StateDropped {
+				continue
+			}
+			when, before, err := droppedFrom(tx, w.ID)
+			if err != nil {
+				return err
+			}
+			if when != moment {
+				continue
+			}
+			if _, err := tx.Exec(`UPDATE work SET state = ? WHERE id = ?`, string(before), w.ID); err != nil {
+				return err
+			}
+			if _, err := addEvent(tx, w.ID, core.EventState, string(before), at); err != nil {
+				return err
+			}
+			if _, err := addEvent(tx, w.ID, core.EventNote, "restored", at); err != nil {
+				return err
+			}
+			restored = append(restored, w)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return l.reread(restored)
+}
+
+// droppedFrom is when work was last dropped and the state it was dropped from.
+func droppedFrom(tx *sql.Tx, id string) (string, core.State, error) {
+	rows, err := tx.Query(`SELECT body, at FROM event WHERE work = ? AND kind = ? ORDER BY id`, id, string(core.EventState))
+	if err != nil {
+		return "", "", err
+	}
+	type change struct{ body, at string }
+	var changes []change
+	for rows.Next() {
+		var c change
+		if err := rows.Scan(&c.body, &c.at); err != nil {
+			rows.Close()
+			return "", "", err
+		}
+		changes = append(changes, c)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return "", "", err
+	}
+	if err := rows.Close(); err != nil {
+		return "", "", err
+	}
+	for i := len(changes) - 1; i > 0; i-- {
+		if changes[i].body == string(core.StateDropped) {
+			before, err := core.ParseState(changes[i-1].body)
+			return changes[i].at, before, err
+		}
+	}
+	return "", "", fmt.Errorf("work %s has no record of the state it was dropped from", id)
 }
 
 // dropOpen moves every open work in tree to dropped, filing why as a decision

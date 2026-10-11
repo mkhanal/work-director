@@ -1,9 +1,10 @@
 import SwiftUI
 import WorkDirectorKit
 
-/// A write that needs words from the person before it can be planned.
+/// A write that needs words from the person: what reopened work is for, or
+/// the decision itself. Nothing else asks; it runs, and can be undone.
 struct Ask: Identifiable {
-    enum Kind { case reopen, release, decide, abandon, archive, cancel, resume }
+    enum Kind { case reopen, decide }
     let kind: Kind
     let work: Work
 
@@ -12,92 +13,72 @@ struct Ask: Identifiable {
     var title: String {
         switch kind {
         case .reopen: "Reopen \(work.title)"
-        case .release: "Release \(work.title)"
         case .decide: "Record a decision on \(work.title)"
-        case .abandon: "Abandon \(work.title)"
-        case .archive: "Drop and archive \(work.title)"
-        case .cancel: "Cancel \(work.title)"
-        case .resume: "Resume \(work.title)"
         }
     }
 
     var prompt: String {
         switch kind {
         case .reopen: "What is being worked on? A question about finished work is answered without reopening it."
-        case .release: "What was true instead? The stop stays on the record; this says it was a choice."
         case .decide: "The decision, in one line."
-        case .abandon: "Detail (optional). The reason, no-pr or unmerged, is worked out from the ledger."
-        case .archive: "Why it is no longer wanted. It is dropped with this reason, then archived with everything under it."
-        case .cancel: "Why it is being cancelled. Running sessions stop and the open work is dropped with this reason."
-        case .resume: "Anything to add before it carries on (optional). Every paused session continues where it left off."
         }
     }
 
     func plan(_ text: String) throws -> Plan {
         switch kind {
         case .reopen: try Plan.reopen(work.id, reason: text)
-        case .release: try Plan.release(work.id, reason: text)
         case .decide: try Plan.decide(work.id, text: text)
-        case .abandon: Plan.abandon(work.id, detail: text)
-        case .archive: try Plan.archive(work, reason: text)
-        case .cancel: try Plan.cancel(work.id, reason: text)
-        case .resume: Plan.resume(work.id, note: text)
         }
     }
 }
 
-/// The writes a state allows, each going through the same confirmation.
-struct Actions: ToolbarContent {
+/// Every write work's state allows, as menu items: the toolbar's Actions menu
+/// and a right-click on the work anywhere it is listed show the same ones.
+struct WorkMenu: View {
     let work: Work
-    @Binding var plan: Plan?
-    @Binding var asking: Ask?
+    let run: (Plan) -> Void
+    let ask: (Ask) -> Void
 
-    var body: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            if work.state == .paused {
-                Button { asking = Ask(kind: .resume, work: work) } label: { Label("Resume", systemImage: "play.fill") }
-                    .help("Continue every paused session where it left off")
-            } else if work.live {
-                Button { plan = .pause(work.id) } label: { Label("Pause", systemImage: "pause.fill") }
-                    .help("Stop the running sessions and keep their conversations")
-            }
-            if work.kind.isGoal && open && work.state != .paused {
-                Button { plan = .drive(work.id) } label: { Label("Drive", systemImage: "steeringwheel") }
-                    .help("Run the goal's loop until a stop condition")
-            }
-            Menu {
-                Button("Record a Decision…") { asking = Ask(kind: .decide, work: work) }
-                if work.state == .review {
-                    Button("Verify") { plan = .verify(work.id) }
-                    Button("Soft-Done") { plan = .softDone(work.id) }
-                }
-                if work.state == .softDone {
-                    Button("Done") { plan = .done(work.id) }
-                }
-                if work.state == .done {
-                    Button("Reopen…") { asking = Ask(kind: .reopen, work: work) }
-                }
-                if open {
-                    Divider()
-                    Button("Cancel…", role: .destructive) { asking = Ask(kind: .cancel, work: work) }
-                }
-                if attempted {
-                    Button("Abandon…", role: .destructive) { asking = Ask(kind: .abandon, work: work) }
-                }
-                if work.state == .abandoned {
-                    Button("Release…") { asking = Ask(kind: .release, work: work) }
-                }
-                Divider()
-                if work.archived != nil {
-                    Button("Unarchive") { plan = .unarchive(work.id) }
-                } else if work.atRest {
-                    Button("Archive") { plan = try? .archive(work, reason: "") }
-                } else {
-                    Button("Drop and Archive…") { asking = Ask(kind: .archive, work: work) }
-                }
-            } label: {
-                Label("Actions", systemImage: "ellipsis.circle")
-            }
+    var body: some View {
+        if work.state == .paused || work.state == .dropped {
+            Button("Resume") { run(.resume(work.id, note: "")) }
+        } else if work.live {
+            Button("Pause") { run(.pause(work.id)) }
+        }
+        if work.kind.isGoal && open && work.state != .paused {
+            Button("Drive") { run(.drive(work.id)) }
+        }
+        Button("Record a Decision…") { ask(Ask(kind: .decide, work: work)) }
+        if work.state == .review {
+            Button("Verify") { run(.verify(work.id)) }
+            Button("Soft-Done") { run(.softDone(work.id)) }
+        }
+        if work.state == .softDone {
+            Button("Done") { run(.done(work.id)) }
+        }
+        if work.state == .done {
+            Button("Reopen…") { ask(Ask(kind: .reopen, work: work)) }
+        }
+        if open {
+            Divider()
+            Button("Cancel", role: .destructive) { run(.cancel(work.id)) }
+        }
+        if attempted {
+            Button("Abandon", role: .destructive) { run(.abandon(work.id, detail: "")) }
+        }
+        if work.state == .abandoned {
+            Button("Release") { run(.release(work.id)) }
+        }
+        Divider()
+        if work.archived != nil {
+            Button("Unarchive") { run(.unarchive(work.id)) }
+        } else {
+            Button(work.atRest ? "Archive" : "Drop and Archive") { run(.archive(work)) }
+        }
+        Divider()
+        Button("Copy ID") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(work.id, forType: .string)
         }
     }
 
@@ -107,6 +88,30 @@ struct Actions: ToolbarContent {
 
     private var attempted: Bool {
         [.running, .needsInput, .review, .softDone, .blocked].contains(work.state)
+    }
+}
+
+/// The toolbar's writes: pause or resume at hand, the rest under Actions.
+struct Actions: ToolbarContent {
+    let work: Work
+    let run: (Plan) -> Void
+    let ask: (Ask) -> Void
+
+    var body: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            if work.state == .paused || work.state == .dropped {
+                Button { run(.resume(work.id, note: "")) } label: { Label("Resume", systemImage: "play.fill") }
+                    .help("Carry on where it left off: wd resume \(work.id)")
+            } else if work.live {
+                Button { run(.pause(work.id)) } label: { Label("Pause", systemImage: "pause.fill") }
+                    .help("Stop the running sessions and keep their conversations: wd pause \(work.id)")
+            }
+            Menu {
+                WorkMenu(work: work, run: run, ask: ask)
+            } label: {
+                Label("Actions", systemImage: "ellipsis.circle")
+            }
+        }
     }
 }
 
@@ -149,61 +154,65 @@ struct ReasonSheet: View {
     }
 }
 
-/// Shows the exact command a write runs, and runs only that, on confirm.
-struct ConfirmSheet: View {
-    let store: Store
-    let plan: Plan
-    @State private var running = false
-    @State private var result: Result<ActionResult, any Error>?
-    @Environment(\.dismiss) private var dismiss
+/// What a write did, shown where the person is: the command it ran, its
+/// outcome, and the write that takes it back when there is one.
+struct WriteBanner: View {
+    let done: Writes.Done
+    let undo: (Plan) -> Void
+    let close: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(plan.title).font(.headline)
-            GroupBox {
-                Text(plan.commandLine)
-                    .font(.body.monospaced())
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(4)
-            }
-            switch result {
-            case nil:
-                Text("This runs exactly the command above.").font(.caption).foregroundStyle(.secondary)
-            case .success(let r):
-                Output(code: r.code, text: [r.stdout, r.stderr].filter { !$0.isEmpty }.joined(separator: "\n"))
-            case .failure(let error):
-                Output(code: nil, text: "\(error)")
-            }
-            HStack {
-                if running { ProgressView().controlSize(.small) }
-                Spacer()
-                if result == nil {
-                    Button("Cancel", role: .cancel) { dismiss() }
-                        .keyboardShortcut(.cancelAction)
-                    Button("Run") { Task { await run() } }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(running)
-                } else {
-                    Button("Close") { dismiss() }
-                        .keyboardShortcut(.defaultAction)
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: done.ok ? "checkmark.circle.fill" : "xmark.octagon.fill")
+                .foregroundStyle(done.ok ? .green : .red)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(done.plan.commandLine).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                if !done.text.isEmpty {
+                    Text(done.text).font(.callout).lineLimit(4).textSelection(.enabled)
                 }
             }
+            Spacer(minLength: 8)
+            if done.ok, let back = done.plan.undo {
+                Button("Undo") { undo(back) }.help(back.commandLine)
+            }
+            Button(action: close) { Image(systemName: "xmark") }.buttonStyle(.plain).foregroundStyle(.secondary)
         }
-        .padding(20)
-        .frame(width: 560)
+        .padding(10)
+        .background(.bar)
+    }
+}
+
+/// Runs writes as they are chosen and keeps what the last one did.
+@MainActor
+@Observable
+final class Writes {
+    struct Done: Identifiable {
+        let id = UUID()
+        let plan: Plan
+        let ok: Bool
+        let text: String
     }
 
-    private func run() async {
-        running = true
-        defer { running = false }
+    private(set) var last: Done?
+    private(set) var running: Plan?
+    private let store: Store
+
+    init(store: Store) { self.store = store }
+
+    func run(_ plan: Plan) async {
+        running = plan
+        defer { running = nil }
         do {
-            result = .success(try await store.run(plan))
+            let r = try await store.run(plan)
+            let text = [r.stdout, r.stderr].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.joined(separator: "\n")
+            last = Done(plan: plan, ok: r.code == 0, text: text)
         } catch {
-            result = .failure(error)
+            last = Done(plan: plan, ok: false, text: "\(error)")
         }
         await store.refresh()
     }
+
+    func dismiss() { last = nil }
 }
 
 struct Output: View {

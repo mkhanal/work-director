@@ -220,7 +220,7 @@ is never removed.
 - Any other reason is refused.
 
 ## A Stop Recorded As A Failure Can Be Released Into A Choice
-- `wd release <id> "<what was true instead>"`, also `wd goal release`, releases abandoned work and refuses without the text.
+- `wd release <id> ["<what was true instead>"]`, also `wd goal release`, releases abandoned work, with `released` when no text is given.
 - `wd set <id> dropped` cannot release abandoned work.
 - Work in any state but abandoned is refused.
 
@@ -312,6 +312,7 @@ could not with their work, the bound that ran out, and the work still open.
 
 ## Wd Archive Hides Work And Wd Unarchive Brings It Back
 - `wd archive <id> ["<why>"]` and `wd unarchive <id>` apply the ledger's archive rules and exit 1 with its refusals.
+- Open work archived without a `<why>` is dropped as `archived`.
 - `wd status` and `wd status --all` leave archived work out; `wd status --archived` lists only archived work.
 
 ## A Project No Longer Used Is Archived With Its Work
@@ -352,9 +353,9 @@ could not with their work, the bound that ran out, and the work still open.
 - `wd resume <id> ["<note>"]` returns each paused task, and a paused goal, to the state it had before it was paused.
 - Each task with a session is sent "Resume where you left off." followed by the note, as `wd send` does.
 
-## Wd Cancel Stops And Drops Work With A Reason
-- `wd cancel <id> "<why>"` stops every running session under the work and drops it and its open work with the reason, as `Drop` does.
-- Without a reason it is refused and nothing stops.
+## Wd Cancel Stops And Drops Work Until Wd Resume Brings It Back
+- `wd cancel <id> ["<why>"]` stops every live session under the work and drops it and its open work, as `Drop` does, with the reason or `cancelled`.
+- `wd resume <id>` on dropped work restores it as `Restore` does, and each restored task with a session is sent "Resume where you left off.".
 - `wd archive` of open work stops running sessions the same way before it drops them.
 
 ## Wd Goal Find Asks A Model Which Goals A Request Continues

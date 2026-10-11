@@ -44,7 +44,7 @@ struct WorkDetail: View {
                         switch loaded {
                         case .goal(let goal):
                             Waiting(store: store, goal: goal, open: open) { Task { await load() } }
-                            GoalSections(store: store, goal: goal, open: open) { Task { await load() } }
+                            GoalSections(store: store, goal: goal, open: open, run: { plan = $0 }, ask: { asking = $0 }) { Task { await load() } }
                         case .work(let work, let events):
                             if hasSession(work) {
                                 Picker("Show", selection: $tab) {
@@ -68,7 +68,7 @@ struct WorkDetail: View {
                 }
                 .defaultScrollAnchor(following ? .bottom : .top)
                 .defaultScrollAnchor(following ? .bottom : .top, for: .sizeChanges)
-                .toolbar { Actions(work: loaded.work, plan: $plan, asking: $asking) }
+                .toolbar { Actions(work: loaded.work, run: { plan = $0 }, ask: { asking = $0 }) }
                 .safeAreaInset(edge: .bottom) {
                     if !loaded.work.atRest || (loaded.work.kind.isGoal && loaded.work.state == .done) {
                         MessageBar(store: store, work: loaded.work, working: working)
@@ -194,6 +194,8 @@ struct GoalSections: View {
     let store: Store
     let goal: GoalDetail
     let open: (String) -> Void
+    let run: (Plan) -> Void
+    let ask: (Ask) -> Void
     /// Reads the goal again after a task was stopped.
     let changed: () -> Void
     @State private var stopping: String?
@@ -249,6 +251,14 @@ struct GoalSections: View {
                         }
                         .buttonStyle(.plain)
                         .help("Open this task's conversation")
+                        .contextMenu {
+                            Button("Open") { open(task.id) }
+                            if goal.activity[task.id]?.status?.live == true {
+                                Button("Stop") { Task { await stop(task.id) } }
+                            }
+                            Divider()
+                            WorkMenu(work: task, run: run, ask: ask)
+                        }
                         if goal.activity[task.id]?.status?.live == true {
                             if stopping == task.id {
                                 ProgressView().controlSize(.mini)

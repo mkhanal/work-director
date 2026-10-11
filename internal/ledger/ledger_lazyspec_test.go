@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -234,12 +235,12 @@ func TestLedger(t *testing.T) {
 			_, err := l.Transition(w.ID, core.StateDone)
 			wantErr(t, err, "illegal transition paused → done")
 		})
-		t.Run("done and dropped are terminal", func(t *testing.T) {
+		t.Run("dropped is left only through Restore", func(t *testing.T) {
 			l := newTestLedger(t)
 			w := add(t, l, "p", "t", AddOptions{})
 			move(t, l, w.ID, core.StateDropped)
 			_, err := l.Transition(w.ID, core.StateQueued)
-			wantErr(t, err, "illegal transition dropped → queued")
+			wantErrNaming(t, err, "Restore")
 		})
 	})
 
@@ -1300,6 +1301,48 @@ func mustGet(t *testing.T, l *Ledger, id string) core.Work {
 // whose work landed under another id, that sentence is false, and the row cannot
 // be left saying it forever — it is the one thing on a board that contradicts
 // work that demonstrably shipped.
+func TestDroppedWorkIsRestoredWithEverythingDroppedAlongsideIt(t *testing.T) {
+	l := newTestLedger(t)
+	goal := add(t, l, "p", "Goal", AddOptions{Kind: core.WorkGoal})
+	move(t, l, goal.ID, core.StateRunning)
+	running := add(t, l, "p", "Running", AddOptions{Parent: &goal.ID})
+	move(t, l, running.ID, core.StateRunning)
+	asking := add(t, l, "p", "Asking", AddOptions{Parent: &goal.ID})
+	move(t, l, asking.ID, core.StateRunning)
+	move(t, l, asking.ID, core.StateNeedsInput)
+	earlier := add(t, l, "p", "Dropped before", AddOptions{Parent: &goal.ID})
+	move(t, l, earlier.ID, core.StateDropped)
+
+	_, err := l.Restore(goal.ID)
+	wantErrNaming(t, err, "only dropped work")
+	// A later moment, so the goal's drop is told apart from the earlier one.
+	time.Sleep(5 * time.Millisecond)
+	_, err = l.Drop(goal.ID, "cancelled")
+	wantNoErr(t, err)
+
+	back, err := l.Restore(goal.ID)
+	wantNoErr(t, err)
+	if len(back) != 3 {
+		t.Fatalf("restored = %+v, want the goal and the two tasks it dropped", back)
+	}
+	for id, want := range map[string]core.State{goal.ID: core.StateRunning, running.ID: core.StateRunning, asking.ID: core.StateNeedsInput, earlier.ID: core.StateDropped} {
+		if got := mustGet(t, l, id).State; got != want {
+			t.Errorf("%s = %s, want %s", id, got, want)
+		}
+	}
+	note := core.EventNote
+	if evs := allEvents(t, l, asking.ID, &note); len(evs) == 0 || evs[len(evs)-1].Body != "restored" {
+		t.Fatalf("notes = %v, want restored", evs)
+	}
+
+	_, err = l.Drop(goal.ID, "cancelled again")
+	wantNoErr(t, err)
+	_, err = l.Archive(goal.ID, "")
+	wantNoErr(t, err)
+	_, err = l.Restore(goal.ID)
+	wantErrNaming(t, err, "Unarchive")
+}
+
 func TestAnAbandonedRowCanBeReleasedIntoAChoice(t *testing.T) {
 	l := newTestLedger(t)
 	dup := add(t, l, "p", "The same work shipped as another task", AddOptions{})

@@ -371,7 +371,9 @@ var Transitions = map[State][]State{
 	// history of what came first. Reopening says what is being worked on, so it
 	// is reached through Reopen and not by a bare transition.
 	StateDone: {StateRunning},
-	// Dropped is terminal: work let go of on purpose stays let go of.
+	// Dropped has no edge a bare transition may take: work let go of comes
+	// back only through Restore, to the state it was dropped from, with
+	// everything the same drop let go of.
 	StateDropped: {},
 	// Abandoned is not terminal, but it is nearly so: it records a thing that
 	// stopped without shipping, and the only way out is into dropped, because

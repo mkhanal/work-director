@@ -259,6 +259,9 @@ func (c *Cli) resumeWork(w core.Work, note string) ([]string, error) {
 	if note != "" {
 		message += "\n\n" + note
 	}
+	if w.State == core.StateDropped {
+		return c.restore(w, message)
+	}
 	targets := []core.Work{w}
 	var err error
 	if core.IsGoal(w.Kind) {
@@ -303,6 +306,34 @@ func (c *Cli) resumeWork(w core.Work, note string) ([]string, error) {
 	return resumed, nil
 }
 
+// restore brings cancelled work back with everything cancelled alongside it,
+// and tells each task with a session to carry on.
+func (c *Cli) restore(w core.Work, message string) ([]string, error) {
+	back, err := c.Ledger.Restore(w.ID)
+	if err != nil {
+		return nil, fail("%v", err)
+	}
+	restored := []string{}
+	for _, t := range back {
+		restored = append(restored, t.ID)
+		if core.IsGoal(t.Kind) || (t.State != core.StateRunning && t.State != core.StateNeedsInput) {
+			continue
+		}
+		p, err := c.project(t.Project)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok, err := coordinator.Handle(c.Ledger, t, p); err != nil {
+			return nil, err
+		} else if ok {
+			if _, err := c.tellTask(t, message); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return restored, nil
+}
+
 // unpause moves paused work back to the state its ledger says it was paused from.
 func (c *Cli) unpause(w core.Work) error {
 	evs, err := c.Ledger.Events(w.ID, kindPtr(core.EventState))
@@ -325,17 +356,21 @@ func (c *Cli) unpause(w core.Work) error {
 // cancel stops every running session under work and drops it and its open
 // work with the reason given.
 func (c *Cli) cancel(rest []string) error {
-	if len(rest) < 2 || strings.TrimSpace(strings.Join(rest[1:], " ")) == "" {
-		return fail("usage: wd cancel <id> \"<why>\" — cancelling drops open work, so it says why")
+	if len(rest) < 1 {
+		return fail("usage: wd cancel <id> [\"<why>\"]")
+	}
+	why := strings.TrimSpace(strings.Join(rest[1:], " "))
+	if why == "" {
+		why = "cancelled"
 	}
 	if err := c.stopUnder(rest[0]); err != nil {
 		return err
 	}
-	dropped, err := c.Ledger.Drop(rest[0], strings.Join(rest[1:], " "))
+	dropped, err := c.Ledger.Drop(rest[0], why)
 	if err != nil {
 		return fail("%v", err)
 	}
-	return c.out(dropped, fmt.Sprintf("cancelled %s: %d work item(s) dropped", rest[0], len(dropped)))
+	return c.out(dropped, fmt.Sprintf("cancelled %s: %d work item(s) dropped; wd resume %s brings them back", rest[0], len(dropped), rest[0]))
 }
 
 // stopUnder stops the running session of every open work under id, itself

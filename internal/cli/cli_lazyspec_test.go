@@ -2324,11 +2324,16 @@ func TestAStopRecordedAsAFailureCanBeReleasedIntoAChoice(t *testing.T) {
 		t.Errorf("set dropped = %q, want it naming the release", errStr)
 	}
 
-	// One argument reaches the reason rather than the usage line, because the
-	// reader who typed it has forgotten the reason and not the command.
-	errStr := f.runFail(t, "release", dup)
-	if !strings.Contains(errStr, "wd release "+dup) {
-		t.Errorf("release with no reason = %q, want it naming the command that takes one", errStr)
+	// With no text the release says only that it was released.
+	quiet := jsonString(t, f.runOK(t, "add", "sample-app", "Released without words", "--json"), "id")
+	f.runOK(t, "set", quiet, "running")
+	f.runOK(t, "abandon", quiet, "no-pr", "--reason", "never started")
+	f.runOK(t, "release", quiet)
+	if got := f.workRow(t, quiet); got.State != core.StateDropped {
+		t.Errorf("release with no text: state = %s, want dropped", got.State)
+	}
+	if evs := f.runOK(t, "events", quiet, "--json"); !strings.Contains(evs, "released: released") {
+		t.Errorf("events = %s, want the release filed as released", evs)
 	}
 
 	out := f.runOK(t, "release", dup, "the same work shipped as 17b4a94b, which is done", "--json")
@@ -3933,10 +3938,10 @@ func TestGoalStartsFromOneSentence(t *testing.T) {
 func TestWdArchiveHidesWorkAndWdUnarchiveBringsItBack(t *testing.T) {
 	f := newCLIFixture(t)
 	standalone, epic := f.ids["standalone"], f.ids["epic"]
-	if errStr := f.runFail(t, "archive", standalone); !strings.Contains(errStr, "say why") {
-		t.Fatalf("archiving open work with no reason: %q, want the refusal", errStr)
+	f.runOK(t, "archive", standalone)
+	if evs := f.runOK(t, "events", standalone, "--json"); !strings.Contains(evs, `"body": "dropped: archived"`) {
+		t.Fatalf("events = %s, want open work archived without a reason dropped as archived", evs)
 	}
-	f.runOK(t, "archive", standalone, "fixed upstream")
 	f.runOK(t, "archive", epic, "the migration was cancelled")
 
 	rows := func(args ...string) map[string]bool {
@@ -4290,18 +4295,15 @@ func TestWdResumeContinuesWhatWasPaused(t *testing.T) {
 	}
 }
 
-func TestWdCancelStopsAndDropsWorkWithAReason(t *testing.T) {
+func TestWdCancelStopsAndDropsWorkUntilWdResumeBringsItBack(t *testing.T) {
 	f := newCLIFixture(t)
 	state := liveClaude(t, f)
 	epic, t1, t2, t3 := f.ids["epic"], f.ids["t1"], f.ids["t2"], f.ids["t3"]
+	before := map[string]core.State{epic: stateOf(t, f, epic), t2: stateOf(t, f, t2), t3: stateOf(t, f, t3), t1: stateOf(t, f, t1)}
 	if err := os.WriteFile(filepath.Join(state, "claude-busy"), nil, 0o644); err != nil {
 		t.Fatalf("busy: %v", err)
 	}
-	f.runFail(t, "cancel", epic)
-	if _, err := os.Stat(filepath.Join(state, "claude-stopped-ab000002")); err == nil {
-		t.Fatalf("a refused cancel stopped a session")
-	}
-	f.runOK(t, "cancel", epic, "the client cancelled the migration")
+	f.runOK(t, "cancel", epic)
 	if _, err := os.Stat(filepath.Join(state, "claude-stopped-ab000002")); err != nil {
 		t.Fatalf("cancel did not stop the running session: %v", err)
 	}
@@ -4309,6 +4311,19 @@ func TestWdCancelStopsAndDropsWorkWithAReason(t *testing.T) {
 		if got := stateOf(t, f, id); got != want {
 			t.Errorf("%s = %s, want %s", id, got, want)
 		}
+	}
+	if evs := f.runOK(t, "events", t2, "--json"); !strings.Contains(evs, `"body": "dropped: cancelled"`) {
+		t.Errorf("events = %s, want the drop filed as cancelled", evs)
+	}
+
+	f.runOK(t, "resume", epic)
+	for id, want := range before {
+		if got := stateOf(t, f, id); got != want {
+			t.Errorf("%s = %s after resume, want %s as before the cancel", id, got, want)
+		}
+	}
+	if got := sends(t, state); len(got) != 1 || got[0] != "Resume where you left off." {
+		t.Fatalf("sends = %q, want one resume to %s", got, t2)
 	}
 
 	g := newCLIFixture(t)

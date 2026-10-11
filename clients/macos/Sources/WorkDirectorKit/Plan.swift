@@ -47,8 +47,8 @@ public struct Plan: Hashable, Sendable, Identifiable {
         Plan(title: "Reopen", argv: ["reopen", id, try required(reason, for: "reopening")])
     }
 
-    public static func release(_ id: String, reason: String) throws -> Plan {
-        Plan(title: "Release", argv: ["release", id, try required(reason, for: "releasing")])
+    public static func release(_ id: String, reason: String = "") -> Plan {
+        Plan(title: "Release", argv: ["release", id] + optional(reason))
     }
 
     public static func decide(_ id: String, text: String) throws -> Plan {
@@ -77,11 +77,8 @@ public struct Plan: Hashable, Sendable, Identifiable {
 
     /// Archives work. Work at rest needs no reason; open work is dropped first,
     /// which is a choice someone has to state.
-    public static func archive(_ work: Work, reason: String) throws -> Plan {
-        if work.atRest {
-            return Plan(title: "Archive", argv: ["archive", work.id])
-        }
-        return Plan(title: "Drop and archive", argv: ["archive", work.id, try required(reason, for: "archiving open work")])
+    public static func archive(_ work: Work, reason: String = "") -> Plan {
+        Plan(title: work.atRest ? "Archive" : "Drop and archive", argv: ["archive", work.id] + optional(reason))
     }
 
     public static func unarchive(_ id: String) -> Plan { Plan(title: "Unarchive", argv: ["unarchive", id]) }
@@ -113,8 +110,21 @@ public struct Plan: Hashable, Sendable, Identifiable {
         return Plan(title: "Resume", argv: ["resume", id] + (note.isEmpty ? [] : [note]))
     }
 
-    public static func cancel(_ id: String, reason: String) throws -> Plan {
-        Plan(title: "Cancel", argv: ["cancel", id, try required(reason, for: "cancelling")])
+    /// Stops and drops work; `resume` brings it back, so it asks nothing.
+    public static func cancel(_ id: String, reason: String = "") -> Plan {
+        Plan(title: "Cancel", argv: ["cancel", id] + optional(reason))
+    }
+
+    /// The write that takes this one back, when there is one: a cancel or a
+    /// pause is resumed, an archive unarchived.
+    public var undo: Plan? {
+        guard argv.count >= 2 else { return nil }
+        let id = argv[1]
+        switch argv[0] {
+        case "cancel", "pause": return Plan.resume(id, note: "")
+        case "archive": return Plan.unarchive(id)
+        default: return nil
+        }
     }
 
     public static func drive(_ id: String) -> Plan { Plan(title: "Drive", argv: ["drive", id]) }
@@ -123,6 +133,11 @@ public struct Plan: Hashable, Sendable, Identifiable {
     public static func verify(_ id: String) -> Plan { Plan(title: "Verify", argv: ["verify", id]) }
     public static func acknowledge(project: String) -> Plan {
         Plan(title: "Acknowledge review", argv: ["review", "--ack", "--project", project])
+    }
+
+    private static func optional(_ text: String) -> [String] {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? [] : [text]
     }
 
     private static func required(_ text: String, for what: String) throws -> String {

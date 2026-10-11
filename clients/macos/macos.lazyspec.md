@@ -20,19 +20,19 @@ command the person confirms.
 - A request outstanding when `wd` exits fails, naming the exit.
 - An error reply fails its request with the kind and message `wd` sent.
 
-## A Write Shows The Exact Command It Will Run
-The confirmation shows `wd` followed by the plan's argv, and confirming sends
-that same argv.
+## A Write Runs At Once And Shows The Command It Ran
+- A write runs when chosen, with no confirmation; the command it ran shows as `wd` followed by the plan's argv.
+- The argv sent is the plan's argv, unchanged.
+- A cancel or a pause offers an undo that resumes it; an archive, one that unarchives it.
 
 ## Text In The Command Bar Becomes Argv Without A Shell
 - Words split on whitespace; single or double quotes keep a phrase together.
 - Nothing is expanded: `$HOME`, `~` and `*` reach `wd` as typed.
 - A leading `wd` is dropped. An unclosed quote is refused.
 
-## Reopening, Releasing And Dropping Need A Reason
-- A reopen, a release, a cancel, or an archive of open work cannot be planned
-  with a reason that is empty or only whitespace.
-- Archiving work at rest needs no reason.
+## Only Reopening Asks For Words
+- A reopen cannot be planned with text that is empty or only whitespace: it says what is being worked on.
+- A cancel, a release and an archive are planned with no reason, and carry one only when given.
 
 ## Needs-Input And Blocked Never Look The Same
 Every state has a symbol and a label of its own; no two states share either.

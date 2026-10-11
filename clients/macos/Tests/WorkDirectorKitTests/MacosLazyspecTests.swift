@@ -190,8 +190,8 @@ func fakeRunner(_ home: Home) throws {
         }
     }
 
-    @Test("A Write Shows The Exact Command It Will Run")
-    func writeShowsExactCommand() async throws {
+    @Test("A Write Runs At Once And Shows The Command It Ran")
+    func writeRunsAtOnce() async throws {
         let home = try Home()
         let id = try home.wd("add", "demo", "Pick a database")
         let plan = try Plan.decide(id, text: "use sqlite, it's what we know")
@@ -203,6 +203,15 @@ func fakeRunner(_ home: Home) throws {
         #expect(result.code == 0)
         let decisions = try await store.events(of: id).filter { $0.kind == "decision" }
         #expect(decisions.map(\.body) == ["use sqlite, it's what we know"])
+
+        #expect(plan.undo == nil)
+        #expect(Plan.cancel(id).undo?.argv == ["resume", id])
+        #expect(Plan.pause(id).undo?.argv == ["resume", id])
+        let cancelled = try await store.run(Plan.cancel(id))
+        #expect(cancelled.code == 0)
+        let undone = try await store.run(try #require(Plan.cancel(id).undo))
+        #expect(undone.code == 0)
+        #expect(try await store.work(id).state != .dropped)
     }
 
     @Test("Text In The Command Bar Becomes Argv Without A Shell")
@@ -214,21 +223,21 @@ func fakeRunner(_ home: Home) throws {
         #expect(throws: PlanError.empty) { try Plan.typed("wd") }
     }
 
-    @Test("Reopening, Releasing And Dropping Need A Reason")
-    func reopenReleaseAndDropNeedAReason() throws {
+    @Test("Only Reopening Asks For Words")
+    func onlyReopeningAsksForWords() throws {
         let open = try JSONDecoder().decode(Work.self, from: Data(workJSON(state: "running").utf8))
         let rest = try JSONDecoder().decode(Work.self, from: Data(workJSON(state: "done").utf8))
         for blank in ["", "  ", "\n\t"] {
             #expect(throws: PlanError.reasonRequired("reopening")) { try Plan.reopen("g1", reason: blank) }
-            #expect(throws: PlanError.reasonRequired("releasing")) { try Plan.release("g1", reason: blank) }
-            #expect(throws: PlanError.reasonRequired("archiving open work")) { try Plan.archive(open, reason: blank) }
-            #expect(throws: PlanError.reasonRequired("cancelling")) { try Plan.cancel("g1", reason: blank) }
+            #expect(Plan.cancel("g1", reason: blank).argv == ["cancel", "g1"])
+            #expect(Plan.release("g1", reason: blank).argv == ["release", "g1"])
+            #expect(Plan.archive(open, reason: blank).argv == ["archive", "w1"])
         }
-        #expect(try Plan.archive(rest, reason: "").argv == ["archive", "w1"])
-        #expect(try Plan.archive(open, reason: " not wanted ").argv == ["archive", "w1", "not wanted"])
-        #expect(try Plan.cancel("g1", reason: "client said stop").argv == ["cancel", "g1", "client said stop"])
+        #expect(Plan.archive(rest).argv == ["archive", "w1"])
+        #expect(Plan.archive(open, reason: " not wanted ").argv == ["archive", "w1", "not wanted"])
+        #expect(Plan.cancel("g1", reason: "client said stop").argv == ["cancel", "g1", "client said stop"])
         #expect(try Plan.reopen("g1", reason: " add search ").argv == ["reopen", "g1", "add search"])
-        #expect(try Plan.release("g1", reason: "duplicate of g2").argv == ["release", "g1", "duplicate of g2"])
+        #expect(Plan.release("g1", reason: "duplicate of g2").argv == ["release", "g1", "duplicate of g2"])
     }
 
     @Test("Needs-Input And Blocked Never Look The Same")

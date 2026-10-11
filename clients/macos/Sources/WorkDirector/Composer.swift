@@ -144,6 +144,8 @@ struct RecentGoals: View {
     let store: Store
     let scope: String?
     @Binding var selected: String?
+    @Binding var plan: Plan?
+    @Binding var asking: Ask?
 
     var body: some View {
         let goals = store.board?.recentGoals(project: scope) ?? []
@@ -154,6 +156,7 @@ struct RecentGoals: View {
                 List(goals, selection: $selected) { work in
                     WorkRow(work: work, rollup: store.board?.rollup(of: work.id))
                         .tag(work.id)
+                        .contextMenu { WorkMenu(work: work, run: { plan = $0 }, ask: { asking = $0 }) }
                 }
             }
         }
@@ -182,9 +185,7 @@ struct ArchivedList: View {
                     List(shown, selection: $selected) { work in
                         WorkRow(work: work, rollup: nil)
                             .tag(work.id)
-                            .contextMenu {
-                                Button("Unarchive") { plan = .unarchive(work.id) }
-                            }
+                            .contextMenu { WorkMenu(work: work, run: { plan = $0 }, ask: { _ in selected = work.id }) }
                     }
                 }
             } else if let failure {

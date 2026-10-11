@@ -19,7 +19,7 @@ and the work state machine. It opens every ledger an earlier wd wrote.
 - queued→running is allowed, for attaching a conversation already under way.
 - queued, briefed and blocked work may go straight to done.
 - Any other transition fails with IllegalTransition naming both states.
-- `Transition` onto soft-done, done→running or abandoned→dropped is refused naming the command that takes it: `SoftDone`, `Reopen`, `Release`.
+- `Transition` onto soft-done, done→running, abandoned→dropped, or out of dropped is refused naming the command that takes it: `SoftDone`, `Reopen`, `Release`, `Restore`.
 
 ## Finished Work Is Reopened With A Reason Or Not At All
 - `Reopen(id, why)` moves done work to running and records the reason as a decision.
@@ -35,6 +35,12 @@ recent reopening; work never reopened is judged on all its events.
 - `AddWorkspace` stores an id, a name, the resolved absolute path, and whether new workspaces may be created under it; `~/work/foo` and its absolute form are one workspace.
 - `Workspace` reads one by id or path; `Workspaces` lists parents first.
 - `CreateWorkspacePath(parent, name)` refuses, by name: a parent not registered as one; a name that is not a single directory (a separator, `.`, `..`, an absolute path); a joined path not under the parent.
+
+## Dropped Work Is Restored With Everything Dropped Alongside It
+- `Restore(id)` returns dropped work to the state it was dropped from, with every work under it dropped at the same moment.
+- Work under it dropped at another moment stays dropped.
+- Each restored work files a note reading `restored`.
+- Any state but dropped is refused, and so is archived work, naming `Unarchive`.
 
 ## An Abandoned Row Can Be Released Into A Choice
 - `Release(id, why)` moves abandoned work to dropped and files the reason as a decision.

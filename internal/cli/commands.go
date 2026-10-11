@@ -101,8 +101,15 @@ func (c *Cli) archive(rest []string) error {
 	if len(rest) < 1 {
 		return fail("usage: wd archive <id> [\"<why it is no longer wanted>\"]")
 	}
-	why := strings.Join(rest[1:], " ")
-	if strings.TrimSpace(why) != "" {
+	why := strings.TrimSpace(strings.Join(rest[1:], " "))
+	w, err := c.Ledger.Get(rest[0])
+	if err != nil {
+		return err
+	}
+	if why == "" && !core.AtRest(w.State) {
+		why = "archived"
+	}
+	if why != "" {
 		if err := c.stopUnder(rest[0]); err != nil {
 			return err
 		}
@@ -897,6 +904,9 @@ func (c *Cli) goalRelease(goal *core.Work, rest []string) error {
 }
 
 func (c *Cli) releaseWork(id, why string) error {
+	if why = strings.TrimSpace(why); why == "" {
+		why = "released"
+	}
 	w, err := c.Ledger.Release(id, why)
 	if err != nil {
 		return err
