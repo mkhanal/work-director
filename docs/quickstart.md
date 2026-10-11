@@ -12,6 +12,10 @@ wd doctor
 
 `wd doctor` lists the agent CLIs it found on your PATH. One is enough.
 
+Tab completion for your shell: `wd completion zsh > "${fpath[1]}/_wd"`, or
+`source <(wd completion bash)`, `wd completion fish | source`, or
+`wd completion powershell | Out-String | Invoke-Expression`.
+
 On a Mac, the app bundles its own `wd`. Build it from a checkout:
 
 ```

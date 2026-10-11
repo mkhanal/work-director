@@ -871,6 +871,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"doctor"},
 		{"cancel", t3, "census"},
 		{"answer", askingWork, "Red"},
+		{"completion", "zsh"},
 	} {
 		covered[args[0]] = true
 		args = append(args, "--json")
@@ -4022,6 +4023,28 @@ func TestGoalStartsFromOneSentence(t *testing.T) {
 	}
 	if !filed {
 		t.Fatalf("a goal whose plan yielded nothing should stay filed")
+	}
+}
+
+func TestWdCompletionPrintsAShellsCompletionScript(t *testing.T) {
+	f := newCLIFixture(t)
+	for shell, marker := range map[string]string{"bash": "complete -F", "zsh": "#compdef wd", "fish": "complete -c wd", "powershell": "Register-ArgumentCompleter"} {
+		script := f.runOK(t, "completion", shell)
+		if !strings.Contains(script, marker) {
+			t.Errorf("%s script lacks %q:\n%s", shell, marker, script)
+		}
+		for name := range commands {
+			if !strings.Contains(script, name) {
+				t.Errorf("%s script does not complete %s", shell, name)
+			}
+		}
+	}
+	var out struct{ Shell, Script string }
+	if err := json.Unmarshal([]byte(f.runOK(t, "completion", "fish", "--json")), &out); err != nil || out.Shell != "fish" || !strings.Contains(out.Script, "complete -c wd") {
+		t.Errorf("completion --json = %+v, %v", out, err)
+	}
+	if errStr := f.runFail(t, "completion", "tcsh"); !strings.Contains(errStr, "bash, zsh, fish or powershell") {
+		t.Errorf("an unknown shell = %q, want it refused naming the four", errStr)
 	}
 }
 

@@ -317,6 +317,11 @@ could not with their work, the bound that ran out, and the work still open.
 - `--json` prints `{goal, tasks}`, read after the tasks are spawned.
 - A plan that yields no tasks leaves the goal filed and exits 1 naming the plan session.
 
+## Wd Completion Prints A Shell's Completion Script
+- `wd completion <bash|zsh|fish|powershell>` prints a script that completes every `wd` command name in that shell.
+- `--json` prints `{shell, script}`.
+- Any other shell is refused naming the four.
+
 ## Wd Archive Hides Work And Wd Unarchive Brings It Back
 - `wd archive <id> ["<why>"]` and `wd unarchive <id>` apply the ledger's archive rules and exit 1 with its refusals.
 - Open work archived without a `<why>` is dropped as `archived`.
