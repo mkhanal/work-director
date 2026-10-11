@@ -73,3 +73,8 @@ hold only that product's work; with none, every product's.
 ## Stopping A Session Puts Back What It Had Not Read
 - Stopping runs `wd stop <id>`.
 - The messages it withdraws come back as one text, oldest first, for the person to edit and send again.
+
+## Escape Pressed Twice Quickly Stops The Work
+- A second Escape within 0.8 seconds of the first stops the task or goal on screen, as the Stop button does.
+- A lone Escape, or a second one later than that, stops nothing.
+- A third quick Escape does not stop it again.

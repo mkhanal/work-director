@@ -44,7 +44,37 @@ const (
 	StatusWaiting RunnerStatus = "waiting"
 	StatusExited  RunnerStatus = "exited"
 	StatusUnknown RunnerStatus = "unknown"
+	// StatusStopped is a session whose process has ended and whose
+	// conversation resumes on the next send.
+	StatusStopped RunnerStatus = "stopped"
 )
+
+// Live is whether a session's process is up: working, idle or waiting on a
+// person. Only a live session has anything to stop.
+func (s RunnerStatus) Live() bool {
+	return s == StatusRunning || s == StatusIdle || s == StatusWaiting
+}
+
+// StopIfLive stops h's session when its process is up, and reports whether
+// it did.
+func StopIfLive(r Runner, h Handle) (bool, error) {
+	status, err := r.Status(h)
+	if err != nil || !status.Live() {
+		return false, err
+	}
+	return true, r.Stop(h)
+}
+
+// Dismiss stops a session the director started for one answer, once that
+// answer is read. A runner file with no stop command declared it cannot stop
+// a session, so its session is left as it is.
+func Dismiss(r Runner, h Handle) error {
+	if s, ok := r.(interface{ CanStop() bool }); ok && !s.CanStop() {
+		return nil
+	}
+	_, err := StopIfLive(r, h)
+	return err
+}
 
 // Runner drives one provider's CLI, the executable Command names. Send takes a pointer because detached
 // runners (opencode, codex, spec) record the new process ref on the handle.

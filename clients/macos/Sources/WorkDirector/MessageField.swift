@@ -13,8 +13,6 @@ struct MessageField: NSViewRepresentable {
     /// The height the text needs, from one line up to `maxLines`.
     @Binding var height: CGFloat
     let send: () -> Void
-    /// Escape, when there is something to stop.
-    let stop: (() -> Void)?
 
     static let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
     static let maxLines: CGFloat = 8
@@ -75,10 +73,6 @@ struct MessageField: NSViewRepresentable {
         }
 
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-            if selector == #selector(NSResponder.cancelOperation(_:)), let stop = field.stop {
-                stop()
-                return true
-            }
             guard let event = NSApp.currentEvent, event.type == .keyDown,
                   event.keyCode == 36 || event.keyCode == 76 else { return false }
             switch field.sendKey.press(Self.chord(event.modifierFlags)) {

@@ -44,7 +44,7 @@ struct WorkDetail: View {
                         switch loaded {
                         case .goal(let goal):
                             Waiting(store: store, goal: goal, open: open) { Task { await load() } }
-                            GoalSections(goal: goal, open: open)
+                            GoalSections(store: store, goal: goal, open: open) { Task { await load() } }
                         case .work(let work, let events):
                             if hasSession(work) {
                                 Picker("Show", selection: $tab) {
@@ -101,12 +101,12 @@ struct WorkDetail: View {
         }
     }
 
-    /// Whether anything under this work is working now: a task's session, or
-    /// any of a goal's tasks.
+    /// Whether a session under this work has a process up to stop: a task's
+    /// own, or any of a goal's tasks'.
     private var working: Bool {
         switch loaded {
-        case .goal(let g): g.tasks.contains { $0.state == .running }
-        case .work: session == .running
+        case .goal(let g): g.activity.values.contains { $0.status?.live == true }
+        case .work: session.live
         case nil: false
         }
     }
@@ -191,8 +191,15 @@ struct Waiting: View {
 }
 
 struct GoalSections: View {
+    let store: Store
     let goal: GoalDetail
     let open: (String) -> Void
+    /// Reads the goal again after a task was stopped.
+    let changed: () -> Void
+    @State private var stopping: String?
+    @State private var stopFailure: String?
+    /// What a stopped task had not read yet, to say again where it belongs.
+    @State private var stopNote: String?
 
     var body: some View {
         if let delivery = goal.delivery {
@@ -211,10 +218,18 @@ struct GoalSections: View {
             if goal.tasks.isEmpty {
                 Text("No tasks yet.").foregroundStyle(.secondary)
             }
+            if let stopNote {
+                Text(stopNote).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            if let stopFailure {
+                Label(stopFailure, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.red).textSelection(.enabled)
+            }
             ForEach(headings, id: \.self) { heading in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(heading).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
                     ForEach(goal.tasks.filter { ($0.heading ?? "") == heading }) { task in
+                        HStack(alignment: .top, spacing: 6) {
                         Button { open(task.id) } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 8) {
@@ -234,6 +249,19 @@ struct GoalSections: View {
                         }
                         .buttonStyle(.plain)
                         .help("Open this task's conversation")
+                        if goal.activity[task.id]?.status?.live == true {
+                            if stopping == task.id {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Button { Task { await stop(task.id) } } label: {
+                                    Image(systemName: "stop.circle")
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.red)
+                                .help("Stop this task's session: \(Plan.stop(task.id).commandLine)")
+                            }
+                        }
+                        }
                     }
                 }
             }
@@ -261,6 +289,19 @@ struct GoalSections: View {
             SectionTitle("Landings", detail: "\(goal.landings.count)")
         }
         EventsSection(events: goal.events, expanded: false)
+    }
+
+    private func stop(_ id: String) async {
+        stopping = id
+        defer { stopping = nil }
+        do {
+            let back = try await store.stop(Plan.stop(id))
+            stopFailure = nil
+            stopNote = back.isEmpty ? nil : "Stopped \(id); it had not read:\n\(back)"
+        } catch {
+            stopFailure = "\(id): \(error)"
+        }
+        changed()
     }
 
     private var headings: [String] {
@@ -458,6 +499,11 @@ struct InputBar: View {
     let submit: () -> Void
     @AppStorage("sendKey") private var sendKey: SendKey = .standard
     @State private var height = MessageField.font.boundingRectForFont.height
+    @State private var taps = EscapeTaps()
+    @State private var escapeMonitor: Any?
+    @State private var escapeStops = EscapeTarget()
+    /// Shown after one Escape, while a second one would stop.
+    @State private var armed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -475,8 +521,7 @@ struct InputBar: View {
                     sendKey: sendKey,
                     enabled: !busy,
                     height: $height,
-                    send: { if command != nil && !busy { submit() } },
-                    stop: stop == nil || busy ? nil : stopped
+                    send: { if command != nil && !busy { submit() } }
                 )
                 .frame(height: height)
                 if busy {
@@ -488,7 +533,7 @@ struct InputBar: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(.red)
-                        .help("Stop (Esc): \(stop.commandLine)\nWhat it has not read yet comes back here to edit")
+                        .help("Stop (Esc Esc): \(stop.commandLine)\nWhat it has not read yet comes back here to edit")
                     }
                     Button(action: submit) {
                         Image(systemName: "arrow.up.circle.fill").font(.title2)
@@ -511,14 +556,50 @@ struct InputBar: View {
                         .truncationMode(.middle)
                 }
                 Spacer(minLength: 0)
-                Text(sendKey.title + (stop == nil ? "" : " · Esc stops"))
+                Text(armed ? "Press Esc again to stop" : sendKey.title + (stop == nil ? "" : " · Esc Esc stops"))
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(armed ? AnyShapeStyle(.red) : AnyShapeStyle(.tertiary))
                     .fixedSize()
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
+        .onAppear { watchEscape() }
+        .onChange(of: stop != nil && !busy, initial: true) { _, can in
+            escapeStops.stop = can ? stopped : nil
+        }
+        .onDisappear {
+            if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+            escapeMonitor = nil
+        }
     }
+
+    /// Escape anywhere in the window counts, not only in the text, so work can
+    /// be stopped while reading its conversation. A sheet's Escape is its own.
+    private func watchEscape() {
+        guard escapeMonitor == nil else { return }
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 53, event.window?.attachedSheet == nil, event.window?.isSheet == false,
+                  let stop = escapeStops.stop else { return event }
+            if taps.tap() {
+                armed = false
+                stop()
+            } else {
+                armed = true
+                Task {
+                    try? await Task.sleep(for: .seconds(EscapeTaps.window))
+                    armed = false
+                }
+            }
+            return nil
+        }
+    }
+}
+
+/// What a double Escape stops right now. The key monitor outlives the view
+/// value that installed it, so it reads this rather than that value.
+@MainActor
+final class EscapeTarget {
+    var stop: (() -> Void)?
 }

@@ -1031,21 +1031,13 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 	if err != nil {
 		return nil, err
 	}
-	deadline := time.Now().Add(time.Duration(wait) * time.Second)
-	var tasks []coordinator.PlanTask
-	for time.Now().Before(deadline) {
-		texts, err := runner.Transcript(rn, h)
-		if err != nil {
-			return nil, err
-		}
-		if ts := coordinator.ParsePlan(texts); len(ts) > 0 {
-			tasks = ts
-			break
-		}
-		if q, ok := coordinator.PlanQuestion(texts); ok {
-			return nil, planAsked{q}
-		}
-		time.Sleep(500 * time.Millisecond)
+	tasks, err := awaitPlan(rn, h, time.Duration(wait)*time.Second)
+	// The planning session answers once; whatever it said, it is not left running.
+	if serr := runner.Dismiss(rn, h); serr != nil && err == nil {
+		err = serr
+	}
+	if err != nil {
+		return nil, err
 	}
 	if tasks == nil {
 		return nil, fail("plan session %s produced no task list", h.Session)
@@ -1070,6 +1062,26 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 		}
 	}
 	return rows, nil
+}
+
+// awaitPlan reads the planning session until it lists tasks or asks a
+// question; nil tasks is a wait that ran out.
+func awaitPlan(rn runner.Runner, h runner.Handle, wait time.Duration) ([]coordinator.PlanTask, error) {
+	deadline := time.Now().Add(wait)
+	for time.Now().Before(deadline) {
+		texts, err := runner.Transcript(rn, h)
+		if err != nil {
+			return nil, err
+		}
+		if ts := coordinator.ParsePlan(texts); len(ts) > 0 {
+			return ts, nil
+		}
+		if q, ok := coordinator.PlanQuestion(texts); ok {
+			return nil, planAsked{q}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return nil, nil
 }
 
 func (c *Cli) goalSpawn(cmd string, goal core.Work) error {

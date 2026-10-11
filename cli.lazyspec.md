@@ -100,6 +100,10 @@ verify event.
 - A project listing no verify commands is verified with its repository's checks, as `ReadToolkit` finds them.
 - A listed command for another package manager than the repository's is refused naming both, and nothing runs.
 
+## A Session Started For One Answer Is Stopped Once It Answers
+- The sessions the director starts to plan a goal, find a goal, judge and reflect are stopped once their reply is read.
+- A runner file with no `stop` command leaves them as they are.
+
 ## Wd Goal Start Files Nothing When The Request Says Nothing To Change
 - A planner replying `ASK: <question>` makes `wd goal start` exit 1 with the question.
 - The goal it filed is dropped with the question as the reason and archived, with no tasks.
@@ -333,13 +337,13 @@ could not with their work, the bound that ran out, and the work still open.
 - `--json` prints the task ids under `delivered`, `queued` and `brief`.
 
 ## Wd Stop Interrupts A Session And Hands Back What It Had Not Read
-- `wd stop <id>` stops a task's running session through its runner; the task keeps its state, and the next message continues the same session.
+- `wd stop <id>` stops a task's live session, working, idle or waiting, through its runner; the task keeps its state, and the next message continues the same session.
 - Messages still queued for the task are withdrawn; `--json` prints `{ok, stopped, withdrawn}`, `withdrawn` holding their texts oldest first.
 - On a goal it stops and withdraws for every open task under it.
-- With no running session and nothing queued it is refused, saying there is nothing to stop.
+- With no live session and nothing queued it is refused, saying there is nothing to stop.
 
 ## Wd Pause Stops Running Sessions And Keeps Their Conversations
-- `wd pause <id>` stops the session of a task that is running through its runner, which keeps the conversation, and moves the task to paused.
+- `wd pause <id>` stops the live session of a task through its runner, which keeps the conversation, and moves the task to paused.
 - On a goal it pauses every open task under it, then the goal.
 - A session that cannot be stopped is named, its task keeps its state, the goal is not paused, and the command exits 1.
 - `wd drive` on a paused goal is refused naming `wd resume`.

@@ -45,6 +45,7 @@ provider is a TOML file of commands under `~/.work-director/runners/`.
 ## A Runner Stops A Session And Keeps Its Conversation
 - `stop` ends the session's current run; a later `send` continues the same conversation.
 - claude runs `claude stop <bg id>`; a handle with no bg id is refused naming it, and a failing stop carries claude's stderr.
+- claude reports a session `claude agents` lists with no status as `stopped`; only `running`, `idle` and `waiting` sessions are live.
 - opencode and codex end the process serving the session; a process already gone is already stopped.
 - A runner file stops through its optional `stop` command, which takes the same placeholders as `status`; a file without one is refused naming the file.
 

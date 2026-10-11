@@ -368,6 +368,9 @@ func (r *specRunnerAdapter) Send(h *Handle, text string) error {
 	return nil
 }
 
+// CanStop is whether the runner file names a stop command.
+func (r *specRunnerAdapter) CanStop() bool { return r.spec.Stop != "" }
+
 func (r *specRunnerAdapter) Stop(h Handle) error {
 	if r.spec.Stop == "" {
 		return &RunnerError{Runner: r.spec.Name, Detail: "no stop command in " + r.spec.file + "; add stop = \"...\" to stop a session and keep its conversation"}

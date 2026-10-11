@@ -171,9 +171,10 @@ func (claudeRunner) Status(h Handle) (RunnerStatus, error) {
 		case "idle":
 			return StatusIdle, nil
 		}
-		// A stopped session keeps its conversation and resumes on the next send.
-		if a.State == "done" || a.State == "stopped" {
-			return StatusIdle, nil
+		// A session listed with no status has no process; it keeps its
+		// conversation and resumes on the next send.
+		if a.Status == "" {
+			return StatusStopped, nil
 		}
 		return StatusUnknown, nil
 	}

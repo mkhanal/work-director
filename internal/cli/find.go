@@ -61,6 +61,9 @@ func (c *Cli) goalFind(name, text string) error {
 	if err != nil {
 		return err
 	}
+	if err := runner.Dismiss(rn, h); err != nil {
+		return err
+	}
 	byID := map[string]core.Work{}
 	for _, g := range goals {
 		byID[g.ID] = g

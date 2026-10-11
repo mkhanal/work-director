@@ -360,8 +360,8 @@ func (c *Cli) stopUnder(id string) error {
 	return nil
 }
 
-// stopSession stops work's session when its runner reports it running. Work
-// with no session, or a session that is idle, has nothing to stop.
+// stopSession stops work's session while its process is up, working, idle or
+// waiting. Work with no session, or one already stopped, has nothing to stop.
 func (c *Cli) stopSession(w core.Work) (bool, error) {
 	p, err := c.project(w.Project)
 	if err != nil {
@@ -375,14 +375,7 @@ func (c *Cli) stopSession(w core.Work) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	status, err := r.Status(h)
-	if err != nil {
-		return false, err
-	}
-	if status != runner.StatusRunning {
-		return false, nil
-	}
-	return true, r.Stop(h)
+	return runner.StopIfLive(r, h)
 }
 
 // goalContinue picks a goal up where it stands: an open goal is told the text,

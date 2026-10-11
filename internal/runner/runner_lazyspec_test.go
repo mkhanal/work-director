@@ -610,11 +610,18 @@ transcript = "cat {log}"
 	t.Run("A Runner Stops A Session And Keeps Its Conversation", func(t *testing.T) {
 		t.Run("claude stops by its background id", func(t *testing.T) {
 			h := Handle{Runner: "claude", Session: testSID, Ref: strPtr("b765c0a2"), Cwd: cwd}
+			os.Remove(filepath.Join(bin, "stopped"))
+			if st, err := claude.Status(h); err != nil || st != StatusIdle || !st.Live() {
+				t.Fatalf("idle session status = %q, %v; want idle and live", st, err)
+			}
 			if err := claude.Stop(h); err != nil {
 				t.Fatalf("claude stop: %v", err)
 			}
 			if !strings.Contains(calls(t, bin), "claude stop b765c0a2") {
 				t.Fatalf("calls.log missing claude stop:\n%s", calls(t, bin))
+			}
+			if st, err := claude.Status(h); err != nil || st != StatusStopped || st.Live() {
+				t.Fatalf("stopped session status = %q, %v; want stopped and not live", st, err)
 			}
 			if err := claude.Stop(Handle{Runner: "claude", Session: testSID, Cwd: cwd}); err == nil || !strings.Contains(err.Error(), "no background id") {
 				t.Fatalf("claude stop with no ref = %v, want it refused naming the missing id", err)

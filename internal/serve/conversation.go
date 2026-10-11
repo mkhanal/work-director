@@ -77,6 +77,8 @@ type activity struct {
 	At     *string          `json:"at,omitempty"`
 	Asking *runner.Question `json:"asking,omitempty"`
 	Error  string           `json:"error,omitempty"`
+	// Status is the session's own: whether it works, rests or has stopped.
+	Status runner.RunnerStatus `json:"status,omitempty"`
 }
 
 // activities reads the session of every task still working, keyed by task.
@@ -102,7 +104,11 @@ func (s *Server) activities(tasks []core.Work) map[string]activity {
 			out[t.ID] = activity{Error: err.Error()}
 			continue
 		}
-		out[t.ID] = activityOf(entries)
+		a := activityOf(entries)
+		if a.Status, err = r.Status(h); err != nil {
+			a.Status = runner.StatusUnknown
+		}
+		out[t.ID] = a
 	}
 	return out
 }

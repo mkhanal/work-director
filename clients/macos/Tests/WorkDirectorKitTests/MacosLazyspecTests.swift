@@ -429,4 +429,16 @@ func fakeRunner(_ home: Home) throws {
         #expect(back == "drop the tables\n\nall of them")
         try await channel.close()
     }
+
+    @Test("Escape Pressed Twice Quickly Stops The Work")
+    func escapeTwiceStops() {
+        let t0 = Date(timeIntervalSince1970: 1000)
+        var taps = EscapeTaps()
+        #expect(taps.tap(at: t0) == false, "a lone Escape stops nothing")
+        #expect(taps.tap(at: t0.addingTimeInterval(0.5)) == true)
+        #expect(taps.tap(at: t0.addingTimeInterval(0.7)) == false, "a third quick Escape does not stop again")
+        var slow = EscapeTaps()
+        _ = slow.tap(at: t0)
+        #expect(slow.tap(at: t0.addingTimeInterval(1.2)) == false, "a second Escape after the window stops nothing")
+    }
 }

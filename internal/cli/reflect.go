@@ -64,6 +64,9 @@ func (c *Cli) Reflect(w core.Work, texts []string) (reflectResult, error) {
 	if err != nil {
 		return res, err
 	}
+	if err := runner.Dismiss(rn, h); err != nil {
+		return res, err
+	}
 	res.Body = reflect.Event(brief, j, rn.Name(), strOrEmpty(p.Model))
 	durable := j.Durable()
 	res.Found = len(durable)

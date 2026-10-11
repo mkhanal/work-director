@@ -1082,6 +1082,18 @@ func TestWdVerifyRunsWhatTheRepositorysToolkitGives(t *testing.T) {
 	}
 }
 
+func TestASessionStartedForOneAnswerIsStoppedOnceItAnswers(t *testing.T) {
+	f := newCLIFixture(t)
+	if err := os.MkdirAll(filepath.Join(f.dir, "fake-state"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.runOK(t, "goal", "start", "sample-app", "Fix the login page", "--runner", "planner")
+	stopped, err := os.ReadFile(filepath.Join(f.dir, "fake-state", "stopped"))
+	if err != nil || !strings.Contains(string(stopped), "planner planner-s") {
+		t.Fatalf("stopped = %q, %v; want the planning session stopped once its plan was read", stopped, err)
+	}
+}
+
 func TestWdGoalStartFilesNothingWhenTheRequestSaysNothingToChange(t *testing.T) {
 	f := newCLIFixture(t)
 	state := filepath.Join(f.dir, "fake-state")
@@ -4224,6 +4236,19 @@ func TestWdStopInterruptsASessionAndHandsBackWhatItHadNotRead(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(state, "claude-stopped-ab000002")); err != nil {
 		t.Fatalf("stop on the goal did not stop the task's session: %v", err)
+	}
+
+	// An idle session's process is still up, so it is stopped too.
+	for _, marker := range []string{"claude-busy", "claude-stopped", "claude-stopped-ab000002"} {
+		if err := os.Remove(filepath.Join(state, marker)); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "stop", t2, "--json")), &out); err != nil {
+		t.Fatalf("stop idle --json: %v", err)
+	}
+	if len(out.Stopped) != 1 || out.Stopped[0] != t2 {
+		t.Fatalf("stop of an idle session = %+v, want %s stopped", out, t2)
 	}
 }
 

@@ -69,7 +69,10 @@ public struct Step: Codable, Sendable, Hashable {
 /// What a session reports about itself: working, idle, waiting on a person,
 /// gone, or no session at all.
 public enum SessionStatus: String, Codable, Sendable {
-    case running, idle, waiting, exited, unknown, none
+    case running, idle, waiting, stopped, exited, unknown, none
+
+    /// Whether the session's process is up, and so can be stopped.
+    public var live: Bool { self == .running || self == .idle || self == .waiting }
 }
 
 public struct ConversationPage: Codable, Sendable, Hashable {
@@ -90,6 +93,7 @@ public struct Activity: Codable, Sendable, Hashable {
     public let at: String?
     public let asking: Question?
     public let error: String?
+    public let status: SessionStatus?
 }
 
 /// One row of a conversation as it reads: a step on its own, or a run of tool

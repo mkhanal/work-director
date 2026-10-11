@@ -178,6 +178,9 @@ func (c *Cli) tasteJudgeOnce(p *project.Project) driver.Judge {
 			return driver.Verdict{}, err
 		}
 		v := awaitJudgement(rn, h)
+		if err := runner.Dismiss(rn, h); err != nil {
+			return driver.Verdict{}, err
+		}
 		return driver.Verdict{
 			Answer:  v.Answer,
 			Decline: v.Decline,
@@ -630,6 +633,9 @@ func (c *Cli) judgeOnce(goal core.Work, p *project.Project) driver.Judge {
 			return driver.Verdict{}, err
 		}
 		v := awaitJudgement(rn, h)
+		if err := runner.Dismiss(rn, h); err != nil {
+			return driver.Verdict{}, err
+		}
 		return driver.Verdict{
 			Answer:  v.Answer,
 			Decline: v.Decline,

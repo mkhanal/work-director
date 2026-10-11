@@ -68,6 +68,7 @@ JSON message per line to stdout:
 ## A Goal Serves What Each Working Task Is Doing Now
 - `activity` on a goal maps each running or needs-input task with a session to its latest step as one line (`now`), that step's `kind`, and `asking`.
 - A tool step reads as its name and what it acted on; a question as its questions; others as their first line.
+- Each carries its session's `status`, `unknown` when the runner cannot say.
 - A session that cannot be read carries `error` instead.
 - With no such task, `activity` is `{}`.
 

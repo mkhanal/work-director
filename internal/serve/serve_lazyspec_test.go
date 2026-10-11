@@ -1140,7 +1140,7 @@ func aGoalServesWhatEachWorkingTaskIsDoingNow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a := g.Activity[tool.ID]; a.Now != "Bash · go test ./..." || a.Kind != runner.EntryTool || a.Asking != nil {
+	if a := g.Activity[tool.ID]; a.Now != "Bash · go test ./..." || a.Kind != runner.EntryTool || a.Asking != nil || a.Status != runner.StatusWaiting {
 		t.Fatalf("tool activity = %+v", a)
 	}
 	if a := g.Activity[ask.ID]; a.Now != "Which colour? (Red / Blue)" || a.Asking == nil {
