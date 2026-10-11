@@ -12,6 +12,8 @@ public final class Store {
     public private(set) var failure: String?
     /// How many times the board has been read; a view can watch it change.
     public private(set) var reads = 0
+    /// Told about each work that comes to wait on a person, once.
+    public var arrived: ((Arrival) -> Void)?
 
     private let channel: Channel
     private var following: Task<Void, Never>?
@@ -55,8 +57,11 @@ public final class Store {
         repeat {
             stale = false
             do {
-                board = try await channel.board()
+                let earlier = board
+                let now = try await channel.board()
+                board = now
                 reads += 1
+                for a in now.arrivals(since: earlier) { arrived?(a) }
                 failure = nil
             } catch {
                 failure = "\(error)"

@@ -55,6 +55,8 @@ extension Notification.Name {
     static let openCommandBar = Notification.Name("openCommandBar")
     static let reload = Notification.Name("reload")
     static let newGoal = Notification.Name("newGoal")
+    /// Opens one work item; its id is the notification's object.
+    static let openWork = Notification.Name("openWork")
 }
 
 @MainActor
@@ -72,6 +74,8 @@ final class Launch {
         guard case .starting = state else { return }
         do {
             let store = Store(channel: try Channel(wd: try locateWD()))
+            Notifier.shared.start()
+            store.arrived = { Notifier.shared.announce($0) }
             state = .running(store)
             await store.start()
         } catch {
@@ -83,6 +87,7 @@ final class Launch {
 /// What a person can set about how Work Director behaves for them.
 struct Preferences: View {
     @AppStorage("sendKey") private var sendKey: SendKey = .standard
+    @AppStorage("notify") private var notify = true
 
     var body: some View {
         Form {
@@ -90,9 +95,10 @@ struct Preferences: View {
                 ForEach(SendKey.allCases) { key in Text(key.title).tag(key) }
             }
             .pickerStyle(.radioGroup)
-            Text("Any other chord with Return starts a new line. Esc stops a session while it works.")
+            Text("Any other chord with Return starts a new line. Esc pressed twice stops a session while it works.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Toggle("Tell me when work needs me or reaches a gate", isOn: $notify)
         }
         .padding(20)
         .frame(width: 460)

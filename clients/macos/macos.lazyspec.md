@@ -96,3 +96,8 @@ hold only that product's work; with none, every product's.
 - A work page offers the gate `wd` serves for it as one button, which runs the gate's argv.
 - Work waiting on no gate has no such button.
 
+## Work That Comes To Wait On You Is Announced Once
+- Work that has moved into Needs You, Ready to Push or Ready to Close since the board was last read is announced, once.
+- Nothing is announced from the first read.
+- Work that stays in its band, or moves into any other, is not announced.
+

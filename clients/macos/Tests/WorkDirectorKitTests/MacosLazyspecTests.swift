@@ -560,4 +560,19 @@ func fakeRunner(_ home: Home) throws {
         #expect(verify.argv == ["verify", id])
         #expect(verify.title == "Verify")
     }
+
+    @Test("Work That Comes To Wait On You Is Announced Once")
+    func arrivalsAnnouncedOnce() throws {
+        func board(_ rows: [(String, String, String)]) throws -> Board {
+            let goals = rows.map { id, state, band in
+                #"{"work":\#(workJSON(state: state).replacingOccurrences(of: #""id":"w1""#, with: #""id":"\#(id)""#)),"rollup":{"counts":{},"done":0,"total":1},"band":"\#(band)"}"#
+            }
+            return try JSONDecoder().decode(Board.self, from: Data(#"{"goals":[\#(goals.joined(separator: ","))],"standalone":[]}"#.utf8))
+        }
+        let first = try board([("a", "running", "in-flight"), ("b", "needs-input", "needs-you"), ("c", "running", "in-flight")])
+        #expect(first.arrivals(since: nil).isEmpty, "nothing is announced from the first read")
+        let second = try board([("a", "needs-input", "needs-you"), ("b", "needs-input", "needs-you"), ("c", "review", "ready-to-push"), ("d", "paused", "paused")])
+        #expect(Set(second.arrivals(since: first).map(\.work.id)) == ["a", "c"])
+        #expect(second.arrivals(since: second).isEmpty, "staying put is not news")
+    }
 }

@@ -86,6 +86,9 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openCommandBar)) { _ in typing = true }
         .onReceive(NotificationCenter.default.publisher(for: .newGoal)) { _ in newGoal() }
+        .onReceive(NotificationCenter.default.publisher(for: .openWork)) { note in
+            if let id = note.object as? String { place = .work(id) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .reload)) { _ in Task { await store.refresh() } }
         .sheet(isPresented: $typing) {
             CommandBar { typed in
