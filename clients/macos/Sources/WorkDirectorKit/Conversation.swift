@@ -84,6 +84,45 @@ public struct ConversationPage: Codable, Sendable, Hashable {
     public let total: Int
     public let entries: [Step]
     public let asking: Question?
+    public let agent: String?
+    public let usage: Usage?
+    public let subagents: [Subagent]?
+}
+
+/// What a session has spent and done.
+public struct Usage: Codable, Sendable, Hashable {
+    public let model: String?
+    public let tokens: Int
+    public let tools: Int
+    public let started: String?
+    public let last: String?
+
+    public init(model: String?, tokens: Int, tools: Int, started: String?, last: String?) {
+        self.model = model
+        self.tokens = tokens
+        self.tools = tools
+        self.started = started
+        self.last = last
+    }
+}
+
+/// An agent a session started for part of its work.
+public struct Subagent: Codable, Sendable, Hashable, Identifiable {
+    public let id: String
+    public let description: String
+    public let type: String
+    public let done: Bool
+    public let said: String?
+    public let usage: Usage
+
+    public init(id: String, description: String, type: String, done: Bool, said: String?, usage: Usage) {
+        self.id = id
+        self.description = description
+        self.type = type
+        self.done = done
+        self.said = said
+        self.usage = usage
+    }
 }
 
 /// What a task's session is doing now, in a line.
@@ -94,6 +133,8 @@ public struct Activity: Codable, Sendable, Hashable {
     public let asking: Question?
     public let error: String?
     public let status: SessionStatus?
+    public let usage: Usage?
+    public let subagents: [Subagent]?
 }
 
 /// One row of a conversation as it reads: a step on its own, or a run of tool
@@ -189,12 +230,18 @@ public final class Feed {
     public private(set) var failure: String?
     public private(set) var loaded = false
 
+    public private(set) var usage: Usage?
+    public private(set) var subagents: [Subagent] = []
+
     private let store: Store
     private let id: String
+    /// The subagent followed, or nil for the session itself.
+    public let agent: String?
 
-    public init(store: Store, id: String) {
+    public init(store: Store, id: String, agent: String? = nil) {
         self.store = store
         self.id = id
+        self.agent = agent
     }
 
     /// The first step that can still change; everything before it is final.
@@ -203,16 +250,18 @@ public final class Feed {
     public func read() async {
         let from = stable
         do {
-            let page = try await store.conversation(id, from: from)
+            let page = try await store.conversation(id, from: from, agent: agent)
             // A store that shrank (a session moved, a file replaced) is read
             // again whole rather than spliced onto steps it no longer has.
             if page.total < from {
-                steps = try await store.conversation(id, from: 0).entries
+                steps = try await store.conversation(id, from: 0, agent: agent).entries
             } else {
                 steps = Array(steps.prefix(from)) + page.entries
             }
             status = page.status
             asking = page.asking
+            usage = page.usage
+            subagents = page.subagents ?? []
             failure = nil
         } catch {
             failure = "\(error)"

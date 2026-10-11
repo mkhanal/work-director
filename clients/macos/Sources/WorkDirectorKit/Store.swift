@@ -76,8 +76,8 @@ public final class Store {
         try await channel.events(of: id)
     }
 
-    public func conversation(_ id: String, from: Int) async throws -> ConversationPage {
-        try await channel.conversation(id, from: from)
+    public func conversation(_ id: String, from: Int, agent: String? = nil) async throws -> ConversationPage {
+        try await channel.conversation(id, from: from, agent: agent)
     }
 
     public func review(project: String) async throws -> ReviewPass {

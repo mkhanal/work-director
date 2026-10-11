@@ -8,16 +8,9 @@ import WorkDirectorKit
 struct ConversationView: View {
     let store: Store
     let work: Work
-    /// Told the session's status each time it changes.
-    let status: (SessionStatus) -> Void
-    @State private var feed: Feed
-
-    init(store: Store, work: Work, status: @escaping (SessionStatus) -> Void) {
-        self.store = store
-        self.work = work
-        self.status = status
-        _feed = State(initialValue: Feed(store: store, id: work.id))
-    }
+    /// The session, or one of its subagents, as it is read; whoever shows the
+    /// conversation owns it, so the agents panel reads the same reads.
+    let feed: Feed
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -53,8 +46,7 @@ struct ConversationView: View {
                 .font(.callout)
             }
         }
-        .task { await feed.follow() }
-        .onChange(of: feed.status, initial: true) { status(feed.status) }
+        .task(id: ObjectIdentifier(feed)) { await feed.follow() }
     }
 }
 

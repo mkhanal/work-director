@@ -78,3 +78,16 @@ hold only that product's work; with none, every product's.
 - A second Escape within 0.8 seconds of the first stops the task or goal on screen, as the Stop button does.
 - A lone Escape, or a second one later than that, stops nothing.
 - A third quick Escape does not stop it again.
+
+## The Agents Panel Shows Each Task And The Subagents It Started
+- A goal's panel has a card for each task with a session, in the goal's order, with the subagents its session started under it.
+- A card is asking when its session waits on a question, working while its session runs, resting while it is up with nothing to do, and settled otherwise; a subagent works until its last reply ends its turn.
+- A card's time runs from its first record to now while it works, and to its last record once it does not.
+- The panel counts settled cards and adds every card's tokens, subagents included.
+- Choosing a subagent shows its own conversation.
+
+## The Sidebar Lists Work As Threads, Most Recently Active First
+- Goals and standalone work in the product in scope are listed most recently updated first.
+- Work not started yet is listed apart as queued, and work at rest apart as settled.
+- Choosing a band shows only the work in it.
+

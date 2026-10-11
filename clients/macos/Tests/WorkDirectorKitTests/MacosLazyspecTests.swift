@@ -450,4 +450,85 @@ func fakeRunner(_ home: Home) throws {
         _ = slow.tap(at: t0)
         #expect(slow.tap(at: t0.addingTimeInterval(1.2)) == false, "a second Escape after the window stops nothing")
     }
+
+    @Test("The Agents Panel Shows Each Task And The Subagents It Started")
+    func agentsPanel() async throws {
+        func task(_ id: String, _ state: String) throws -> Work {
+            try JSONDecoder().decode(Work.self, from: Data(workJSON(state: state).replacingOccurrences(of: #""id":"w1""#, with: #""id":"\#(id)""#).utf8))
+        }
+        let a = try task("a", "running"), b = try task("b", "needs-input"), c = try task("c", "done"), quiet = try task("q", "queued")
+        func activity(_ status: String, asking: Bool = false, usage: String, subagents: String = "[]") throws -> Activity {
+            let q = asking ? #"{"id":"q1","items":[],"answers":null,"reply":null}"# : "null"
+            return try JSONDecoder().decode(Activity.self, from: Data("""
+            {"now":"working","kind":"text","at":null,"asking":\(q),"error":null,"status":"\(status)","usage":\(usage),"subagents":\(subagents)}
+            """.utf8))
+        }
+        let usage = { (tok: Int, from: String, to: String) in #"{"model":"m","tokens":\#(tok),"tools":1,"started":"\#(from)","last":"\#(to)"}"# }
+        let sub = #"[{"id":"s1","description":"Probe","type":"fork","done":true,"said":"found","usage":\#(usage(5, "2026-10-11T10:00:00Z", "2026-10-11T10:02:00Z"))},{"id":"s2","description":"Dig","type":"fork","done":false,"said":null,"usage":\#(usage(7, "2026-10-11T10:00:00Z", "2026-10-11T10:01:00Z"))}]"#
+        let roster = AgentRoster(tasks: [a, b, c, quiet], activity: [
+            "a": try activity("running", usage: usage(100, "2026-10-11T10:00:00Z", "2026-10-11T10:05:00Z"), subagents: sub),
+            "b": try activity("waiting", asking: true, usage: usage(10, "2026-10-11T10:00:00Z", "2026-10-11T10:01:00Z")),
+            "c": try activity("stopped", usage: usage(1000, "2026-10-11T09:00:00Z", "2026-10-11T09:30:00Z")),
+        ])
+        #expect(roster.cards.map(\.task) == ["a", "b", "c"], "a task with no session has no card")
+        #expect(roster.cards.map(\.phase) == [.working, .asking, .settled])
+        #expect(roster.cards[0].subagents.map(\.phase) == [.settled, .working])
+        #expect(roster.settled == 2)
+        #expect(roster.tokens == 1122)
+        let now = AgentCard.instant("2026-10-11T10:10:00Z")!
+        #expect(roster.cards[0].elapsed(now: now) == 600, "a working card runs to now")
+        #expect(roster.cards[2].elapsed(now: now) == 1800, "a settled card stops at its last record")
+
+        let home = try Home()
+        var env = home.environment
+        env["HOME"] = home.dir.path
+        try executable(home.dir.appendingPathComponent("bin/claude"), "#!/bin/sh\necho '[]'\n")
+        let id = try home.wd("add", "demo", "Delegates")
+        let session = "c0ffee00-0000-4000-8000-000000000003"
+        try home.wd("attach", id, session, "--runner", "claude")
+        let dir = home.dir.appendingPathComponent(".claude/projects/anywhere")
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("\(session)/subagents"), withIntermediateDirectories: true)
+        try #"{"type":"user","timestamp":"2026-10-11T10:00:00Z","message":{"content":"the brief"}}"#.appending("\n")
+            .write(to: dir.appendingPathComponent("\(session).jsonl"), atomically: true, encoding: .utf8)
+        try #"{"type":"user","isSidechain":true,"timestamp":"2026-10-11T10:01:00Z","message":{"content":"probe the parser"}}"#.appending("\n")
+            .write(to: dir.appendingPathComponent("\(session)/subagents/agent-s9.jsonl"), atomically: true, encoding: .utf8)
+        try #"{"agentType":"fork","description":"Probe"}"#.write(to: dir.appendingPathComponent("\(session)/subagents/agent-s9.meta.json"), atomically: true, encoding: .utf8)
+        let channel = try Channel(wd: builtWD, environment: env)
+        let store = await Store(channel: channel)
+        let main = await Feed(store: store, id: id)
+        await main.read()
+        #expect(await main.subagents.map(\.id) == ["s9"])
+        let probe = await Feed(store: store, id: id, agent: "s9")
+        await probe.read()
+        #expect(await probe.failure == nil)
+        #expect(await probe.steps.map(\.text) == ["probe the parser"])
+        try await channel.close()
+    }
+
+    @Test("The Sidebar Lists Work As Threads, Most Recently Active First")
+    func sidebarThreads() throws {
+        func work(_ id: String, _ state: String, project: String = "demo", updated: String) -> String {
+            workJSON(state: state)
+                .replacingOccurrences(of: #""id":"w1""#, with: #""id":"\#(id)""#)
+                .replacingOccurrences(of: #""project":"demo""#, with: #""project":"\#(project)""#)
+                .replacingOccurrences(of: #""updated":"u""#, with: #""updated":"\#(updated)""#)
+        }
+        let board = try JSONDecoder().decode(Board.self, from: Data("""
+        {"goals":[
+          {"work":\(work("old", "running", updated: "2026-10-01")),"rollup":{"counts":{},"done":0,"total":1},"band":"in-flight"},
+          {"work":\(work("new", "needs-input", updated: "2026-10-09")),"rollup":{"counts":{},"done":0,"total":1},"band":"needs-you"},
+          {"work":\(work("later", "queued", updated: "2026-10-08")),"rollup":{"counts":{},"done":0,"total":0},"band":"in-flight"},
+          {"work":\(work("shipped", "done", updated: "2026-10-10")),"rollup":{"counts":{},"done":1,"total":1},"band":"at-rest"},
+          {"work":\(work("elsewhere", "running", project: "other", updated: "2026-10-11")),"rollup":{"counts":{},"done":0,"total":1},"band":"in-flight"}
+        ],"standalone":[
+          {"work":\(work("fix", "running", updated: "2026-10-05")),"band":"in-flight"}
+        ]}
+        """.utf8))
+        let t = board.threads(project: "demo")
+        #expect(t.open.map(\.id) == ["new", "fix", "old"])
+        #expect(t.queued.map(\.id) == ["later"])
+        #expect(t.settled.map(\.id) == ["shipped"])
+        #expect(board.threads().open.first?.id == "elsewhere")
+        #expect(board.threads(project: "demo", band: .needsYou).open.map(\.id) == ["new"])
+    }
 }

@@ -138,33 +138,6 @@ struct NewGoalPage: View {
     }
 }
 
-/// The goals of the product in scope, most recently active first: where an
-/// older goal is found and opened.
-struct RecentGoals: View {
-    let store: Store
-    let scope: String?
-    @Binding var selected: String?
-    @Binding var plan: Plan?
-    @Binding var asking: Ask?
-
-    var body: some View {
-        let goals = store.board?.recentGoals(project: scope) ?? []
-        Group {
-            if goals.isEmpty {
-                ContentUnavailableView("No goals yet", systemImage: "target", description: Text("Type what you want done to start one."))
-            } else {
-                List(goals, selection: $selected) { work in
-                    WorkRow(work: work, rollup: store.board?.rollup(of: work.id))
-                        .tag(work.id)
-                        .contextMenu { WorkMenu(work: work, run: { plan = $0 }, ask: { asking = $0 }) }
-                }
-            }
-        }
-        .navigationTitle("Goals")
-        .navigationSubtitle(scope ?? "All products")
-    }
-}
-
 /// Work put out of sight, with the way back.
 struct ArchivedList: View {
     let store: Store

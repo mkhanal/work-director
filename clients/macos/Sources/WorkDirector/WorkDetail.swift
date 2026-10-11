@@ -15,9 +15,22 @@ struct WorkDetail: View {
     @State private var loaded: Loaded?
     @State private var failure: String?
     @State private var asking: Ask?
-    /// The status of a task's session, as its conversation last read it.
-    @State private var session: SessionStatus = .none
+    /// A task's own session, as its page reads it.
+    @State private var feed: Feed
+    /// The agent whose conversation the centre shows instead of this page's
+    /// own: a goal's task, or a subagent.
+    @State private var focus: AgentCard?
+    @State private var focusFeed: Feed?
     @AppStorage("detail.tab") private var tab: Tab = .conversation
+    @AppStorage("detail.agents") private var showAgents = true
+
+    init(store: Store, id: String, plan: Binding<Plan?>, open: @escaping (String) -> Void) {
+        self.store = store
+        self.id = id
+        _plan = plan
+        self.open = open
+        _feed = State(initialValue: Feed(store: store, id: id))
+    }
 
     enum Tab: String {
         case conversation, record
@@ -40,38 +53,37 @@ struct WorkDetail: View {
             if let loaded {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
-                        Header(work: loaded.work, open: open)
-                        switch loaded {
-                        case .goal(let goal):
-                            Waiting(store: store, goal: goal, open: open) { Task { await load() } }
-                            GoalSections(store: store, goal: goal, open: open, run: { plan = $0 }, ask: { asking = $0 }) { Task { await load() } }
-                        case .work(let work, let events):
-                            if hasSession(work) {
-                                Picker("Show", selection: $tab) {
-                                    Text("Conversation").tag(Tab.conversation)
-                                    Text("Record").tag(Tab.record)
-                                }
-                                .pickerStyle(.segmented)
-                                .labelsHidden()
-                                .fixedSize()
-                            }
-                            if hasSession(work) && tab == .conversation {
-                                ConversationView(store: store, work: work) { session = $0 }
-                            } else {
-                                EventsSection(events: events, expanded: true)
-                            }
+                        if let focus, let focusFeed, let task = focusedTask(focus, in: loaded) {
+                            Breadcrumb(work: loaded.work, task: task, focus: focus) { self.focus = nil; self.focusFeed = nil }
+                            ConversationView(store: store, work: task, feed: focusFeed)
+                        } else {
+                            Header(work: loaded.work, open: open)
+                            page(loaded)
                         }
                     }
                     .padding(24)
-                    .frame(maxWidth: 820, alignment: .leading)
+                    .frame(maxWidth: 860, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .defaultScrollAnchor(following ? .bottom : .top)
                 .defaultScrollAnchor(following ? .bottom : .top, for: .sizeChanges)
-                .toolbar { Actions(work: loaded.work, run: { plan = $0 }, ask: { asking = $0 }) }
+                .toolbar {
+                    Actions(work: loaded.work, run: { plan = $0 }, ask: { asking = $0 })
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { showAgents.toggle() } label: { Label("Agents", systemImage: "sidebar.right") }
+                            .help(showAgents ? "Hide the agents" : "Show the agents")
+                    }
+                }
+                .inspector(isPresented: $showAgents) {
+                    AgentsPanel(roster: roster(loaded), focused: focus?.id ?? (loaded.work.kind.isGoal ? nil : loaded.work.id),
+                                choose: { choose($0, in: loaded) }, stop: { plan = Plan.stop($0) },
+                                menu: { card in AnyView(cardMenu(card, in: loaded)) })
+                        .inspectorColumnWidth(min: 260, ideal: 340, max: 480)
+                }
                 .safeAreaInset(edge: .bottom) {
-                    if !loaded.work.atRest || (loaded.work.kind.isGoal && loaded.work.state == .done) {
-                        MessageBar(store: store, work: loaded.work, working: working)
+                    if let target = messaged(loaded), !target.atRest || (target.kind.isGoal && target.state == .done) {
+                        MessageBar(store: store, work: target, working: working(loaded))
+                            .id(target.id)
                     }
                 }
             } else if let failure {
@@ -81,14 +93,14 @@ struct WorkDetail: View {
             }
         }
         .navigationTitle(loaded?.work.title ?? id)
+        .navigationSubtitle(loaded.map { "\($0.work.project) · \($0.work.state.look.label)" } ?? "")
         .task(id: store.reads) { await load() }
         .task(id: id) {
-            session = .none
             // What a goal's tasks are doing lives in their sessions, which tell
             // the ledger nothing; while any task works, the goal is read again.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3))
-                if case .goal(let g) = loaded, g.tasks.contains(where: { $0.state == .running || $0.state == .needsInput }) {
+                if case .goal(let g) = loaded, g.tasks.contains(where: { !$0.atRest }) {
                     await load()
                 }
             }
@@ -101,13 +113,102 @@ struct WorkDetail: View {
         }
     }
 
-    /// Whether a session under this work has a process up to stop: a task's
-    /// own, or any of a goal's tasks'.
-    private var working: Bool {
+    @ViewBuilder
+    private func page(_ loaded: Loaded) -> some View {
         switch loaded {
-        case .goal(let g): g.activity.values.contains { $0.status?.live == true }
-        case .work: session.live
-        case nil: false
+        case .goal(let goal):
+            GoalThread(store: store, goal: goal, focus: { id in choose(id, in: loaded) }) { Task { await load() } }
+        case .work(let work, let events):
+            if hasSession(work) {
+                Picker("Show", selection: $tab) {
+                    Text("Conversation").tag(Tab.conversation)
+                    Text("Record").tag(Tab.record)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+            }
+            if hasSession(work) && tab == .conversation {
+                ConversationView(store: store, work: work, feed: feed)
+            } else {
+                EventsSection(events: events, expanded: true)
+            }
+        }
+    }
+
+    /// The agents on this work: a goal's tasks, or a task's own session, each
+    /// with the subagents it started.
+    private func roster(_ loaded: Loaded) -> AgentRoster {
+        switch loaded {
+        case .goal(let g):
+            AgentRoster(tasks: g.tasks, activity: g.activity)
+        case .work(let w, _):
+            hasSession(w)
+                ? AgentRoster(task: w, status: feed.status, asking: feed.asking != nil,
+                              line: feed.steps.last.map(Self.line), usage: feed.usage, subagents: feed.subagents)
+                : AgentRoster(tasks: [], activity: [:])
+        }
+    }
+
+    private static func line(_ step: Step) -> String {
+        switch step.kind {
+        case .tool: [step.tool?.name, step.tool?.summary].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        case .question: step.question?.items.first?.question ?? ""
+        default: (step.text ?? "").split(separator: "\n").first.map(String.init) ?? ""
+        }
+    }
+
+    /// Shows an agent's conversation in the centre: a goal's task, or a
+    /// subagent. A task's own card is its page.
+    private func choose(_ card: AgentCard, in loaded: Loaded) {
+        if card.agent == nil && card.task == loaded.work.id {
+            focus = nil
+            focusFeed = nil
+            return
+        }
+        focus = card
+        focusFeed = Feed(store: store, id: card.task, agent: card.agent)
+    }
+
+    private func choose(_ task: String, in loaded: Loaded) {
+        // A task with no session has no conversation to show; its page has its record.
+        if let card = roster(loaded).cards.first(where: { $0.task == task }) {
+            choose(card, in: loaded)
+        } else {
+            open(task)
+        }
+    }
+
+    @ViewBuilder
+    private func cardMenu(_ card: AgentCard, in loaded: Loaded) -> some View {
+        if card.agent == nil, let task = task(card.task, in: loaded) {
+            Divider()
+            Button("Open Task Page") { open(task.id) }
+            WorkMenu(work: task, run: { plan = $0 }, ask: { asking = $0 })
+        }
+    }
+
+    private func task(_ id: String, in loaded: Loaded) -> Work? {
+        switch loaded {
+        case .goal(let g): g.tasks.first { $0.id == id }
+        case .work(let w, _): w.id == id ? w : nil
+        }
+    }
+
+    private func focusedTask(_ card: AgentCard, in loaded: Loaded) -> Work? { task(card.task, in: loaded) }
+
+    /// Who a message goes to: the agent in focus's task, else this work.
+    private func messaged(_ loaded: Loaded) -> Work? {
+        if let focus { return task(focus.task, in: loaded) }
+        return loaded.work
+    }
+
+    /// Whether a session the message bar speaks to has a process up to stop.
+    private func working(_ loaded: Loaded) -> Bool {
+        if let focus, let focusFeed { return focus.agent == nil ? focusFeed.status.live : false }
+        switch loaded {
+        case .goal(let g): return g.activity.values.contains { $0.status?.live == true }
+        case .work: return feed.status.live
         }
     }
 
@@ -115,6 +216,7 @@ struct WorkDetail: View {
 
     /// A conversation keeps its newest step in view as it grows.
     private var following: Bool {
+        if focus != nil { return true }
         if case .work(let w, _) = loaded { return hasSession(w) && tab == .conversation }
         return false
     }
@@ -130,6 +232,36 @@ struct WorkDetail: View {
             failure = nil
         } catch {
             failure = "\(error)"
+        }
+    }
+}
+
+/// Where the centre is: the work, the task in focus, and the subagent, each
+/// a way back.
+struct Breadcrumb: View {
+    let work: Work
+    let task: Work
+    let focus: AgentCard
+    let back: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Button(action: back) { Label(work.title, systemImage: "chevron.backward") }
+                    .buttonStyle(.link)
+                    .lineLimit(1)
+                if focus.agent != nil {
+                    Image(systemName: "chevron.forward").font(.caption2).foregroundStyle(.tertiary)
+                    Text(task.title).lineLimit(1).foregroundStyle(.secondary)
+                }
+            }
+            .font(.caption)
+            Text(focus.title).font(.title3.weight(.semibold)).textSelection(.enabled)
+            HStack(spacing: 8) {
+                if focus.agent == nil { StatePill(state: task.state) }
+                Text(focus.kind).font(.caption.monospaced()).foregroundStyle(.secondary)
+                Text(focus.agent ?? task.id).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+            }
         }
     }
 }
@@ -156,7 +288,8 @@ struct Header: View {
                 Text(work.project).font(.caption).foregroundStyle(.secondary)
                 Text(work.id).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
             }
-            if !work.detail.isEmpty {
+            // A goal's request opens its thread; a task's detail is its brief.
+            if !work.detail.isEmpty && !work.kind.isGoal {
                 Text(work.detail).foregroundStyle(.secondary).textSelection(.enabled)
             }
         }
@@ -187,137 +320,6 @@ struct Waiting: View {
                 }
             }
         }
-    }
-}
-
-struct GoalSections: View {
-    let store: Store
-    let goal: GoalDetail
-    let open: (String) -> Void
-    let run: (Plan) -> Void
-    let ask: (Ask) -> Void
-    /// Reads the goal again after a task was stopped.
-    let changed: () -> Void
-    @State private var stopping: String?
-    @State private var stopFailure: String?
-    /// What a stopped task had not read yet, to say again where it belongs.
-    @State private var stopNote: String?
-
-    var body: some View {
-        if let delivery = goal.delivery {
-            GroupBox {
-                LabeledContent("Where it reached") {
-                    VStack(alignment: .trailing) {
-                        Text(delivery.status)
-                        if !delivery.detail.isEmpty {
-                            Text(delivery.detail).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-        }
-        Section {
-            if goal.tasks.isEmpty {
-                Text("No tasks yet.").foregroundStyle(.secondary)
-            }
-            if let stopNote {
-                Text(stopNote).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-            }
-            if let stopFailure {
-                Label(stopFailure, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption).foregroundStyle(.red).textSelection(.enabled)
-            }
-            ForEach(headings, id: \.self) { heading in
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(heading).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-                    ForEach(goal.tasks.filter { ($0.heading ?? "") == heading }) { task in
-                        HStack(alignment: .top, spacing: 6) {
-                        Button { open(task.id) } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 8) {
-                                    StateSymbol(state: task.state)
-                                    Text(task.title).lineLimit(2)
-                                    Spacer()
-                                    Text(task.id).font(.caption.monospaced()).foregroundStyle(.tertiary)
-                                    Image(systemName: "chevron.forward").font(.caption).foregroundStyle(.tertiary)
-                                }
-                                if let activity = goal.activity[task.id] {
-                                    ActivityLine(activity: activity)
-                                        .font(.caption)
-                                        .padding(.leading, 24)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("Open this task's conversation")
-                        .contextMenu {
-                            Button("Open") { open(task.id) }
-                            if goal.activity[task.id]?.status?.live == true {
-                                Button("Stop") { Task { await stop(task.id) } }
-                            }
-                            Divider()
-                            WorkMenu(work: task, run: run, ask: ask)
-                        }
-                        if goal.activity[task.id]?.status?.live == true {
-                            if stopping == task.id {
-                                ProgressView().controlSize(.mini)
-                            } else {
-                                Button { Task { await stop(task.id) } } label: {
-                                    Image(systemName: "stop.circle")
-                                }
-                                .buttonStyle(.plain)
-                                .foregroundStyle(.red)
-                                .help("Stop this task's session: \(Plan.stop(task.id).commandLine)")
-                            }
-                        }
-                        }
-                    }
-                }
-            }
-        } header: {
-            SectionTitle("Tasks", detail: "\(goal.rollup.done) of \(goal.rollup.total) done")
-        }
-        Section {
-            if goal.claims.isEmpty {
-                Text("The loop has decided nothing here.").foregroundStyle(.secondary)
-            }
-            ForEach(goal.claims, id: \.event.id) { claim in
-                ClaimRow(claim: claim)
-            }
-        } header: {
-            SectionTitle("Decisions", detail: "\(goal.claims.count)")
-        }
-        Section {
-            if goal.landings.isEmpty {
-                Text("Nothing has landed.").foregroundStyle(.secondary)
-            }
-            ForEach(goal.landings, id: \.url) { landed in
-                LandingRow(landed: landed)
-            }
-        } header: {
-            SectionTitle("Landings", detail: "\(goal.landings.count)")
-        }
-        EventsSection(events: goal.events, expanded: false)
-    }
-
-    private func stop(_ id: String) async {
-        stopping = id
-        defer { stopping = nil }
-        do {
-            let back = try await store.stop(Plan.stop(id))
-            stopFailure = nil
-            stopNote = back.isEmpty ? nil : "Stopped \(id); it had not read:\n\(back)"
-        } catch {
-            stopFailure = "\(id): \(error)"
-        }
-        changed()
-    }
-
-    private var headings: [String] {
-        var seen: [String] = []
-        for t in goal.tasks where !seen.contains(t.heading ?? "") { seen.append(t.heading ?? "") }
-        return seen
     }
 }
 
