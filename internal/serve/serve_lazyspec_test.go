@@ -17,6 +17,7 @@ import (
 
 	"wd/internal/core"
 	"wd/internal/ledger"
+	"wd/internal/runner"
 )
 
 func newTestServer(t *testing.T) *Server {
@@ -27,7 +28,7 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatalf("ledger: %v", err)
 	}
 	t.Cleanup(func() { l.Close() })
-	return New(l, "")
+	return New(l, "", nil)
 }
 
 func TestServe(t *testing.T) {
@@ -38,6 +39,9 @@ func TestServe(t *testing.T) {
 	t.Run("The Board Places Every Item In One Band", theBoardPlacesEveryItemInOneBand)
 	t.Run("Archived Work Is Not On The Board", archivedWorkIsNotOnTheBoard)
 	t.Run("A Client Can Hold The Server On Its Standard Streams", aClientCanHoldTheServerOnItsStandardStreams)
+	t.Run("A Work Item Serves Its Session's Conversation", aWorkItemServesItsSessionsConversation)
+	t.Run("A Goal Serves What Each Working Task Is Doing Now", aGoalServesWhatEachWorkingTaskIsDoingNow)
+	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("Work Items Serve Over HTTP", workItemsServeOverHTTP)
 	t.Run("Actions Dispatch To The CLI", actionsDispatchToTheCLI)
 	t.Run("WebSocket Serves Live Events", webSocketServesLiveEvents)
@@ -351,7 +355,7 @@ func webSocketServesLiveEvents(t *testing.T) {
 	if _, err := l.AddEvent(w.ID, core.EventNote, "before serve"); err != nil {
 		t.Fatalf("event before serve: %v", err)
 	}
-	addr, _, err := New(l, "/bin/echo").Start(0)
+	addr, _, err := New(l, "/bin/echo", nil).Start(0)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -436,7 +440,7 @@ func aClientThatStopsReadingNeverDelaysTheOthers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	srv := New(l, "/bin/echo")
+	srv := New(l, "/bin/echo", nil)
 	addr, _, err := srv.Start(0)
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -997,3 +1001,214 @@ func aGoalsDeliveryIsReadInTheGoalsOwnDirectory(t *testing.T) {
 		t.Fatalf("delivery = %+v, want it read in the task's directory on goal-branch", placed.Delivery)
 	}
 }
+
+// sessionRunner is a runner whose conversations are canned per session.
+type sessionRunner struct {
+	runner.Runner
+	steps  map[string][]runner.Entry
+	broken map[string]bool
+	sent   []string
+}
+
+func (r *sessionRunner) Conversation(h runner.Handle) ([]runner.Entry, error) {
+	if r.broken[h.Session] {
+		return nil, fmt.Errorf("store of %s unreadable", h.Session)
+	}
+	return r.steps[h.Session], nil
+}
+
+func (r *sessionRunner) Status(h runner.Handle) (runner.RunnerStatus, error) {
+	return runner.StatusWaiting, nil
+}
+
+func (r *sessionRunner) Send(h *runner.Handle, text string) error {
+	r.sent = append(r.sent, text)
+	return nil
+}
+
+// withSessions gives s sessions: work whose session is set runs in it on r.
+func withSessions(s *Server, r *sessionRunner) {
+	s.sessions = func(w core.Work) (runner.Runner, runner.Handle, bool, error) {
+		if w.Session == nil {
+			return nil, runner.Handle{}, false, nil
+		}
+		return r, runner.Handle{Runner: "fake", Session: *w.Session}, true, nil
+	}
+}
+
+func colourQuestion() *runner.Question {
+	return &runner.Question{ID: "q1", Items: []runner.QuestionItem{{Header: "Colour", Question: "Which colour?", Options: []runner.Option{{Label: "Red"}, {Label: "Blue"}}}}}
+}
+
+// inSession adds running work attached to session.
+func inSession(t *testing.T, s *Server, title, session string, parent *string) core.Work {
+	t.Helper()
+	w, err := s.ledger.Add("p", title, ledger.AddOptions{Parent: parent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range []core.State{core.StateBriefed, core.StateRunning} {
+		if _, err := s.ledger.Transition(w.ID, st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.ledger.SetSession(w.ID, ledger.SessionInfo{Runner: "fake", Session: session}); err != nil {
+		t.Fatal(err)
+	}
+	w, err = s.ledger.Get(w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return w
+}
+
+func aWorkItemServesItsSessionsConversation(t *testing.T) {
+	s := newTestServer(t)
+	r := &sessionRunner{steps: map[string][]runner.Entry{"ses-1": {
+		{Kind: runner.EntryPrompt, Text: "the brief"},
+		{Kind: runner.EntryThinking, Text: "Weighing it"},
+		{Kind: runner.EntryTool, Tool: &runner.ToolCall{ID: "t1", Name: "Bash", Summary: "go test ./..."}},
+		{Kind: runner.EntryQuestion, Question: colourQuestion()},
+	}}}
+	withSessions(s, r)
+	w := inSession(t, s, "Asking", "ses-1", nil)
+	idle, err := s.ledger.Add("p", "No session", ledger.AddOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	var all conversationView
+	getJSON(t, ts.URL+"/api/conversation/"+w.ID, http.StatusOK, &all)
+	if all.Total != 4 || len(all.Entries) != 4 || all.Entries[1].Text != "Weighing it" || all.Status != runner.StatusWaiting {
+		t.Fatalf("conversation = %+v, want its four steps and status", all)
+	}
+	if all.Asking == nil || all.Asking.Items[0].Question != "Which colour?" {
+		t.Fatalf("asking = %+v, want the colour question", all.Asking)
+	}
+	var tail conversationView
+	getJSON(t, ts.URL+"/api/conversation/"+w.ID+"?from=2", http.StatusOK, &tail)
+	if tail.From != 2 || tail.Total != 4 || len(tail.Entries) != 2 || tail.Entries[0].Tool.Name != "Bash" {
+		t.Fatalf("from 2 = %+v, want the last two steps", tail)
+	}
+	var none conversationView
+	getJSON(t, ts.URL+"/api/conversation/"+idle.ID, http.StatusOK, &none)
+	if none.Status != "none" || none.Entries == nil || len(none.Entries) != 0 || none.Asking != nil {
+		t.Fatalf("no session = %+v, want status none and no steps", none)
+	}
+	getJSON(t, ts.URL+"/api/conversation/nope", http.StatusNotFound, &errorBody{})
+	getJSON(t, ts.URL+"/api/conversation/"+w.ID+"?from=-1", http.StatusBadRequest, &errorBody{})
+	getJSON(t, ts.URL+"/api/conversation/"+w.ID+"?from=x", http.StatusBadRequest, &errorBody{})
+
+	c := startStdio(t, s)
+	c.send(`{"id": 1, "method": "conversation", "params": {"id": "` + w.ID + `", "from": 3}}`)
+	var viaStdio conversationView
+	if err := json.Unmarshal(c.reply(1)["result"], &viaStdio); err != nil || len(viaStdio.Entries) != 1 || viaStdio.Entries[0].Kind != runner.EntryQuestion {
+		t.Fatalf("stdio conversation = %+v (%v), want the question step", viaStdio, err)
+	}
+}
+
+func aGoalServesWhatEachWorkingTaskIsDoingNow(t *testing.T) {
+	s := newTestServer(t)
+	r := &sessionRunner{
+		steps: map[string][]runner.Entry{
+			"tool":  {{Kind: runner.EntryTool, Tool: &runner.ToolCall{Name: "Bash", Summary: "go test ./..."}}},
+			"ask":   {{Kind: runner.EntryQuestion, Question: colourQuestion()}},
+			"think": {{Kind: runner.EntryThinking, Text: "Weighing it\nand more"}},
+		},
+		broken: map[string]bool{"broken": true},
+	}
+	withSessions(s, r)
+	goal, err := s.ledger.Add("p", "Goal", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var empty goalView
+	if empty, err = s.goal(goal.ID); err != nil || empty.Activity == nil || len(empty.Activity) != 0 {
+		t.Fatalf("activity with no working task = %v (%v), want {}", empty.Activity, err)
+	}
+	tool := inSession(t, s, "Tool", "tool", &goal.ID)
+	ask := inSession(t, s, "Ask", "ask", &goal.ID)
+	think := inSession(t, s, "Think", "think", &goal.ID)
+	broken := inSession(t, s, "Broken", "broken", &goal.ID)
+	done := inSession(t, s, "Done", "tool", &goal.ID)
+	if _, err := s.ledger.Transition(done.ID, core.StateReview); err != nil {
+		t.Fatal(err)
+	}
+	g, err := s.goal(goal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := g.Activity[tool.ID]; a.Now != "Bash · go test ./..." || a.Kind != runner.EntryTool || a.Asking != nil {
+		t.Fatalf("tool activity = %+v", a)
+	}
+	if a := g.Activity[ask.ID]; a.Now != "Which colour? (Red / Blue)" || a.Asking == nil {
+		t.Fatalf("question activity = %+v", a)
+	}
+	if a := g.Activity[think.ID]; a.Now != "Weighing it" {
+		t.Fatalf("thinking activity = %+v", a)
+	}
+	if a := g.Activity[broken.ID]; !strings.Contains(a.Error, "unreadable") {
+		t.Fatalf("unreadable activity = %+v, want its error", a)
+	}
+	if _, ok := g.Activity[done.ID]; ok {
+		t.Fatal("a task in review has activity")
+	}
+}
+
+func aRunningSessionsQuestionPutsItsWorkInNeedsYou(t *testing.T) {
+	s := newTestServer(t)
+	r := &sessionRunner{steps: map[string][]runner.Entry{
+		"ask":   {{Kind: runner.EntryText, Text: "looking"}, {Kind: runner.EntryQuestion, Question: colourQuestion()}},
+		"quiet": {{Kind: runner.EntryText, Text: "working"}},
+	}}
+	withSessions(s, r)
+	ask := inSession(t, s, "Ask", "ask", nil)
+	quiet := inSession(t, s, "Quiet", "quiet", nil)
+	stop := make(chan struct{})
+	done := make(chan error, 1)
+	go func() { done <- s.watchQuestions(stop) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		w, err := s.ledger.Get(ask.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if w.State == core.StateNeedsInput {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("asking work is still %s", w.State)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	// Back to running with the same question still last: a later pass must not
+	// file it again.
+	if _, err := s.ledger.Transition(ask.ID, core.StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(questionWatch + time.Second)
+	close(stop)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	qs, err := s.ledger.Events(ask.ID, kindOf(core.EventQuestion))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(qs) != 1 || qs[0].Body != "Which colour? (Red / Blue)" {
+		t.Fatalf("questions filed = %+v, want the one question once", qs)
+	}
+	if w, _ := s.ledger.Get(ask.ID); w.State != core.StateRunning {
+		t.Fatalf("a filed question was escalated again: %s", w.State)
+	}
+	if w, _ := s.ledger.Get(quiet.ID); w.State != core.StateRunning {
+		t.Fatalf("work asking nothing moved to %s", w.State)
+	}
+	if len(r.sent) != 0 {
+		t.Fatalf("the watcher sent %q", r.sent)
+	}
+}
+
+func kindOf(k core.EventKind) *core.EventKind { return &k }

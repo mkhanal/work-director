@@ -53,3 +53,14 @@ hold only that product's work; with none, every product's.
 - Submitting a request asks `wd goal find` first and starts nothing while matches are offered.
 - With no match it starts the goal in the same step.
 - Continuing an offered goal runs `wd goal continue` with the request.
+
+## A Session's Conversation Follows It, Reading Only What Can Still Change
+- A task's page shows its session's steps as `wd` serves them: prompts, texts, thinking, tool calls and questions.
+- Each later read asks from the first step that can still change: a tool call without its result, or a question without its answer.
+- Steps the session adds, and results and answers that arrive, appear on that read.
+
+## A Question Is Answered In Place, One Answer Per Item
+- Picking a single-choice option replaces the item's pick; typed words replace it too.
+- Multiple-choice picks join in the order offered, then any typed words.
+- Nothing can be sent until every item has an answer.
+- Sending runs `wd answer <id>` with one answer per item, in the order asked.

@@ -96,6 +96,11 @@ public actor Channel {
         try await request("events", .id(id))
     }
 
+    /// The work's session steps from index `from` on.
+    public func conversation(_ id: String, from: Int) async throws -> ConversationPage {
+        try await request("conversation", .conversation(id, from: from))
+    }
+
     /// Runs `wd` with argv, exactly as given.
     public func action(_ argv: [String]) async throws -> ActionResult {
         try await request("action", .argv(argv))
@@ -105,8 +110,9 @@ public actor Channel {
         case none
         case id(String)
         case argv([String])
+        case conversation(String, from: Int)
 
-        enum CodingKeys: String, CodingKey { case id, argv }
+        enum CodingKeys: String, CodingKey { case id, argv, from }
 
         func encode(to encoder: any Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
@@ -114,6 +120,9 @@ public actor Channel {
             case .none: break
             case .id(let id): try c.encode(id, forKey: .id)
             case .argv(let argv): try c.encode(argv, forKey: .argv)
+            case .conversation(let id, let from):
+                try c.encode(id, forKey: .id)
+                try c.encode(from, forKey: .from)
             }
         }
     }

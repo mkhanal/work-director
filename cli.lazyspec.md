@@ -311,6 +311,13 @@ could not with their work, the bound that ran out, and the work still open.
 - To a running session it stays queued, saying `queued`, and the next coordination pass (`wd drive`, `wd goal review`) delivers it once the session is idle.
 - Messages already waiting go out with it, as one message.
 
+## Wd Answer Replies To The Question A Session Is Waiting On
+- `wd answer <id> <answer>...` answers the question with options the work's session ends on: one answer per item, in the order asked.
+- A count of answers other than the item count is refused naming the questions, and nothing is sent.
+- Work in needs-input with no such question takes the answers as words.
+- Work asking nothing is refused, pointing at `wd send`.
+- The answer is recorded on the work as an `answer` event and reaches the session as `wd send` does.
+
 ## Wd Send To A Goal Tells Every Open Task And Keeps It As A Decision
 - `wd send <goal> "<text>"` files the text as a decision on the goal and sends it, as `wd send` does, to every open task with a session.
 - An open task with no session yet reads it in its brief.

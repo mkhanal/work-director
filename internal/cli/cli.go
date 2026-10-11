@@ -254,7 +254,7 @@ func tasteCheckout() (string, error) {
 	return "", nil
 }
 
-const usage = "wd <projects|workspace|add|tasks|brief|spawn|models|runner|roadmap|goal|drive|send|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|review|abandon|release|reopen|feedback|distill|archive|unarchive|pause|resume|cancel|tui|serve|doctor> [--json]\n\nwd --version   what release this binary is\nwd serve       the JSON API over loopback HTTP; --stdio serves a desktop app on its standard streams\nwd doctor     which runner CLIs are detected, and whether this is a repo"
+const usage = "wd <projects|workspace|add|tasks|brief|spawn|models|runner|roadmap|goal|drive|send|answer|attach|report|verify|decide|pr|soft-done|set|done|status|context|open|claim|impact|conflict|worktree|merge|concern|scan|events|review|abandon|release|reopen|feedback|distill|archive|unarchive|pause|resume|cancel|tui|serve|doctor> [--json]\n\nwd --version   what release this binary is\nwd serve       the JSON API over loopback HTTP; --stdio serves a desktop app on its standard streams\nwd doctor     which runner CLIs are detected, and whether this is a repo"
 
 // commands maps each wd command to its handler, given the arguments after it.
 var commands = map[string]func(c *Cli, rest []string) error{
@@ -278,6 +278,7 @@ var commands = map[string]func(c *Cli, rest []string) error{
 	"reopen":    (*Cli).reopen,
 	"review":    (*Cli).review,
 	"send":      (*Cli).send,
+	"answer":    (*Cli).answer,
 	"attach":    (*Cli).attach,
 	"report":    (*Cli).report,
 	"verify":    (*Cli).verify,

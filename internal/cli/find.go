@@ -82,7 +82,7 @@ func (c *Cli) goalFind(name, text string) error {
 func awaitFind(rn runner.Runner, h runner.Handle) ([]string, error) {
 	deadline := time.Now().Add(findTimeout)
 	for time.Now().Before(deadline) {
-		out, err := rn.Transcript(h)
+		out, err := runner.Transcript(rn, h)
 		if err != nil {
 			return nil, err
 		}

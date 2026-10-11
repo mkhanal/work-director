@@ -57,7 +57,9 @@ type Runner interface {
 	// later Send continues it.
 	Stop(h Handle) error
 	Status(h Handle) (RunnerStatus, error)
-	Transcript(h Handle) ([]string, error)
+	// Conversation is the session so far, oldest first, from the runner's own
+	// store.
+	Conversation(h Handle) ([]Entry, error)
 	Models() ([]string, error)
 	AttachHint(h Handle) string
 }

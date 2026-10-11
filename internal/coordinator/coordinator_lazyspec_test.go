@@ -62,6 +62,7 @@ func eventBodies(t *testing.T, l *ledger.Ledger, work string, kind core.EventKin
 type fakeRunner struct {
 	busy     bool
 	texts    []string
+	asking   *runner.Question
 	sends    []string
 	sentTo   []runner.Handle
 	resolved []string
@@ -90,10 +91,17 @@ func (f *fakeRunner) Status(h runner.Handle) (runner.RunnerStatus, error) {
 	}
 	return runner.StatusIdle, nil
 }
-func (f *fakeRunner) Transcript(h runner.Handle) ([]string, error) {
+func (f *fakeRunner) Conversation(h runner.Handle) ([]runner.Entry, error) {
 	f.cwds = append(f.cwds, h.Cwd)
 	f.sessions = append(f.sessions, h.Session)
-	return f.texts, nil
+	out := make([]runner.Entry, 0, len(f.texts)+1)
+	for _, t := range f.texts {
+		out = append(out, runner.Entry{Kind: runner.EntryText, Text: t})
+	}
+	if f.asking != nil {
+		out = append(out, runner.Entry{Kind: runner.EntryQuestion, Question: f.asking})
+	}
+	return out, nil
 }
 func (f *fakeRunner) Models() ([]string, error)         { return nil, nil }
 func (f *fakeRunner) AttachHint(h runner.Handle) string { return "fake attach" }

@@ -1011,7 +1011,7 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 	deadline := time.Now().Add(time.Duration(wait) * time.Second)
 	var tasks []coordinator.PlanTask
 	for time.Now().Before(deadline) {
-		texts, err := rn.Transcript(h)
+		texts, err := runner.Transcript(rn, h)
 		if err != nil {
 			return nil, err
 		}
@@ -1304,7 +1304,7 @@ func (c *Cli) goalReview(goal core.Work) error {
 			if err != nil {
 				return err
 			}
-			texts, err := r.Transcript(h)
+			texts, err := runner.Transcript(r, h)
 			if err != nil {
 				return err
 			}
@@ -1445,7 +1445,7 @@ func (c *Cli) report(rest []string) error {
 	if err != nil {
 		return err
 	}
-	texts, err := r.Transcript(h)
+	texts, err := runner.Transcript(r, h)
 	if err != nil {
 		return err
 	}
@@ -2654,13 +2654,30 @@ func (c *Cli) distill(rest []string) error {
 	return c.out(candidates, text)
 }
 
+// sessionOf reaches the session work is worked in, for serve.
+func (c *Cli) sessionOf(w core.Work) (runner.Runner, runner.Handle, bool, error) {
+	p, err := c.project(w.Project)
+	if err != nil {
+		return nil, runner.Handle{}, false, err
+	}
+	h, ok, err := coordinator.Handle(c.Ledger, w, p)
+	if err != nil || !ok {
+		return nil, runner.Handle{}, false, err
+	}
+	r, err := runner.RunnerNamed(h.Runner)
+	if err != nil {
+		return nil, runner.Handle{}, false, err
+	}
+	return r, h, true, nil
+}
+
 func (c *Cli) serve(rest []string) error {
 	// Board actions run this same binary, so they can never drift from it.
 	cliPath, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	srv := serve.New(c.Ledger, cliPath)
+	srv := serve.New(c.Ledger, cliPath, c.sessionOf)
 	if flag(c.Args, "stdio") {
 		if c.JSON {
 			return fail("wd serve --stdio speaks its own protocol on stdout and has no --json document")

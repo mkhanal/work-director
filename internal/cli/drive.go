@@ -645,7 +645,7 @@ func (c *Cli) judgeOnce(goal core.Work, p *project.Project) driver.Judge {
 func awaitJudgement(rn runner.Runner, h runner.Handle) judge.Verdict {
 	deadline := time.Now().Add(judgeTimeout)
 	for time.Now().Before(deadline) {
-		out, err := rn.Transcript(h)
+		out, err := runner.Transcript(rn, h)
 		if err != nil {
 			return judge.Verdict{}
 		}

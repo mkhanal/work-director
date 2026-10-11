@@ -777,6 +777,9 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 	f.runOK(t, "soft-done", finishedGoal)
 	f.runOK(t, "done", finishedGoal)
 	driveGoal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Never driven", "--json"), "id")
+	askingWork := jsonString(t, f.runOK(t, "add", "sample-app", "Asking", "--json"), "id")
+	f.runOK(t, "attach", askingWork, "ses_census_asking", "--runner", "claude", "--ref", "ab0000ff")
+	asking(t, f, "ses_census_asking", "Which colour?")
 	ready := jsonString(t, f.runOK(t, "add", "sample-app", "Ready", "--epic", epic, "--json"), "id")
 	f.runOK(t, "set", ready, "running")
 	f.runOK(t, "set", ready, "review")
@@ -867,6 +870,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"distill"},
 		{"doctor"},
 		{"cancel", t3, "census"},
+		{"answer", askingWork, "Red"},
 	} {
 		covered[args[0]] = true
 		args = append(args, "--json")
@@ -3953,6 +3957,77 @@ func sends(t *testing.T, state string) []string {
 			t.Fatalf("read send %d: %v", i, err)
 		}
 		out = append(out, string(b))
+	}
+}
+
+// asking writes a claude store for session that ends on a question with
+// options, one item per question given.
+func asking(t *testing.T, f *cliFixture, session string, questions ...string) {
+	t.Helper()
+	items := []map[string]any{}
+	for _, q := range questions {
+		items = append(items, map[string]any{"header": "H", "question": q, "multiSelect": false,
+			"options": []map[string]any{{"label": "Red", "description": "warm"}, {"label": "Large", "description": "big"}}})
+	}
+	lines := []map[string]any{
+		{"type": "user", "message": map[string]any{"content": "the brief"}},
+		{"type": "assistant", "message": map[string]any{"content": []map[string]any{{"type": "tool_use", "id": "q1", "name": "AskUserQuestion", "input": map[string]any{"questions": items}}}}},
+	}
+	dir := filepath.Join(f.home, ".claude", "projects", "anywhere")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	for _, l := range lines {
+		j, err := json.Marshal(l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.Write(j)
+		b.WriteByte('\n')
+	}
+	if err := os.WriteFile(filepath.Join(dir, session+".jsonl"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWdAnswerRepliesToTheQuestionASessionIsWaitingOn(t *testing.T) {
+	f := newCLIFixture(t)
+	state := liveClaude(t, f)
+	t2 := f.ids["t2"]
+	asking(t, f, "ses_000002", "Which colour?", "Which size?")
+	if errStr := f.runFail(t, "answer", t2, "Red"); !strings.Contains(errStr, "Which size?") {
+		t.Fatalf("one answer to two questions: %q, want a refusal naming them", errStr)
+	}
+	if got := sends(t, state); len(got) != 0 {
+		t.Fatalf("a refused answer reached the session: %q", got)
+	}
+	out := f.runOK(t, "answer", t2, "Red", "Large", "--json")
+	want := "Answers to your questions:\n\"Which colour?\" → Red\n\"Which size?\" → Large"
+	if got := sends(t, state); len(got) != 1 || got[0] != want {
+		t.Fatalf("sends = %q, want the answers one per line", got)
+	}
+	if told := jsonString(t, out, "told"); told != "delivered" {
+		t.Fatalf("told = %q, want delivered", told)
+	}
+	if _, err := os.Stat(filepath.Join(state, "claude-stopped-ab000002")); err != nil {
+		t.Fatalf("the waiting session was not stopped before it was resumed: %v", err)
+	}
+	if evs := f.runOK(t, "events", t2, "--json"); !strings.Contains(evs, `"answer"`) || !strings.Contains(evs, "Which size?") {
+		t.Fatalf("the answer is not recorded on the work:\n%s", evs)
+	}
+
+	os.Remove(filepath.Join(f.home, ".claude", "projects", "anywhere", "ses_000002.jsonl"))
+	if errStr := f.runFail(t, "answer", t2, "Red"); !strings.Contains(errStr, "wd send") {
+		t.Fatalf("answering work that asks nothing: %q, want it pointed at wd send", errStr)
+	}
+	f.runOK(t, "set", t2, "needs-input")
+	f.runOK(t, "answer", t2, "use postgres")
+	if got := sends(t, state); len(got) != 2 || got[1] != "use postgres" {
+		t.Fatalf("a question asked in words was not answered in words: %q", got)
+	}
+	if st := stateOf(t, f, t2); st != core.StateRunning {
+		t.Fatalf("answered work is %s, want running", st)
 	}
 }
 

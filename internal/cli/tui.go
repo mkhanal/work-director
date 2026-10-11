@@ -96,7 +96,7 @@ func (s *tuiSource) sessionView(id string) (*tui.SessionView, error) {
 	if err != nil {
 		return &tui.SessionView{Handle: h, Err: err.Error()}, nil
 	}
-	messages, err := rn.Transcript(h)
+	messages, err := runner.Transcript(rn, h)
 	if err != nil {
 		return &tui.SessionView{Handle: h, Status: status, Err: err.Error()}, nil
 	}

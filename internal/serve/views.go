@@ -60,6 +60,8 @@ type goalView struct {
 	Claims   []review.Claim  `json:"claims"`
 	Landings []review.Landed `json:"landings"`
 	Delivery *delivery.State `json:"delivery,omitempty"`
+	// Activity is what each task still working is doing now, by task id.
+	Activity map[string]activity `json:"activity"`
 }
 
 // notFound is a view asked of work that does not exist, or of the wrong kind.
@@ -170,6 +172,7 @@ func (s *Server) goal(id string) (goalView, error) {
 		Events:   events,
 		Claims:   review.ClaimsUnder(events, works),
 		Landings: review.LandingsUnder(events, works),
+		Activity: s.activities(children),
 	}
 	if dir := goalDir(goal, children); dir != "" {
 		d := delivery.StatusFor(dir, events, goal, children)

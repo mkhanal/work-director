@@ -178,6 +178,8 @@ public struct GoalDetail: Codable, Sendable, Hashable {
     public let claims: [Claim]
     public let landings: [Landed]
     public let delivery: Delivery?
+    /// What each task still working is doing now, by task id.
+    public let activity: [String: Activity]
 }
 
 public struct ActionResult: Codable, Sendable, Hashable {

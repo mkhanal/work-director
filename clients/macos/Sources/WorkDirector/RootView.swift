@@ -39,7 +39,7 @@ struct RootView: View {
             .navigationSplitViewColumnWidth(min: 280, ideal: 340)
         } detail: {
             if let selected {
-                WorkDetail(store: store, id: selected, plan: $plan)
+                WorkDetail(store: store, id: selected, plan: $plan) { self.selected = $0 }
                     .id(selected)
             } else if place == .home || place == nil {
                 NewGoalPage(store: store, scope: scope) { id in selected = id }

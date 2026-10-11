@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,18 +23,21 @@ const DefaultPort = 8787
 // ledger. It serves the board, work items, events and actions, and
 // broadcasts live events to WebSocket clients.
 type Server struct {
-	ledger  *ledger.Ledger
-	cliPath string
-	hub     *wsHub
+	ledger   *ledger.Ledger
+	cliPath  string
+	sessions Sessions
+	hub      *wsHub
 }
 
 // New creates a serve server over the given ledger; cliPath is the path to
-// the wd CLI binary.
-func New(l *ledger.Ledger, cliPath string) *Server {
+// the wd CLI binary, and sessions reaches the session work runs in (nil serves
+// no conversations).
+func New(l *ledger.Ledger, cliPath string, sessions Sessions) *Server {
 	return &Server{
-		ledger:  l,
-		cliPath: cliPath,
-		hub:     newWSHub(),
+		ledger:   l,
+		cliPath:  cliPath,
+		sessions: sessions,
+		hub:      newWSHub(),
 	}
 }
 
@@ -83,9 +87,14 @@ func (s *Server) Start(port int) (string, <-chan error, error) {
 		ln.Close()
 		return "", nil, err
 	}
-	failed := make(chan error, 2)
+	failed := make(chan error, 3)
 	go func() { failed <- http.Serve(ln, s.routes()) }()
 	go func() { failed <- s.broadcastEvents(last) }()
+	go func() {
+		if err := s.watchQuestions(nil); err != nil {
+			failed <- err
+		}
+	}()
 	return ln.Addr().String(), failed, nil
 }
 
@@ -95,6 +104,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/api/board", s.handleBoard)
 	mux.HandleFunc("/api/goals", s.handleBoard)
 	mux.HandleFunc("/api/goal/", s.handleGoal)
+	mux.HandleFunc("/api/conversation/", s.handleConversation)
 	mux.HandleFunc("/api/work", s.handleWork)
 	mux.HandleFunc("/api/work/", s.handleWorkItem)
 	mux.HandleFunc("/api/action", s.handleAction)
@@ -184,6 +194,28 @@ func (s *Server) handleGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, g)
+}
+
+// handleConversation serves a work item's session steps, from ?from= on.
+func (s *Server) handleConversation(w http.ResponseWriter, r *http.Request) {
+	if !allow(w, r, http.MethodGet) {
+		return
+	}
+	from := 0
+	if v := r.URL.Query().Get("from"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "from is a step index, 0 or more")
+			return
+		}
+		from = n
+	}
+	c, err := s.conversation(strings.TrimPrefix(r.URL.Path, "/api/conversation/"), from)
+	if err != nil {
+		writeViewError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
 }
 
 // handleWork lists all work items.

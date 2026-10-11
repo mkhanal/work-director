@@ -50,13 +50,31 @@ Archived goals and standalone items are left off the board.
 `wd serve --stdio` reads one JSON request per line from stdin and writes one
 JSON message per line to stdout:
 - A request is `{"id": n, "method": m, "params": {...}}`; `m` is `board`,
-  `goal` (`id`), `work` (`id`), `events` (`id`) or `action` (`argv`).
+  `goal` (`id`), `work` (`id`), `events` (`id`), `conversation` (`id`, `from`)
+  or `action` (`argv`).
 - Its reply is `{"id": n, "result": ...}` with the value the HTTP route serves,
   or `{"id": n, "error": {"kind": k, "message": "..."}}`, `k` one of
   `not-found`, `bad-request`, `internal`.
 - A line that is not a request gets an error with no `id`.
 - Every ledger event, from any process, is pushed as `{"push": "event", "data": event}`.
 - End of stdin ends the server without error.
+
+## A Work Item Serves Its Session's Conversation
+- `GET /api/conversation/<id>?from=<n>` and the `conversation` method return the work's session steps from index `n` on (default 0), as the runner's `conversation` gives them.
+- The reply carries `total` steps, the session's `status`, and `asking`: the question the session ends waiting on, else null.
+- Work with no session has status `none` and no steps.
+- An unknown id is not-found; a negative or non-numeric `from` is bad-request.
+
+## A Goal Serves What Each Working Task Is Doing Now
+- `activity` on a goal maps each running or needs-input task with a session to its latest step as one line (`now`), that step's `kind`, and `asking`.
+- A tool step reads as its name and what it acted on; a question as its questions; others as their first line.
+- A session that cannot be read carries `error` instead.
+- With no such task, `activity` is `{}`.
+
+## A Running Session's Question Puts Its Work In Needs You
+- While serving, a running work item whose session ends on a question has the question filed as a `question` event and moves to needs-input within seconds.
+- A question already filed at that point of the conversation is not filed again.
+- Nothing is sent to the session.
 
 ## Work Items Serve Over HTTP
 `GET /api/work` lists all work items. `GET /api/work/<id>` returns one

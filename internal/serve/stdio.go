@@ -17,6 +17,7 @@ type stdioRequest struct {
 	Params struct {
 		ID   string   `json:"id"`
 		Argv []string `json:"argv"`
+		From int      `json:"from"`
 	} `json:"params"`
 }
 
@@ -71,6 +72,9 @@ func (s *Server) ServeStdio(in io.Reader, out io.Writer) error {
 		})
 	}()
 
+	watched := make(chan error, 1)
+	go func() { watched <- s.watchQuestions(stop) }()
+
 	var pending sync.WaitGroup
 	failed := make(chan error, 1)
 	fail := func(err error) {
@@ -107,6 +111,9 @@ func (s *Server) ServeStdio(in io.Reader, out io.Writer) error {
 	if err := <-followed; err != nil {
 		return err
 	}
+	if err := <-watched; err != nil {
+		return err
+	}
 	select {
 	case err := <-failed:
 		return fmt.Errorf("write reply: %w", err)
@@ -132,6 +139,8 @@ func (s *Server) answer(req stdioRequest) stdioReply {
 		result, err = s.work(req.Params.ID)
 	case "events":
 		result, err = s.events(req.Params.ID)
+	case "conversation":
+		result, err = s.conversation(req.Params.ID, req.Params.From)
 	case "action":
 		if len(req.Params.Argv) == 0 {
 			err = badRequest{"action needs params.argv"}
@@ -139,7 +148,7 @@ func (s *Server) answer(req stdioRequest) stdioReply {
 		}
 		result, err = s.runCLI(req.Params.Argv)
 	default:
-		err = badRequest{fmt.Sprintf("unknown method %q: one of board, goal, work, events, action", req.Method)}
+		err = badRequest{fmt.Sprintf("unknown method %q: one of board, goal, work, events, conversation, action", req.Method)}
 	}
 	if err != nil {
 		return stdioReply{ID: *req.ID, Error: &stdioError{Kind: errorKind(err), Message: err.Error()}}

@@ -1,15 +1,25 @@
 import SwiftUI
 import WorkDirectorKit
 
-/// One goal or task, read again whenever the board is.
+/// One goal or task, read again whenever the board is. A task leads with its
+/// session's conversation; the ledger's record of it is one tab away. A goal
+/// leads with whatever its tasks are waiting on you for, then the tasks, each
+/// with what it is doing now.
 struct WorkDetail: View {
     let store: Store
     let id: String
     @Binding var plan: Plan?
+    /// Opens another work item in this pane: a goal's task, a task's goal.
+    let open: (String) -> Void
 
     @State private var loaded: Loaded?
     @State private var failure: String?
     @State private var asking: Ask?
+    @AppStorage("detail.tab") private var tab: Tab = .conversation
+
+    enum Tab: String {
+        case conversation, record
+    }
 
     enum Loaded {
         case goal(GoalDetail)
@@ -28,16 +38,34 @@ struct WorkDetail: View {
             if let loaded {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
-                        Header(work: loaded.work)
+                        Header(work: loaded.work, open: open)
                         switch loaded {
-                        case .goal(let goal): GoalSections(goal: goal)
-                        case .work(_, let events): EventsSection(events: events, expanded: true)
+                        case .goal(let goal):
+                            Waiting(store: store, goal: goal, open: open) { Task { await load() } }
+                            GoalSections(goal: goal, open: open)
+                        case .work(let work, let events):
+                            if hasSession(work) {
+                                Picker("Show", selection: $tab) {
+                                    Text("Conversation").tag(Tab.conversation)
+                                    Text("Record").tag(Tab.record)
+                                }
+                                .pickerStyle(.segmented)
+                                .labelsHidden()
+                                .fixedSize()
+                            }
+                            if hasSession(work) && tab == .conversation {
+                                ConversationView(store: store, work: work)
+                            } else {
+                                EventsSection(events: events, expanded: true)
+                            }
                         }
                     }
                     .padding(24)
                     .frame(maxWidth: 820, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .defaultScrollAnchor(following ? .bottom : .top)
+                .defaultScrollAnchor(following ? .bottom : .top, for: .sizeChanges)
                 .toolbar { Actions(work: loaded.work, plan: $plan, asking: $asking) }
                 .safeAreaInset(edge: .bottom) {
                     if !loaded.work.atRest || (loaded.work.kind.isGoal && loaded.work.state == .done) {
@@ -52,12 +80,30 @@ struct WorkDetail: View {
         }
         .navigationTitle(loaded?.work.title ?? id)
         .task(id: store.reads) { await load() }
+        .task(id: id) {
+            // What a goal's tasks are doing lives in their sessions, which tell
+            // the ledger nothing; while any task works, the goal is read again.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3))
+                if case .goal(let g) = loaded, g.tasks.contains(where: { $0.state == .running || $0.state == .needsInput }) {
+                    await load()
+                }
+            }
+        }
         .sheet(item: $asking) { ask in
             ReasonSheet(ask: ask) { made in
                 asking = nil
                 plan = made
             }
         }
+    }
+
+    private func hasSession(_ work: Work) -> Bool { work.session != nil || work.claim != nil }
+
+    /// A conversation keeps its newest step in view as it grows.
+    private var following: Bool {
+        if case .work(let w, _) = loaded { return hasSession(w) && tab == .conversation }
+        return false
     }
 
     private func load() async {
@@ -77,9 +123,17 @@ struct WorkDetail: View {
 
 struct Header: View {
     let work: Work
+    let open: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let parent = work.parent {
+                Button { open(parent) } label: {
+                    Label("Goal \(parent)", systemImage: "chevron.backward")
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
             Text(work.title).font(.title2.weight(.semibold)).textSelection(.enabled)
             HStack(spacing: 8) {
                 StatePill(state: work.state)
@@ -96,8 +150,36 @@ struct Header: View {
     }
 }
 
+/// The questions a goal's tasks are waiting on, lifted to the top of the goal
+/// so they are answered without opening each task.
+struct Waiting: View {
+    let store: Store
+    let goal: GoalDetail
+    let open: (String) -> Void
+    let answered: () -> Void
+
+    var body: some View {
+        let asking = goal.tasks.compactMap { t in goal.activity[t.id]?.asking.map { (t, $0) } }
+        if !asking.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(asking, id: \.1.id) { task, question in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Button { open(task.id) } label: {
+                            Label(task.title, systemImage: "arrow.up.forward.square")
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                        QuestionCard(store: store, workID: task.id, question: question, answered: answered)
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct GoalSections: View {
     let goal: GoalDetail
+    let open: (String) -> Void
 
     var body: some View {
         if let delivery = goal.delivery {
@@ -120,12 +202,25 @@ struct GoalSections: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(heading).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
                     ForEach(goal.tasks.filter { ($0.heading ?? "") == heading }) { task in
-                        HStack(spacing: 8) {
-                            StateSymbol(state: task.state)
-                            Text(task.title).lineLimit(2)
-                            Spacer()
-                            Text(task.id).font(.caption.monospaced()).foregroundStyle(.tertiary)
+                        Button { open(task.id) } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 8) {
+                                    StateSymbol(state: task.state)
+                                    Text(task.title).lineLimit(2)
+                                    Spacer()
+                                    Text(task.id).font(.caption.monospaced()).foregroundStyle(.tertiary)
+                                    Image(systemName: "chevron.forward").font(.caption).foregroundStyle(.tertiary)
+                                }
+                                if let activity = goal.activity[task.id] {
+                                    ActivityLine(activity: activity)
+                                        .font(.caption)
+                                        .padding(.leading, 24)
+                                }
+                            }
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+                        .help("Open this task's conversation")
                     }
                 }
             }

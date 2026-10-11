@@ -22,15 +22,18 @@ case "$1 $2" in
     # Each send is kept, numbered, so a test can count them and read the text.
     n=$(ls "$WD_FAKE_STATE"/resumed-* 2>/dev/null | wc -l | tr -d ' ')
     printf '%s' "$4" > "$WD_FAKE_STATE/resumed-$n"
+    rm -f "$WD_FAKE_STATE/claude-stopped"
     echo "backgrounded · $(cat "$WD_FAKE_STATE/bgid")";;
   "agents --json")
     # A test makes the session look busy by creating $WD_FAKE_STATE/claude-busy.
-    status=idle state=done
-    [ -f "$WD_FAKE_STATE/claude-busy" ] && status=busy state=working
-    row="[{\"id\":\"$(cat "$WD_FAKE_STATE/bgid")\",\"sessionId\":\"$(cat "$WD_FAKE_STATE/sid")\",\"cwd\":\"$PWD\",\"kind\":\"background\",\"status\":\"$status\",\"state\":\"$state\"}]"
+    # A stopped session has no status until it is resumed.
+    status='"status":"idle",' state=done
+    [ -f "$WD_FAKE_STATE/claude-busy" ] && status='"status":"busy",' state=working
+    [ -f "$WD_FAKE_STATE/claude-stopped" ] && status='' state=stopped
+    row="[{\"id\":\"$(cat "$WD_FAKE_STATE/bgid")\",\"sessionId\":\"$(cat "$WD_FAKE_STATE/sid")\",\"cwd\":\"$PWD\",\"kind\":\"background\",$status\"state\":\"$state\"}]"
     echo "$row";;
   "stop "*)
-    touch "$WD_FAKE_STATE/claude-stopped-$2"
+    touch "$WD_FAKE_STATE/claude-stopped-$2" "$WD_FAKE_STATE/claude-stopped"
     echo "stopped $2";;
   *) echo "unhandled claude $*" >&2; exit 1;;
 esac

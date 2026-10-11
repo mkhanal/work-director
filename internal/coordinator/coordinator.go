@@ -334,7 +334,7 @@ func CoordinateOnce(goal core.Work, p *project.Project, l *ledger.Ledger, resolv
 			}
 			continue
 		}
-		texts, err := r.Transcript(h)
+		texts, err := runner.Transcript(r, h)
 		if err != nil {
 			return PassResult{}, err
 		}
@@ -421,6 +421,31 @@ func Coordinate(w core.Work, known []core.Work, l *ledger.Ledger, r runner.Runne
 		return escalate()
 	}
 	return FileReport(l, w, status[1], report)
+}
+
+// Notice files the question a session's transcript ends on and moves its
+// work to needs-input, answering nothing, so a person sees it where work waits
+// on them. A question already filed at that point is not filed again, and the
+// next coordination pass reads it as escalated. It reports whether it filed.
+func Notice(l *ledger.Ledger, w core.Work, h runner.Handle, texts []string) (bool, error) {
+	if w.State != core.StateRunning || len(texts) == 0 {
+		return false, nil
+	}
+	ask := askRe.FindStringSubmatch(texts[len(texts)-1])
+	if ask == nil {
+		return false, nil
+	}
+	at := core.TranscriptMark{Session: h.Session, Entries: len(texts)}
+	if prev, ok, err := l.Filed(w.ID); err != nil || (ok && prev == at) {
+		return false, err
+	}
+	if err := l.File(w.ID, core.EventQuestion, strings.TrimSpace(ask[1]), at); err != nil {
+		return false, err
+	}
+	if _, err := l.Transition(w.ID, core.StateNeedsInput); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // FileReport files a STATUS report on work and moves it to the state that

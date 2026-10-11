@@ -325,4 +325,72 @@ func fakeRunner(_ home: Home) throws {
         #expect(fresh.goal.title == "A dark mode for the settings page" && fresh.tasks.count == 2)
         await store.stop()
     }
+
+    @Test("A Session's Conversation Follows It, Reading Only What Can Still Change")
+    func conversationFollowsTheSession() async throws {
+        let home = try Home()
+        var env = home.environment
+        env["HOME"] = home.dir.path
+        let bin = home.dir.appendingPathComponent("bin")
+        // A claude that knows no live session: the store is read from its file.
+        try executable(bin.appendingPathComponent("claude"), "#!/bin/sh\necho '[]'\n")
+        let id = try home.wd("add", "demo", "Talked to")
+        let session = "c0ffee00-0000-4000-8000-000000000001"
+        try home.wd("attach", id, session, "--runner", "claude")
+        let store = home.dir.appendingPathComponent(".claude/projects/anywhere/\(session).jsonl")
+        try FileManager.default.createDirectory(at: store.deletingLastPathComponent(), withIntermediateDirectories: true)
+        func lines(_ records: [String]) -> String { records.map { $0 + "\n" }.joined() }
+        let opening = [
+            #"{"type":"user","message":{"content":"the brief"}}"#,
+            #"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"Weighing it"},{"type":"text","text":"Looking"}]}}"#,
+            #"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"go test ./..."}}]}}"#,
+        ]
+        try lines(opening).write(to: store, atomically: true, encoding: .utf8)
+
+        let channel = try Channel(wd: builtWD, environment: env)
+        let shared = await Store(channel: channel)
+        let feed = await Feed(store: shared, id: id)
+        await feed.read()
+        #expect(await feed.failure == nil)
+        #expect(await feed.steps.map(\.kind) == [.prompt, .thinking, .text, .tool])
+        #expect(await feed.stable == 3, "the running tool call is where the next read starts")
+
+        let later = opening + [
+            #"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}"#,
+            #"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"q1","name":"AskUserQuestion","input":{"questions":[{"header":"Colour","question":"Which colour?","multiSelect":false,"options":[{"label":"Red","description":""},{"label":"Blue","description":""}]}]}}]}}"#,
+        ]
+        try lines(later).write(to: store, atomically: true, encoding: .utf8)
+        await feed.read()
+        let steps = await feed.steps
+        #expect(steps.map(\.kind) == [.prompt, .thinking, .text, .tool, .question])
+        #expect(steps[3].tool?.result == "ok")
+        #expect(await feed.asking?.items.first?.question == "Which colour?")
+        #expect(await feed.stable == 4, "the question waiting for its answer is where the next read starts")
+        try await channel.close()
+    }
+
+    @Test("A Question Is Answered In Place, One Answer Per Item")
+    func questionAnsweredInPlace() throws {
+        let opts = [QuestionOption(label: "Red", description: ""), QuestionOption(label: "Blue", description: ""), QuestionOption(label: "Green", description: "")]
+        let q = Question(id: "q1", items: [
+            QuestionItem(header: "Colour", question: "Which colour?", multi: false, options: opts),
+            QuestionItem(header: "Extras", question: "Which extras?", multi: true, options: opts),
+        ])
+        var draft = AnswerDraft(q)
+        #expect(draft.answers == nil)
+        draft.toggle("Red", item: 0)
+        draft.toggle("Blue", item: 0)
+        #expect(draft.answers == nil, "an item without an answer holds the whole answer back")
+        draft.toggle("Green", item: 1)
+        draft.toggle("Red", item: 1)
+        draft.typed[1] = "a stripe"
+        #expect(draft.answers == ["Blue", "Red, Green, a stripe"])
+        draft.typed[0] = "teal"
+        #expect(draft.answers?.first == "teal")
+
+        let plan = try Plan.answer("w1", q, answers: ["teal", "Red, Green"])
+        #expect(plan.argv == ["answer", "w1", "teal", "Red, Green"])
+        #expect(throws: PlanError.empty) { try Plan.answer("w1", q, answers: ["teal"]) }
+        #expect(throws: PlanError.empty) { try Plan.answer("w1", q, answers: ["teal", "  "]) }
+    }
 }

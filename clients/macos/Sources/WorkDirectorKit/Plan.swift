@@ -94,6 +94,14 @@ public struct Plan: Hashable, Sendable, Identifiable {
         return Plan(title: "Send", argv: ["send", id, text])
     }
 
+    /// The answers to the question a session is waiting on, one per item in
+    /// the order asked.
+    public static func answer(_ id: String, _ question: Question, answers: [String]) throws -> Plan {
+        let answers = answers.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard answers.count == question.items.count, !answers.contains(where: \.isEmpty) else { throw PlanError.empty }
+        return Plan(title: "Answer", argv: ["answer", id] + answers)
+    }
+
     public static func pause(_ id: String) -> Plan { Plan(title: "Pause", argv: ["pause", id]) }
 
     public static func resume(_ id: String, note: String) -> Plan {

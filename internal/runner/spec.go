@@ -411,9 +411,11 @@ func (r *specRunnerAdapter) Status(h Handle) (RunnerStatus, error) {
 	return StatusIdle, nil
 }
 
-func (r *specRunnerAdapter) Transcript(h Handle) ([]string, error) {
+// Conversation is the lines the spec's transcript command prints, each
+// something the session said.
+func (r *specRunnerAdapter) Conversation(h Handle) ([]Entry, error) {
 	if r.spec.Transcript == "" {
-		return []string{}, nil
+		return []Entry{}, nil
 	}
 	res, err := shell(fill(r.spec.Transcript, r.placeholders(h, "")), h.Cwd)
 	if err != nil {
@@ -422,7 +424,7 @@ func (r *specRunnerAdapter) Transcript(h Handle) ([]string, error) {
 	if res.Code != 0 {
 		return nil, &RunnerError{Runner: r.spec.Name, Detail: "transcript failed: " + res.Stderr}
 	}
-	return lines(res.Stdout), nil
+	return texts(lines(res.Stdout)), nil
 }
 
 func (r *specRunnerAdapter) Models() ([]string, error) {

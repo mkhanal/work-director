@@ -57,7 +57,7 @@ func TestClaudeTranscriptIsEmptyOnlyWhenTheFileIsMissing(t *testing.T) {
 	isolate(t)
 	cwd := t.TempDir()
 	h := Handle{Runner: "claude", Session: testSID, Cwd: cwd}
-	got, err := claude.Transcript(h)
+	got, err := Transcript(claude, h)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("missing transcript = %v, %v, want empty", got, err)
 	}
@@ -68,7 +68,7 @@ func TestClaudeTranscriptIsEmptyOnlyWhenTheFileIsMissing(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".claude", "projects", projectSlug(cwd), testSID+".jsonl"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if _, err := claude.Transcript(h); err == nil {
+	if _, err := Transcript(claude, h); err == nil {
 		t.Fatal("unreadable transcript returned no error")
 	}
 }
@@ -82,7 +82,7 @@ func TestCodexTranscriptRejectsAnUnparseableLine(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "codex-abc123.1.jsonl"), []byte("not json\n"), 0o644); err != nil {
 		t.Fatalf("write log: %v", err)
 	}
-	if got, err := (codexRunner{}).Transcript(Handle{Runner: "codex", Session: "codex-abc123"}); err == nil {
+	if got, err := Transcript(codexRunner{}, Handle{Runner: "codex", Session: "codex-abc123"}); err == nil {
 		t.Fatalf("transcript = %v, want a parse error", got)
 	}
 }

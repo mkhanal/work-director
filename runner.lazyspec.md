@@ -38,7 +38,9 @@ provider is a TOML file of commands under `~/.work-director/runners/`.
 `spawn` returns a handle with the runner's session id and a hint a human can run to join the session.
 
 ## Sending Continues The Same Session
-`send` addresses the runner with the handle's session id, never starting a new session.
+- `send` addresses the runner with the handle's session id, never starting a new session.
+- claude stops a session that is idle or waiting, and resumes it once the process `claude agents` listed for it has exited.
+- claude refuses to send to a session that is working, naming it.
 
 ## A Runner Stops A Session And Keeps Its Conversation
 - `stop` ends the session's current run; a later `send` continues the same conversation.
@@ -48,6 +50,24 @@ provider is a TOML file of commands under `~/.work-director/runners/`.
 
 ## A Transcript Yields The Executor Messages
 `transcript` returns the assistant texts of the session, oldest first, from the runner's own store.
+
+## A Transcript Ending On A Question Ends On Its ASK Line
+A conversation ending on an unanswered question with options gives a transcript whose last text is `ASK: ` and each item's question with its option labels.
+
+## A Conversation Shows Prompts, Thinking, Tool Calls And Questions
+- `conversation` returns the session's steps oldest first: prompts, texts, thinking, tool calls and questions.
+- claude spawns with thinking summaries on, so its thinking has text; empty thinking is left out.
+- A tool call carries its name, the one thing it acted on (relative to the session's directory where it can be), its input, and its result once there is one, marked failed when the tool failed.
+- An input or result longer than 4000 characters is cut, saying how much was cut.
+- A question carries each item's header, question, options and whether several may be picked.
+- A question answered in the session carries the answers; one interrupted and then followed by a prompt carries that prompt as its reply, or its answers when the prompt is an answer set, which is then not a step of its own.
+- A subagent's side conversation and meta records are not part of the session's conversation.
+- Runners whose store holds only what was said give text steps.
+
+## A Question Takes One Answer Per Item And Keeps It
+- `AnswerText` writes one line per item, in order, under one heading.
+- A count of answers other than the item count, or an empty answer, is refused naming the questions.
+- A conversation reads that message back as the question's answers.
 
 ## A Transcript Follows Its Session Into A Worktree
 `transcript` finds a session by its id wherever the runner's store now keeps it, so a session that moved into a worktree after spawn still reports.

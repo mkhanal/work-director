@@ -14,6 +14,7 @@ import (
 // agentRow is one entry of `claude agents --json --all`.
 type agentRow struct {
 	ID        string `json:"id"`
+	Pid       int    `json:"pid"`
 	SessionID string `json:"sessionId"`
 	Cwd       string `json:"cwd"`
 	Status    string `json:"status"`
@@ -39,6 +40,11 @@ func agents(cwd string) ([]agentRow, error) {
 // "backgrounded · b765c0a2 · <name>".
 var claudeRefRe = regexp.MustCompile(`backgrounded\s*·\s*([0-9a-f]{8})`)
 
+// thinkingSummaries has claude record its thinking as readable summaries
+// rather than empty blocks. A resumed session keeps the settings it was
+// spawned with, so it is passed once, at spawn.
+const thinkingSummaries = `{"showThinkingSummaries":true}`
+
 type claudeRunner struct{}
 
 // claude is the built-in claude adapter: spawn resolves the session id via
@@ -54,7 +60,7 @@ func (claudeRunner) Spawn(o SpawnOptions) (Handle, error) {
 	if o.PermissionMode != nil {
 		permissionMode = *o.PermissionMode
 	}
-	args := []string{"claude", "--bg", "-n", o.Name, "--permission-mode", permissionMode}
+	args := []string{"claude", "--bg", "-n", o.Name, "--permission-mode", permissionMode, "--settings", thinkingSummaries}
 	if o.Model != nil {
 		args = append(args, "--model", *o.Model)
 	}
@@ -92,7 +98,36 @@ func (claudeRunner) Spawn(o SpawnOptions) (Handle, error) {
 	return Handle{Runner: "claude", Session: row.SessionID, Ref: &ref, Cwd: row.Cwd}, nil
 }
 
-func (claudeRunner) Send(h *Handle, text string) error {
+// Send continues the session. Resuming a session whose process is still up,
+// even idle or waiting on a question, starts a copy of it, so a live session
+// is stopped first; one still working is refused, because stopping it would
+// cut its work short.
+func (c claudeRunner) Send(h *Handle, text string) error {
+	rows, err := agents(h.Cwd)
+	if err != nil {
+		return err
+	}
+	for _, a := range rows {
+		if a.SessionID != h.Session {
+			continue
+		}
+		switch a.Status {
+		case "busy", "running":
+			return &RunnerError{Runner: "claude", Detail: "session " + h.Session + " is working; a message to it waits until it is idle"}
+		case "idle", "waiting":
+			if err := c.Stop(*h); err != nil {
+				return err
+			}
+			// claude stop returns before the process has gone, and a resume
+			// while it is still going starts a copy.
+			if a.Pid != 0 {
+				_, gone, _ := waitFor(func() (bool, bool, error) { return true, !alive(a.Pid), nil }, 15*time.Second, 100*time.Millisecond)
+				if !gone {
+					return &RunnerError{Runner: "claude", Detail: fmt.Sprintf("session %s (pid %d) did not exit within 15s of stopping; nothing was sent", h.Session, a.Pid)}
+				}
+			}
+		}
+	}
 	r, err := Run([]string{"claude", "--bg", "--resume", h.Session, text}, h.Cwd)
 	if err != nil {
 		return err
@@ -136,7 +171,8 @@ func (claudeRunner) Status(h Handle) (RunnerStatus, error) {
 		case "idle":
 			return StatusIdle, nil
 		}
-		if a.State == "done" {
+		// A stopped session keeps its conversation and resumes on the next send.
+		if a.State == "done" || a.State == "stopped" {
 			return StatusIdle, nil
 		}
 		return StatusUnknown, nil
@@ -144,61 +180,216 @@ func (claudeRunner) Status(h Handle) (RunnerStatus, error) {
 	return StatusExited, nil
 }
 
-// Transcript searches every project dir: claude files a session under the
-// slug of its current cwd, which moves when the session enters a worktree.
-// No file yet means no messages yet.
-func (claudeRunner) Transcript(h Handle) ([]string, error) {
+// transcriptFile finds the session's store in every project dir: claude
+// files a session under the slug of its current cwd, which moves when the
+// session enters a worktree. "" means no file yet, so no messages yet.
+func transcriptFile(session string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	files, err := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", h.Session+".jsonl"))
+	files, err := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", session+".jsonl"))
+	if err != nil {
+		return "", err
+	}
+	switch len(files) {
+	case 0:
+		return "", nil
+	case 1:
+		return files[0], nil
+	}
+	return "", &RunnerError{Runner: "claude", Detail: fmt.Sprintf("session %s has %d transcripts: %s", session, len(files), strings.Join(files, ", "))}
+}
+
+// claudeRecord is one line of a session's store; only the fields a
+// conversation reads.
+type claudeRecord struct {
+	Type          string          `json:"type"`
+	Timestamp     *string         `json:"timestamp"`
+	IsMeta        bool            `json:"isMeta"`
+	IsSidechain   bool            `json:"isSidechain"`
+	ToolUseResult json.RawMessage `json:"toolUseResult"`
+	Message       struct {
+		Content json.RawMessage `json:"content"`
+	} `json:"message"`
+}
+
+type claudePart struct {
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	Thinking  string          `json:"thinking"`
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Input     json.RawMessage `json:"input"`
+	ToolUseID string          `json:"tool_use_id"`
+	Content   json.RawMessage `json:"content"`
+	IsError   bool            `json:"is_error"`
+}
+
+// askUserQuestion is claude's question tool: its input is the question set.
+const askUserQuestion = "AskUserQuestion"
+
+type claudeQuestions struct {
+	Questions []struct {
+		Header      string `json:"header"`
+		Question    string `json:"question"`
+		MultiSelect bool   `json:"multiSelect"`
+		Options     []struct {
+			Label       string `json:"label"`
+			Description string `json:"description"`
+		} `json:"options"`
+	} `json:"questions"`
+	Answers map[string]string `json:"answers"`
+}
+
+// Conversation reads the session's store: prompts, what it said, its
+// summarised thinking, its tool calls with their results, and the questions it
+// asked with the answers they got. Side conversations of its subagents are not
+// its own.
+func (claudeRunner) Conversation(h Handle) ([]Entry, error) {
+	file, err := transcriptFile(h.Session)
+	if err != nil || file == "" {
+		return []Entry{}, err
+	}
+	text, err := os.ReadFile(file)
 	if err != nil {
 		return nil, err
 	}
-	if len(files) == 0 {
-		return []string{}, nil
+	out := []Entry{}
+	calls := map[string]int{}
+	// open is the question still waiting for its reply, or -1: claude records
+	// an answer typed in the session as the tool's result, and a session
+	// stopped and resumed with an answer as the prompt that follows.
+	open := -1
+	prompt := func(at *string, s string) {
+		if strings.TrimSpace(s) == "" {
+			return
+		}
+		if open >= 0 {
+			q := out[open].Question
+			q.settle(s)
+			open = -1
+			// A set of answers is shown on its question; it is not said twice.
+			if q.Answers != nil {
+				return
+			}
+		}
+		out = append(out, Entry{Kind: EntryPrompt, At: at, Text: s})
 	}
-	if len(files) > 1 {
-		return nil, &RunnerError{Runner: "claude", Detail: fmt.Sprintf("session %s has %d transcripts: %s", h.Session, len(files), strings.Join(files, ", "))}
-	}
-	text, err := os.ReadFile(files[0])
-	if err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, line := range jsonlRecords(string(text)) {
+	for i, line := range jsonlRecords(string(text)) {
 		if line == "" {
 			continue
 		}
-		var row struct {
-			Type    string `json:"type"`
-			Message struct {
-				Content json.RawMessage `json:"content"`
-			} `json:"message"`
+		var rec claudeRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			return nil, fmt.Errorf("%s:%d: %w", file, i+1, err)
 		}
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			return nil, err
-		}
-		// Only assistant messages with an array content carry texts; a user
-		// turn's content is a bare string.
-		if row.Type != "assistant" || !bytes.HasPrefix(bytes.TrimSpace(row.Message.Content), []byte("[")) {
+		if (rec.Type != "user" && rec.Type != "assistant") || rec.IsSidechain || rec.IsMeta || len(rec.Message.Content) == 0 {
 			continue
 		}
-		var content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+		if !bytes.HasPrefix(bytes.TrimSpace(rec.Message.Content), []byte("[")) {
+			var s string
+			if err := json.Unmarshal(rec.Message.Content, &s); err != nil {
+				return nil, fmt.Errorf("%s:%d: %w", file, i+1, err)
+			}
+			if rec.Type == "user" {
+				prompt(rec.Timestamp, s)
+			}
+			continue
 		}
-		if err := json.Unmarshal(row.Message.Content, &content); err != nil {
-			return nil, err
+		var parts []claudePart
+		if err := json.Unmarshal(rec.Message.Content, &parts); err != nil {
+			return nil, fmt.Errorf("%s:%d: %w", file, i+1, err)
 		}
-		for _, part := range content {
-			if part.Type == "text" && part.Text != "" {
-				out = append(out, part.Text)
+		for _, p := range parts {
+			switch {
+			case rec.Type == "user" && p.Type == "text":
+				prompt(rec.Timestamp, p.Text)
+			case rec.Type == "user" && p.Type == "tool_result":
+				at, ok := calls[p.ToolUseID]
+				if !ok {
+					continue
+				}
+				if q := out[at].Question; q != nil {
+					// An interrupted question is still waiting: the reply
+					// arrives as the next prompt.
+					if p.IsError || !q.Pending() {
+						continue
+					}
+					var res claudeQuestions
+					if len(rec.ToolUseResult) > 0 && json.Unmarshal(rec.ToolUseResult, &res) == nil && len(res.Answers) > 0 {
+						answers := make([]string, len(q.Items))
+						for k, it := range q.Items {
+							answers[k] = res.Answers[it.Question]
+						}
+						q.Answers = answers
+					} else {
+						q.settle(resultText(p.Content))
+					}
+					open = -1
+					continue
+				}
+				r := clipped(resultText(p.Content))
+				out[at].Tool.Result = &r
+				out[at].Tool.Failed = p.IsError
+			case rec.Type == "assistant" && p.Type == "text" && p.Text != "":
+				out = append(out, Entry{Kind: EntryText, At: rec.Timestamp, Text: p.Text})
+			case rec.Type == "assistant" && p.Type == "thinking" && strings.TrimSpace(p.Thinking) != "":
+				out = append(out, Entry{Kind: EntryThinking, At: rec.Timestamp, Text: strings.TrimSpace(p.Thinking)})
+			case rec.Type == "assistant" && p.Type == "tool_use" && p.Name == askUserQuestion:
+				var in claudeQuestions
+				if err := json.Unmarshal(p.Input, &in); err != nil {
+					return nil, fmt.Errorf("%s:%d: %s input: %w", file, i+1, askUserQuestion, err)
+				}
+				q := &Question{ID: p.ID, Items: []QuestionItem{}}
+				for _, item := range in.Questions {
+					it := QuestionItem{Header: item.Header, Question: item.Question, Multi: item.MultiSelect, Options: []Option{}}
+					for _, o := range item.Options {
+						it.Options = append(it.Options, Option{Label: o.Label, Description: o.Description})
+					}
+					q.Items = append(q.Items, it)
+				}
+				calls[p.ID] = len(out)
+				open = len(out)
+				out = append(out, Entry{Kind: EntryQuestion, At: rec.Timestamp, Question: q})
+			case rec.Type == "assistant" && p.Type == "tool_use":
+				input := map[string]any{}
+				if len(p.Input) > 0 {
+					if err := json.Unmarshal(p.Input, &input); err != nil {
+						return nil, fmt.Errorf("%s:%d: %s input: %w", file, i+1, p.Name, err)
+					}
+				}
+				calls[p.ID] = len(out)
+				out = append(out, Entry{Kind: EntryTool, At: rec.Timestamp, Tool: &ToolCall{
+					ID: p.ID, Name: p.Name, Summary: toolSummary(p.Name, input, h.Cwd), Input: toolInput(input),
+				}})
 			}
 		}
 	}
 	return out, nil
+}
+
+// resultText is a tool result's text: claude stores it as a string or as
+// text parts.
+func resultText(content json.RawMessage) string {
+	var s string
+	if json.Unmarshal(content, &s) == nil {
+		return s
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(content, &parts) != nil {
+		return ""
+	}
+	var texts []string
+	for _, p := range parts {
+		if p.Type == "text" {
+			texts = append(texts, p.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
 }
 
 // claude's CLI has no non-interactive model list; its own /model picker is the list.

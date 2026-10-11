@@ -96,7 +96,7 @@ func awaitReflection(rn runner.Runner, h runner.Handle) (reflect.Judgement, erro
 	deadline := time.Now().Add(reflectTimeout)
 	var j reflect.Judgement
 	for time.Now().Before(deadline) {
-		out, err := rn.Transcript(h)
+		out, err := runner.Transcript(rn, h)
 		if err != nil {
 			return j, err
 		}

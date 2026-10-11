@@ -136,7 +136,9 @@ func (opencodeRunner) Status(h Handle) (RunnerStatus, error) {
 	return StatusIdle, nil
 }
 
-func (opencodeRunner) Transcript(h Handle) ([]string, error) {
+// Conversation is what the session said: opencode's export is read for its
+// assistant texts.
+func (opencodeRunner) Conversation(h Handle) ([]Entry, error) {
 	r, err := Run([]string{"opencode", "session", "export", h.Session}, h.Cwd)
 	if err != nil {
 		return nil, err
@@ -167,7 +169,7 @@ func (opencodeRunner) Transcript(h Handle) ([]string, error) {
 			}
 		}
 	}
-	return out, nil
+	return texts(out), nil
 }
 
 func (opencodeRunner) Models() ([]string, error) {

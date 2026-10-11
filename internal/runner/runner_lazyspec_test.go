@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -59,10 +60,16 @@ func TestRunner(t *testing.T) {
 
 	writeFake(t, bin, "claude", `case "$1 $2" in
   "--bg -n") echo "backgrounded · b765c0a2 · $3";;
-  "--bg --resume") echo "backgrounded · b765c0a2";;
-  "agents --json") echo '[{"id":"b765c0a2","sessionId":"`+testSID+`","cwd":"`+cwd+`","kind":"background","status":"idle","state":"done"}]';;
+  "--bg --resume") rm -f `+filepath.Join(bin, "stopped")+`; echo "backgrounded · b765c0a2";;
+  "agents --json") status='"status":"idle",'; [ -f `+filepath.Join(bin, "busy")+` ] && status='"status":"busy",'
+    [ -f `+filepath.Join(bin, "stopped")+` ] && status=''
+    [ -f `+filepath.Join(bin, "pid")+` ] && status="$status\"pid\":$(cat `+filepath.Join(bin, "pid")+`),"
+    echo '[{"id":"b765c0a2","sessionId":"`+testSID+`","cwd":"`+cwd+`","kind":"background",'$status'"state":"done"}]';;
   "stop deadbeef") echo 'no background session deadbeef' >&2; exit 1;;
-  "stop "*) echo "stopped $2";;
+  "stop "*) touch `+filepath.Join(bin, "stopped")+`
+    # The process outlives the stop command, as claude's does.
+    [ -f `+filepath.Join(bin, "pid")+` ] && (sleep 0.5; kill $(cat `+filepath.Join(bin, "pid")+`)) >/dev/null 2>&1 &
+    echo "stopped $2";;
 esac`)
 	writeFake(t, bin, "opencode", `case "$1" in
   run) echo '{"type":"step_start","sessionID":"ses_abc123"}'; echo '{"type":"text","sessionID":"ses_abc123","part":{"type":"text","text":"READY"}}';;
@@ -143,7 +150,7 @@ transcript = "cat {log}"
 			if got := claude.AttachHint(h); got != "claude attach b765c0a2" {
 				t.Fatalf("attachHint = %q, want %q", got, "claude attach b765c0a2")
 			}
-			if !strings.Contains(calls(t, bin), "claude --bg -n wd-1 t --permission-mode bypassPermissions B") {
+			if !strings.Contains(calls(t, bin), "claude --bg -n wd-1 t --permission-mode bypassPermissions --settings {\"showThinkingSummaries\":true} B") {
 				t.Fatalf("calls.log missing claude spawn:\n%s", calls(t, bin))
 			}
 		})
@@ -168,8 +175,49 @@ transcript = "cat {log}"
 			if err := claude.Send(&h, "more"); err != nil {
 				t.Fatalf("claude send: %v", err)
 			}
-			if !strings.Contains(calls(t, bin), "claude --bg --resume "+testSID+" more") {
-				t.Fatalf("calls.log missing claude send:\n%s", calls(t, bin))
+			if !strings.Contains(calls(t, bin), "claude stop b765c0a2\nclaude --bg --resume "+testSID+" more") {
+				t.Fatalf("calls.log missing claude stop then send:\n%s", calls(t, bin))
+			}
+		})
+		t.Run("claude resumes only once the stopped process has exited", func(t *testing.T) {
+			proc := exec.Command("sleep", "30")
+			if err := proc.Start(); err != nil {
+				t.Fatal(err)
+			}
+			exited := make(chan struct{})
+			go func() { proc.Wait(); close(exited) }()
+			pidFile := filepath.Join(bin, "pid")
+			if err := os.WriteFile(pidFile, []byte(fmt.Sprint(proc.Process.Pid)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(pidFile)
+			h := Handle{Runner: "claude", Session: testSID, Ref: strPtr("b765c0a2"), Cwd: cwd}
+			if err := claude.Send(&h, "after the exit"); err != nil {
+				t.Fatalf("claude send: %v", err)
+			}
+			select {
+			case <-exited:
+			default:
+				t.Fatal("resumed while the stopped session's process was still running")
+			}
+			if !strings.Contains(calls(t, bin), "claude --bg --resume "+testSID+" after the exit") {
+				t.Fatalf("calls.log missing the resume:\n%s", calls(t, bin))
+			}
+		})
+		t.Run("claude refuses a session that is working", func(t *testing.T) {
+			busy := filepath.Join(bin, "busy")
+			if err := os.WriteFile(busy, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(busy)
+			before := calls(t, bin)
+			h := Handle{Runner: "claude", Session: testSID, Ref: strPtr("b765c0a2"), Cwd: cwd}
+			err := claude.Send(&h, "interrupting")
+			if err == nil || !strings.Contains(err.Error(), testSID) || !strings.Contains(err.Error(), "working") {
+				t.Fatalf("send to a working session = %v, want a refusal naming it", err)
+			}
+			if after := strings.TrimPrefix(calls(t, bin), before); strings.Contains(after, "stop") || strings.Contains(after, "--resume") {
+				t.Fatalf("a working session was stopped or resumed:\n%s", after)
 			}
 		})
 		t.Run("opencode resumes with -s", func(t *testing.T) {
@@ -184,7 +232,7 @@ transcript = "cat {log}"
 	t.Run("A Transcript Yields The Executor Messages", func(t *testing.T) {
 		t.Run("claude reads the jsonl under ~/.claude/projects/<slug>", func(t *testing.T) {
 			h := Handle{Runner: "claude", Session: testSID, Ref: strPtr("b765c0a2"), Cwd: cwd}
-			got, err := claude.Transcript(h)
+			got, err := Transcript(claude, h)
 			if err != nil {
 				t.Fatalf("claude transcript: %v", err)
 			}
@@ -194,7 +242,7 @@ transcript = "cat {log}"
 		})
 		t.Run("opencode reads export", func(t *testing.T) {
 			h := Handle{Runner: "opencode", Session: "ses_abc123", Cwd: cwd}
-			got, err := opencode.Transcript(h)
+			got, err := Transcript(opencode, h)
 			if err != nil {
 				t.Fatalf("opencode transcript: %v", err)
 			}
@@ -212,7 +260,7 @@ transcript = "cat {log}"
 			}
 			fresh := codexRunner{}
 			got, ok, err := waitFor(func() ([]string, bool, error) {
-				got, err := fresh.Transcript(h)
+				got, err := Transcript(fresh, h)
 				return got, len(got) == 2, err
 			}, 5*time.Second, 20*time.Millisecond)
 			if err != nil {
@@ -224,6 +272,163 @@ transcript = "cat {log}"
 		})
 	})
 
+	// session writes a claude store for id from records, one JSON line each.
+	session := func(t *testing.T, id string, records ...map[string]any) Handle {
+		t.Helper()
+		var b strings.Builder
+		for _, r := range records {
+			j, err := json.Marshal(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b.Write(j)
+			b.WriteByte('\n')
+		}
+		if err := os.WriteFile(filepath.Join(claudeDir, id+".jsonl"), []byte(b.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return Handle{Runner: "claude", Session: id, Cwd: cwd}
+	}
+	said := func(role string, parts ...map[string]any) map[string]any {
+		return map[string]any{"type": role, "timestamp": "2026-10-11T10:00:00Z", "message": map[string]any{"content": parts}}
+	}
+	ask := func(id string, items ...string) map[string]any {
+		qs := []map[string]any{}
+		for _, it := range items {
+			qs = append(qs, map[string]any{"header": "H", "question": it, "multiSelect": false, "options": []map[string]any{{"label": "Red", "description": "warm"}, {"label": "Blue", "description": "cool"}}})
+		}
+		return said("assistant", map[string]any{"type": "tool_use", "id": id, "name": "AskUserQuestion", "input": map[string]any{"questions": qs}})
+	}
+	interrupted := func(id string) map[string]any {
+		return said("user", map[string]any{"type": "tool_result", "tool_use_id": id, "is_error": true, "content": "[Tool call interrupted]"})
+	}
+	prompt := func(text string) map[string]any {
+		return map[string]any{"type": "user", "message": map[string]any{"content": text}}
+	}
+
+	t.Run("A Transcript Ending On A Question Ends On Its ASK Line", func(t *testing.T) {
+		h := session(t, "a5c0e7d1-0000-4000-8000-000000000001",
+			prompt("go"),
+			said("assistant", map[string]any{"type": "text", "text": "READY"}),
+			ask("q1", "Which colour?", "Which shade?"),
+		)
+		got, err := Transcript(claude, h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"READY", "ASK: Which colour? (Red / Blue); Which shade? (Red / Blue)"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("transcript = %q, want %q", got, want)
+		}
+		session(t, "a5c0e7d1-0000-4000-8000-000000000001", prompt("go"), ask("q1", "Which colour?"), interrupted("q1"), prompt("Red"))
+		if got, _ := Transcript(claude, h); len(got) != 0 {
+			t.Fatalf("an answered question still ends the transcript: %q", got)
+		}
+	})
+
+	t.Run("A Conversation Shows Prompts, Thinking, Tool Calls And Questions", func(t *testing.T) {
+		long := strings.Repeat("x", 4100)
+		q2, err := AnswerText(Question{Items: []QuestionItem{{Question: "Which colour?"}, {Question: "Which size?"}}}, []string{"Red", "Small, Large"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := session(t, "a5c0e7d1-0000-4000-8000-000000000002",
+			prompt("the brief"),
+			map[string]any{"type": "user", "isMeta": true, "message": map[string]any{"content": "meta"}},
+			said("assistant", map[string]any{"type": "thinking", "thinking": ""}, map[string]any{"type": "thinking", "thinking": "Weighing it"}),
+			said("assistant", map[string]any{"type": "text", "text": "Looking"}),
+			said("assistant",
+				map[string]any{"type": "tool_use", "id": "t1", "name": "Bash", "input": map[string]any{"command": "go test ./...\necho done"}},
+				map[string]any{"type": "tool_use", "id": "t2", "name": "Read", "input": map[string]any{"file_path": filepath.Join(cwd, "a", "b.go")}},
+				map[string]any{"type": "tool_use", "id": "t3", "name": "Grep", "input": map[string]any{"pattern": "x"}},
+			),
+			said("user",
+				map[string]any{"type": "tool_result", "tool_use_id": "t1", "content": long},
+				map[string]any{"type": "tool_result", "tool_use_id": "t2", "is_error": true, "content": []map[string]any{{"type": "text", "text": "nope"}}},
+			),
+			map[string]any{"type": "assistant", "isSidechain": true, "message": map[string]any{"content": []map[string]any{{"type": "text", "text": "side"}}}},
+			ask("q1", "Which colour?"),
+			map[string]any{"type": "user", "toolUseResult": map[string]any{"answers": map[string]any{"Which colour?": "Blue"}}, "message": map[string]any{"content": []map[string]any{{"type": "tool_result", "tool_use_id": "q1", "content": "answered"}}}},
+			ask("q2", "Which colour?", "Which size?"),
+			interrupted("q2"),
+			prompt(q2),
+			ask("q3", "Which colour?"),
+			interrupted("q3"),
+			prompt("do it differently"),
+		)
+		got, err := claude.Conversation(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		kinds := []EntryKind{}
+		for _, e := range got {
+			kinds = append(kinds, e.Kind)
+		}
+		want := []EntryKind{EntryPrompt, EntryThinking, EntryText, EntryTool, EntryTool, EntryTool, EntryQuestion, EntryQuestion, EntryQuestion, EntryPrompt}
+		if !slices.Equal(kinds, want) {
+			t.Fatalf("kinds = %v, want %v", kinds, want)
+		}
+		if got[0].Text != "the brief" || got[1].Text != "Weighing it" || got[2].Text != "Looking" {
+			t.Fatalf("texts = %q %q %q", got[0].Text, got[1].Text, got[2].Text)
+		}
+		bash, read, grep := got[3].Tool, got[4].Tool, got[5].Tool
+		if bash.Name != "Bash" || bash.Summary != "go test ./..." || !strings.Contains(bash.Input, "echo done") {
+			t.Fatalf("bash = %+v", bash)
+		}
+		if bash.Result == nil || bash.Failed || !strings.HasPrefix(*bash.Result, strings.Repeat("x", 4000)) || !strings.Contains(*bash.Result, "100 more characters") {
+			t.Fatalf("bash result not cut at 4000 saying how much: %v", bash.Result)
+		}
+		if read.Summary != filepath.Join("a", "b.go") || read.Result == nil || *read.Result != "nope" || !read.Failed {
+			t.Fatalf("read = %+v", read)
+		}
+		if grep.Result != nil {
+			t.Fatalf("a running call has a result: %+v", grep)
+		}
+		one := got[6].Question
+		if len(one.Items) != 1 || one.Items[0].Header != "H" || one.Items[0].Options[1].Description != "cool" || !slices.Equal(one.Answers, []string{"Blue"}) {
+			t.Fatalf("question answered in session = %+v", one)
+		}
+		if two := got[7].Question; !slices.Equal(two.Answers, []string{"Red", "Small, Large"}) || two.Reply != nil {
+			t.Fatalf("question answered by an answer set = %+v", two)
+		}
+		if three := got[8].Question; three.Answers != nil || three.Reply == nil || *three.Reply != "do it differently" {
+			t.Fatalf("question replied to = %+v", three)
+		}
+		if _, ok := Asking(got); ok {
+			t.Fatal("a conversation with every question settled is asking")
+		}
+		t.Run("text-only stores give text steps", func(t *testing.T) {
+			got, err := opencode.Conversation(Handle{Runner: "opencode", Session: "ses_abc123", Cwd: cwd})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 2 || got[0].Kind != EntryText || got[1].Text != "PONG" {
+				t.Fatalf("opencode conversation = %+v", got)
+			}
+		})
+	})
+
+	t.Run("A Question Takes One Answer Per Item And Keeps It", func(t *testing.T) {
+		q := Question{Items: []QuestionItem{{Question: "Which colour?"}, {Question: "Which size?"}}}
+		text, err := AnswerText(q, []string{"Red", "Large"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if text != "Answers to your questions:\n\"Which colour?\" → Red\n\"Which size?\" → Large" {
+			t.Fatalf("answer text = %q", text)
+		}
+		for _, bad := range [][]string{{"Red"}, {"Red", " "}} {
+			if _, err := AnswerText(q, bad); err == nil || !strings.Contains(err.Error(), "Which size?") {
+				t.Fatalf("answers %q = %v, want a refusal naming the question", bad, err)
+			}
+		}
+		read := q
+		read.settle(text)
+		if !slices.Equal(read.Answers, []string{"Red", "Large"}) || read.Reply != nil {
+			t.Fatalf("read back = %+v", read)
+		}
+	})
+
 	t.Run("A Transcript Follows Its Session Into A Worktree", func(t *testing.T) {
 		moved := "0d7a1c52-5b8e-4f0e-9c1a-2f3b4c5d6e7f"
 		dir := filepath.Join(home, ".claude", "projects", projectSlug(filepath.Join(cwd, ".claude", "worktrees", "fix")))
@@ -233,7 +438,7 @@ transcript = "cat {log}"
 		if err := os.WriteFile(filepath.Join(dir, moved+".jsonl"), []byte(transcript), 0o644); err != nil {
 			t.Fatalf("write moved transcript: %v", err)
 		}
-		got, err := claude.Transcript(Handle{Runner: "claude", Session: moved, Cwd: cwd})
+		got, err := Transcript(claude, Handle{Runner: "claude", Session: moved, Cwd: cwd})
 		if err != nil {
 			t.Fatalf("claude transcript: %v", err)
 		}
@@ -274,7 +479,7 @@ transcript = "cat {log}"
 				if err := os.WriteFile(c.log, []byte(c.complete+"\n"+c.torn), 0o644); err != nil {
 					t.Fatalf("write log: %v", err)
 				}
-				got, err := c.runner.Transcript(c.handle)
+				got, err := Transcript(c.runner, c.handle)
 				if err != nil {
 					t.Fatalf("transcript mid-write: %v", err)
 				}
@@ -284,7 +489,7 @@ transcript = "cat {log}"
 				if err := os.WriteFile(c.log, []byte(c.complete+"\n"+c.torn+"\n"), 0o644); err != nil {
 					t.Fatalf("write log: %v", err)
 				}
-				if got, err := c.runner.Transcript(c.handle); err == nil {
+				if got, err := Transcript(c.runner, c.handle); err == nil {
 					t.Fatalf("transcript with a malformed complete line = %v, want a parse error", got)
 				}
 			})
@@ -296,7 +501,7 @@ transcript = "cat {log}"
 			if _, err := claude.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-1 t", Brief: "B", Model: strPtr("fable")}); err != nil {
 				t.Fatalf("claude spawn: %v", err)
 			}
-			if !strings.Contains(calls(t, bin), "claude --bg -n wd-1 t --permission-mode bypassPermissions --model fable B") {
+			if !strings.Contains(calls(t, bin), "claude --bg -n wd-1 t --permission-mode bypassPermissions --settings {\"showThinkingSummaries\":true} --model fable B") {
 				t.Fatalf("calls.log missing claude model spawn:\n%s", calls(t, bin))
 			}
 		})
@@ -510,7 +715,7 @@ transcript = "cat {log}"
 			if status != StatusWaiting {
 				t.Fatalf("status = %q, want waiting", status)
 			}
-			texts, err := r.Transcript(h)
+			texts, err := Transcript(r, h)
 			if err != nil {
 				t.Fatalf("myagent transcript: %v", err)
 			}
@@ -545,7 +750,7 @@ transcript = "cat {log}"
 			if err != nil {
 				t.Fatalf("RunnerNamed: %v", err)
 			}
-			texts, err := fresh.Transcript(h)
+			texts, err := Transcript(fresh, h)
 			if err != nil {
 				t.Fatalf("detached transcript: %v", err)
 			}

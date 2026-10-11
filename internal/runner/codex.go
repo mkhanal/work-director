@@ -97,8 +97,8 @@ func (codexRunner) Status(h Handle) (RunnerStatus, error) {
 	return StatusIdle, nil
 }
 
-// Transcript reads every turn log of the session, oldest turn first.
-func (codexRunner) Transcript(h Handle) ([]string, error) {
+// Conversation is what the session said in every turn log, oldest turn first.
+func (codexRunner) Conversation(h Handle) ([]Entry, error) {
 	dir, err := codexLogDir()
 	if err != nil {
 		return nil, err
@@ -109,13 +109,13 @@ func (codexRunner) Transcript(h Handle) ([]string, error) {
 	}
 	out := []string{}
 	for _, log := range logs {
-		texts, err := codexTexts(log)
+		said, err := codexTexts(log)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, texts...)
+		out = append(out, said...)
 	}
-	return out, nil
+	return texts(out), nil
 }
 
 // codexTurnLogs lists the session's turn logs ordered by their timestamp.
