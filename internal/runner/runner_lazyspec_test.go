@@ -1022,6 +1022,22 @@ func TestARunnerThatReportsNothingIsAskedRatherThanGuessedAt(t *testing.T) {
 		}
 	})
 
+	t.Run("the only runner lists models nothing checked, so it is asked", func(t *testing.T) {
+		// One runner, with models but no cost and no probe: none can be ranked
+		// or called capable, so the runner's own default is the honest answer.
+		alone := []Availability{{Runner: "alpha", Detected: true}}
+		got, err := Pick(RoleInterpret, alone, nil, nil, Policy{
+			Role:   RolePolicy{},
+			Lister: func(string) ([]Model, error) { return []Model{{ID: "alpha/ok"}}, nil },
+		})
+		if err != nil {
+			t.Fatalf("Pick: %v", err)
+		}
+		if got.Runner != "alpha" || got.Model != "" || !strings.Contains(got.Why, "was not checked") {
+			t.Errorf("choice = %+v, want alpha asked with no model named", got)
+		}
+	})
+
 	t.Run("no runner offers anything, so no model is named at all", func(t *testing.T) {
 		got, err := Pick(RoleTaste, both, nil, nil, Policy{
 			Role:   RolePolicy{},

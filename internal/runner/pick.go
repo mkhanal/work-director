@@ -150,7 +150,9 @@ func Pick(role Role, avail []Availability, costs map[string]Cost, probe Probe, p
 	}
 
 	var everything []Model
-	var unrankable string
+	// unrankable is the first runner that listed nothing to rank; listed, the
+	// first that listed models, which is asked when none of them was checked.
+	var unrankable, listed string
 
 	for _, name := range order {
 		a := avail[indexOf(avail, name)]
@@ -167,6 +169,9 @@ func Pick(role Role, avail []Availability, costs map[string]Cost, probe Probe, p
 				unrankable = name
 			}
 			continue
+		}
+		if listed == "" {
+			listed = name
 		}
 		everything = append(everything, models...)
 	}
@@ -246,6 +251,9 @@ func Pick(role Role, avail []Availability, costs map[string]Cost, probe Probe, p
 	// So: no floor data at all means ask; a floor that was checked and not met
 	// means refuse and say what each model did.
 	if !anyProbed && !anyUnreachable {
+		if unrankable == "" {
+			unrankable = listed
+		}
 		if unrankable != "" {
 			return Choice{Runner: unrankable,
 				Why:        fmt.Sprintf("the %s floor was not checked on any candidate, so %s is asked instead of one being called incapable: see `wd model for %s`", role, unrankable, role),
