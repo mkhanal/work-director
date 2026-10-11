@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -26,6 +27,11 @@ type conversationView struct {
 	Total   int                 `json:"total"`
 	Entries []runner.Entry      `json:"entries"`
 	Asking  *runner.Question    `json:"asking"`
+	// Agent is the subagent whose conversation this is, or empty for the
+	// session's own.
+	Agent     string            `json:"agent,omitempty"`
+	Usage     *runner.Usage     `json:"usage,omitempty"`
+	Subagents []runner.Subagent `json:"subagents,omitempty"`
 }
 
 // statusNone is the status of work that has no session to ask.
@@ -35,7 +41,7 @@ const statusNone runner.RunnerStatus = "none"
 // from never changes once a later step exists, except a tool call still
 // waiting for its result or a question still waiting for its answer, so a
 // client re-reads from the first of those.
-func (s *Server) conversation(id string, from int) (conversationView, error) {
+func (s *Server) conversation(id string, from int, agent string) (conversationView, error) {
 	w, err := s.work(id)
 	if err != nil {
 		return conversationView{}, err
@@ -51,9 +57,29 @@ func (s *Server) conversation(id string, from int) (conversationView, error) {
 	if err != nil || !ok {
 		return view, err
 	}
-	entries, err := r.Conversation(h)
+	inspect, inspects := r.(runner.Inspector)
+	var entries []runner.Entry
+	switch {
+	case agent == "":
+		entries, err = r.Conversation(h)
+	case inspects:
+		entries, err = inspect.SubagentConversation(h, agent)
+		if err != nil {
+			return conversationView{}, notFound{err.Error()}
+		}
+	default:
+		return conversationView{}, notFound{fmt.Sprintf("%s runs on %s, which keeps no subagents", w.ID, h.Runner)}
+	}
 	if err != nil {
 		return conversationView{}, err
+	}
+	view.Agent = agent
+	if inspects {
+		u, subs, err := inspected(inspect, h)
+		if err != nil {
+			return conversationView{}, err
+		}
+		view.Usage, view.Subagents = &u, subs
 	}
 	status, err := r.Status(h)
 	if err != nil {
@@ -78,7 +104,19 @@ type activity struct {
 	Asking *runner.Question `json:"asking,omitempty"`
 	Error  string           `json:"error,omitempty"`
 	// Status is the session's own: whether it works, rests or has stopped.
-	Status runner.RunnerStatus `json:"status,omitempty"`
+	Status    runner.RunnerStatus `json:"status,omitempty"`
+	Usage     *runner.Usage       `json:"usage,omitempty"`
+	Subagents []runner.Subagent   `json:"subagents,omitempty"`
+}
+
+// inspected is what a session spent and the subagents it started.
+func inspected(r runner.Inspector, h runner.Handle) (runner.Usage, []runner.Subagent, error) {
+	u, err := r.Usage(h)
+	if err != nil {
+		return runner.Usage{}, nil, err
+	}
+	subs, err := r.Subagents(h)
+	return u, subs, err
 }
 
 // activities reads the session of every task still working, keyed by task.
@@ -88,9 +126,6 @@ func (s *Server) activities(tasks []core.Work) map[string]activity {
 		return out
 	}
 	for _, t := range tasks {
-		if t.State != core.StateRunning && t.State != core.StateNeedsInput {
-			continue
-		}
 		r, h, ok, err := s.sessions(t)
 		if err != nil {
 			out[t.ID] = activity{Error: err.Error()}
@@ -107,6 +142,14 @@ func (s *Server) activities(tasks []core.Work) map[string]activity {
 		a := activityOf(entries)
 		if a.Status, err = r.Status(h); err != nil {
 			a.Status = runner.StatusUnknown
+		}
+		if inspect, ok := r.(runner.Inspector); ok {
+			u, subs, err := inspected(inspect, h)
+			if err != nil {
+				out[t.ID] = activity{Error: err.Error()}
+				continue
+			}
+			a.Usage, a.Subagents = &u, subs
 		}
 		out[t.ID] = a
 	}

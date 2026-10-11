@@ -252,6 +252,12 @@ func (claudeRunner) Conversation(h Handle) ([]Entry, error) {
 	if err != nil || file == "" {
 		return []Entry{}, err
 	}
+	return conversationIn(file, h.Cwd, false)
+}
+
+// conversationIn reads one claude store. A subagent's own store is all
+// sidechain; a session's store skips the sidechain records it carries.
+func conversationIn(file, cwd string, sidechain bool) ([]Entry, error) {
 	text, err := os.ReadFile(file)
 	if err != nil {
 		return nil, err
@@ -285,7 +291,7 @@ func (claudeRunner) Conversation(h Handle) ([]Entry, error) {
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			return nil, fmt.Errorf("%s:%d: %w", file, i+1, err)
 		}
-		if (rec.Type != "user" && rec.Type != "assistant") || rec.IsSidechain || rec.IsMeta || len(rec.Message.Content) == 0 {
+		if (rec.Type != "user" && rec.Type != "assistant") || rec.IsSidechain != sidechain || rec.IsMeta || len(rec.Message.Content) == 0 {
 			continue
 		}
 		if !bytes.HasPrefix(bytes.TrimSpace(rec.Message.Content), []byte("[")) {
@@ -362,7 +368,7 @@ func (claudeRunner) Conversation(h Handle) ([]Entry, error) {
 				}
 				calls[p.ID] = len(out)
 				out = append(out, Entry{Kind: EntryTool, At: rec.Timestamp, Tool: &ToolCall{
-					ID: p.ID, Name: p.Name, Summary: toolSummary(p.Name, input, h.Cwd), Input: toolInput(input),
+					ID: p.ID, Name: p.Name, Summary: toolSummary(p.Name, input, cwd), Input: toolInput(input),
 				}})
 			}
 		}

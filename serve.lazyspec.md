@@ -62,15 +62,18 @@ JSON message per line to stdout:
 ## A Work Item Serves Its Session's Conversation
 - `GET /api/conversation/<id>?from=<n>` and the `conversation` method return the work's session steps from index `n` on (default 0), as the runner's `conversation` gives them.
 - The reply carries `total` steps, the session's `status`, and `asking`: the question the session ends waiting on, else null.
+- Where the runner can say, it carries the session's `usage` and its `subagents`.
+- With `agent=<subagent id>` (`agent` on the method) the steps are that subagent's conversation; a subagent the session does not have is not-found.
 - Work with no session has status `none` and no steps.
 - An unknown id is not-found; a negative or non-numeric `from` is bad-request.
 
-## A Goal Serves What Each Working Task Is Doing Now
-- `activity` on a goal maps each running or needs-input task with a session to its latest step as one line (`now`), that step's `kind`, and `asking`.
+## A Goal Serves What Each Of Its Tasks Is Doing
+- `activity` on a goal maps each task with a session to its latest step as one line (`now`), that step's `kind`, and `asking`.
+- Where the runner can say, each carries the session's `usage` and its `subagents`.
 - A tool step reads as its name and what it acted on; a question as its questions; others as their first line.
 - Each carries its session's `status`, `unknown` when the runner cannot say.
 - A session that cannot be read carries `error` instead.
-- With no such task, `activity` is `{}`.
+- With no task that has a session, `activity` is `{}`.
 
 ## A Running Session's Question Puts Its Work In Needs You
 - While serving, a running work item whose session ends on a question has the question filed as a `question` event and moves to needs-input within seconds.

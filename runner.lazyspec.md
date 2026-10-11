@@ -65,6 +65,12 @@ A conversation ending on an unanswered question with options gives a transcript 
 - A subagent's side conversation and meta records are not part of the session's conversation.
 - Runners whose store holds only what was said give text steps.
 
+## A Claude Session Reports What It Spent And The Subagents It Started
+- `Usage` gives the model of its last reply, its tokens, its tool calls, and the times of its first and last records.
+- Tokens add up each reply's input, cache-creation and output tokens; cache reads are left out.
+- `Subagents` lists the agents in the session's `subagents` directory, oldest first, each with its description and type from its meta file, its own usage, whether its last reply ended its turn, and the first line of the last thing it said.
+- `SubagentConversation` reads one subagent's store as a conversation; an id the session has no store for is refused naming it.
+
 ## A Question Takes One Answer Per Item And Keeps It
 - `AnswerText` writes one line per item, in order, under one heading.
 - A count of answers other than the item count, or an empty answer, is refused naming the questions.

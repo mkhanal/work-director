@@ -40,7 +40,7 @@ func TestServe(t *testing.T) {
 	t.Run("Archived Work Is Not On The Board", archivedWorkIsNotOnTheBoard)
 	t.Run("A Client Can Hold The Server On Its Standard Streams", aClientCanHoldTheServerOnItsStandardStreams)
 	t.Run("A Work Item Serves Its Session's Conversation", aWorkItemServesItsSessionsConversation)
-	t.Run("A Goal Serves What Each Working Task Is Doing Now", aGoalServesWhatEachWorkingTaskIsDoingNow)
+	t.Run("A Goal Serves What Each Of Its Tasks Is Doing", aGoalServesWhatEachOfItsTasksIsDoing)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("Work Items Serve Over HTTP", workItemsServeOverHTTP)
 	t.Run("Actions Dispatch To The CLI", actionsDispatchToTheCLI)
@@ -1021,6 +1021,21 @@ func (r *sessionRunner) Status(h runner.Handle) (runner.RunnerStatus, error) {
 	return runner.StatusWaiting, nil
 }
 
+func (r *sessionRunner) Usage(h runner.Handle) (runner.Usage, error) {
+	return runner.Usage{Model: "claude-opus-5-5", Tokens: 1200, Tools: 3}, nil
+}
+
+func (r *sessionRunner) Subagents(h runner.Handle) ([]runner.Subagent, error) {
+	return []runner.Subagent{{ID: "sub1", Description: "Probe", Type: "fork", Done: true}}, nil
+}
+
+func (r *sessionRunner) SubagentConversation(h runner.Handle, agent string) ([]runner.Entry, error) {
+	if agent != "sub1" {
+		return nil, fmt.Errorf("session %s has no subagent %s", h.Session, agent)
+	}
+	return []runner.Entry{{Kind: runner.EntryText, Text: "probing"}}, nil
+}
+
 func (r *sessionRunner) Send(h *runner.Handle, text string) error {
 	r.sent = append(r.sent, text)
 	return nil
@@ -1092,6 +1107,15 @@ func aWorkItemServesItsSessionsConversation(t *testing.T) {
 	if tail.From != 2 || tail.Total != 4 || len(tail.Entries) != 2 || tail.Entries[0].Tool.Name != "Bash" {
 		t.Fatalf("from 2 = %+v, want the last two steps", tail)
 	}
+	if all.Usage == nil || all.Usage.Tools != 3 || len(all.Subagents) != 1 {
+		t.Fatalf("conversation = %+v, want the session's usage and subagents", all)
+	}
+	var sub conversationView
+	getJSON(t, ts.URL+"/api/conversation/"+w.ID+"?agent=sub1", http.StatusOK, &sub)
+	if len(sub.Entries) != 1 || sub.Entries[0].Text != "probing" || sub.Agent != "sub1" {
+		t.Fatalf("subagent conversation = %+v, want its own step", sub)
+	}
+	getJSON(t, ts.URL+"/api/conversation/"+w.ID+"?agent=nope", http.StatusNotFound, &errorBody{})
 	var none conversationView
 	getJSON(t, ts.URL+"/api/conversation/"+idle.ID, http.StatusOK, &none)
 	if none.Status != "none" || none.Entries == nil || len(none.Entries) != 0 || none.Asking != nil {
@@ -1102,6 +1126,11 @@ func aWorkItemServesItsSessionsConversation(t *testing.T) {
 	getJSON(t, ts.URL+"/api/conversation/"+w.ID+"?from=x", http.StatusBadRequest, &errorBody{})
 
 	c := startStdio(t, s)
+	c.send(`{"id": 2, "method": "conversation", "params": {"id": "` + w.ID + `", "agent": "sub1"}}`)
+	var subViaStdio conversationView
+	if err := json.Unmarshal(c.reply(2)["result"], &subViaStdio); err != nil || len(subViaStdio.Entries) != 1 {
+		t.Fatalf("stdio subagent conversation = %+v (%v)", subViaStdio, err)
+	}
 	c.send(`{"id": 1, "method": "conversation", "params": {"id": "` + w.ID + `", "from": 3}}`)
 	var viaStdio conversationView
 	if err := json.Unmarshal(c.reply(1)["result"], &viaStdio); err != nil || len(viaStdio.Entries) != 1 || viaStdio.Entries[0].Kind != runner.EntryQuestion {
@@ -1109,7 +1138,7 @@ func aWorkItemServesItsSessionsConversation(t *testing.T) {
 	}
 }
 
-func aGoalServesWhatEachWorkingTaskIsDoingNow(t *testing.T) {
+func aGoalServesWhatEachOfItsTasksIsDoing(t *testing.T) {
 	s := newTestServer(t)
 	r := &sessionRunner{
 		steps: map[string][]runner.Entry{
@@ -1152,8 +1181,11 @@ func aGoalServesWhatEachWorkingTaskIsDoingNow(t *testing.T) {
 	if a := g.Activity[broken.ID]; !strings.Contains(a.Error, "unreadable") {
 		t.Fatalf("unreadable activity = %+v, want its error", a)
 	}
-	if _, ok := g.Activity[done.ID]; ok {
-		t.Fatal("a task in review has activity")
+	if a, ok := g.Activity[done.ID]; !ok || a.Now != "Bash · go test ./..." {
+		t.Fatalf("a task in review = %+v, want its activity too", a)
+	}
+	if a := g.Activity[tool.ID]; a.Usage == nil || a.Usage.Tokens != 1200 || len(a.Subagents) != 1 || a.Subagents[0].Description != "Probe" {
+		t.Fatalf("tool activity = %+v, want the session's usage and subagent", a)
 	}
 }
 

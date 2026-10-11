@@ -20,8 +20,8 @@ type Toolkit struct {
 	// Lockfile is the lockfile PackageManager was read from, or empty when
 	// none says which manager the repository uses.
 	Lockfile string
-	Checks         []string
-	Specs          []string
+	Checks   []string
+	Specs    []string
 }
 
 // nodeScripts are the package.json scripts that check a repository, in the

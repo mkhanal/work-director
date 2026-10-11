@@ -15,9 +15,10 @@ type stdioRequest struct {
 	ID     *int64 `json:"id"`
 	Method string `json:"method"`
 	Params struct {
-		ID   string   `json:"id"`
-		Argv []string `json:"argv"`
-		From int      `json:"from"`
+		ID    string   `json:"id"`
+		Argv  []string `json:"argv"`
+		From  int      `json:"from"`
+		Agent string   `json:"agent"`
 	} `json:"params"`
 }
 
@@ -140,7 +141,7 @@ func (s *Server) answer(req stdioRequest) stdioReply {
 	case "events":
 		result, err = s.events(req.Params.ID)
 	case "conversation":
-		result, err = s.conversation(req.Params.ID, req.Params.From)
+		result, err = s.conversation(req.Params.ID, req.Params.From, req.Params.Agent)
 	case "action":
 		if len(req.Params.Argv) == 0 {
 			err = badRequest{"action needs params.argv"}

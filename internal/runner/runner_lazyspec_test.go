@@ -306,6 +306,77 @@ transcript = "cat {log}"
 		return map[string]any{"type": "user", "message": map[string]any{"content": text}}
 	}
 
+	t.Run("A Claude Session Reports What It Spent And The Subagents It Started", func(t *testing.T) {
+		reply := func(at, model string, in, cache, read, out int, stop string, parts ...map[string]any) map[string]any {
+			return map[string]any{"type": "assistant", "timestamp": at, "message": map[string]any{
+				"model": model, "stop_reason": stop, "content": parts,
+				"usage": map[string]any{"input_tokens": in, "cache_creation_input_tokens": cache, "cache_read_input_tokens": read, "output_tokens": out},
+			}}
+		}
+		const sid = "a5c0e7d1-0000-4000-8000-0000000000a1"
+		h := session(t, sid,
+			map[string]any{"type": "user", "timestamp": "2026-10-11T10:00:00Z", "message": map[string]any{"content": "go"}},
+			reply("2026-10-11T10:00:05Z", "claude-opus-5-5", 10, 1000, 50000, 200, "tool_use",
+				map[string]any{"type": "tool_use", "id": "t1", "name": "Bash", "input": map[string]any{"command": "ls"}},
+				map[string]any{"type": "tool_use", "id": "a1", "name": "Agent", "input": map[string]any{"description": "Probe"}}),
+			reply("2026-10-11T10:09:00Z", "claude-opus-5-5", 5, 0, 60000, 100, "end_turn", map[string]any{"type": "text", "text": "Done here"}),
+		)
+		u, err := Inspector(claude).Usage(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if u.Model != "claude-opus-5-5" || u.Tokens != 1315 || u.Tools != 2 || *u.Started != "2026-10-11T10:00:00Z" || *u.Last != "2026-10-11T10:09:00Z" {
+			t.Fatalf("usage = %+v, want opus, 1315 tokens without cache reads, 2 tools, 10:00 to 10:09", u)
+		}
+
+		dir := filepath.Join(claudeDir, sid, "subagents")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		store := func(id, meta string, records ...map[string]any) {
+			var b strings.Builder
+			for _, r := range records {
+				r["isSidechain"] = true
+				j, _ := json.Marshal(r)
+				b.Write(j)
+				b.WriteByte('\n')
+			}
+			if err := os.WriteFile(filepath.Join(dir, "agent-"+id+".jsonl"), []byte(b.String()), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "agent-"+id+".meta.json"), []byte(meta), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		store("late", `{"agentType":"general-purpose","description":"Still going"}`,
+			map[string]any{"type": "user", "timestamp": "2026-10-11T10:02:00Z", "message": map[string]any{"content": "probe more"}},
+			reply("2026-10-11T10:03:00Z", "claude-sonnet-5-5", 1, 2, 3, 4, "tool_use",
+				map[string]any{"type": "tool_use", "id": "r1", "name": "Read", "input": map[string]any{"file_path": "x"}}))
+		store("early", `{"agentType":"fork","description":"Probe"}`,
+			map[string]any{"type": "user", "timestamp": "2026-10-11T10:01:00Z", "message": map[string]any{"content": "probe"}},
+			reply("2026-10-11T10:04:00Z", "claude-opus-5-5", 1, 1, 1, 1, "end_turn", map[string]any{"type": "text", "text": "Found it\nmore"}))
+		subs, err := Inspector(claude).Subagents(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(subs) != 2 || subs[0].ID != "early" || subs[1].ID != "late" {
+			t.Fatalf("subagents = %+v, want early then late", subs)
+		}
+		if a := subs[0]; a.Description != "Probe" || a.Type != "fork" || !a.Done || a.Said != "Found it" || a.Usage.Tokens != 3 {
+			t.Fatalf("early = %+v", a)
+		}
+		if a := subs[1]; a.Done || a.Usage.Tools != 1 || a.Usage.Model != "claude-sonnet-5-5" {
+			t.Fatalf("late = %+v, want still going with one tool on sonnet", a)
+		}
+		steps, err := Inspector(claude).SubagentConversation(h, "late")
+		if err != nil || len(steps) != 2 || steps[0].Text != "probe more" || steps[1].Tool == nil {
+			t.Fatalf("late conversation = %+v, %v", steps, err)
+		}
+		if _, err := Inspector(claude).SubagentConversation(h, "nope"); err == nil || !strings.Contains(err.Error(), "nope") {
+			t.Fatalf("unknown subagent = %v, want it refused naming it", err)
+		}
+	})
+
 	t.Run("A Transcript Ending On A Question Ends On Its ASK Line", func(t *testing.T) {
 		h := session(t, "a5c0e7d1-0000-4000-8000-000000000001",
 			prompt("go"),

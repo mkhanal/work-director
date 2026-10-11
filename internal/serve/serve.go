@@ -210,7 +210,7 @@ func (s *Server) handleConversation(w http.ResponseWriter, r *http.Request) {
 		}
 		from = n
 	}
-	c, err := s.conversation(strings.TrimPrefix(r.URL.Path, "/api/conversation/"), from)
+	c, err := s.conversation(strings.TrimPrefix(r.URL.Path, "/api/conversation/"), from, r.URL.Query().Get("agent"))
 	if err != nil {
 		writeViewError(w, err)
 		return
