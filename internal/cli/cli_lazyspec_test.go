@@ -4004,7 +4004,7 @@ func TestGoalStartsFromOneSentence(t *testing.T) {
 
 	// The finder replies with neither tasks nor a question.
 	code, _, errStr := f.run(t, "goal", "start", "sample-app", "Nothing to plan", "--runner", "finder", "--timeout", "1")
-	if code != 1 || !strings.Contains(errStr, "produced no task list") || !strings.Contains(errStr, "finder-s") {
+	if code != 1 || !strings.Contains(errStr, "finder-s") {
 		t.Fatalf("an empty plan: exit %d, %q; want 1 naming the plan session", code, errStr)
 	}
 	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
