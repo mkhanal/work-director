@@ -16,8 +16,13 @@ pub enum ThreadFilter {
 }
 
 impl ThreadFilter {
-    pub const ALL: [ThreadFilter; 5] =
-        [ThreadFilter::All, ThreadFilter::You, ThreadFilter::Supervisor, ThreadFilter::Reports, ThreadFilter::Questions];
+    pub const ALL: [ThreadFilter; 5] = [
+        ThreadFilter::All,
+        ThreadFilter::You,
+        ThreadFilter::Supervisor,
+        ThreadFilter::Reports,
+        ThreadFilter::Questions,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -388,47 +393,46 @@ impl GoalDetail {
     pub fn waiting_tasks(&self) -> Vec<WaitingTask> {
         self.tasks
             .iter()
-            .filter(|t| {
-                t.state == WorkState::NeedsInput && self.activity.get(&t.id).is_none_or(|a| a.asking.is_none())
-            })
+            .filter(|t| t.state == WorkState::NeedsInput && self.activity.get(&t.id).is_none_or(|a| a.asking.is_none()))
             .filter_map(|t| {
-                let question = self.events.iter().rev().filter(|e| e.work == t.id).find_map(|e| match e.kind.as_str() {
-                    "answer" | "decision" => Some(None),
-                    "question" => {
-                        let items = e
-                            .asked_items()
-                            .into_iter()
-                            .map(|i| QuestionItem {
+                let question =
+                    self.events.iter().rev().filter(|e| e.work == t.id).find_map(|e| match e.kind.as_str() {
+                        "answer" | "decision" => Some(None),
+                        "question" => {
+                            let items = e
+                                .asked_items()
+                                .into_iter()
+                                .map(|i| QuestionItem {
+                                    header: String::new(),
+                                    question: i.question,
+                                    multi: false,
+                                    options: i
+                                        .choices
+                                        .into_iter()
+                                        .map(|label| QuestionOption { label, description: String::new() })
+                                        .collect(),
+                                })
+                                .collect();
+                            Some(Some(asked(e, items)))
+                        }
+                        "report" => {
+                            let report = self.reports.get(&e.id.to_string());
+                            let notes = report.and_then(|r| r.sections.iter().find(|s| s.name == "NOTES"));
+                            let said = [report.map(|r| r.said.as_str()), notes.map(|s| s.text.as_str())]
+                                .into_iter()
+                                .flatten()
+                                .find(|s| !s.is_empty())
+                                .unwrap_or(&e.body);
+                            let item = QuestionItem {
                                 header: String::new(),
-                                question: i.question,
+                                question: said.to_string(),
                                 multi: false,
-                                options: i
-                                    .choices
-                                    .into_iter()
-                                    .map(|label| QuestionOption { label, description: String::new() })
-                                    .collect(),
-                            })
-                            .collect();
-                        Some(Some(asked(e, items)))
-                    }
-                    "report" => {
-                        let report = self.reports.get(&e.id.to_string());
-                        let notes = report.and_then(|r| r.sections.iter().find(|s| s.name == "NOTES"));
-                        let said = [report.map(|r| r.said.as_str()), notes.map(|s| s.text.as_str())]
-                            .into_iter()
-                            .flatten()
-                            .find(|s| !s.is_empty())
-                            .unwrap_or(&e.body);
-                        let item = QuestionItem {
-                            header: String::new(),
-                            question: said.to_string(),
-                            multi: false,
-                            options: Vec::new(),
-                        };
-                        Some(Some(asked(e, vec![item])))
-                    }
-                    _ => None,
-                })??;
+                                options: Vec::new(),
+                            };
+                            Some(Some(asked(e, vec![item])))
+                        }
+                        _ => None,
+                    })??;
                 Some(WaitingTask { task: t.clone(), question })
             })
             .collect()

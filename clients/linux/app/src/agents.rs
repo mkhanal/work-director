@@ -39,11 +39,8 @@ impl AgentsPanel {
         let list = gtk::ListBox::new();
         list.add_css_class("navigation-sidebar");
         list.set_selection_mode(gtk::SelectionMode::Single);
-        let scroller = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .vexpand(true)
-            .child(&list)
-            .build();
+        let scroller =
+            gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&list).build();
         widget.append(&scroller);
 
         let cards: Rc<RefCell<Vec<AgentCard>>> = Rc::new(RefCell::new(Vec::new()));
@@ -114,7 +111,8 @@ fn card_view(card: &AgentCard, nested: bool) -> gtk::Box {
     }
     column.append(&top);
     if let Some(line) = card.line.as_deref().filter(|l| !l.is_empty()) {
-        let classes: &[&str] = if card.phase == Phase::Asking { &["meta", "attention-text"] } else { &["meta", "text2"] };
+        let classes: &[&str] =
+            if card.phase == Phase::Asking { &["meta", "attention-text"] } else { &["meta", "text2"] };
         column.append(&ui::line(line, classes));
     }
     if let Some(usage) = &card.usage {

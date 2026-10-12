@@ -20,7 +20,8 @@ pub struct Shown {
 fn frame(app: &App, title: &str, content: &impl IsA<gtk::Widget>, end: Option<&gtk::Widget>) -> adw::ToolbarView {
     let bar = adw::HeaderBar::new();
     bar.set_title_widget(Some(&adw::WindowTitle::new(title, "")));
-    let sidebar = gtk::ToggleButton::builder().icon_name("sidebar-show-symbolic").tooltip_text("Show the goals").build();
+    let sidebar =
+        gtk::ToggleButton::builder().icon_name("sidebar-show-symbolic").tooltip_text("Show the goals").build();
     app.sidebar_split.bind_property("show-sidebar", &sidebar, "active").bidirectional().sync_create().build();
     bar.pack_start(&sidebar);
     if let Some(end) = end {
@@ -33,7 +34,11 @@ fn frame(app: &App, title: &str, content: &impl IsA<gtk::Widget>, end: Option<&g
 }
 
 /// Replaces the content of a preferences page with what `fill` adds.
-fn refill(page: &adw::PreferencesPage, groups: &std::cell::RefCell<Vec<adw::PreferencesGroup>>, fill: Vec<adw::PreferencesGroup>) {
+fn refill(
+    page: &adw::PreferencesPage,
+    groups: &std::cell::RefCell<Vec<adw::PreferencesGroup>>,
+    fill: Vec<adw::PreferencesGroup>,
+) {
     for g in groups.borrow_mut().drain(..) {
         page.remove(&g);
     }
@@ -68,7 +73,8 @@ pub fn archived(app: &App, scope: Option<String>) -> Shown {
             app.clone().spawn(async move {
                 let group = match app.store.archived().await {
                     Ok(items) => {
-                        let shown: Vec<_> = items.into_iter().filter(|w| scope.as_ref().is_none_or(|s| &w.project == s)).collect();
+                        let shown: Vec<_> =
+                            items.into_iter().filter(|w| scope.as_ref().is_none_or(|s| &w.project == s)).collect();
                         let group = adw::PreferencesGroup::builder()
                             .title("Archived")
                             .description(format!("{} item{}", shown.len(), if shown.len() == 1 { "" } else { "s" }))
@@ -126,7 +132,10 @@ pub fn taste(app: &App, scope: Option<String>) -> Shown {
     app.spawn(async move {
         let fill = match a.store.taste().await {
             Ok(taste) => {
-                let rules = adw::PreferencesGroup::builder().title("Rules").description(format!("{} in effect", taste.cards.len())).build();
+                let rules = adw::PreferencesGroup::builder()
+                    .title("Rules")
+                    .description(format!("{} in effect", taste.cards.len()))
+                    .build();
                 for card in &taste.cards {
                     let r = row(&card.title, &card.statement);
                     r.add_suffix(&ui::tag(&card.source, &["meta", "text2"]));
@@ -134,7 +143,10 @@ pub fn taste(app: &App, scope: Option<String>) -> Shown {
                 }
                 let learned = adw::PreferencesGroup::builder().title("Learned from feedback").build();
                 for l in &taste.learned {
-                    let r = adw::ExpanderRow::builder().title(ui::escaped(&l.key)).subtitle(format!("{} times", l.count)).build();
+                    let r = adw::ExpanderRow::builder()
+                        .title(ui::escaped(&l.key))
+                        .subtitle(format!("{} times", l.count))
+                        .build();
                     for text in &l.texts {
                         r.add_row(&row(text, ""));
                     }
@@ -161,7 +173,10 @@ pub fn review(app: &App, project: &str) -> Shown {
     app.spawn(async move {
         let fill = match a.store.review(&project_name).await {
             Ok(pass) if pass.is_empty() => {
-                let group = adw::PreferencesGroup::builder().title("Nothing to review").description("The loop decided nothing since the last review.").build();
+                let group = adw::PreferencesGroup::builder()
+                    .title("Nothing to review")
+                    .description("The loop decided nothing since the last review.")
+                    .build();
                 vec![group]
             }
             Ok(pass) => {

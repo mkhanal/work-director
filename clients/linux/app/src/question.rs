@@ -30,7 +30,8 @@ pub fn pending(app: &App, work: &str, question: &Question, title: &str, answered
     let card = ui::card("attention");
     card.append(&ui::line(title, &["meta", "attention-text"]));
     let draft = Rc::new(RefCell::new(AnswerDraft::new(question.clone())));
-    let pages = gtk::Stack::builder().vhomogeneous(false).transition_type(gtk::StackTransitionType::SlideLeftRight).build();
+    let pages =
+        gtk::Stack::builder().vhomogeneous(false).transition_type(gtk::StackTransitionType::SlideLeftRight).build();
     let answer = gtk::Button::with_label("Answer");
     answer.add_css_class("suggested-action");
     answer.set_sensitive(false);
@@ -41,7 +42,8 @@ pub fn pending(app: &App, work: &str, question: &Question, title: &str, answered
     failure.set_visible(false);
 
     let refresh: Rc<dyn Fn()> = {
-        let (draft, answer, command, work, q) = (draft.clone(), answer.clone(), command.clone(), work.to_string(), question.clone());
+        let (draft, answer, command, work, q) =
+            (draft.clone(), answer.clone(), command.clone(), work.to_string(), question.clone());
         Rc::new(move || {
             let plan = draft.borrow().answers().and_then(|a| Plan::answer(&work, &q, &a).ok());
             answer.set_sensitive(plan.is_some());
@@ -138,7 +140,8 @@ fn item_page(
     let list = gtk::ListBox::new();
     list.add_css_class("boxed-list");
     list.set_selection_mode(gtk::SelectionMode::None);
-    let other = adw::EntryRow::builder().title(if item.multi { "Add something else…" } else { "Something else…" }).build();
+    let other =
+        adw::EntryRow::builder().title(if item.multi { "Add something else…" } else { "Something else…" }).build();
     let mut group: Option<gtk::CheckButton> = None;
     for option in &item.options {
         let check = gtk::CheckButton::new();

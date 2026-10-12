@@ -132,7 +132,7 @@ jobs:
         run: |
           name="Work-Director-${GITHUB_REF_NAME}-linux-$(uname -m)"
           "dist/$name/lib/work-director/wd" --version | grep -F "${GITHUB_REF_NAME}"
-          dpkg-deb -c "dist/$name.deb" | grep -q 'usr/lib/work-director/wd$'
+          dpkg-deb -c "dist/$name.deb" | grep 'usr/lib/work-director/wd$' > /dev/null
           (cd dist && sha256sum -c "$name.tar.gz.sha256" "$name.deb.sha256")
 
       - name: attest where the linux app was built

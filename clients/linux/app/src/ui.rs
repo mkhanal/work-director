@@ -26,12 +26,7 @@ pub fn hbox(spacing: i32) -> gtk::Box {
 
 /// Plain text, start-aligned and wrapping, in the given classes.
 pub fn text(text: &str, classes: &[&str]) -> gtk::Label {
-    let label = gtk::Label::builder()
-        .label(text)
-        .xalign(0.0)
-        .wrap(true)
-        .wrap_mode(pango::WrapMode::WordChar)
-        .build();
+    let label = gtk::Label::builder().label(text).xalign(0.0).wrap(true).wrap_mode(pango::WrapMode::WordChar).build();
     for class in classes {
         label.add_css_class(class);
     }

@@ -187,7 +187,8 @@ impl Window {
         let run = gio::SimpleAction::new("run", Some(glib::VariantTy::new("(sas)").expect("(sas) is a variant type")));
         let weak = self.me.clone();
         run.connect_activate(move |_, param| {
-            let (Some(win), Some((title, argv))) = (weak.upgrade(), param.and_then(|p| p.get::<(String, Vec<String>)>()))
+            let (Some(win), Some((title, argv))) =
+                (weak.upgrade(), param.and_then(|p| p.get::<(String, Vec<String>)>()))
             else {
                 return;
             };
@@ -277,7 +278,11 @@ impl Window {
         let strs: Vec<&str> = runners.iter().map(String::as_str).collect();
         let runner = gtk::DropDown::from_strings(&strs);
         let mode = gtk::DropDown::from_strings(&["ask", "auto"]);
-        for (label, widget) in [("Name", name.clone().upcast::<gtk::Widget>()), ("Agent", runner.clone().upcast()), ("Mode", mode.clone().upcast())] {
+        for (label, widget) in [
+            ("Name", name.clone().upcast::<gtk::Widget>()),
+            ("Agent", runner.clone().upcast()),
+            ("Mode", mode.clone().upcast()),
+        ] {
             form.append(&ui::line(label, &["meta", "text2"]));
             form.append(&widget);
         }
@@ -288,7 +293,8 @@ impl Window {
             if response != "add" {
                 return;
             }
-            let chosen = usize::try_from(runner.selected()).ok().and_then(|i| runners.get(i)).cloned().unwrap_or_default();
+            let chosen =
+                usize::try_from(runner.selected()).ok().and_then(|i| runners.get(i)).cloned().unwrap_or_default();
             let mode = if mode.selected() == 1 { "auto" } else { "ask" };
             let plan = match Plan::add_product(&name.text(), &path, &chosen, mode) {
                 Ok(plan) => plan,

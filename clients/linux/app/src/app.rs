@@ -129,9 +129,13 @@ impl App {
     /// Asks for a decision on work, in one line.
     pub fn ask_decision(&self, work: &Work) {
         let id = work.id.clone();
-        self.ask(&format!("Record a decision on {}", work.title), "The decision, in one line.", "Record", "", move |t| {
-            Plan::decide(&id, t)
-        });
+        self.ask(
+            &format!("Record a decision on {}", work.title),
+            "The decision, in one line.",
+            "Record",
+            "",
+            move |t| Plan::decide(&id, t),
+        );
     }
 
     /// Asks what reopened work is for.

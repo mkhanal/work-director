@@ -11,10 +11,9 @@ use adw::prelude::*;
 use gtk::{gdk, glib};
 
 use kit::{
-    Report, TaskProgress, ThreadFilter, ThreadItem,
-    follow, AgentCard, AgentRoster, ChannelError, EscapeTaps, Event, Feed, Gate, GoalDetail, Outgoing,
-    OutgoingState, Phase, Plan, SessionStatus, Step, StepKind, ThreadRow, ThreadStep, ToolCall, Watch, Work,
-    WorkState,
+    follow, AgentCard, AgentRoster, ChannelError, EscapeTaps, Event, Feed, Gate, GoalDetail, Outgoing, OutgoingState,
+    Phase, Plan, Report, SessionStatus, Step, StepKind, TaskProgress, ThreadFilter, ThreadItem, ThreadRow, ThreadStep,
+    ToolCall, Watch, Work, WorkState,
 };
 
 use crate::agents::{phase_mark, AgentsPanel};
@@ -249,7 +248,8 @@ impl WorkPage {
         let weak = self.me.clone();
         self.yours_list.connect_row_activated(move |_, row| {
             let Some(page) = weak.upgrade() else { return };
-            let turn = usize::try_from(row.index()).ok().and_then(|i| page.state.borrow().yours.get(i).map(|y| y.1.clone()));
+            let turn =
+                usize::try_from(row.index()).ok().and_then(|i| page.state.borrow().yours.get(i).map(|y| y.1.clone()));
             if let Some(turn) = turn {
                 page.yours.popdown();
                 page.scroll_to(&turn);
@@ -481,9 +481,10 @@ impl WorkPage {
     fn choose(self: &Rc<Self>, card: AgentCard) {
         let own = {
             let state = self.state.borrow();
-            state.loaded.as_ref().is_some_and(|l| {
-                card.agent.is_none() && card.task == l.work().id && !l.work().kind.is_goal()
-            })
+            state
+                .loaded
+                .as_ref()
+                .is_some_and(|l| card.agent.is_none() && card.task == l.work().id && !l.work().kind.is_goal())
         };
         if own {
             let mut state = self.state.borrow_mut();
@@ -586,7 +587,8 @@ impl WorkPage {
                 Ok(back) => {
                     let typed = page.composer.text();
                     page.composer.set_text(&if typed.trim().is_empty() { back } else { format!("{back}\n\n{typed}") });
-                    page.composer.set_note(Some(("stopped: what it had not read is back here to edit and send", false)));
+                    page.composer
+                        .set_note(Some(("stopped: what it had not read is back here to edit and send", false)));
                     page.composer.focus();
                 }
                 Err(e) => page.composer.set_note(Some((&e.to_string(), true))),
@@ -619,12 +621,18 @@ impl WorkPage {
                 (Some(focus), Some(feed)) => {
                     let task = match loaded {
                         Loaded::Goal(g) => {
-                            if g.goal.id == focus.task { Some(g.goal.clone()) } else { g.tasks.iter().find(|t| t.id == focus.task).cloned() }
+                            if g.goal.id == focus.task {
+                                Some(g.goal.clone())
+                            } else {
+                                g.tasks.iter().find(|t| t.id == focus.task).cloned()
+                            }
                         }
                         Loaded::Work(w, _) => Some((**w).clone()),
                     };
                     match task {
-                        Some(task) => (self.session_turns(&task, feed, &director_answers(loaded, &task.id)), Vec::new()),
+                        Some(task) => {
+                            (self.session_turns(&task, feed, &director_answers(loaded, &task.id)), Vec::new())
+                        }
                         None => (Vec::new(), Vec::new()),
                     }
                 }
@@ -705,7 +713,11 @@ impl WorkPage {
                 parts.push(format!("{} of {} tasks", g.rollup.done, g.rollup.total));
             }
             if let Some(d) = g.delivery.as_ref().filter(|d| d.status != "none") {
-                parts.push(if d.detail.is_empty() { d.status.clone() } else { format!("{} · {}", d.status, d.detail) });
+                parts.push(if d.detail.is_empty() {
+                    d.status.clone()
+                } else {
+                    format!("{} · {}", d.status, d.detail)
+                });
             }
         }
         h.meta.append(&ui::line(&parts.join(" · "), &["meta", "text2"]));
@@ -793,7 +805,11 @@ impl WorkPage {
         match (&pass, &state.gate) {
             (Some(plan), Some(gate)) => {
                 self.gate.set_label(&plan.title);
-                self.gate.set_tooltip_text(Some(&format!("{} — {}", gate.why.as_deref().unwrap_or(""), plan.command_line())));
+                self.gate.set_tooltip_text(Some(&format!(
+                    "{} — {}",
+                    gate.why.as_deref().unwrap_or(""),
+                    plan.command_line()
+                )));
                 self.gate.set_visible(true);
             }
             _ => self.gate.set_visible(false),
@@ -915,7 +931,8 @@ impl WorkPage {
                 }
                 ThreadItem::Updates(run) => {
                     let id = format!("u{}", run.first().map_or(0, ThreadStep::id));
-                    let inner: Vec<Turn> = run.iter().filter_map(|s| self.step_turn(g, s.clone(), &mut yours)).collect();
+                    let inner: Vec<Turn> =
+                        run.iter().filter_map(|s| self.step_turn(g, s.clone(), &mut yours)).collect();
                     let count = run.len();
                     turns.push(Turn::key(&id, &run).with(move || updates_row(count, &at, inner)));
                 }
@@ -1138,9 +1155,13 @@ impl WorkPage {
         if let Some(q) = &g.asking {
             let title = if g.supervised() { "The supervisor asks you" } else { "Waiting on you" };
             let (app, goal, q, answered) = (self.app.clone(), g.goal.id.clone(), q.clone(), self.reload());
-            turns.push(Turn::key(format!("{prefix}asking"), &q).with(move || question::pending(&app, &goal, &q, title, answered)));
+            turns.push(
+                Turn::key(format!("{prefix}asking"), &q)
+                    .with(move || question::pending(&app, &goal, &q, title, answered)),
+            );
         }
-        let sessions = g.tasks.iter().filter_map(|t| g.activity.get(&t.id).and_then(|a| a.asking.clone()).map(|q| (t.clone(), q)));
+        let sessions =
+            g.tasks.iter().filter_map(|t| g.activity.get(&t.id).and_then(|a| a.asking.clone()).map(|q| (t.clone(), q)));
         let waiting = g.waiting_tasks().into_iter().map(|w| (w.task, w.question));
         for (task, q) in sessions.chain(waiting) {
             let (app, answered, weak) = (self.app.clone(), self.reload(), self.me.clone());
@@ -1235,7 +1256,9 @@ impl WorkPage {
             let index = row.index();
             let id = format!("s{index}");
             let (step_at, agent) = match &row {
-                ThreadRow::Step { step, .. } => (step.at.clone(), !matches!(step.kind, StepKind::Prompt | StepKind::Question)),
+                ThreadRow::Step { step, .. } => {
+                    (step.at.clone(), !matches!(step.kind, StepKind::Prompt | StepKind::Question))
+                }
                 ThreadRow::Tools { .. } => (f.steps.get(index).and_then(|s| s.at.clone()), true),
             };
             let continues = agent
@@ -1260,26 +1283,37 @@ impl WorkPage {
                         } else {
                             let label = if index == 0 { "Brief" } else { "Told" };
                             let at = step.at.clone();
-                            turns.push(Turn::key(&id, &step).with(move || ui::you_bubble(&text, label, at.as_deref(), None).upcast()));
+                            turns.push(
+                                Turn::key(&id, &step)
+                                    .with(move || ui::you_bubble(&text, label, at.as_deref(), None).upcast()),
+                            );
                         }
                     }
                     StepKind::Question => {
                         let Some(q) = step.question.clone() else { continue };
                         if q.pending() {
                             let (app, work_id, answered) = (self.app.clone(), work.id.clone(), self.reload_feed(feed));
-                            turns.push(Turn::key(&id, &q).with(move || question::pending(&app, &work_id, &q, "Waiting on you", answered)));
+                            turns.push(
+                                Turn::key(&id, &q)
+                                    .with(move || question::pending(&app, &work_id, &q, "Waiting on you", answered)),
+                            );
                         } else {
                             turns.push(Turn::key(&id, &q).with(move || question::answered(&q)));
                         }
                     }
                     _ => {
                         let open = index == last && running;
-                        turns.push(Turn::key(&id, &(&step, open, &head)).with(move || agent_turn(head, agent_body(&step, open))));
+                        turns.push(
+                            Turn::key(&id, &(&step, open, &head))
+                                .with(move || agent_turn(head, agent_body(&step, open))),
+                        );
                     }
                 },
                 ThreadRow::Tools { calls, .. } => {
                     let working = running && index + calls.len() > last;
-                    turns.push(Turn::key(&id, &(&calls, working, &head)).with(move || agent_turn(head, tool_group(&calls))));
+                    turns.push(
+                        Turn::key(&id, &(&calls, working, &head)).with(move || agent_turn(head, tool_group(&calls))),
+                    );
                 }
             }
         }
@@ -1297,7 +1331,10 @@ impl WorkPage {
             let waiting = if running { "queued: read once it is ready" } else { "sent" };
             for m in outgoing {
                 let app = self.app.clone();
-                turns.push(Turn::key(format!("out{}", m.id), &(&m.state, waiting)).with(move || outgoing_bubble(&app, &m, waiting)));
+                turns.push(
+                    Turn::key(format!("out{}", m.id), &(&m.state, waiting))
+                        .with(move || outgoing_bubble(&app, &m, waiting)),
+                );
             }
         }
         if running {
@@ -1329,11 +1366,8 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
     column.set_margin_end(SPACE_6);
     column.append(&header.widget);
     column.append(&turns.widget);
-    let scroller = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .vexpand(true)
-        .child(&column)
-        .build();
+    let scroller =
+        gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&column).build();
     let jump = gtk::Button::from_icon_name("go-down-symbolic");
     jump.add_css_class("circular");
     jump.add_css_class("osd");
@@ -1362,16 +1396,25 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
 
     let bar = adw::HeaderBar::new();
     bar.set_show_title(false);
-    let sidebar = gtk::ToggleButton::builder().icon_name("sidebar-show-symbolic").tooltip_text("Show the goals").build();
+    let sidebar =
+        gtk::ToggleButton::builder().icon_name("sidebar-show-symbolic").tooltip_text("Show the goals").build();
     app.sidebar_split.bind_property("show-sidebar", &sidebar, "active").bidirectional().sync_create().build();
     bar.pack_start(&sidebar);
     let agents_toggle =
         gtk::ToggleButton::builder().icon_name("sidebar-show-right-symbolic").tooltip_text("Agents").build();
-    let actions = gtk::MenuButton::builder().label("Actions").tooltip_text("Every write this work's state allows").build();
-    let open = gtk::Button::builder().label("Open in Editor").tooltip_text("Open where this work is done in your editor").build();
+    let actions =
+        gtk::MenuButton::builder().label("Actions").tooltip_text("Every write this work's state allows").build();
+    let open = gtk::Button::builder()
+        .label("Open in Editor")
+        .tooltip_text("Open where this work is done in your editor")
+        .build();
     let pause = gtk::Button::new();
     pause.set_visible(false);
-    let command = gtk::Button::builder().label("Command").action_name("win.command").tooltip_text("Run a wd command (Ctrl+K)").build();
+    let command = gtk::Button::builder()
+        .label("Command")
+        .action_name("win.command")
+        .tooltip_text("Run a wd command (Ctrl+K)")
+        .build();
     let yours_list = gtk::ListBox::new();
     yours_list.add_css_class("navigation-sidebar");
     let yours_popover = gtk::Popover::builder().child(&yours_list).build();
@@ -1516,7 +1559,11 @@ fn record_turns(events: &[Event]) -> Vec<Turn> {
 
 /// The tasks a goal was planned into, grouped as planned, each a way into
 /// its conversation.
-fn plan_block(plan: &[(String, String, WorkState, Option<String>)], rollup: (i64, i64), page: Weak<WorkPage>) -> gtk::Widget {
+fn plan_block(
+    plan: &[(String, String, WorkState, Option<String>)],
+    rollup: (i64, i64),
+    page: Weak<WorkPage>,
+) -> gtk::Widget {
     if plan.is_empty() {
         return ui::text("Not planned yet.", &["callout", "text2"]).upcast();
     }
@@ -1610,12 +1657,22 @@ fn event_turn(
                 None => ui::speaker("Sent"),
             };
             let meta = ui::meta(&speaker, Some(e.at.as_str()), None);
-            ui::turn(Some(&ui::avatar("mail-send-symbolic", &["text2"])), Some(&meta), &ui::folded(&e.body, 4, &["body"])).upcast()
+            ui::turn(
+                Some(&ui::avatar("mail-send-symbolic", &["text2"])),
+                Some(&meta),
+                &ui::folded(&e.body, 4, &["body"]),
+            )
+            .upcast()
         }
         "decision" | "answer" => director_answer(&e.answer_text(), Some(e.at.as_str()), on.as_deref()),
         "verify" => {
             let passed = e.body.starts_with("pass");
-            let text = format!("{}{} · {}", if passed { "Verified" } else { "Verify failed" }, on.map(|t| format!(" · {t}")).unwrap_or_default(), kit::time::when(&e.at));
+            let text = format!(
+                "{}{} · {}",
+                if passed { "Verified" } else { "Verify failed" },
+                on.map(|t| format!(" · {t}")).unwrap_or_default(),
+                kit::time::when(&e.at)
+            );
             let classes: &[&str] = if passed { &[] } else { &["failure"] };
             ui::event_line(&text, classes).upcast()
         }
@@ -1672,7 +1729,13 @@ fn director_answer(text: &str, at: Option<&str>, on: Option<&str>) -> gtk::Widge
 }
 
 /// A question and its answer, read together.
-fn exchange_turn(q: &Event, answer: Option<&Event>, asker: &str, task: Option<String>, page: Weak<WorkPage>) -> gtk::Widget {
+fn exchange_turn(
+    q: &Event,
+    answer: Option<&Event>,
+    asker: &str,
+    task: Option<String>,
+    page: Weak<WorkPage>,
+) -> gtk::Widget {
     let body = ui::vbox(SPACE_3);
     for item in q.asked_items() {
         body.append(&ui::said(&item.question, &["body"]));
@@ -1688,7 +1751,12 @@ fn exchange_turn(q: &Event, answer: Option<&Event>, asker: &str, task: Option<St
     }
     match answer {
         Some(a) if a.answered_by_director() => {
-            let detail = a.decision.as_ref().map(|d| d.model.clone()).filter(|m| !m.is_empty()).unwrap_or_else(|| "from what was already decided".into());
+            let detail = a
+                .decision
+                .as_ref()
+                .map(|d| d.model.clone())
+                .filter(|m| !m.is_empty())
+                .unwrap_or_else(|| "from what was already decided".into());
             let card = ui::card("settled");
             card.append(&ui::meta(&ui::speaker("Director answered"), Some(a.at.as_str()), Some(detail.as_str())));
             card.append(&ui::said(&a.answer_text(), &["body"]));
@@ -1997,7 +2065,8 @@ fn filter_chips(counts: &[(ThreadFilter, usize)], chosen: ThreadFilter, page: We
     let row = ui::hbox(SPACE_2);
     let mut first: Option<gtk::ToggleButton> = None;
     for (filter, n) in counts {
-        let chip = gtk::ToggleButton::builder().label(format!("{} {n}", filter.label())).active(*filter == chosen).build();
+        let chip =
+            gtk::ToggleButton::builder().label(format!("{} {n}", filter.label())).active(*filter == chosen).build();
         chip.add_css_class("chip");
         match &first {
             Some(group) => chip.set_group(Some(group)),
@@ -2023,7 +2092,8 @@ fn updates_row(count: usize, at: &str, inner: Vec<Turn>) -> gtk::Widget {
         column.append(&turn.build());
     }
     let expander = gtk::Expander::new(None);
-    expander.set_label_widget(Some(&ui::line(&format!("{count} updates · {}", kit::time::when(at)), &["meta", "text3"])));
+    expander
+        .set_label_widget(Some(&ui::line(&format!("{count} updates · {}", kit::time::when(at)), &["meta", "text3"])));
     expander.set_child(Some(&column));
     expander.upcast()
 }
@@ -2152,7 +2222,8 @@ fn tasks_table(rows: &[TaskLine], sort: Sort, app: &App, page: Weak<WorkPage>) -
         name.append(&ui::state_icon(r.task.state));
         name.append(&ui::line(&r.task.title, &["callout"]));
         row.append(&name);
-        let doing = ui::line(r.now.as_deref().unwrap_or("—"), &["callout", if r.asking { "attention-text" } else { "text2" }]);
+        let doing =
+            ui::line(r.now.as_deref().unwrap_or("—"), &["callout", if r.asking { "attention-text" } else { "text2" }]);
         doing.set_width_chars(28);
         doing.set_max_width_chars(28);
         row.append(&doing);
@@ -2166,7 +2237,8 @@ fn tasks_table(rows: &[TaskLine], sort: Sort, app: &App, page: Weak<WorkPage>) -
         moved.set_width_chars(5);
         moved.set_xalign(1.0);
         row.append(&moved);
-        let tokens = ui::line(&r.tokens.map(kit::token_count).unwrap_or_else(|| "—".into()), &["meta", "numeric", "text2"]);
+        let tokens =
+            ui::line(&r.tokens.map(kit::token_count).unwrap_or_else(|| "—".into()), &["meta", "numeric", "text2"]);
         tokens.set_width_chars(6);
         tokens.set_xalign(1.0);
         row.append(&tokens);

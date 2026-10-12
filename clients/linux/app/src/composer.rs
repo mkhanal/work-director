@@ -62,7 +62,8 @@ impl Composer {
             .tooltip_text("Remember: also keep what you say as feedback, to learn from")
             .build();
         remember.add_css_class("flat");
-        let stop = gtk::Button::builder().icon_name("media-playback-stop-symbolic").tooltip_text("Stop (Esc Esc)").build();
+        let stop =
+            gtk::Button::builder().icon_name("media-playback-stop-symbolic").tooltip_text("Stop (Esc Esc)").build();
         stop.add_css_class("flat");
         stop.set_visible(false);
         let send = gtk::Button::builder().icon_name("go-up-symbolic").tooltip_text("Send").sensitive(false).build();

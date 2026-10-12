@@ -61,7 +61,8 @@ impl Sidebar {
             keys.append_item(&item);
         }
         menu.append_section(Some("Sending"), &keys);
-        let main = gtk::MenuButton::builder().icon_name("open-menu-symbolic").menu_model(&menu).tooltip_text("Menu").build();
+        let main =
+            gtk::MenuButton::builder().icon_name("open-menu-symbolic").menu_model(&menu).tooltip_text("Menu").build();
         main.set_primary(true);
         let header = adw::HeaderBar::new();
         header.set_show_title(false);
@@ -95,11 +96,8 @@ impl Sidebar {
         let list = gtk::ListBox::new();
         list.add_css_class("navigation-sidebar");
         list.set_selection_mode(gtk::SelectionMode::Single);
-        let scroller = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .vexpand(true)
-            .child(&list)
-            .build();
+        let scroller =
+            gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&list).build();
         let body = ui::vbox(0);
         body.append(&tools);
         body.append(&scroller);
@@ -230,7 +228,8 @@ impl Sidebar {
         let matches = |t: &&BoardThread| {
             query.is_empty() || t.work.title.to_lowercase().contains(&query) || t.work.id.starts_with(&query)
         };
-        let threads = self.app.store.board().as_ref().map(|b| b.threads(scope.as_deref(), self.band.get())).unwrap_or_default();
+        let threads =
+            self.app.store.board().as_ref().map(|b| b.threads(scope.as_deref(), self.band.get())).unwrap_or_default();
 
         let new_goal = nav_row("document-edit-symbolic", "New Goal");
         self.list.append(&new_goal);

@@ -848,7 +848,11 @@ fn a_goal_is_read_as_its_overview_its_conversation_its_tasks_or_its_record() {
     assert_eq!(goal.waiting_on_you(), 2, "the goal's own question and task c's");
 
     let ids = |filter| goal.items(filter).iter().map(ThreadItem::id).collect::<Vec<_>>();
-    assert_eq!(ids(ThreadFilter::All), vec![1, 2, 5, 6, 7, 9], "updates 2–4 fold into one row; a lone update stays a step");
+    assert_eq!(
+        ids(ThreadFilter::All),
+        vec![1, 2, 5, 6, 7, 9],
+        "updates 2–4 fold into one row; a lone update stays a step"
+    );
     let ThreadItem::Updates(run) = &goal.items(ThreadFilter::All)[1] else { panic!("row 2 is not folded updates") };
     assert_eq!(run.iter().map(ThreadStep::id).collect::<Vec<_>>(), vec![2, 3, 4]);
     assert_eq!(ids(ThreadFilter::You), vec![1, 7], "a decision, and a question the person answered");

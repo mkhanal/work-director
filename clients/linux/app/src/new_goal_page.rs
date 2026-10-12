@@ -46,7 +46,9 @@ impl NewGoalPage {
         }
         column.append(&product_row);
         let composer = Composer::new(Rc::clone(&app.settings), 4, 12);
-        composer.set_placeholder("What do you want done? Work Director checks for a goal it continues, then plans and starts it");
+        composer.set_placeholder(
+            "What do you want done? Work Director checks for a goal it continues, then plans and starts it",
+        );
         composer.set_remember_offered(false);
         column.append(&composer.widget);
         let status = ui::vbox(SPACE_3);
@@ -58,7 +60,11 @@ impl NewGoalPage {
             .title("No product yet")
             .description("Add the repository you want worked on, then say what you want done.")
             .build();
-        let add = gtk::Button::builder().label("Add Product…").action_name("win.add-product").halign(gtk::Align::Center).build();
+        let add = gtk::Button::builder()
+            .label("Add Product…")
+            .action_name("win.add-product")
+            .halign(gtk::Align::Center)
+            .build();
         add.add_css_class("suggested-action");
         add.add_css_class("pill");
         empty.set_child(Some(&add));
@@ -66,11 +72,16 @@ impl NewGoalPage {
         body.append(&form);
         body.append(&empty);
         let clamp = adw::Clamp::builder().maximum_size(640).child(&body).build();
-        let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&clamp).build();
+        let scroller = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vexpand(true)
+            .child(&clamp)
+            .build();
 
         let bar = adw::HeaderBar::new();
         bar.set_show_title(false);
-        let sidebar = gtk::ToggleButton::builder().icon_name("sidebar-show-symbolic").tooltip_text("Show the goals").build();
+        let sidebar =
+            gtk::ToggleButton::builder().icon_name("sidebar-show-symbolic").tooltip_text("Show the goals").build();
         app.sidebar_split.bind_property("show-sidebar", &sidebar, "active").bidirectional().sync_create().build();
         bar.pack_start(&sidebar);
         let widget = adw::ToolbarView::new();
