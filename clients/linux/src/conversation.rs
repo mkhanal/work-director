@@ -173,7 +173,7 @@ pub struct Activity {
 /// calls folded into one row.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ThreadRow {
-    Step { index: usize, step: Step },
+    Step { index: usize, step: Box<Step> },
     Tools { first: usize, calls: Vec<ToolCall> },
 }
 
@@ -195,7 +195,7 @@ impl ThreadRow {
         let flush = |run: &mut Vec<ToolCall>, run_start: usize, out: &mut Vec<ThreadRow>| {
             match run.len() {
                 0 => {}
-                1 => out.push(ThreadRow::Step { index: run_start, step: steps[run_start].clone() }),
+                1 => out.push(ThreadRow::Step { index: run_start, step: Box::new(steps[run_start].clone()) }),
                 _ => out.push(ThreadRow::Tools { first: run_start, calls: std::mem::take(run) }),
             }
             run.clear();
@@ -209,7 +209,7 @@ impl ThreadRow {
                 continue;
             }
             flush(&mut run, run_start, &mut out);
-            out.push(ThreadRow::Step { index: i, step: step.clone() });
+            out.push(ThreadRow::Step { index: i, step: Box::new(step.clone()) });
         }
         flush(&mut run, run_start, &mut out);
         out

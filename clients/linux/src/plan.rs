@@ -170,6 +170,15 @@ impl Plan {
         ))
     }
 
+    /// Files feedback on no work in particular: a rule-to-be in a person's words.
+    pub fn feedback(text: &str, project: Option<&str>) -> Result<Plan, PlanError> {
+        let mut argv = vec!["feedback".to_string(), "add".to_string(), said(text)?];
+        if let Some(project) = project {
+            argv.extend(words(&["--project", project]));
+        }
+        Ok(plan("Feedback", argv))
+    }
+
     /// Registers a folder as a product the director works in.
     pub fn add_product(name: &str, path: &str, runner: &str, mode: &str) -> Result<Plan, PlanError> {
         let name = name.trim();

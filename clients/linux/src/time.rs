@@ -22,11 +22,14 @@ pub fn when(stamp: &str) -> String {
 pub fn ago(stamp: &str, now: DateTime<Utc>) -> String {
     let Some(t) = instant(stamp) else { return String::new() };
     let s = (now - t).num_seconds();
-    match s {
-        ..60 => "now".to_string(),
-        ..3600 => format!("{}m", s / 60),
-        ..86400 => format!("{}h", s / 3600),
-        _ => format!("{}d", s / 86400),
+    if s < 60 {
+        "now".to_string()
+    } else if s < 3600 {
+        format!("{}m", s / 60)
+    } else if s < 86400 {
+        format!("{}h", s / 3600)
+    } else {
+        format!("{}d", s / 86400)
     }
 }
 

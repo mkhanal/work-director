@@ -34,6 +34,7 @@ pub enum Change {
 }
 
 type Watcher = Rc<dyn Fn(Change)>;
+type Announcer = Rc<dyn Fn(&Arrival)>;
 
 pub struct Store {
     channel: Channel,
@@ -52,7 +53,7 @@ pub struct Store {
     stale: Cell<bool>,
     watchers: RefCell<Vec<(u64, Watcher)>>,
     next_watch: Cell<u64>,
-    arrived: RefCell<Option<Rc<dyn Fn(&Arrival)>>>,
+    arrived: RefCell<Option<Announcer>>,
 }
 
 /// A view's subscription to the store; dropping it ends the subscription.

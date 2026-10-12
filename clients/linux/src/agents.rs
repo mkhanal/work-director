@@ -167,18 +167,22 @@ impl AgentRoster {
 
 /// A count of tokens as a person reads it: 950, 12k, 1.1M.
 pub fn token_count(n: i64) -> String {
-    match n {
-        ..1000 => n.to_string(),
-        ..1_000_000 => format!("{}k", (n as f64 / 1000.0).round() as i64),
-        _ => format!("{:.1}M", n as f64 / 1_000_000.0),
+    if n < 1000 {
+        n.to_string()
+    } else if n < 1_000_000 {
+        format!("{}k", (n as f64 / 1000.0).round() as i64)
+    } else {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
     }
 }
 
 /// A span as a person reads it: 45s, 11m 10s, 2h 5m.
 pub fn span(seconds: i64) -> String {
-    match seconds {
-        ..60 => format!("{seconds}s"),
-        ..3600 => format!("{}m {}s", seconds / 60, seconds % 60),
-        _ => format!("{}h {}m", seconds / 3600, (seconds % 3600) / 60),
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else if seconds < 3600 {
+        format!("{}m {}s", seconds / 60, seconds % 60)
+    } else {
+        format!("{}h {}m", seconds / 3600, (seconds % 3600) / 60)
     }
 }

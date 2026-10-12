@@ -15,7 +15,7 @@ pub enum NewGoalPhase {
     Finding,
     Offering(Vec<Found>),
     Starting,
-    Started(Started),
+    Started(Box<Started>),
     Failed(String),
 }
 
@@ -66,7 +66,7 @@ impl NewGoal {
         };
         self.set(NewGoalPhase::Starting);
         match self.store.start_goal(&plan).await {
-            Ok(started) => self.set(NewGoalPhase::Started(started)),
+            Ok(started) => self.set(NewGoalPhase::Started(Box::new(started))),
             Err(e) => self.set(NewGoalPhase::Failed(e.to_string())),
         }
     }

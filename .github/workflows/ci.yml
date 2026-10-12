@@ -35,6 +35,7 @@ jobs:
   # The Linux app is tested the same way, its model headless against a wd
   # built from this commit; the GTK app is linted and built.
   linux-app:
+    env: { CARGO_TERM_COLOR: never }
     runs-on: ubuntu-24.04
     defaults:
       run:
