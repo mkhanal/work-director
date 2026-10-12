@@ -59,7 +59,7 @@ cat > "$root/DEBIAN/control" <<CONTROL
 Package: work-director
 Version: $deb_version
 Architecture: $deb_arch
-Maintainer: Mridul Khanal <mridul.khanal@gmail.com>
+Maintainer: Mridul Khanal <mkhanal@users.noreply.github.com>
 Depends: libgtk-4-1 (>= 4.14), libadwaita-1-0 (>= 1.5)
 Section: devel
 Priority: optional
