@@ -123,7 +123,7 @@ and directory still follow its goal.
 ## A Question The Director Files Keeps Its Choices
 - `QuestionBody(asks)` writes each question on its own line, its choices under it as `- ` lines.
 - `AskedQuestion(event)` reads that back as one item per question, each with its choices.
-- A question asking yes or no that offers no choices of its own offers Yes and No, marking the one it recommends.
+- A question asking yes or no, or proposing something, that offers no choices of its own offers Yes and No, marking the one it recommends; a proposal recommends Yes.
 - `OpenQuestion(events, work)` is the latest question on the work with no answer or decision on it since.
 
 ## A Supervision Reply Parses Into Actions

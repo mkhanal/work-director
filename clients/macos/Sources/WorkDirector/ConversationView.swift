@@ -457,7 +457,7 @@ struct QuestionCard: View {
                 HStack(spacing: Space.s2) {
                     Image(systemName: question.pending ? "questionmark.bubble.fill" : "checkmark.bubble")
                     if let asker {
-                        Text(asker).foregroundStyle(.primary).lineLimit(1).truncationMode(.tail)
+                        Text(asker).foregroundStyle(Color.primary).fontWeight(.semibold).lineLimit(1).truncationMode(.tail)
                             .layoutPriority(-1)
                     }
                     Text(title ?? (question.pending ? "Waiting on you" : "Asked")).fixedSize()

@@ -216,6 +216,10 @@ func TestCoordinator(t *testing.T) {
 		if got := rec.Items[0].Options; len(got) != 2 || got[0].Label != "Yes (recommended)" || got[1].Label != "No" {
 			t.Fatalf("a confirmation recommending yes offers %+v", got)
 		}
+		proposed := ReportQuestion(core.Event{ID: 10, Body: "NEEDS-INPUT\nSTATUS: NEEDS-INPUT Pushing needs a force-with-lease; I propose allowing it."})
+		if got := proposed.Items[0].Options; len(got) != 2 || got[0].Label != "Yes (recommended)" {
+			t.Fatalf("a proposal offers %+v, want Yes recommended and No", got)
+		}
 		if _, ok := OpenQuestion(append(events, core.Event{ID: 6, Work: "g", Kind: core.EventDecision, Body: "settled"}), "g"); ok {
 			t.Fatal("a question decided on since is still open")
 		}

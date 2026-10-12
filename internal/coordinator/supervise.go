@@ -337,15 +337,20 @@ func AskedQuestion(e core.Event) runner.Question {
 var (
 	yesNoRe     = regexp.MustCompile(`(?i)^\W*(should|shall|is|are|was|were|do|does|did|can|could|will|would|has|have|had|may|might|must|ok|okay|confirm)\b`)
 	recommendRe = regexp.MustCompile(`(?i)\brecommend(?:ation)?:?\s+(yes|no)\b`)
+	proposeRe   = regexp.MustCompile(`(?i)\bI\s+(propose|suggest)\b`)
 )
 
 // offerYesNo gives a yes-or-no question that offers no choices Yes and No,
 // so it is answered with a pick; the one it recommends is marked so.
 func offerYesNo(it *runner.QuestionItem) {
-	if len(it.Options) > 0 || !yesNoRe.MatchString(strings.TrimSpace(it.Question)) {
+	proposal := proposeRe.MatchString(it.Question)
+	if len(it.Options) > 0 || !(proposal || yesNoRe.MatchString(strings.TrimSpace(it.Question))) {
 		return
 	}
 	yes, no := runner.Option{Label: "Yes"}, runner.Option{Label: "No"}
+	if proposal {
+		yes.Label = "Yes (recommended)"
+	}
 	if m := recommendRe.FindStringSubmatch(it.Question); m != nil {
 		if strings.EqualFold(m[1], "yes") {
 			yes.Label = "Yes (recommended)"
