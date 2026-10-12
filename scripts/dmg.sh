@@ -79,7 +79,9 @@ rm -f "$dmg"
 # UDZO is the compressed read-only format Finder mounts like a disk image.
 hdiutil create -volname "wd $version" -srcfolder "$vol" -ov -format UDZO "$dmg" >/dev/null
 
-if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$dmg" > "$dmg.sha256"
-else sha256sum "$dmg" > "$dmg.sha256"; fi
+# Named without its folder, so `shasum -c` checks it beside the download.
+name=$(basename "$dmg")
+if command -v shasum >/dev/null 2>&1; then (cd dist && shasum -a 256 "$name" > "$name.sha256")
+else (cd dist && sha256sum "$name" > "$name.sha256"); fi
 
 echo "built $dmg"
