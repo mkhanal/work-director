@@ -4555,6 +4555,52 @@ func superviseOnce(t *testing.T, f *cliFixture, goal string) supervised {
 
 const supervisor = "overseer-s00001"
 
+func TestAWorktreeWdMakesHasItsOwnDependencies(t *testing.T) {
+	f := newCLIFixture(t)
+	state := filepath.Join(f.dir, "fake-state")
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"package.json": "{}", "package-lock.json": "{}"} {
+		if err := os.WriteFile(filepath.Join(f.sample, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitRun(t, f.sample, "add", ".")
+	gitRun(t, f.sample, "commit", "-qm", "a node repository")
+	npm := "#!/usr/bin/env bash\necho \"$PWD $*\" >> \"$WD_FAKE_STATE/npm\"\nif [ -f \"$WD_FAKE_STATE/npm-fails\" ]; then echo 'npm ERR! lru-cache@11 not found' >&2; exit 1; fi\nmkdir -p node_modules\n"
+	if err := os.WriteFile(filepath.Join(f.bin, "npm"), []byte(npm), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Export to CSV", "--json"), "id")
+	task := jsonString(t, f.runOK(t, "add", "sample-app", "Write the exporter", "--goal", goal, "--json"), "id")
+	if err := os.WriteFile(filepath.Join(state, "npm-fails"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shared := filepath.Join(f.wdHome, "worktrees", "sample-app-goal-"+goal)
+	errStr := f.runFail(t, "spawn", task)
+	if !strings.Contains(errStr, "npm ci") || !strings.Contains(errStr, "lru-cache@11 not found") || !strings.Contains(errStr, "worktree was removed") {
+		t.Fatalf("spawn with a failing install = %q, want the command and what it printed", errStr)
+	}
+	if _, err := os.Stat(shared); !os.IsNotExist(err) {
+		t.Fatalf("the worktree whose install failed is still at %s: %v", shared, err)
+	}
+	if err := os.Remove(filepath.Join(state, "npm-fails")); err != nil {
+		t.Fatal(err)
+	}
+	f.runOK(t, "spawn", task)
+	if calls := readFile(t, filepath.Join(state, "npm")); !strings.Contains(calls, shared+" ci") {
+		t.Fatalf("npm ran as %q, want npm ci in %s", calls, shared)
+	}
+	if _, err := os.Stat(filepath.Join(shared, "node_modules")); err != nil {
+		t.Fatalf("the worktree has no dependencies of its own: %v", err)
+	}
+	if brief := f.runOK(t, "brief", task); !strings.Contains(brief, "Never link node_modules") {
+		t.Fatalf("the brief does not say to keep dependencies in the worktree:\n%s", brief)
+	}
+}
+
 func TestWdGoalSuperviseHasTheGoalsSupervisorLookOnceNoTaskIsWorking(t *testing.T) {
 	f := newCLIFixture(t)
 	o := overseenGoal(t, f)

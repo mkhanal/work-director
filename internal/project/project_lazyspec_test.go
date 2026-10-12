@@ -192,6 +192,31 @@ func TestProjectToolkit(t *testing.T) {
 		}
 	})
 
+	t.Run("A Repository's Toolkit Installs From Its Lockfile", func(t *testing.T) {
+		for files, want := range map[string]string{
+			"package-lock.json":     "npm ci",
+			"pnpm-lock.yaml":        "pnpm install --frozen-lockfile",
+			"bun.lock":              "bun install --frozen-lockfile",
+			"bun.lockb":             "bun install --frozen-lockfile",
+			"yarn.lock":             "yarn install --frozen-lockfile",
+			"yarn.lock .yarnrc.yml": "yarn install --immutable",
+			"":                      "",
+		} {
+			repoFiles := map[string]string{"package.json": "{}"}
+			for _, f := range strings.Fields(files) {
+				repoFiles[f] = ""
+			}
+			kit, err := ReadToolkit(repo(t, repoFiles))
+			if err != nil || kit.Install != want {
+				t.Fatalf("%q: install = %q, %v, want %q", files, kit.Install, err, want)
+			}
+		}
+		kit, err := ReadToolkit(repo(t, map[string]string{"go.mod": "module x", "yarn.lock": ""}))
+		if err != nil || kit.Install != "" {
+			t.Fatalf("no package.json: install = %q, %v, want none", kit.Install, err)
+		}
+	})
+
 	t.Run("A Repository's Toolkit Names The Specifications It Keeps", func(t *testing.T) {
 		kit, err := ReadToolkit(repo(t, map[string]string{"billing.lazyspec.md": "", "apps/web/SPEC.md": ""}))
 		if err != nil || !slices.Equal(kit.Specs, []string{"lazyspec", "SPEC.md"}) {

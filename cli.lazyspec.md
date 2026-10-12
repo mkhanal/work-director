@@ -200,6 +200,11 @@ These exit 1 naming the flag, never falling back to a default:
 - `wd report` on running or needs-input work files a STATUS report as `wd goal review` would: DONE to review, BLOCKED to blocked, NEEDS-INPUT to needs-input.
 - A report already filed is not filed again.
 
+## A Worktree Wd Makes Has Its Own Dependencies
+- Making a goal's shared worktree or a task's private one runs the repository's install command in it, before any session starts there.
+- An install that fails removes the worktree it was made for and fails naming the command and what it printed; the next start makes it again.
+- Every brief says the dependencies are installed in the worktree, and never to link them from another checkout.
+
 ## Done Removes A Worktree Wd Made Once Its Branch Has Landed
 - `wd done` and `wd set <id> done` remove each worktree wd made for the work, and its branch, when it is unlocked, clean, and its branch's content is already where it lands.
 - A task's private worktree lands on its goal's shared branch; a goal's shared worktree on the project's default branch, or its upstream fetched first.

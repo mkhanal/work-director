@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"wd/internal/runner"
 
 	"wd/internal/core"
 	"wd/internal/ledger"
@@ -50,6 +51,9 @@ func (c *Cli) ensureSharedWorktree(goal core.Work, p *project.Project) (string, 
 	if r.Code != 0 {
 		return "", fail("cannot create shared worktree at %s: %s", path, strings.TrimSpace(r.Stderr))
 	}
+	if err := c.installIn(path, p); err != nil {
+		return "", err
+	}
 	wt, err := c.Ledger.AddWorktree(goal.ID, ledger.WorktreeInfo{
 		Path:   path,
 		Branch: ptr(sharedBranch(goal)),
@@ -60,6 +64,38 @@ func (c *Cli) ensureSharedWorktree(goal core.Work, p *project.Project) (string, 
 		return "", err
 	}
 	return wt.Path, nil
+}
+
+// installTail bounds how much of a failed install's output is shown.
+const installTail = 2000
+
+// installIn installs the dependencies the repository's lockfile pins in a
+// worktree just made at path, so nothing run there reads another checkout's.
+// A worktree whose install fails is removed, so the next start makes it again.
+func (c *Cli) installIn(path string, p *project.Project) error {
+	kit, err := project.ReadToolkit(path)
+	if err != nil || kit.Install == "" {
+		return err
+	}
+	r, err := runner.Run([]string{"bash", "-lc", kit.Install}, path)
+	if err == nil && r.Code == 0 {
+		return nil
+	}
+	said := ""
+	if err != nil {
+		said = err.Error()
+	} else {
+		said = strings.TrimSpace(r.Stdout + "\n" + r.Stderr)
+		if n := len(said); n > installTail {
+			said = "…" + said[n-installTail:]
+		}
+	}
+	if rm, rerr := c.runGit([]string{"worktree", "remove", "--force", path}, p.Path); rerr != nil {
+		return rerr
+	} else if rm.Code != 0 {
+		return fail("installing dependencies in %s failed (`%s`: %s), and the worktree could not be removed: %s", path, kit.Install, said, strings.TrimSpace(rm.Stderr))
+	}
+	return fail("installing dependencies in %s failed, so the worktree was removed: `%s`: %s", path, kit.Install, said)
 }
 
 // ensurePrivateWorktree creates a private worktree for a task, branched off
@@ -84,6 +120,9 @@ func (c *Cli) ensurePrivateWorktree(w core.Work, goal core.Work, p *project.Proj
 	}
 	if r.Code != 0 {
 		return "", fail("cannot create private worktree at %s: %s", path, strings.TrimSpace(r.Stderr))
+	}
+	if err := c.installIn(path, p); err != nil {
+		return "", err
 	}
 	wt, err := c.Ledger.AddWorktree(w.ID, ledger.WorktreeInfo{
 		Path:   path,

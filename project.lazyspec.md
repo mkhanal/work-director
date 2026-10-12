@@ -53,6 +53,11 @@ keyed by project name.
 - `go.mod` adds `go vet ./...` and `go test ./...`; `Cargo.toml` adds `cargo test`.
 - A repository with none of these has no checks.
 
+## A Repository's Toolkit Installs From Its Lockfile
+- `ReadToolkit(dir)` gives the install command its lockfile calls for: `npm ci` for `package-lock.json`, `pnpm install --frozen-lockfile` for `pnpm-lock.yaml`, `bun install --frozen-lockfile` for a bun lockfile.
+- `yarn.lock` installs with `yarn install --immutable` beside a `.yarnrc.yml`, else `yarn install --frozen-lockfile`.
+- A `package.json` without a lockfile, and a repository without a `package.json`, install nothing.
+
 ## A Repository's Toolkit Names The Specifications It Keeps
 - `*.lazyspec.md` files make it `lazyspec`; `SPEC.md` files make it `SPEC.md`; a repository can keep both.
 - `node_modules`, `.git`, `vendor`, `dist` and `build` are not searched.

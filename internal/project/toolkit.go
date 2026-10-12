@@ -20,8 +20,11 @@ type Toolkit struct {
 	// Lockfile is the lockfile PackageManager was read from, or empty when
 	// none says which manager the repository uses.
 	Lockfile string
-	Checks   []string
-	Specs    []string
+	// Install installs the dependencies the lockfile pins, or is empty when
+	// nothing pins them.
+	Install string
+	Checks  []string
+	Specs   []string
 }
 
 // nodeScripts are the package.json scripts that check a repository, in the
@@ -40,6 +43,7 @@ func ReadToolkit(dir string) (Toolkit, error) {
 	switch {
 	case err == nil:
 		kit.PackageManager, kit.Lockfile = packageManager(dir)
+		kit.Install = install(dir, kit.PackageManager, kit.Lockfile)
 		var pkg struct {
 			Scripts map[string]string `json:"scripts"`
 		}
@@ -79,6 +83,23 @@ func packageManager(dir string) (manager, lockfile string) {
 		}
 	}
 	return "npm", ""
+}
+
+// install is the command that installs exactly what lockfile pins.
+func install(dir, manager, lockfile string) string {
+	if lockfile == "" {
+		return ""
+	}
+	switch manager {
+	case "npm":
+		return "npm ci"
+	case "yarn":
+		if exists(filepath.Join(dir, ".yarnrc.yml")) {
+			return "yarn install --immutable"
+		}
+		return "yarn install --frozen-lockfile"
+	}
+	return manager + " install --frozen-lockfile"
 }
 
 // specs names the specification conventions dir keeps.

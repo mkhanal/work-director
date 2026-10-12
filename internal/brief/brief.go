@@ -118,6 +118,7 @@ const coordination = `You are an executor, not the whole team. Claim what you wo
 - Claim your task: ` + "`wd claim <id> <session>`" + `. Record every area you will touch: ` + "`wd impact <id> <+path>`" + `.
 - Look before stepping: ` + "`wd conflict <goal>`" + ` shows overlapping claims; never edit a path another active task claims.
 - Something does not work or conflicts? Raise ` + "`wd concern add <id> \"<text>\"`" + ` — a concern is a decision queue for the director, not something you work around silently.
+- Dependencies are installed in the worktree you work in. Never link node_modules, a virtualenv or any other installed dependencies from another checkout: what you run would read that checkout's code, not this one's.
 - Own worktree for isolation? Register it: ` + "`wd worktree attach <id> <path> [--branch <b>]`" + `. Merge it back when done: ` + "`wd merge <id>`" + ` (after verify and a clean conflict scan).`
 
 func shared(p *project.Project, ctx Context) string {
