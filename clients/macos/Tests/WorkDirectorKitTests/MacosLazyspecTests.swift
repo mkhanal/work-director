@@ -491,7 +491,7 @@ func fakeRunner(_ home: Home) throws {
         let asking = #"{"id":"event-11","items":[{"header":"","question":"Tag v1.0.0?","multi":false,"options":[{"label":"yes (recommended)","description":""},{"label":"no","description":""}]}],"answers":null,"reply":null}"#
         let json = """
         {"goal":\(work("g", "Release notes", "running")),"tasks":[\(work("a", "Impacts", "running")),\(work("b", "Collector", "review")),\(work("n", "Weekly note", "running"))],
-         "rollup":{"counts":{},"done":0,"total":3},"events":[\(events)],"claims":[],"landings":[],"delivery":null,"activity":{},"asking":\(asking)}
+         "rollup":{"counts":{},"done":0,"total":3},"events":[\(events)],"claims":[],"landings":[],"delivery":null,"activity":{},"asking":\(asking),"reports":{}}
         """
         let goal = try JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
         #expect(goal.supervised)
@@ -731,5 +731,55 @@ func fakeRunner(_ home: Home) throws {
         let store = await Store(channel: try home.channel())
         #expect(try await store.run(plan).code == 0)
         #expect(try await store.work(goal).title == "Config fixes")
+    }
+
+    @Test("A Goal Is Read As Its Overview, Its Conversation, Its Tasks Or Its Record")
+    func goalViews() throws {
+        func event(_ id: Int, _ work: String, _ kind: String, _ body: String, decision: String = "null") -> String {
+            let quoted = String(data: try! JSONEncoder().encode(body), encoding: .utf8)!
+            return #"{"id":\#(id),"work":"\#(work)","kind":"\#(kind)","body":\#(quoted),"at":"2026-10-12T01:\#(String(format: "%02d", id)):00Z","effective":null,"decision":\#(decision)}"#
+        }
+        func work(_ id: String, _ state: String) -> String {
+            workJSON(state: state).replacingOccurrences(of: #""id":"w1""#, with: #""id":"\#(id)""#)
+        }
+        let person = #"{"question":"q","answer":"yes","source":"person","runner":"","model":"","tokens":0,"reverses":0,"reversed_by":0}"#
+        let events = [
+            event(1, "g", "decision", "keep the js script"),
+            event(2, "a", "state", "paused"),
+            event(3, "g", "look", "a task reported (1)"),
+            event(4, "a", "verify", "pass"),
+            event(5, "a", "report", "DONE\nSTATUS: DONE\nFILES: x.ts"),
+            event(6, "g", "supervised", "All fits.\nACTIONS:\nWAIT"),
+            event(7, "g", "question", "Tag it?\n- yes\n- no"),
+            event(8, "g", "answer", "yes", decision: person),
+            event(9, "b", "state", "blocked"),
+        ].joined(separator: ",")
+        let report = #"{"verdict":"done","said":"","files":["x.ts"],"file_note":"","sections":[{"name":"VERIFY","text":"go test → 0"}]}"#
+        let asking = #"{"id":"event-1","items":[],"answers":null,"reply":null}"#
+        let json = """
+        {"goal":\(work("g", "running")),"tasks":[\(work("a", "done")),\(work("b", "blocked")),\(work("c", "running")),\(work("d", "queued")),\(work("e", "dropped")),\(work("f", "review"))],
+         "rollup":{"counts":{},"done":1,"total":6},"events":[\(events)],"claims":[],"landings":[],"delivery":null,
+         "activity":{"c":{"now":"Bash","kind":"tool","at":null,"asking":\(asking),"error":null,"status":"running","usage":null,"subagents":null}},
+         "asking":\(asking),"reports":{"5":\(report)}}
+        """
+        let goal = try JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
+        let p = goal.progress
+        let counts: [Int] = [p.done, p.working, p.review, p.blocked, p.waiting, p.dropped]
+        #expect(counts == [1, 1, 1, 1, 1, 1])
+        #expect(goal.waitingOnYou == 2, "the goal's own question and task c's")
+
+        let all = goal.items(.all)
+        #expect(all.map(\.id) == [1, 2, 5, 6, 7, 9], "updates 2–4 fold into one row; a lone update stays a step")
+        guard case .updates(let run) = all[1] else { Issue.record("row 2 is \(all[1])"); return }
+        #expect(run.map(\.id) == [2, 3, 4])
+        #expect(goal.items(.you).map(\.id) == [1, 7], "a decision, and a question the person answered")
+        #expect(goal.items(.supervisor).map(\.id) == [6, 7])
+        #expect(goal.items(.reports).map(\.id) == [5])
+        #expect(goal.items(.questions).map(\.id) == [7])
+
+        let r = try #require(goal.reports["5"])
+        #expect(r.verdict == "done")
+        #expect(r.files == ["x.ts"])
+        #expect(r.sections.map(\.name) == ["VERIFY"])
     }
 }

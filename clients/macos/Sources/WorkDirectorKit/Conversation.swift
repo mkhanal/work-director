@@ -21,6 +21,11 @@ public struct ToolCall: Codable, Sendable, Hashable {
 public struct QuestionOption: Codable, Sendable, Hashable {
     public let label: String
     public let description: String
+
+    public init(label: String, description: String = "") {
+        self.label = label
+        self.description = description
+    }
 }
 
 public struct QuestionItem: Codable, Sendable, Hashable {
@@ -28,6 +33,13 @@ public struct QuestionItem: Codable, Sendable, Hashable {
     public let question: String
     public let multi: Bool
     public let options: [QuestionOption]
+
+    public init(header: String = "", question: String, multi: Bool = false, options: [QuestionOption] = []) {
+        self.header = header
+        self.question = question
+        self.multi = multi
+        self.options = options
+    }
 }
 
 public struct Question: Codable, Sendable, Hashable, Identifiable {

@@ -10,20 +10,50 @@ struct GoalThread: View {
     /// Shows a task's conversation.
     let focus: (String) -> Void
     let answered: () -> Void
+    @Binding var filter: ThreadFilter
 
     var body: some View {
+        let items = goal.items(filter)
         LazyVStack(alignment: .leading, spacing: Space.s5) {
-            if !goal.goal.detail.isEmpty {
+            FilterChips(filter: $filter, counts: counts)
+            if filter == .all && !goal.goal.detail.isEmpty {
                 YouBubble(text: goal.goal.detail, at: when(goal.goal.created), label: "You asked")
             }
-            PlanTurn(goal: goal, focus: focus)
-            ForEach(goal.thread) { step in
-                row(step).id(step.id)
+            if items.isEmpty && filter != .all {
+                Text("Nothing here yet.").font(TypeScale.callout).foregroundStyle(.secondary)
             }
-            ForEach(store.outbox.filter { $0.work == goal.goal.id && !$0.arrived(in: goal) }) { message in
-                OutgoingBubble(store: store, message: message)
+            ForEach(Array(items.enumerated()), id: \.element.id) { n, item in
+                if let day = DayLine.day(of: item, after: n > 0 ? items[n - 1] : nil) {
+                    DayLine(day: day)
+                }
+                switch item {
+                case .step(let step): row(step).id(step.id)
+                case .updates(let run): UpdatesRow(run: run, line: line).id(run[0].id)
+                }
             }
-            Waiting(store: store, goal: goal, open: focus, answered: answered)
+            if filter == .all {
+                ForEach(store.outbox.filter { $0.work == goal.goal.id && !$0.arrived(in: goal) }) { message in
+                    OutgoingBubble(store: store, message: message)
+                }
+                Waiting(store: store, goal: goal, open: focus, answered: answered)
+            }
+        }
+    }
+
+    private var counts: [ThreadFilter: Int] {
+        Dictionary(uniqueKeysWithValues: ThreadFilter.allCases.filter { $0 != .all }.map { f in
+            (f, goal.items(f).count)
+        })
+    }
+
+    /// One update as a line: a look, a state change, a check, a landing.
+    private func line(_ step: ThreadStep) -> AnyView {
+        switch step {
+        case .look(let e): AnyView(EventLine(text: "Supervisor looking: \(e.body)", symbol: "eye", at: e.at))
+        case .event(let e) where e.kind == "sent":
+            AnyView(EventLine(text: "Told \(speaker(of: e.work).name): \(firstLine(e.body))", symbol: "arrow.turn.down.right", at: e.at))
+        case .event(let e): AnyView(EventLine(text: line(e), symbol: symbol(e), at: e.at, tint: tint(e)))
+        default: AnyView(row(step))
         }
     }
 
@@ -33,7 +63,7 @@ struct GoalThread: View {
             YouBubble(text: event.decision?.answer ?? event.answerText, at: when(event.at), label: event.kind == "answer" ? "You answered" : "You")
         case .event(let event) where event.kind == "report":
             Turn(speaker: speaker(of: event.work), at: event.at, open: opener(event.work)) {
-                ReportCard(text: event.body)
+                ReportCard(text: event.body, report: goal.reports[String(event.id)])
             }
         case .event(let event) where event.kind == "answer":
             DirectorTurn(answer: event)
@@ -168,7 +198,9 @@ struct AgentChip: View {
                     Text(task.title).font(TypeScale.calloutMedium).lineLimit(1)
                     StateSymbol(state: task.state)
                 }
-                Text(line).font(TypeScale.callout).foregroundStyle(.secondary).lineLimit(2)
+                if !line.isEmpty {
+                    Text(line).font(TypeScale.callout).foregroundStyle(.secondary).lineLimit(2)
+                }
                 if let now = activity?.error ?? activity?.now, !now.isEmpty {
                     Text(now).font(TypeScale.meta).foregroundStyle(.tertiary).lineLimit(1)
                 }
@@ -281,62 +313,97 @@ struct DirectorTurn: View {
     }
 }
 
-/// A task's report: its verdict and what it said, folded when long.
+/// A task's report: its verdict and what it said with it, the files it
+/// touched, then each section under its name. Long ones fold.
 struct ReportCard: View {
     let text: String
+    let report: Report?
     @State private var expanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s3) {
-            HStack(spacing: Space.s2) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
                 Image(systemName: "doc.text").foregroundStyle(.secondary)
                 Text("Report").font(TypeScale.calloutMedium)
-                if let verdict {
-                    Text(verdict)
-                        .font(TypeScale.meta)
-                        .padding(.horizontal, Space.s2).padding(.vertical, 2)
-                        .background(verdictTint.opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.chip))
-                        .foregroundStyle(verdictTint)
+                if let verdict = report?.verdict, !verdict.isEmpty {
+                    VerdictPill(verdict: verdict)
+                }
+                if let said = report?.said, !said.isEmpty {
+                    Text(said).font(TypeScale.callout).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer(minLength: 0)
-                if folds {
-                    Button(expanded ? "Show less" : "Show all") { expanded.toggle() }
+            }
+            if let report {
+                if !report.files.isEmpty || !report.fileNote.isEmpty {
+                    ReportField(name: "Files") {
+                        VStack(alignment: .leading, spacing: Space.s1 + 2) {
+                            FlowLayout(spacing: Space.s1 + 2) {
+                                ForEach(report.files, id: \.self) { path in
+                                    Text(path)
+                                        .font(.system(size: 11.5, design: .monospaced))
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Palette.sunken, in: RoundedRectangle(cornerRadius: Radius.chip))
+                                        .textSelection(.enabled)
+                                }
+                            }
+                            if !report.fileNote.isEmpty {
+                                Text(report.fileNote).font(TypeScale.callout).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                ForEach(Array(shownSections(report).enumerated()), id: \.offset) { _, section in
+                    ReportField(name: section.name.capitalized) {
+                        MarkdownText(section.text)
+                    }
+                }
+                if report.sections.count > 2 {
+                    Button(expanded ? "Show less" : "Show \(report.sections.count - 2) more") { expanded.toggle() }
                         .buttonStyle(.link)
                         .font(TypeScale.meta)
+                        .padding(.leading, reportLabelWidth + Space.s3)
                 }
+            } else {
+                MarkdownText(text)
             }
-            MarkdownText(shown)
         }
         .card()
     }
 
-    /// The report without the verdict the pill already shows: a bare verdict
-    /// line, and the `STATUS:` word, keeping anything said after it.
-    private var lines: [String] {
-        var out: [String] = []
-        for (i, raw) in text.components(separatedBy: "\n").enumerated() {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if i == 0, ["DONE", "BLOCKED", "NEEDS-INPUT"].contains(line) { continue }
-            if let rest = line.range(of: #"^STATUS:\s*(DONE|BLOCKED|NEEDS-INPUT)\s*"#, options: .regularExpression) {
-                let said = line[rest.upperBound...].trimmingCharacters(in: .whitespaces)
-                if !said.isEmpty { out.append(said) }
-                continue
-            }
-            out.append(raw)
-        }
-        return out
+    private func shownSections(_ r: Report) -> [ReportSection] {
+        expanded ? r.sections : Array(r.sections.prefix(2))
     }
-    private var folds: Bool { lines.count > 12 }
-    private var shown: String { (expanded || !folds ? lines : Array(lines.prefix(12))).joined(separator: "\n") }
+}
 
-    private var verdict: String? {
-        for word in ["DONE", "BLOCKED", "NEEDS-INPUT"] where text.contains("STATUS: \(word)") || text.hasPrefix(word) {
-            return word.lowercased()
+/// One named part of a report: its name in a narrow column, its words beside.
+struct ReportField<Content: View>: View {
+
+    let name: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
+            Text(name)
+                .font(TypeScale.meta)
+                .foregroundStyle(.secondary)
+                .frame(width: reportLabelWidth, alignment: .leading)
+            content.frame(maxWidth: .infinity, alignment: .leading)
         }
-        return nil
+    }
+}
+
+struct VerdictPill: View {
+    let verdict: String
+
+    var body: some View {
+        Text(verdict)
+            .font(TypeScale.meta)
+            .padding(.horizontal, Space.s2).padding(.vertical, 2)
+            .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.chip))
+            .foregroundStyle(tint)
     }
 
-    private var verdictTint: Color {
+    private var tint: Color {
         switch verdict {
         case "done": Palette.settled
         case "blocked": Palette.failure
@@ -395,3 +462,6 @@ struct DeliveryLine: View {
         .foregroundStyle(.secondary)
     }
 }
+
+/// The column a report's section names sit in.
+let reportLabelWidth: CGFloat = 64

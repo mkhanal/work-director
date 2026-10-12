@@ -428,6 +428,8 @@ struct QuestionCard: View {
     let workID: String
     let question: Question
     var title: String? = nil
+    /// Who asks, named before the title.
+    var asker: String? = nil
     let answered: () -> Void
 
     @State private var draft: AnswerDraft
@@ -435,11 +437,12 @@ struct QuestionCard: View {
     @State private var sending = false
     @State private var failure: String?
 
-    init(store: Store, workID: String, question: Question, title: String? = nil, answered: @escaping () -> Void) {
+    init(store: Store, workID: String, question: Question, title: String? = nil, asker: String? = nil, answered: @escaping () -> Void) {
         self.store = store
         self.workID = workID
         self.question = question
         self.title = title
+        self.asker = asker
         self.answered = answered
         _draft = State(initialValue: AnswerDraft(question))
     }
@@ -453,7 +456,11 @@ struct QuestionCard: View {
             VStack(alignment: .leading, spacing: Space.s4) {
                 HStack(spacing: Space.s2) {
                     Image(systemName: question.pending ? "questionmark.bubble.fill" : "checkmark.bubble")
-                    Text(title ?? (question.pending ? "Waiting on you" : "Asked"))
+                    if let asker {
+                        Text(asker).foregroundStyle(.primary).lineLimit(1).truncationMode(.tail)
+                            .layoutPriority(-1)
+                    }
+                    Text(title ?? (question.pending ? "Waiting on you" : "Asked")).fixedSize()
                     Spacer()
                     if many && question.pending {
                         Text("\(page + 1) of \(question.items.count)").foregroundStyle(.secondary).monospacedDigit()

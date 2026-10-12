@@ -24,6 +24,8 @@ struct WorkDetail: View {
     /// The gate this work waits on next, if any.
     @State private var gate: Gate?
     @AppStorage("detail.tab") private var tab: Tab = .conversation
+    @AppStorage("goal.view") private var goalView: GoalView = .overview
+    @State private var filter: ThreadFilter = .all
     /// Whether the reader is at the bottom of the conversation, where it
     /// follows what comes in.
     @State private var atBottom = true
@@ -62,14 +64,15 @@ struct WorkDetail: View {
                 // last in the conversation ends above the bar however tall the
                 // bar grows.
                 VStack(spacing: 0) {
+                if focus == nil {
+                    pageTop(loaded)
+                }
                 ScrollView {
                     VStack(alignment: .leading, spacing: Space.s5) {
                         if let focus, let focusFeed, let task = focusedTask(focus, in: loaded) {
                             Breadcrumb(work: loaded.work, task: task, focus: focus) { self.focus = nil; self.focusFeed = nil }
                             ConversationView(store: store, work: task, feed: focusFeed, directorAnswers: directorAnswers(task.id, in: loaded))
                         } else {
-                            Header(work: loaded.work, goal: goalDetail(loaded), open: open,
-                                   rename: { title in plan = try? Plan.rename(loaded.work.id, title: title) })
                             page(loaded)
                         }
                     }
@@ -124,7 +127,8 @@ struct WorkDetail: View {
                     Actions(work: loaded.work, run: { plan = $0 }, ask: { asking = $0 })
                     ToolbarItem(placement: .primaryAction) {
                         if let target = openTarget(loaded) {
-                            Button { plan = Plan.open(target) } label: { Label("Open", systemImage: "arrow.up.forward.app") }
+                            Button { plan = Plan.open(target) } label: { Label("Open in Editor", systemImage: "arrow.up.forward.app") }
+                                .labelStyle(.titleAndIcon)
                                 .help("Open where this work is done in your editor: wd open \(target) .")
                         }
                     }
@@ -143,7 +147,12 @@ struct WorkDetail: View {
                     ToolbarItem(placement: .navigation) {
                         if focus == nil, case .goal(let goal) = loaded, !goal.yours.isEmpty {
                             YoursMenu(yours: goal.yours) { id in
-                                withAnimation { proxy.scrollTo(id, anchor: .top) }
+                                goalView = .conversation
+                                filter = .all
+                                Task {
+                                    try? await Task.sleep(for: .milliseconds(150))
+                                    withAnimation { proxy.scrollTo(id, anchor: .top) }
+                                }
                             }
                         }
                     }
@@ -180,17 +189,19 @@ struct WorkDetail: View {
     private func page(_ loaded: Loaded) -> some View {
         switch loaded {
         case .goal(let goal):
-            GoalThread(store: store, goal: goal, focus: { id in choose(id, in: loaded) }) { Task { await load() } }
-        case .work(let work, let events):
-            if hasSession(work) {
-                Picker("Show", selection: $tab) {
-                    Text("Conversation").tag(Tab.conversation)
-                    Text("Record").tag(Tab.record)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
+            let focusTask = { (id: String) in choose(id, in: loaded) }
+            switch goalView {
+            case .overview:
+                GoalOverview(store: store, goal: goal, gate: gate, pass: { plan = $0 }, focus: focusTask,
+                             answered: { Task { await load() } }, show: { goalView = $0 })
+            case .conversation:
+                GoalThread(store: store, goal: goal, focus: focusTask, answered: { Task { await load() } }, filter: $filter)
+            case .tasks:
+                GoalTasks(goal: goal, focus: focusTask)
+            case .record:
+                EventsSection(events: goal.events, expanded: true)
             }
+        case .work(let work, let events):
             if hasSession(work) && tab == .conversation {
                 ConversationView(store: store, work: work, feed: feed, directorAnswers: directorAnswers(work.id, in: loaded))
             } else {
@@ -256,6 +267,38 @@ struct WorkDetail: View {
         case .goal(let g): g.goal.id == id ? g.goal : g.tasks.first { $0.id == id }
         case .work(let w, _): w.id == id ? w : nil
         }
+    }
+
+    /// The page's fixed top: its name and where it stands, and the views it
+    /// is read in. It stays while the view under it scrolls.
+    @ViewBuilder private func pageTop(_ loaded: Loaded) -> some View {
+        VStack(alignment: .leading, spacing: Space.s4) {
+            Header(work: loaded.work, goal: goalDetail(loaded), open: open,
+                   rename: { title in plan = try? Plan.rename(loaded.work.id, title: title) })
+            switch loaded {
+            case .goal(let g):
+                PageTabs(tabs: GoalView.allCases, selection: $goalView, label: \.label, symbol: \.symbol,
+                         count: { view in
+                             switch view {
+                             case .tasks: g.tasks.count
+                             case .record: g.events.count
+                             default: nil
+                             }
+                         },
+                         alert: { $0 == .overview && g.waitingOnYou > 0 })
+            case .work(let w, _):
+                if hasSession(w) {
+                    PageTabs(tabs: [Tab.conversation, Tab.record], selection: $tab,
+                             label: { $0 == .conversation ? "Conversation" : "Record" },
+                             symbol: { $0 == .conversation ? "bubble.left.and.bubble.right" : "list.bullet.rectangle" })
+                }
+            }
+        }
+        .padding(.horizontal, Space.s6)
+        .padding(.top, Space.s4)
+        .padding(.bottom, Space.s3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        Divider()
     }
 
     private func goalDetail(_ loaded: Loaded) -> GoalDetail? {
@@ -330,7 +373,7 @@ struct WorkDetail: View {
     /// A conversation keeps its newest step in view as it grows.
     private var following: Bool {
         if focus != nil { return true }
-        if case .goal = loaded { return true }
+        if case .goal = loaded { return goalView == .conversation }
         if case .work(let w, _) = loaded { return hasSession(w) && tab == .conversation }
         return false
     }
@@ -452,7 +495,6 @@ struct Header: View {
                 Text(work.detail).readable().foregroundStyle(.secondary).textSelection(.enabled).lineLimit(6)
             }
         }
-        .padding(.bottom, Space.s3)
     }
 
     private func begin() {
@@ -481,6 +523,9 @@ struct Waiting: View {
         if let question = goal.asking {
             QuestionCard(store: store, workID: goal.goal.id, question: question,
                          title: goal.supervised ? "The supervisor asks you" : "Waiting on you", answered: answered)
+        }
+        ForEach(goal.waitingTasks, id: \.question.id) { task, question in
+            QuestionCard(store: store, workID: task.id, question: question, title: "asks you", asker: task.title, answered: answered)
         }
         if !asking.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
@@ -851,6 +896,7 @@ struct YoursMenu: View {
         } label: {
             Label("Your messages", systemImage: "person.crop.circle")
         }
+        .labelStyle(.titleAndIcon)
         .help("Jump to something you said on this goal")
     }
 }

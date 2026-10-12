@@ -105,9 +105,11 @@ struct Actions: ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
             if work.state == .paused || work.state == .dropped {
                 Button { run(.resume(work.id, note: "")) } label: { Label("Resume", systemImage: "play.fill") }
+                    .labelStyle(.titleAndIcon)
                     .help("Carry on where it left off: wd resume \(work.id)")
             } else if work.live {
                 Button { run(.pause(work.id)) } label: { Label("Pause", systemImage: "pause.fill") }
+                    .labelStyle(.titleAndIcon)
                     .help("Stop the running sessions and keep their conversations: wd pause \(work.id)")
             }
             Menu {
@@ -115,6 +117,8 @@ struct Actions: ToolbarContent {
             } label: {
                 Label("Actions", systemImage: "ellipsis.circle")
             }
+            .help("Everything you can do to this work")
+            .labelStyle(.titleAndIcon)
         }
     }
 }

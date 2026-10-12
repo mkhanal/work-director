@@ -185,3 +185,143 @@ extension Event {
         return items
     }
 }
+
+/// What a goal's conversation is narrowed to.
+public enum ThreadFilter: String, CaseIterable, Sendable {
+    case all, you, supervisor, reports, questions
+
+    public var label: String {
+        switch self {
+        case .all: "Everything"
+        case .you: "You"
+        case .supervisor: "Supervisor"
+        case .reports: "Reports"
+        case .questions: "Questions"
+        }
+    }
+}
+
+/// One row of a goal's conversation as it reads: a step, or a run of
+/// updates folded into one line that opens.
+public enum ThreadItem: Sendable, Hashable, Identifiable {
+    case step(ThreadStep)
+    case updates([ThreadStep])
+
+    public var id: Int {
+        switch self {
+        case .step(let s): s.id
+        case .updates(let run): run[0].id
+        }
+    }
+}
+
+/// How far a goal's tasks have come, by where each stands.
+public struct TaskProgress: Sendable, Hashable {
+    public var done = 0, working = 0, review = 0, blocked = 0, waiting = 0, dropped = 0
+    public var total: Int { done + working + review + blocked + waiting + dropped }
+}
+
+extension GoalDetail {
+    /// The conversation narrowed to one kind of turn. Everything folds each
+    /// run of two or more updates — looks, state changes, checks, landings,
+    /// messages told to a task — into one row.
+    public func items(_ filter: ThreadFilter) -> [ThreadItem] {
+        var out: [ThreadItem] = []
+        var run: [ThreadStep] = []
+        func flush() {
+            if run.count == 1 { out.append(.step(run[0])) } else if run.count > 1 { out.append(.updates(run)) }
+            run = []
+        }
+        for step in thread where shows(step, filter) {
+            if filter == .all && isUpdate(step) {
+                run.append(step)
+                continue
+            }
+            flush()
+            out.append(.step(step))
+        }
+        flush()
+        return out
+    }
+
+    private func shows(_ step: ThreadStep, _ filter: ThreadFilter) -> Bool {
+        switch (filter, step) {
+        case (.all, _): true
+        case (.you, .event(let e)): isYours(e)
+        case (.you, .exchange(_, let a?)): isYours(a)
+        case (.supervisor, .supervisor): true
+        case (.supervisor, .exchange(let q, _)): q.work == goal.id
+        case (.reports, .event(let e)): e.kind == "report"
+        case (.questions, .exchange): true
+        default: false
+        }
+    }
+
+    private func isUpdate(_ step: ThreadStep) -> Bool {
+        switch step {
+        case .look: true
+        case .event(let e): ["state", "verify", "pr", "sent"].contains(e.kind)
+        default: false
+        }
+    }
+
+    /// Where the goal's tasks stand.
+    public var progress: TaskProgress {
+        var p = TaskProgress()
+        for t in tasks {
+            switch t.state {
+            case .done, .softDone: p.done += 1
+            case .running, .needsInput: p.working += 1
+            case .review: p.review += 1
+            case .blocked: p.blocked += 1
+            case .dropped, .abandoned: p.dropped += 1
+            case .queued, .briefed, .paused: p.waiting += 1
+            }
+        }
+        return p
+    }
+
+    /// The supervisor's latest reply, the freshest word on where the goal is.
+    public var latestSupervision: (event: Event, reply: SupervisorReply)? {
+        for step in thread.reversed() {
+            if case .supervisor(let e, let r) = step { return (e, r) }
+        }
+        return nil
+    }
+
+    /// The tasks whose sessions are running now.
+    public var working: [Work] {
+        tasks.filter { activity[$0.id]?.status == .running }
+    }
+
+    /// What waits on the person: the goal's own question, each task's session
+    /// question, and each task waiting on them some other way.
+    public var waitingOnYou: Int {
+        (asking == nil ? 0 : 1) + tasks.filter { activity[$0.id]?.asking != nil }.count + waitingTasks.count
+    }
+
+    /// Tasks waiting on the person with no question open in their session: what
+    /// they last asked, or what their report said they need, to answer in words
+    /// or by the choices offered.
+    public var waitingTasks: [(task: Work, question: Question)] {
+        tasks.compactMap { t in
+            guard t.state == .needsInput, activity[t.id]?.asking == nil else { return nil }
+            for e in events.reversed() where e.work == t.id {
+                switch e.kind {
+                case "answer", "decision":
+                    return nil
+                case "question":
+                    let items = e.askedItems.map { QuestionItem(question: $0.question, options: $0.choices.map { QuestionOption(label: $0) }) }
+                    return (t, Question(id: "event-\(e.id)", items: items))
+                case "report":
+                    let r = reports[String(e.id)]
+                    let asked = [r?.said, r?.sections.first { $0.name == "NOTES" }?.text].compactMap { $0 }.first { !$0.isEmpty } ?? e.body
+                    return (t, Question(id: "event-\(e.id)", items: [QuestionItem(question: asked)]))
+                default:
+                    continue
+                }
+            }
+            return nil
+        }
+    }
+}

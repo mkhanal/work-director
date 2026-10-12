@@ -61,7 +61,7 @@ struct RootView: View {
                     .help("Start a goal (⌘N)")
             }
             ToolbarItem(placement: .primaryAction) {
-                Button { typing = true } label: { Label("Run a wd Command", systemImage: "terminal") }
+                Button { typing = true } label: { Label("Command", systemImage: "command") }
                     .help("Run a wd command (⌘K)")
             }
         }
@@ -277,19 +277,6 @@ struct GoalThreadRow: View {
             }
         }
         .padding(.vertical, Space.s1)
-    }
-
-    private func ago(_ stamp: String) -> String {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let d = f.date(from: stamp) ?? ISO8601DateFormatter().date(from: stamp) else { return "" }
-        let s = Int(Date().timeIntervalSince(d))
-        switch s {
-        case ..<60: return "now"
-        case ..<3600: return "\(s / 60)m"
-        case ..<86400: return "\(s / 3600)h"
-        default: return "\(s / 86400)d"
-        }
     }
 }
 
