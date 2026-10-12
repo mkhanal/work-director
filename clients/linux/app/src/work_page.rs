@@ -909,7 +909,7 @@ impl WorkPage {
             }
             match item {
                 ThreadItem::Step(step) => {
-                    if let Some(turn) = self.step_turn(g, step, &mut yours) {
+                    if let Some(turn) = self.step_turn(g, *step, &mut yours) {
                         turns.push(turn);
                     }
                 }

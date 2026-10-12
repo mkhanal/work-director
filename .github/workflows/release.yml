@@ -111,3 +111,42 @@ jobs:
             dist/checksums.txt \
             scripts/install.sh \
             scripts/install.ps1
+
+  # The Linux app, built on the oldest Ubuntu it supports (GTK 4.14,
+  # libadwaita 1.5) with the matching wd beside it, added to the release the
+  # job above published.
+  linux-app:
+    needs: release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-4-dev libadwaita-1-dev
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: build the linux app
+        run: VERSION="${GITHUB_REF_NAME}" COMMIT="$(git rev-parse --short HEAD)" scripts/build-linux.sh
+
+      - name: the app carries the wd of this release
+        run: |
+          name="Work-Director-${GITHUB_REF_NAME}-linux-$(uname -m)"
+          "dist/$name/lib/work-director/wd" --version | grep -F "${GITHUB_REF_NAME}"
+          dpkg-deb -c "dist/$name.deb" | grep -q 'usr/lib/work-director/wd$'
+          (cd dist && sha256sum -c "$name.tar.gz.sha256" "$name.deb.sha256")
+
+      - name: attest where the linux app was built
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/Work-Director-*-linux-*.tar.gz
+            dist/Work-Director-*-linux-*.deb
+
+      - name: add it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" \
+            dist/Work-Director-*-linux-*.tar.gz \
+            dist/Work-Director-*-linux-*.deb \
+            dist/Work-Director-*-linux-*.sha256

@@ -52,6 +52,12 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo build --release --workspace
+      - name: the release packaging builds
+        working-directory: .
+        run: |
+          scripts/build-linux.sh
+          dpkg-deb -c dist/Work-Director-dev-linux-*.deb | grep -q 'usr/lib/work-director/wd$'
+          git clean -fdxq dist
       # Last, so a formatting slip never hides a failing test; the patch that
       # fixes it is kept with the run.
       - name: formatted as rustfmt formats it

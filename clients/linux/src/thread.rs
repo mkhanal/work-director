@@ -34,7 +34,7 @@ impl ThreadFilter {
 /// updates folded into one row that opens.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ThreadItem {
-    Step(ThreadStep),
+    Step(Box<ThreadStep>),
     Updates(Vec<ThreadStep>),
 }
 
@@ -315,7 +315,7 @@ impl GoalDetail {
         let mut run: Vec<ThreadStep> = Vec::new();
         let flush = |run: &mut Vec<ThreadStep>, out: &mut Vec<ThreadItem>| match run.len() {
             0 => {}
-            1 => out.push(ThreadItem::Step(run.remove(0))),
+            1 => out.push(ThreadItem::Step(Box::new(run.remove(0)))),
             _ => out.push(ThreadItem::Updates(std::mem::take(run))),
         };
         for step in self.thread().into_iter().filter(|s| self.shows(s, filter)) {
@@ -324,7 +324,7 @@ impl GoalDetail {
                 continue;
             }
             flush(&mut run, &mut out);
-            out.push(ThreadItem::Step(step));
+            out.push(ThreadItem::Step(Box::new(step)));
         }
         flush(&mut run, &mut out);
         out

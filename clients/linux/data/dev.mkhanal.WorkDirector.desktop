@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Work Director
+Comment=Goals, their agents and what waits on you, over the wd ledger
+Exec=work-director
+Icon=dev.mkhanal.WorkDirector
+Terminal=false
+Categories=Development;GTK;
+StartupNotify=true

@@ -40,9 +40,22 @@ right-click it and choose **Open** (or run `xattr -dr com.apple.quarantine "/App
 scripts/build-macos.sh            # dist/Work Director.app, with the matching wd inside
 ```
 
+**Work Director for Linux** is the same app in GTK4 and libadwaita (`clients/linux`, Rust),
+with its own `wd` installed beside it. Each release carries, for Ubuntu 24.04 or later
+(GTK 4.14, libadwaita 1.5):
+
+```
+sudo apt install ./Work-Director-<version>-linux-x86_64.deb    # then open Work Director from your apps
+```
+
+or `Work-Director-<version>-linux-x86_64.tar.gz` for anywhere else with GTK 4.14 and
+libadwaita 1.5: unpack it and run `bin/work-director`; copy its `share/` into `~/.local/share`
+for the launcher entry and icon. To build it: `scripts/build-linux.sh` (needs cargo, go,
+`libgtk-4-dev` and `libadwaita-1-dev`).
+
 New here? **`docs/quickstart.md`** goes from install to a goal being worked on in five minutes.
 
-Windows (WinUI 3) and Linux (GTK4) apps are planned over the same stdio channel.
+A Windows (WinUI 3) app is planned over the same stdio channel.
 
 ## Install the taste plugin
 
