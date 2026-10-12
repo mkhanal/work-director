@@ -505,7 +505,7 @@ fn a_question_is_answered_in_place_one_answer_per_item() {
     assert_eq!(draft.answers(), None);
     draft.toggle("Red", 0);
     draft.toggle("Blue", 0);
-    assert_eq!(draft.answers(), None, "an item without an answer holds the whole answer back");
+    assert_eq!(draft.answers(), Some(strings(&["Blue", "(no answer)"])), "an item left unanswered says so");
     draft.toggle("Green", 1);
     draft.toggle("Red", 1);
     draft.set_typed(1, "a stripe");
@@ -517,6 +517,15 @@ fn a_question_is_answered_in_place_one_answer_per_item() {
     assert_eq!(plan.argv, strings(&["answer", "w1", "teal", "Red, Green"]));
     assert_eq!(Plan::answer("w1", &q, &strings(&["teal"])), Err(PlanError::Empty));
     assert_eq!(Plan::answer("w1", &q, &strings(&["teal", "  "])), Err(PlanError::Empty));
+
+    let yes_no: Question = serde_json::from_value(json!({"id": "q2", "items": [
+        {"header": "", "question": "Ship it?", "multi": false, "options": [
+            {"label": "Yes (recommended)", "description": ""}, {"label": "No", "description": ""}]},
+    ], "answers": null, "reply": null}))
+    .expect("a question");
+    let mut draft = AnswerDraft::new(yes_no);
+    draft.toggle("Yes (recommended)", 0);
+    assert_eq!(draft.answers(), Some(strings(&["Yes"])), "the recommended mark is not sent");
 }
 
 /// The Key That Sends A Message Is The Person's Choice

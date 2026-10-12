@@ -229,6 +229,21 @@ pub struct AnswerDraft {
     typed: Vec<String>,
 }
 
+/// What an item left unanswered is sent as.
+pub const NO_ANSWER: &str = "(no answer)";
+
+const RECOMMENDED: &str = " (recommended)";
+
+/// An option's label without the mark that recommends it.
+pub fn unmarked(label: &str) -> &str {
+    let cut = label.len().saturating_sub(RECOMMENDED.len());
+    if label.is_char_boundary(cut) && label[cut..].eq_ignore_ascii_case(RECOMMENDED) {
+        label[..cut].trim_end()
+    } else {
+        label
+    }
+}
+
 impl AnswerDraft {
     pub fn new(question: Question) -> AnswerDraft {
         let n = question.items.len();
@@ -267,10 +282,13 @@ impl AnswerDraft {
         &self.typed[item]
     }
 
-    /// Each item's answer: its picks in the order offered, then anything typed;
-    /// on a single choice, typed words replace a pick. None until every item has one.
+    /// Each item's answer: its picks in the order offered, without a
+    /// recommended mark, then anything typed; on a single choice, typed words
+    /// replace a pick. An item left without one is `(no answer)`; None while
+    /// no item has one.
     pub fn answers(&self) -> Option<Vec<String>> {
-        self.question
+        let answers: Vec<Option<String>> = self
+            .question
             .items
             .iter()
             .enumerate()
@@ -281,6 +299,7 @@ impl AnswerDraft {
                     .iter()
                     .map(|o| o.label.as_str())
                     .filter(|l| self.picked[i].iter().any(|p| p == l))
+                    .map(unmarked)
                     .collect();
                 if !words.is_empty() {
                     if item.multi {
@@ -291,6 +310,10 @@ impl AnswerDraft {
                 }
                 (!parts.is_empty()).then(|| parts.join(", "))
             })
-            .collect()
+            .collect();
+        answers
+            .iter()
+            .any(Option::is_some)
+            .then(|| answers.into_iter().map(|a| a.unwrap_or_else(|| NO_ANSWER.to_string())).collect())
     }
 }

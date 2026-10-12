@@ -12,16 +12,10 @@ use kit::{AnswerDraft, Plan, Question, QuestionItem};
 use crate::app::App;
 use crate::ui::{self, SPACE_1, SPACE_2, SPACE_3};
 
-const RECOMMENDED: &str = " (recommended)";
-
 /// The label an option is shown with, and whether it is the recommended one.
 fn shown(label: &str) -> (&str, bool) {
-    let cut = label.len().saturating_sub(RECOMMENDED.len());
-    if label.is_char_boundary(cut) && label[cut..].eq_ignore_ascii_case(RECOMMENDED) {
-        (label[..cut].trim_end(), true)
-    } else {
-        (label, false)
-    }
+    let bare = kit::unmarked(label);
+    (bare, bare.len() != label.len())
 }
 
 /// The question waiting on the person, answered in place; `answered` runs

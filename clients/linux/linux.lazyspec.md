@@ -67,7 +67,8 @@ hold only that product's work; with none, every product's.
 ## A Question Is Answered In Place, One Answer Per Item
 - Picking a single-choice option replaces the item's pick; typed words replace it too.
 - Multiple-choice picks join in the order offered, then any typed words.
-- Nothing can be sent until every item has an answer.
+- A pick is sent as its label without a `(recommended)` mark.
+- Nothing can be sent until some item has an answer; an item left without one is sent as `(no answer)`.
 - Sending runs `wd answer <id>` with one answer per item, in the order asked.
 
 ## The Key That Sends A Message Is The Person's Choice
