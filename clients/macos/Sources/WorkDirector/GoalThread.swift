@@ -353,7 +353,7 @@ struct ReportCard: View {
                     }
                 }
                 ForEach(Array(shownSections(report).enumerated()), id: \.offset) { _, section in
-                    ReportField(name: section.name.capitalized) {
+                    ReportField(name: section.name.count <= 3 ? section.name : section.name.capitalized) {
                         MarkdownText(section.text)
                     }
                 }
