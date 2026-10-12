@@ -11,6 +11,7 @@ use adw::prelude::*;
 use gtk::{gdk, glib};
 
 use kit::{
+    Report, TaskProgress, ThreadFilter, ThreadItem,
     follow, AgentCard, AgentRoster, ChannelError, EscapeTaps, Event, Feed, Gate, GoalDetail, Outgoing,
     OutgoingState, Phase, Plan, SessionStatus, Step, StepKind, ThreadRow, ThreadStep, ToolCall, Watch, Work,
     WorkState,
@@ -40,10 +41,36 @@ impl Loaded {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Tab {
+/// The views of a work page. A goal has all four; a task its conversation and record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    Overview,
     Conversation,
+    Tasks,
     Record,
+}
+
+impl Tab {
+    pub fn name(self) -> &'static str {
+        match self {
+            Tab::Overview => "overview",
+            Tab::Conversation => "conversation",
+            Tab::Tasks => "tasks",
+            Tab::Record => "record",
+        }
+    }
+
+    pub fn named(name: &str) -> Option<Tab> {
+        [Tab::Overview, Tab::Conversation, Tab::Tasks, Tab::Record].into_iter().find(|t| t.name() == name)
+    }
+}
+
+/// How the tasks table is ordered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Sort {
+    Plan,
+    State,
+    Recent,
 }
 
 struct State {
@@ -55,7 +82,11 @@ struct State {
     /// The agent whose conversation the centre shows instead of this page's own.
     focus: Option<AgentCard>,
     focus_feed: Option<Rc<Feed>>,
-    tab: Tab,
+    /// The view chosen on this page; until one is, a goal opens on the last
+    /// view chosen on any goal, a task on its conversation.
+    tab: Option<Tab>,
+    filter: ThreadFilter,
+    sort: Sort,
     /// Where each of your messages is, to jump back to: what you said, and its turn.
     yours: Vec<(String, String)>,
 }
@@ -69,7 +100,9 @@ struct Header {
     meta: gtk::Box,
     problem: gtk::Label,
     tabs: gtk::Box,
+    overview: gtk::ToggleButton,
     conversation: gtk::ToggleButton,
+    tasks: gtk::ToggleButton,
     record: gtk::ToggleButton,
 }
 
@@ -87,6 +120,7 @@ pub struct WorkPage {
     jump: gtk::Button,
     gate: gtk::Button,
     open: gtk::Button,
+    pause: gtk::Button,
     actions: gtk::MenuButton,
     yours: gtk::MenuButton,
     yours_list: gtk::ListBox,
@@ -97,6 +131,8 @@ pub struct WorkPage {
     loading: Cell<bool>,
     stale: Cell<bool>,
     watch: RefCell<Option<Watch>>,
+    /// What the Pause or Resume button runs, for the work as last read.
+    pause_plan: RefCell<Option<Plan>>,
 }
 
 impl WorkPage {
@@ -194,6 +230,14 @@ impl WorkPage {
             }
         });
         let weak = self.me.clone();
+        self.pause.connect_clicked(move |_| {
+            let Some(page) = weak.upgrade() else { return };
+            let plan = page.pause_plan.borrow().clone();
+            if let Some(plan) = plan {
+                page.app.run(plan);
+            }
+        });
+        let weak = self.me.clone();
         self.open.connect_clicked(move |_| {
             if let Some(page) = weak.upgrade() {
                 if let Some(target) = page.open_target() {
@@ -246,15 +290,19 @@ impl WorkPage {
         });
         self.header.title.add_controller(click);
 
-        for (button, tab) in [(&self.header.conversation, Tab::Conversation), (&self.header.record, Tab::Record)] {
+        let h = &self.header;
+        for (button, tab) in [
+            (&h.overview, Tab::Overview),
+            (&h.conversation, Tab::Conversation),
+            (&h.tasks, Tab::Tasks),
+            (&h.record, Tab::Record),
+        ] {
             let weak = self.me.clone();
             button.connect_toggled(move |b| {
-                if !b.is_active() {
-                    return;
-                }
-                if let Some(page) = weak.upgrade() {
-                    page.state.borrow_mut().tab = tab;
-                    page.render();
+                if b.is_active() {
+                    if let Some(page) = weak.upgrade() {
+                        page.show(tab);
+                    }
                 }
             });
         }
@@ -339,9 +387,9 @@ impl WorkPage {
     async fn beat(self: &Rc<Self>, tick: u32) {
         let (feed, goal_live) = {
             let state = self.state.borrow();
-            let feed = state.focus_feed.clone().or_else(|| match state.tab {
+            let feed = state.focus_feed.clone().or_else(|| match self.tab(&state) {
                 Tab::Conversation => state.feed.clone(),
-                Tab::Record => None,
+                _ => None,
             });
             let goal_live = match &state.loaded {
                 Some(Loaded::Goal(g)) => !g.goal.at_rest() || g.tasks.iter().any(|t| !t.at_rest()),
@@ -520,6 +568,10 @@ impl WorkPage {
         self.app.store.post(plan, &target.id, remember);
         self.composer.clear();
         self.composer.set_note(None);
+        let view = self.tab(&self.state.borrow());
+        if view != Tab::Conversation {
+            self.show(Tab::Conversation);
+        }
         self.to_bottom();
     }
 
@@ -576,14 +628,16 @@ impl WorkPage {
                         None => (Vec::new(), Vec::new()),
                     }
                 }
-                _ => match loaded {
-                    Loaded::Goal(g) => self.goal_turns(g),
-                    Loaded::Work(w, events) => match (&state.feed, state.tab) {
-                        (Some(feed), Tab::Conversation) => {
-                            (self.session_turns(w, feed, &director_answers(loaded, &w.id)), Vec::new())
-                        }
-                        _ => (record_turns(events), Vec::new()),
+                _ => match (loaded, self.tab(&state)) {
+                    (Loaded::Goal(g), Tab::Overview) => (self.overview_turns(g, state.gate.as_ref()), Vec::new()),
+                    (Loaded::Goal(g), Tab::Conversation) => self.goal_turns(g, state.filter),
+                    (Loaded::Goal(g), Tab::Tasks) => (self.task_turns(g, state.sort), Vec::new()),
+                    (Loaded::Goal(g), Tab::Record) => (record_turns(&g.events), Vec::new()),
+                    (Loaded::Work(w, _), Tab::Conversation) if state.feed.is_some() => match &state.feed {
+                        Some(feed) => (self.session_turns(w, feed, &director_answers(loaded, &w.id)), Vec::new()),
+                        None => (Vec::new(), Vec::new()),
                     },
+                    (Loaded::Work(_, events), _) => (record_turns(events), Vec::new()),
                 },
             }
         };
@@ -655,8 +709,72 @@ impl WorkPage {
             }
         }
         h.meta.append(&ui::line(&parts.join(" · "), &["meta", "text2"]));
-        let session = matches!(loaded, Loaded::Work(w, _) if w.has_session());
-        h.tabs.set_visible(session);
+        let tab = self.tab(state);
+        match loaded {
+            Loaded::Goal(g) => {
+                h.tabs.set_visible(true);
+                h.overview.set_visible(true);
+                h.tasks.set_visible(true);
+                h.overview.set_label(if g.waiting_on_you() > 0 { "Overview ●" } else { "Overview" });
+                h.tasks.set_label(&format!("Tasks {}", g.tasks.len()));
+                h.record.set_label(&format!("Record {}", g.events.len()));
+            }
+            Loaded::Work(w, events) => {
+                h.tabs.set_visible(w.has_session());
+                h.overview.set_visible(false);
+                h.tasks.set_visible(false);
+                h.record.set_label(&format!("Record {}", events.len()));
+            }
+        }
+        let button = match tab {
+            Tab::Overview => &h.overview,
+            Tab::Conversation => &h.conversation,
+            Tab::Tasks => &h.tasks,
+            Tab::Record => &h.record,
+        };
+        if !button.is_active() {
+            button.set_active(true);
+        }
+    }
+
+    /// The view in effect: the one chosen here, else the default for the work.
+    fn tab(&self, state: &State) -> Tab {
+        state.tab.unwrap_or_else(|| match &state.loaded {
+            Some(Loaded::Goal(_)) => self.app.settings.goal_tab().and_then(|t| Tab::named(&t)).unwrap_or(Tab::Overview),
+            _ => Tab::Conversation,
+        })
+    }
+
+    /// Shows one view; a goal's choice is remembered for the next goal opened.
+    fn show(self: &Rc<Self>, tab: Tab) {
+        let is_goal = {
+            let mut state = self.state.borrow_mut();
+            if self.tab(&state) == tab && state.tab.is_some() {
+                return;
+            }
+            state.tab = Some(tab);
+            matches!(state.loaded, Some(Loaded::Goal(_)))
+        };
+        if is_goal {
+            if let Err(e) = self.app.settings.set_goal_tab(tab.name()) {
+                self.app.complain(&format!("cannot remember the view: {e}"));
+            }
+        }
+        self.at_bottom.set(tab == Tab::Conversation);
+        if tab != Tab::Conversation {
+            self.scroller.vadjustment().set_value(0.0);
+        }
+        self.render();
+    }
+
+    fn set_filter(self: &Rc<Self>, filter: ThreadFilter) {
+        self.state.borrow_mut().filter = filter;
+        self.render();
+    }
+
+    fn set_sort(self: &Rc<Self>, sort: Sort) {
+        self.state.borrow_mut().sort = sort;
+        self.render();
     }
 
     fn task_in(&self, loaded: &Loaded, id: &str) -> Option<Work> {
@@ -680,7 +798,21 @@ impl WorkPage {
             }
             _ => self.gate.set_visible(false),
         }
-        self.actions.set_menu_model(Some(&work_menu(loaded.work(), true)));
+        let work = loaded.work();
+        self.actions.set_menu_model(Some(&work_menu(work, true)));
+        let toggle = if matches!(work.state, WorkState::Paused | WorkState::Dropped) {
+            Some(Plan::resume(&work.id, ""))
+        } else if work.live() {
+            Some(Plan::pause(&work.id))
+        } else {
+            None
+        };
+        self.pause.set_visible(toggle.is_some());
+        if let Some(plan) = &toggle {
+            self.pause.set_label(&plan.title);
+            self.pause.set_tooltip_text(Some(&plan.command_line()));
+        }
+        *self.pause_plan.borrow_mut() = toggle;
         drop(state);
         self.open.set_visible(self.open_target().is_some());
 
@@ -740,71 +872,52 @@ impl WorkPage {
     /// A goal as one conversation: what was asked, the plan, what its
     /// supervisor and agents did, and what waits on you, last.
     /// Also where each of your messages is, to jump back to.
-    fn goal_turns(self: &Rc<Self>, g: &GoalDetail) -> (Vec<Turn>, Vec<(String, String)>) {
+    fn goal_turns(self: &Rc<Self>, g: &GoalDetail, filter: ThreadFilter) -> (Vec<Turn>, Vec<(String, String)>) {
         let mut turns = Vec::new();
         let mut yours = Vec::new();
-        if !g.goal.detail.is_empty() {
-            let (detail, at) = (g.goal.detail.clone(), g.goal.created.clone());
-            turns.push(Turn::key("asked", &detail).with(move || ui::you_bubble(&detail, "You asked", Some(at.as_str()), None).upcast()));
+        let counts: Vec<(ThreadFilter, usize)> = ThreadFilter::ALL
+            .iter()
+            .map(|f| (*f, if *f == ThreadFilter::All { g.thread().len() } else { g.items(*f).len() }))
+            .collect();
+        let weak = self.me.clone();
+        turns.push(Turn::key("filters", &(&counts, filter)).with(move || filter_chips(&counts, filter, weak)));
+        if filter == ThreadFilter::All {
+            if !g.goal.detail.is_empty() {
+                let (detail, at) = (g.goal.detail.clone(), g.goal.created.clone());
+                turns.push(
+                    Turn::key("asked", &detail)
+                        .with(move || ui::you_bubble(&detail, "You asked", Some(at.as_str()), None).upcast()),
+                );
+            }
+            let plan: Vec<(String, String, WorkState, Option<String>)> =
+                g.tasks.iter().map(|t| (t.id.clone(), t.title.clone(), t.state, t.heading.clone())).collect();
+            let (weak, rollup) = (self.me.clone(), (g.rollup.done, g.rollup.total));
+            turns.push(Turn::key("plan", &(&plan, rollup)).with(move || plan_block(&plan, rollup, weak)));
         }
-        let plan: Vec<(String, String, WorkState, Option<String>)> =
-            g.tasks.iter().map(|t| (t.id.clone(), t.title.clone(), t.state, t.heading.clone())).collect();
-        let (weak, rollup) = (self.me.clone(), (g.rollup.done, g.rollup.total));
-        turns.push(Turn::key("plan", &(&plan, rollup)).with(move || plan_block(&plan, rollup, weak)));
 
-        let supervised = g.supervised();
-        for step in g.thread() {
-            let id = format!("e{}", step.id());
-            match step {
-                ThreadStep::Event(e) if g.is_yours(&e) => {
-                    let said = e.decision.as_ref().map(|d| d.answer.clone()).unwrap_or_else(|| e.body.clone());
-                    yours.push((said.clone(), id.clone()));
-                    let label = if e.kind == "answer" { "You answered" } else { "You" };
-                    turns.push(Turn::key(&id, &e).with(move || ui::you_bubble(&said, label, Some(e.at.as_str()), None).upcast()));
-                }
-                ThreadStep::Event(e) => {
-                    let task = self.named(g, &e.work);
-                    let weak = self.me.clone();
-                    turns.push(Turn::key(&id, &e).with(move || event_turn(&e, task, weak)));
-                }
-                ThreadStep::Exchange(q, answer) => {
-                    if answer.is_none() && g.asking.as_ref().is_some_and(|a| a.id == format!("event-{}", q.id)) {
-                        continue;
+        let mut day = String::new();
+        for item in g.items(filter) {
+            let at = match &item {
+                ThreadItem::Step(step) => step.event().at.clone(),
+                ThreadItem::Updates(run) => run.first().map(|s| s.event().at.clone()).unwrap_or_default(),
+            };
+            let today = kit::time::day(&at);
+            if today != day {
+                let label = today.clone();
+                turns.push(Turn::key(format!("day-{}", item.id()), &label).with(move || ui::day_line(&label).upcast()));
+                day = today;
+            }
+            match item {
+                ThreadItem::Step(step) => {
+                    if let Some(turn) = self.step_turn(g, step, &mut yours) {
+                        turns.push(turn);
                     }
-                    if let Some(a) = answer.as_ref().filter(|a| g.is_yours(a)) {
-                        yours.push((a.answer_text(), id.clone()));
-                    }
-                    let asker = if q.work == g.goal.id {
-                        (if supervised { "Supervisor" } else { "Plan" }).to_string()
-                    } else {
-                        g.title_of(&q.work).unwrap_or(&q.work).to_string()
-                    };
-                    let weak = self.me.clone();
-                    let target = (q.work != g.goal.id).then(|| q.work.clone());
-                    turns.push(Turn::key(&id, &(&q, &answer)).with(move || exchange_turn(&q, answer.as_ref(), &asker, target, weak)));
                 }
-                ThreadStep::Look(e) => {
-                    let text = format!("Supervisor looking · {} · {}", e.body, kit::time::when(&e.at));
-                    turns.push(Turn::key(&id, &text).with(move || ui::event_line(&text, &[]).upcast()));
-                }
-                ThreadStep::Supervisor(e, reply) => {
-                    let tasks: Vec<(Option<Work>, Phase, Option<String>)> = reply
-                        .actions
-                        .iter()
-                        .map(|a| {
-                            let task = a.task.as_ref().and_then(|t| g.tasks.iter().find(|w| &w.id == t)).cloned();
-                            let activity = task.as_ref().and_then(|t| g.activity.get(&t.id));
-                            let now = activity.and_then(|a| a.error.clone().or_else(|| a.now.clone()));
-                            (task, Phase::of(activity), now)
-                        })
-                        .collect();
-                    let (weak, goal) = (self.me.clone(), g.goal.id.clone());
-                    turns.push(Turn::key(&id, &(&e, &reply, &tasks)).with(move || supervisor_turn(&e, &reply, &tasks, &goal, weak)));
-                }
-                ThreadStep::Stopped(e, said) => {
-                    let task = self.named(g, &e.work);
-                    let weak = self.me.clone();
-                    turns.push(Turn::key(&id, &(&e, &said)).with(move || stopped_turn(&e, &said, task, weak)));
+                ThreadItem::Updates(run) => {
+                    let id = format!("u{}", run.first().map_or(0, ThreadStep::id));
+                    let inner: Vec<Turn> = run.iter().filter_map(|s| self.step_turn(g, s.clone(), &mut yours)).collect();
+                    let count = run.len();
+                    turns.push(Turn::key(&id, &run).with(move || updates_row(count, &at, inner)));
                 }
             }
         }
@@ -816,15 +929,222 @@ impl WorkPage {
             turns.push(Turn::key(format!("out{}", m.id), &m.state).with(move || outgoing_bubble(&app, &m, "sent")));
         }
 
-        if let Some(q) = &g.asking {
-            let title = if supervised { "The supervisor asks you" } else { "Waiting on you" };
-            let (app, goal, q, answered) = (self.app.clone(), g.goal.id.clone(), q.clone(), self.reload());
-            turns.push(Turn::key("asking", &q).with(move || question::pending(&app, &goal, &q, title, answered)));
+        turns.extend(self.asking_turns(g, false));
+        (turns, yours)
+    }
+
+    /// One step of a goal's conversation as a turn; none for a question that
+    /// waits on the person, which is answered in place below.
+    fn step_turn(self: &Rc<Self>, g: &GoalDetail, step: ThreadStep, yours: &mut Vec<(String, String)>) -> Option<Turn> {
+        let id = format!("e{}", step.id());
+        let supervised = g.supervised();
+        Some(match step {
+            ThreadStep::Event(e) if g.is_yours(&e) => {
+                let said = e.decision.as_ref().map(|d| d.answer.clone()).unwrap_or_else(|| e.body.clone());
+                yours.push((said.clone(), id.clone()));
+                let label = if e.kind == "answer" { "You answered" } else { "You" };
+                Turn::key(&id, &e).with(move || ui::you_bubble(&said, label, Some(e.at.as_str()), None).upcast())
+            }
+            ThreadStep::Event(e) => {
+                let task = self.named(g, &e.work);
+                let report = g.reports.get(&e.id.to_string()).cloned();
+                let weak = self.me.clone();
+                Turn::key(&id, &(&e, &report)).with(move || event_turn(&e, report.as_ref(), task, weak))
+            }
+            ThreadStep::Exchange(q, answer) => {
+                if answer.is_none() && g.asking.as_ref().is_some_and(|a| a.id == format!("event-{}", q.id)) {
+                    return None;
+                }
+                if let Some(a) = answer.as_ref().filter(|a| g.is_yours(a)) {
+                    yours.push((a.answer_text(), id.clone()));
+                }
+                let asker = if q.work == g.goal.id {
+                    (if supervised { "Supervisor" } else { "Plan" }).to_string()
+                } else {
+                    g.title_of(&q.work).unwrap_or(&q.work).to_string()
+                };
+                let weak = self.me.clone();
+                let target = (q.work != g.goal.id).then(|| q.work.clone());
+                Turn::key(&id, &(&q, &answer)).with(move || exchange_turn(&q, answer.as_ref(), &asker, target, weak))
+            }
+            ThreadStep::Look(e) => {
+                let text = format!("Supervisor looking · {} · {}", e.body, kit::time::when(&e.at));
+                Turn::key(&id, &text).with(move || ui::event_line(&text, &[]).upcast())
+            }
+            ThreadStep::Supervisor(e, reply) => {
+                let tasks = self.told(g, &reply);
+                let (weak, goal) = (self.me.clone(), g.goal.id.clone());
+                Turn::key(&id, &(&e, &reply, &tasks)).with(move || supervisor_turn(&e, &reply, &tasks, &goal, weak))
+            }
+            ThreadStep::Stopped(e, said) => {
+                let task = self.named(g, &e.work);
+                let weak = self.me.clone();
+                Turn::key(&id, &(&e, &said)).with(move || stopped_turn(&e, &said, task, weak))
+            }
+        })
+    }
+
+    /// Each task a supervisor's action told, started or filed, where it is and what it is doing.
+    fn told(&self, g: &GoalDetail, reply: &kit::SupervisorReply) -> Vec<(Option<Work>, Phase, Option<String>)> {
+        reply
+            .actions
+            .iter()
+            .map(|a| {
+                let task = a.task.as_ref().and_then(|t| g.tasks.iter().find(|w| &w.id == t)).cloned();
+                let activity = task.as_ref().and_then(|t| g.activity.get(&t.id));
+                let now = activity.and_then(|a| a.error.clone().or_else(|| a.now.clone()));
+                (task, Phase::of(activity), now)
+            })
+            .collect()
+    }
+
+    /// Where a goal stands, at a glance: what waits on you, the next step,
+    /// how far its tasks have come, who is working now, the supervisor's
+    /// latest word, what you decided and what you asked.
+    fn overview_turns(self: &Rc<Self>, g: &GoalDetail, gate: Option<&Gate>) -> Vec<Turn> {
+        let mut turns = Vec::new();
+        if g.waiting_on_you() > 0 {
+            turns.push(Turn::key("o-needs", &()).with(|| section_title("Needs you", true)));
+            turns.extend(self.asking_turns(g, true));
         }
-        for task in &g.tasks {
-            let Some(q) = g.activity.get(&task.id).and_then(|a| a.asking.clone()) else { continue };
-            let (app, task, answered, weak) = (self.app.clone(), task.clone(), self.reload(), self.me.clone());
-            turns.push(Turn::key(format!("asking-{}", task.id), &q).with(move || {
+        if let Some((gate, plan)) = gate.and_then(|gate| Plan::passing(gate).map(|p| (gate.clone(), p))) {
+            let app = self.app.clone();
+            turns.push(Turn::key("o-next", &(&gate, &plan)).with(move || {
+                let column = ui::vbox(SPACE_3);
+                column.append(&section_title("Next step", false));
+                let card = ui::card("raised");
+                let row = ui::hbox(SPACE_4);
+                let words = ui::vbox(SPACE_1);
+                words.set_hexpand(true);
+                words.append(&ui::text(&plan.title, &["title"]));
+                if let Some(why) = &gate.why {
+                    words.append(&ui::said(why, &["callout", "text2"]));
+                }
+                row.append(&words);
+                let pass = gtk::Button::with_label(&plan.title);
+                pass.add_css_class("suggested-action");
+                pass.add_css_class("pill");
+                pass.set_valign(gtk::Align::Center);
+                pass.set_tooltip_text(Some(&plan.command_line()));
+                pass.connect_clicked(move |_| app.run(plan.clone()));
+                row.append(&pass);
+                card.append(&row);
+                column.append(&card);
+                column.upcast()
+            }));
+        }
+        let progress = g.progress();
+        let weak = self.me.clone();
+        turns.push(Turn::key("o-progress", &progress).with(move || {
+            let column = ui::vbox(SPACE_3);
+            let head = ui::hbox(SPACE_2);
+            let title = section_title("Progress", false);
+            title.set_hexpand(true);
+            head.append(&title);
+            let all = ui::link("All tasks");
+            all.connect_clicked(move |_| {
+                if let Some(page) = weak.upgrade() {
+                    page.show(Tab::Tasks);
+                }
+            });
+            head.append(&all);
+            column.append(&head);
+            column.append(&progress_card(&progress));
+            column.upcast()
+        }));
+        let working: Vec<(Work, Phase, Option<String>)> = g
+            .working()
+            .into_iter()
+            .map(|t| {
+                let activity = g.activity.get(&t.id);
+                (t.clone(), Phase::of(activity), activity.and_then(|a| a.error.clone().or_else(|| a.now.clone())))
+            })
+            .collect();
+        if !working.is_empty() {
+            let weak = self.me.clone();
+            turns.push(Turn::key("o-working", &working).with(move || {
+                let column = ui::vbox(SPACE_3);
+                column.append(&section_title("Working now", false));
+                for (task, phase, now) in &working {
+                    column.append(&agent_chip(task, *phase, now.as_deref().unwrap_or(""), None, weak.clone()));
+                }
+                column.upcast()
+            }));
+        }
+        if let Some((e, reply)) = g.latest_supervision() {
+            let tasks = self.told(g, &reply);
+            let weak = self.me.clone();
+            turns.push(Turn::key("o-latest", &(&e, &reply, &tasks)).with(move || {
+                let column = ui::vbox(SPACE_3);
+                let head = ui::hbox(SPACE_2);
+                let title = section_title("Latest from the supervisor", false);
+                title.set_hexpand(true);
+                head.append(&title);
+                let open = ui::link("Conversation");
+                let w = weak.clone();
+                open.connect_clicked(move |_| {
+                    if let Some(page) = w.upgrade() {
+                        page.show(Tab::Conversation);
+                    }
+                });
+                head.append(&open);
+                column.append(&head);
+                let card = ui::card("raised");
+                card.append(&ui::line(&kit::time::when(&e.at), &["meta", "text3"]));
+                card.append(&supervisor_body(&reply, &tasks, weak));
+                column.append(&card);
+                column.upcast()
+            }));
+        }
+        let decisions: Vec<Event> = g.yours().into_iter().filter(|e| e.kind == "decision").rev().collect();
+        if !decisions.is_empty() {
+            turns.push(Turn::key("o-decided", &decisions).with(move || {
+                let column = ui::vbox(SPACE_3);
+                column.append(&section_title("What you decided", false));
+                let card = ui::card("raised");
+                for e in &decisions {
+                    let row = ui::hbox(SPACE_3);
+                    row.append(&ui::icon("emblem-ok-symbolic", &["accent-text"]));
+                    let said = ui::said(&e.body, &["callout"]);
+                    said.set_hexpand(true);
+                    row.append(&said);
+                    row.append(&ui::line(&kit::time::when(&e.at), &["meta", "text3"]));
+                    card.append(&row);
+                }
+                column.append(&card);
+                column.upcast()
+            }));
+        }
+        if !g.goal.detail.is_empty() {
+            let detail = g.goal.detail.clone();
+            turns.push(Turn::key("o-asked", &detail).with(move || {
+                let column = ui::vbox(SPACE_3);
+                column.append(&section_title("What you asked", false));
+                let card = ui::card("raised");
+                card.append(&ui::folded(&detail, 10, &["body"]));
+                column.append(&card);
+                column.upcast()
+            }));
+        }
+        turns
+    }
+
+    /// Every question waiting on the person, answered in place: the goal's
+    /// own, each task's session question, and each task in needs-input with
+    /// what it asked or reported.
+    fn asking_turns(self: &Rc<Self>, g: &GoalDetail, overview: bool) -> Vec<Turn> {
+        let prefix = if overview { "o-" } else { "" };
+        let mut turns = Vec::new();
+        if let Some(q) = &g.asking {
+            let title = if g.supervised() { "The supervisor asks you" } else { "Waiting on you" };
+            let (app, goal, q, answered) = (self.app.clone(), g.goal.id.clone(), q.clone(), self.reload());
+            turns.push(Turn::key(format!("{prefix}asking"), &q).with(move || question::pending(&app, &goal, &q, title, answered)));
+        }
+        let sessions = g.tasks.iter().filter_map(|t| g.activity.get(&t.id).and_then(|a| a.asking.clone()).map(|q| (t.clone(), q)));
+        let waiting = g.waiting_tasks().into_iter().map(|w| (w.task, w.question));
+        for (task, q) in sessions.chain(waiting) {
+            let (app, answered, weak) = (self.app.clone(), self.reload(), self.me.clone());
+            turns.push(Turn::key(format!("{prefix}asking-{}", task.id), &(&task, &q)).with(move || {
                 let column = ui::vbox(SPACE_2);
                 let link = ui::link(&task.title);
                 let id = task.id.clone();
@@ -838,7 +1158,40 @@ impl WorkPage {
                 column.upcast()
             }));
         }
-        (turns, yours)
+        turns
+    }
+
+    /// The goal's tasks as a table: state and title, what its agent is doing
+    /// now, its last report's verdict, when it last moved, tokens.
+    fn task_turns(self: &Rc<Self>, g: &GoalDetail, sort: Sort) -> Vec<Turn> {
+        let mut rows: Vec<TaskLine> = g
+            .tasks
+            .iter()
+            .map(|t| {
+                let activity = g.activity.get(&t.id);
+                TaskLine {
+                    task: t.clone(),
+                    now: activity.and_then(|a| a.error.clone().or_else(|| a.now.clone())),
+                    asking: activity.is_some_and(|a| a.asking.is_some()),
+                    verdict: g
+                        .events
+                        .iter()
+                        .rev()
+                        .find(|e| e.work == t.id && e.kind == "report")
+                        .and_then(|e| g.reports.get(&e.id.to_string()))
+                        .map(|r| r.verdict.clone())
+                        .filter(|v| !v.is_empty()),
+                    tokens: activity.and_then(|a| a.usage.as_ref()).map(|u| u.tokens),
+                }
+            })
+            .collect();
+        match sort {
+            Sort::Plan => {}
+            Sort::State => rows.sort_by_key(|r| rank(r.task.state)),
+            Sort::Recent => rows.sort_by(|a, b| b.task.updated.cmp(&a.task.updated)),
+        }
+        let (app, weak) = (self.app.clone(), self.me.clone());
+        vec![Turn::key("tasks", &(&rows, sort)).with(move || tasks_table(&rows, sort, &app, weak))]
     }
 
     /// The name of work on a goal: the task's title, or none for the goal itself.
@@ -1014,22 +1367,27 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
     bar.pack_start(&sidebar);
     let agents_toggle =
         gtk::ToggleButton::builder().icon_name("sidebar-show-right-symbolic").tooltip_text("Agents").build();
-    let actions = gtk::MenuButton::builder().icon_name("view-more-symbolic").tooltip_text("Actions").build();
-    let open = gtk::Button::builder().icon_name("document-open-symbolic").tooltip_text("Open where this work is done in your editor").build();
+    let actions = gtk::MenuButton::builder().label("Actions").tooltip_text("Every write this work's state allows").build();
+    let open = gtk::Button::builder().label("Open in Editor").tooltip_text("Open where this work is done in your editor").build();
+    let pause = gtk::Button::new();
+    pause.set_visible(false);
+    let command = gtk::Button::builder().label("Command").action_name("win.command").tooltip_text("Run a wd command (Ctrl+K)").build();
     let yours_list = gtk::ListBox::new();
     yours_list.add_css_class("navigation-sidebar");
     let yours_popover = gtk::Popover::builder().child(&yours_list).build();
     let yours = gtk::MenuButton::builder()
-        .icon_name("user-available-symbolic")
-        .tooltip_text("Your messages")
+        .label("Your messages")
+        .tooltip_text("What you said on this goal, to jump back to")
         .popover(&yours_popover)
         .build();
     let gate = gtk::Button::new();
     gate.add_css_class("suggested-action");
     gate.set_visible(false);
     bar.pack_end(&agents_toggle);
-    bar.pack_end(&actions);
+    bar.pack_end(&command);
     bar.pack_end(&open);
+    bar.pack_end(&actions);
+    bar.pack_end(&pause);
     bar.pack_end(&yours);
     bar.pack_end(&gate);
 
@@ -1069,6 +1427,7 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
         jump,
         gate,
         open,
+        pause,
         actions,
         yours,
         yours_list,
@@ -1080,7 +1439,9 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
             feed: None,
             focus: None,
             focus_feed: None,
-            tab: Tab::Conversation,
+            tab: None,
+            filter: ThreadFilter::All,
+            sort: Sort::Plan,
             yours: Vec::new(),
         }),
         at_bottom: Cell::new(true),
@@ -1088,6 +1449,7 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
         loading: Cell::new(false),
         stale: Cell::new(false),
         watch: RefCell::new(None),
+        pause_plan: RefCell::new(None),
     }
 }
 
@@ -1103,13 +1465,17 @@ fn build_header() -> Header {
     titles.add_named(&entry, Some("entry"));
     titles.set_visible_child_name("title");
     let meta = ui::hbox(SPACE_2);
-    let conversation = gtk::ToggleButton::builder().label("Conversation").active(true).build();
-    let record = gtk::ToggleButton::builder().label("Record").group(&conversation).build();
+    let overview = gtk::ToggleButton::builder().label("Overview").build();
+    let conversation = gtk::ToggleButton::builder().label("Conversation").group(&overview).build();
+    let tasks = gtk::ToggleButton::builder().label("Tasks").group(&overview).build();
+    let record = gtk::ToggleButton::builder().label("Record").group(&overview).build();
     let tabs = ui::hbox(0);
     tabs.add_css_class("linked");
     tabs.set_halign(gtk::Align::Start);
     tabs.set_margin_top(SPACE_2);
+    tabs.append(&overview);
     tabs.append(&conversation);
+    tabs.append(&tasks);
     tabs.append(&record);
     tabs.set_visible(false);
     widget.append(&crumbs);
@@ -1119,7 +1485,7 @@ fn build_header() -> Header {
     problem.set_visible(false);
     widget.append(&problem);
     widget.append(&tabs);
-    Header { widget, crumbs, titles, title, entry, meta, problem, tabs, conversation, record }
+    Header { widget, crumbs, titles, title, entry, meta, problem, tabs, overview, conversation, tasks, record }
 }
 
 /// What the director answered work in the person's place.
@@ -1131,10 +1497,11 @@ fn director_answers(loaded: &Loaded, id: &str) -> Vec<String> {
     events.iter().filter(|e| e.work == id && e.answered_by_director()).map(|e| e.body.clone()).collect()
 }
 
-/// The ledger's record of work, oldest first.
+/// The ledger's record of work, newest first.
 fn record_turns(events: &[Event]) -> Vec<Turn> {
     events
         .iter()
+        .rev()
         .map(|e| {
             let e = e.clone();
             Turn::key(format!("r{}", e.id), &e).with(move || {
@@ -1202,7 +1569,12 @@ fn task_link(task: &Option<(String, String, WorkState)>, page: &Weak<WorkPage>) 
 }
 
 /// One thing that happened on a goal or a task, as its kind reads.
-fn event_turn(e: &Event, task: Option<(String, String, WorkState)>, page: Weak<WorkPage>) -> gtk::Widget {
+fn event_turn(
+    e: &Event,
+    report: Option<&Report>,
+    task: Option<(String, String, WorkState)>,
+    page: Weak<WorkPage>,
+) -> gtk::Widget {
     let on = task.as_ref().map(|t| t.1.clone());
     match e.kind.as_str() {
         "report" => {
@@ -1212,12 +1584,19 @@ fn event_turn(e: &Event, task: Option<(String, String, WorkState)>, page: Weak<W
             if let Some(link) = task_link(&task, &page) {
                 head.append(&link);
             }
-            if let Some(verdict) = verdict(&e.body) {
-                head.append(&ui::tag(&verdict, &["meta"]));
+            let verdict = report.map(|r| r.verdict.clone()).filter(|v| !v.is_empty()).or_else(|| verdict(&e.body));
+            if let Some(verdict) = verdict {
+                head.append(&verdict_pill(&verdict));
             }
-            head.append(&ui::line(&kit::time::when(&e.at), &["meta", "text3"]));
+            let at = ui::line(&kit::time::when(&e.at), &["meta", "text3"]);
+            at.set_hexpand(true);
+            at.set_xalign(1.0);
+            head.append(&at);
             card.append(&head);
-            card.append(&folded_markdown(&e.body, 12));
+            match report {
+                Some(r) => card.append(&report_view(r)),
+                None => card.append(&folded_markdown(&e.body, 12)),
+            }
             card.upcast()
         }
         "sent" => {
@@ -1344,6 +1723,25 @@ fn supervisor_turn(
     goal: &str,
     page: Weak<WorkPage>,
 ) -> gtk::Widget {
+    let body = supervisor_body(reply, tasks, page.clone());
+    let speaker = ui::link("Supervisor");
+    speaker.add_css_class("speaker");
+    let goal = goal.to_string();
+    speaker.connect_clicked(move |_| {
+        if let Some(page) = page.upgrade() {
+            page.focus_task(&goal);
+        }
+    });
+    let meta = ui::meta(&speaker.upcast(), Some(e.at.as_str()), None);
+    ui::turn(Some(&ui::avatar("security-high-symbolic", &["text2"])), Some(&meta), &body).upcast()
+}
+
+/// What a supervisor said, the agents it told, started or filed, and what was refused.
+fn supervisor_body(
+    reply: &kit::SupervisorReply,
+    tasks: &[(Option<Work>, Phase, Option<String>)],
+    page: Weak<WorkPage>,
+) -> gtk::Box {
     let body = ui::vbox(SPACE_3);
     if !reply.said.is_empty() {
         body.append(&ui::markdown(&reply.said));
@@ -1369,16 +1767,7 @@ fn supervisor_turn(
         row.append(&ui::said(line, &["callout", "failure"]));
         body.append(&row);
     }
-    let speaker = ui::link("Supervisor");
-    speaker.add_css_class("speaker");
-    let goal = goal.to_string();
-    speaker.connect_clicked(move |_| {
-        if let Some(page) = page.upgrade() {
-            page.focus_task(&goal);
-        }
-    });
-    let meta = ui::meta(&speaker.upcast(), Some(e.at.as_str()), None);
-    ui::turn(Some(&ui::avatar("security-high-symbolic", &["text2"])), Some(&meta), &body).upcast()
+    body
 }
 
 /// An agent inside the conversation: where its session is, what it is
@@ -1519,5 +1908,276 @@ fn outgoing_bubble(app: &App, m: &Outgoing, waiting: &str) -> gtk::Widget {
         row.append(&discard);
         column.append(&row);
     }
+    column.upcast()
+}
+
+/// A report in parts: what it said with its verdict, then its files as path
+/// chips with any note, then each named section; the first two show and the
+/// rest open with "Show N more".
+fn report_view(r: &Report) -> gtk::Widget {
+    let column = ui::vbox(SPACE_3);
+    if !r.said.is_empty() {
+        column.append(&ui::said(&r.said, &["body"]));
+    }
+    if !r.files.is_empty() || !r.file_note.is_empty() {
+        let value = ui::vbox(SPACE_1);
+        let chips = gtk::FlowBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .column_spacing(SPACE_1 as u32)
+            .row_spacing(SPACE_1 as u32)
+            .max_children_per_line(12)
+            .build();
+        for file in &r.files {
+            chips.insert(&ui::tag(file, &["code"]), -1);
+        }
+        value.append(&chips);
+        if !r.file_note.is_empty() {
+            value.append(&ui::said(&r.file_note, &["callout", "text2"]));
+        }
+        column.append(&field("Files", &value));
+    }
+    let rest = ui::vbox(SPACE_3);
+    for (i, section) in r.sections.iter().enumerate() {
+        let shown = field(&title_case(&section.name), &ui::markdown(&section.text));
+        if i < 2 {
+            column.append(&shown);
+        } else {
+            rest.append(&shown);
+        }
+    }
+    let more = r.sections.len().saturating_sub(2);
+    if more > 0 {
+        let revealer = gtk::Revealer::builder().child(&rest).reveal_child(false).build();
+        let open = ui::link(&format!("Show {more} more"));
+        let r = revealer.clone();
+        open.connect_clicked(move |b| {
+            let now = !r.reveals_child();
+            r.set_reveal_child(now);
+            b.set_label(if now { "Show less" } else { &format!("Show {more} more") });
+        });
+        column.append(&revealer);
+        column.append(&open);
+    }
+    column.upcast()
+}
+
+/// A labelled field: the name in a 64 px column, the value beside it.
+fn field(name: &str, value: &impl IsA<gtk::Widget>) -> gtk::Box {
+    let row = ui::hbox(SPACE_3);
+    let label = ui::line(name, &["meta", "text2"]);
+    label.set_size_request(64, -1);
+    label.set_valign(gtk::Align::Start);
+    row.append(&label);
+    value.set_hexpand(true);
+    row.append(value);
+    row
+}
+
+/// VERIFY as Verify.
+fn title_case(name: &str) -> String {
+    let lower = name.to_lowercase();
+    let mut chars = lower.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+}
+
+/// A verdict as a pill: done green, blocked red, needs-input orange.
+fn verdict_pill(verdict: &str) -> gtk::Label {
+    let class = match verdict.to_lowercase().as_str() {
+        "done" => "settled-text",
+        "blocked" => "failure",
+        "needs-input" => "attention-text",
+        _ => "text2",
+    };
+    ui::tag(verdict, &["meta", class])
+}
+
+/// The chips a goal's conversation is narrowed with, each with its count.
+fn filter_chips(counts: &[(ThreadFilter, usize)], chosen: ThreadFilter, page: Weak<WorkPage>) -> gtk::Widget {
+    let row = ui::hbox(SPACE_2);
+    let mut first: Option<gtk::ToggleButton> = None;
+    for (filter, n) in counts {
+        let chip = gtk::ToggleButton::builder().label(format!("{} {n}", filter.label())).active(*filter == chosen).build();
+        chip.add_css_class("chip");
+        match &first {
+            Some(group) => chip.set_group(Some(group)),
+            None => first = Some(chip.clone()),
+        }
+        let (page, filter) = (page.clone(), *filter);
+        chip.connect_toggled(move |c| {
+            if c.is_active() {
+                if let Some(page) = page.upgrade() {
+                    page.set_filter(filter);
+                }
+            }
+        });
+        row.append(&chip);
+    }
+    row.upcast()
+}
+
+/// A run of updates folded into one line that opens.
+fn updates_row(count: usize, at: &str, inner: Vec<Turn>) -> gtk::Widget {
+    let column = ui::vbox(SPACE_3);
+    for turn in inner {
+        column.append(&turn.build());
+    }
+    let expander = gtk::Expander::new(None);
+    expander.set_label_widget(Some(&ui::line(&format!("{count} updates · {}", kit::time::when(at)), &["meta", "text3"])));
+    expander.set_child(Some(&column));
+    expander.upcast()
+}
+
+/// A section's small title on the overview; orange for what waits on you.
+fn section_title(title: &str, attention: bool) -> gtk::Widget {
+    let classes: &[&str] = if attention { &["micro", "attention-text"] } else { &["micro", "text3"] };
+    ui::line(&title.to_uppercase(), classes).upcast()
+}
+
+/// Done of total, a bar segmented by where each task stands, and a legend.
+fn progress_card(p: &TaskProgress) -> gtk::Widget {
+    let card = ui::card("raised");
+    let head = ui::hbox(SPACE_2);
+    head.append(&ui::line(&format!("{} of {}", p.done, p.total()), &["title", "numeric"]));
+    head.append(&ui::line("tasks done", &["callout", "text2"]));
+    card.append(&head);
+    let parts = [
+        ("Done", p.done, "bar-done"),
+        ("Working", p.working, "bar-working"),
+        ("Review", p.review, "bar-review"),
+        ("Blocked", p.blocked, "bar-blocked"),
+        ("Waiting", p.waiting, "bar-waiting"),
+        ("Dropped", p.dropped, "bar-dropped"),
+    ];
+    // One equal cell per task, coloured by where it stands, so each state's
+    // share of the bar is its share of the tasks.
+    let bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    bar.set_homogeneous(true);
+    bar.add_css_class("progress-bar");
+    for (_, n, class) in parts {
+        for _ in 0..n {
+            let cell = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            cell.add_css_class(class);
+            bar.append(&cell);
+        }
+    }
+    if p.total() > 0 {
+        card.append(&bar);
+    }
+    let legend = ui::hbox(SPACE_4);
+    for (name, n, class) in parts.into_iter().filter(|part| part.1 > 0) {
+        let item = ui::hbox(SPACE_1);
+        let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        dot.add_css_class("dot");
+        dot.add_css_class(class);
+        dot.set_valign(gtk::Align::Center);
+        item.append(&dot);
+        item.append(&ui::line(&format!("{name} {n}"), &["meta", "text2"]));
+        legend.append(&item);
+    }
+    card.append(&legend);
+    card.upcast()
+}
+
+/// One row of the tasks table.
+#[derive(Debug, Clone)]
+struct TaskLine {
+    task: Work,
+    now: Option<String>,
+    asking: bool,
+    verdict: Option<String>,
+    tokens: Option<i64>,
+}
+
+/// Needs input and blocked first, then what is moving, then what rests.
+fn rank(state: WorkState) -> usize {
+    [
+        WorkState::NeedsInput,
+        WorkState::Blocked,
+        WorkState::Running,
+        WorkState::Review,
+        WorkState::Queued,
+        WorkState::Briefed,
+        WorkState::Paused,
+        WorkState::SoftDone,
+        WorkState::Done,
+        WorkState::Dropped,
+        WorkState::Abandoned,
+    ]
+    .iter()
+    .position(|s| *s == state)
+    .unwrap_or(usize::MAX)
+}
+
+fn tasks_table(rows: &[TaskLine], sort: Sort, app: &App, page: Weak<WorkPage>) -> gtk::Widget {
+    let column = ui::vbox(SPACE_3);
+    let head = ui::hbox(SPACE_2);
+    let count = ui::line(&format!("{} tasks", rows.len()), &["meta", "text2"]);
+    count.set_hexpand(true);
+    head.append(&count);
+    let sorts = ui::hbox(0);
+    sorts.add_css_class("linked");
+    let mut first: Option<gtk::ToggleButton> = None;
+    for (label, by) in [("Plan", Sort::Plan), ("State", Sort::State), ("Recent", Sort::Recent)] {
+        let b = gtk::ToggleButton::builder().label(label).active(by == sort).build();
+        match &first {
+            Some(group) => b.set_group(Some(group)),
+            None => first = Some(b.clone()),
+        }
+        let page = page.clone();
+        b.connect_toggled(move |b| {
+            if b.is_active() {
+                if let Some(page) = page.upgrade() {
+                    page.set_sort(by);
+                }
+            }
+        });
+        sorts.append(&b);
+    }
+    head.append(&sorts);
+    column.append(&head);
+
+    let list = gtk::ListBox::new();
+    list.add_css_class("boxed-list");
+    list.set_selection_mode(gtk::SelectionMode::None);
+    let now = chrono::Utc::now();
+    for r in rows {
+        let row = ui::hbox(SPACE_3);
+        row.set_margin_top(SPACE_2);
+        row.set_margin_bottom(SPACE_2);
+        row.set_margin_start(SPACE_3);
+        row.set_margin_end(SPACE_3);
+        let name = ui::hbox(SPACE_2);
+        name.set_hexpand(true);
+        name.append(&ui::state_icon(r.task.state));
+        name.append(&ui::line(&r.task.title, &["callout"]));
+        row.append(&name);
+        let doing = ui::line(r.now.as_deref().unwrap_or("—"), &["callout", if r.asking { "attention-text" } else { "text2" }]);
+        doing.set_width_chars(28);
+        doing.set_max_width_chars(28);
+        row.append(&doing);
+        let verdict: gtk::Widget = match &r.verdict {
+            Some(v) => verdict_pill(v).upcast(),
+            None => ui::line("—", &["text3"]).upcast(),
+        };
+        verdict.set_size_request(76, -1);
+        row.append(&verdict);
+        let moved = ui::line(&kit::time::ago(&r.task.updated, now), &["meta", "numeric", "text2"]);
+        moved.set_width_chars(5);
+        moved.set_xalign(1.0);
+        row.append(&moved);
+        let tokens = ui::line(&r.tokens.map(kit::token_count).unwrap_or_else(|| "—".into()), &["meta", "numeric", "text2"]);
+        tokens.set_width_chars(6);
+        tokens.set_xalign(1.0);
+        row.append(&tokens);
+        let item = gtk::ListBoxRow::builder().child(&row).activatable(true).build();
+        list.append(&item);
+    }
+    let (app, ids) = (app.clone(), rows.iter().map(|r| r.task.id.clone()).collect::<Vec<_>>());
+    list.connect_row_activated(move |_, row| {
+        if let Some(id) = usize::try_from(row.index()).ok().and_then(|i| ids.get(i)) {
+            app.open(Place::Work(id.clone()));
+        }
+    });
+    column.append(&list);
     column.upcast()
 }

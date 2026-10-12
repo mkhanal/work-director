@@ -18,6 +18,21 @@ pub fn when(stamp: &str) -> String {
     }
 }
 
+/// The day a time falls on, as a day line reads it: Today, Yesterday, or
+/// "Monday, Oct 12". A stamp that is not a time reads as written.
+pub fn day(stamp: &str) -> String {
+    let Some(t) = instant(stamp) else { return stamp.to_string() };
+    let date = t.with_timezone(&Local).date_naive();
+    let today = Local::now().date_naive();
+    if date == today {
+        "Today".to_string()
+    } else if today.pred_opt() == Some(date) {
+        "Yesterday".to_string()
+    } else {
+        date.format("%A, %b %-d").to_string()
+    }
+}
+
 /// How long ago, in the fewest characters: now, 5m, 3h, 2d.
 pub fn ago(stamp: &str, now: DateTime<Utc>) -> String {
     let Some(t) = instant(stamp) else { return String::new() };

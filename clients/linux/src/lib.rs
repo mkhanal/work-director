@@ -30,4 +30,6 @@ pub use outbox::{Outgoing, OutgoingState};
 pub use plan::{Plan, PlanError};
 pub use send_key::{Chord, ReturnPress, SendKey};
 pub use store::{Change, Feed, FeedState, Spawner, Store, Watch};
-pub use thread::{AskedItem, SupervisorAction, SupervisorReply, ThreadStep};
+pub use thread::{
+    AskedItem, SupervisorAction, SupervisorReply, TaskProgress, ThreadFilter, ThreadItem, ThreadStep, WaitingTask,
+};

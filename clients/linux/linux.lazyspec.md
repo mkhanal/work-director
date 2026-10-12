@@ -106,6 +106,13 @@ hold only that product's work; with none, every product's.
 - A question reads with its answer, and the answer says whether the director gave it or the person did; the answer's message to the session is not shown again.
 - The question a goal waits on the person for is answered in place, one answer per question, its choices offered as a session's are.
 
+## A Goal Is Read As Its Overview, Its Conversation, Its Tasks Or Its Record
+- The overview counts the goal's tasks as done, working, in review, blocked, waiting or dropped.
+- The overview counts what waits on the person: the goal's own question and each task's.
+- The conversation narrows to the person's words, the supervisor, reports or questions.
+- Everything folds each run of two or more updates — looks, state changes, checks, landings and messages told to a task — into one row.
+- A report reads as its verdict, what it said with it, its files and its named sections.
+
 ## The Sidebar Lists Work As Threads, Most Recently Active First
 - Goals and standalone work in the product in scope are listed most recently updated first.
 - Work not started yet is listed apart as queued, and work at rest apart as settled.
@@ -129,6 +136,6 @@ hold only that product's work; with none, every product's.
 - With Remember on, what is said to work is sent and also filed as feedback on that work and its project, from the director.
 - A message that cannot be filed as feedback says it was sent but not remembered.
 
-## A Goal Is Renamed Where Its Name Shows
-- Renaming runs `wd rename <id> "<title>"` with the words typed, trimmed; the page and the sidebar show the new name once `wd` has it.
-- A name that is empty or only whitespace is not sent.
+## Work Is Renamed From Its Page Or Its Menu
+- Renaming runs `wd rename <id> "<title>"` with the title trimmed; the page and the sidebar show the new name once `wd` has it.
+- A blank title is not sent.

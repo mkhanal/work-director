@@ -33,6 +33,11 @@ impl Turn {
         Key(format!("{id}:{:x}", hasher.finish()))
     }
 
+    /// The turn's widget, for a turn shown inside another.
+    pub fn build(self) -> gtk::Widget {
+        (self.build)()
+    }
+
     fn id(&self) -> &str {
         self.key.split(':').next().unwrap_or("")
     }
@@ -67,9 +72,5 @@ impl Turns {
     /// The widget showing the turn named `id`.
     pub fn find(&self, id: &str) -> Option<gtk::Widget> {
         self.shown.borrow().iter().find(|(key, _)| key.split(':').next() == Some(id)).map(|(_, w)| w.clone())
-    }
-
-    pub fn clear(&self) {
-        self.update(Vec::new());
     }
 }

@@ -352,6 +352,8 @@ pub struct GoalDetail {
     pub activity: HashMap<String, Activity>,
     /// The question the goal waits on the person for, with its choices.
     pub asking: Option<Question>,
+    /// Each report read into its parts, by the id of the event that filed it.
+    pub reports: HashMap<String, Report>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -476,4 +478,23 @@ pub struct Learned {
     pub key: String,
     pub count: i64,
     pub texts: Vec<String>,
+}
+
+/// A task's report read into its parts, as wd serves it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+pub struct Report {
+    /// `done`, `blocked`, `needs-input`, or empty when the report gave none.
+    pub verdict: String,
+    /// What the report said with its verdict.
+    pub said: String,
+    pub files: Vec<String>,
+    /// What the report said about its files beyond naming them.
+    pub file_note: String,
+    pub sections: Vec<ReportSection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+pub struct ReportSection {
+    pub name: String,
+    pub text: String,
 }

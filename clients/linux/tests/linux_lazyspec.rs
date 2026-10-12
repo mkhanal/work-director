@@ -770,7 +770,7 @@ fn a_goal_reads_as_one_conversation_with_its_supervisor_and_its_agents() {
             event(11, "g", "question", "Tag v1.0.0?\n- yes (recommended)\n- no", "09:00"),
             answer(12, "g", "yes", "person", "10:00"),
         ],
-        "claims": [], "landings": [], "delivery": null, "activity": {},
+        "claims": [], "landings": [], "delivery": null, "activity": {}, "reports": {},
         "asking": {"id": "event-11", "items": [{"header": "", "question": "Tag v1.0.0?", "multi": false,
             "options": [{"label": "yes (recommended)", "description": ""}, {"label": "no", "description": ""}]}], "answers": null, "reply": null},
     });
@@ -807,6 +807,59 @@ fn a_goal_reads_as_one_conversation_with_its_supervisor_and_its_agents() {
         "each action names the task it told or filed"
     );
     assert_eq!(reply.refused, strings(&["START b — b is review, already under way"]));
+}
+
+/// A Goal Is Read As Its Overview, Its Conversation, Its Tasks Or Its Record
+#[test]
+fn a_goal_is_read_as_its_overview_its_conversation_its_tasks_or_its_record() {
+    let event = |id: i64, work: &str, kind: &str, body: &str, decision: Value| {
+        json!({"id": id, "work": work, "kind": kind, "body": body, "at": format!("2026-10-12T01:{id:02}:00Z"),
+            "effective": null, "decision": decision})
+    };
+    let person = json!({"question": "q", "answer": "yes", "source": "person", "runner": "", "model": "", "tokens": 0,
+        "reverses": 0, "reversed_by": 0});
+    let asking = json!({"id": "event-1", "items": [], "answers": null, "reply": null});
+    let goal: GoalDetail = serde_json::from_value(json!({
+        "goal": work_json("g", "running"),
+        "tasks": [work_json("a", "done"), work_json("b", "blocked"), work_json("c", "running"),
+            work_json("d", "queued"), work_json("e", "dropped"), work_json("f", "review")],
+        "rollup": {"counts": {}, "done": 1, "total": 6},
+        "events": [
+            event(1, "g", "decision", "keep the js script", Value::Null),
+            event(2, "a", "state", "paused", Value::Null),
+            event(3, "g", "look", "a task reported (1)", Value::Null),
+            event(4, "a", "verify", "pass", Value::Null),
+            event(5, "a", "report", "DONE\nSTATUS: DONE\nFILES: x.ts", Value::Null),
+            event(6, "g", "supervised", "All fits.\nACTIONS:\nWAIT", Value::Null),
+            event(7, "g", "question", "Tag it?\n- yes\n- no", Value::Null),
+            event(8, "g", "answer", "yes", person),
+            event(9, "b", "state", "blocked", Value::Null),
+        ],
+        "claims": [], "landings": [], "delivery": null,
+        "activity": {"c": {"now": "Bash", "kind": "tool", "at": null, "asking": asking, "error": null,
+            "status": "running", "usage": null, "subagents": null}},
+        "asking": asking,
+        "reports": {"5": {"verdict": "done", "said": "", "files": ["x.ts"], "file_note": "",
+            "sections": [{"name": "VERIFY", "text": "go test → 0"}]}},
+    }))
+    .expect("a goal");
+    let p = goal.progress();
+    assert_eq!([p.done, p.working, p.review, p.blocked, p.waiting, p.dropped], [1, 1, 1, 1, 1, 1]);
+    assert_eq!(goal.waiting_on_you(), 2, "the goal's own question and task c's");
+
+    let ids = |filter| goal.items(filter).iter().map(ThreadItem::id).collect::<Vec<_>>();
+    assert_eq!(ids(ThreadFilter::All), vec![1, 2, 5, 6, 7, 9], "updates 2–4 fold into one row; a lone update stays a step");
+    let ThreadItem::Updates(run) = &goal.items(ThreadFilter::All)[1] else { panic!("row 2 is not folded updates") };
+    assert_eq!(run.iter().map(ThreadStep::id).collect::<Vec<_>>(), vec![2, 3, 4]);
+    assert_eq!(ids(ThreadFilter::You), vec![1, 7], "a decision, and a question the person answered");
+    assert_eq!(ids(ThreadFilter::Supervisor), vec![6, 7]);
+    assert_eq!(ids(ThreadFilter::Reports), vec![5]);
+    assert_eq!(ids(ThreadFilter::Questions), vec![7]);
+
+    let r = &goal.reports["5"];
+    assert_eq!(r.verdict, "done");
+    assert_eq!(r.files, strings(&["x.ts"]));
+    assert_eq!(r.sections.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), vec!["VERIFY"]);
 }
 
 /// The Sidebar Lists Work As Threads, Most Recently Active First
@@ -934,9 +987,9 @@ fn a_correction_can_be_kept_as_feedback() {
     store.stop();
 }
 
-/// A Goal Is Renamed Where Its Name Shows
+/// Work Is Renamed From Its Page Or Its Menu
 #[test]
-fn a_goal_is_renamed_where_its_name_shows() {
+fn work_is_renamed_from_its_page_or_its_menu() {
     let home = Home::new();
     let id = home.goal("demo", "Fix the login");
     let run = Run::new();

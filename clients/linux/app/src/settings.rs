@@ -75,6 +75,15 @@ impl Settings {
         self.set("send-key", key.name())
     }
 
+    /// The view a goal opens on: the last one chosen on any goal.
+    pub fn goal_tab(&self) -> Option<String> {
+        self.get("goal-tab")
+    }
+
+    pub fn set_goal_tab(&self, tab: &str) -> io::Result<()> {
+        self.set("goal-tab", tab)
+    }
+
     /// Whether the agents panel shows beside a work page.
     pub fn agents_shown(&self) -> bool {
         self.get("agents").is_none_or(|v| v == "shown")

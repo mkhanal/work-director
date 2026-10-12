@@ -225,6 +225,11 @@ pub fn event_line(text: &str, classes: &[&str]) -> gtk::Box {
     row
 }
 
+/// The line that starts each day of a conversation.
+pub fn day_line(day: &str) -> gtk::Box {
+    event_line(day, &["strong"])
+}
+
 /// Monospace text in a sunken block that scrolls sideways rather than wrapping.
 pub fn code_block(code: &str) -> gtk::Widget {
     let label = gtk::Label::builder().label(code).xalign(0.0).selectable(true).build();
