@@ -106,8 +106,12 @@ struct MicroLabel: View {
 /// Space between two groups of toolbar actions, where the system draws groups.
 struct GroupGap: ToolbarContent {
     var body: some ToolbarContent {
+        // ToolbarSpacer exists from the macOS 26 SDK (Swift 6.2); an app built
+        // with an older SDK groups the actions without the space between.
+        #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             ToolbarSpacer(.fixed, placement: .primaryAction)
         }
+        #endif
     }
 }
