@@ -1953,7 +1953,8 @@ fn report_view(r: &Report) -> gtk::Widget {
         open.connect_clicked(move |b| {
             let now = !r.reveals_child();
             r.set_reveal_child(now);
-            b.set_label(if now { "Show less" } else { &format!("Show {more} more") });
+            let label = if now { "Show less".to_string() } else { format!("Show {more} more") };
+            b.set_label(&label);
         });
         column.append(&revealer);
         column.append(&open);
