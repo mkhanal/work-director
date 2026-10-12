@@ -32,7 +32,9 @@ jobs:
       # and the dmg alongside it rather than skipped.
       - name: the mac icon set
         if: runner.os == 'macos'
-        run: scripts/icons.sh
+        run: |
+          brew install librsvg
+          scripts/icons.sh
 
       # One job builds every target. Cross-compiling pure Go is just GOOS/GOARCH,
       # so a matrix would buy parallelism and cost a checksum pass; the whole set
