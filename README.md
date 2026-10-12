@@ -48,7 +48,7 @@ with its own `wd` installed beside it. Each release carries, for Ubuntu 24.04 or
 sudo apt install ./Work-Director-<version>-linux-x86_64.deb    # then open Work Director from your apps
 ```
 
-or `Work-Director-<version>-linux-x86_64.tar.gz` for anywhere else with GTK 4.14 and
+(`aarch64` in place of `x86_64` on ARM), or `Work-Director-<version>-linux-<arch>.tar.gz` for anywhere else with GTK 4.14 and
 libadwaita 1.5: unpack it and run `bin/work-director`; copy its `share/` into `~/.local/share`
 for the launcher entry and icon. To build it: `scripts/build-linux.sh` (needs cargo, go,
 `libgtk-4-dev` and `libadwaita-1-dev`).
