@@ -241,7 +241,7 @@ type Driver struct {
 	Spend func(work, question string, v Verdict) error
 	// Send hands an answer to the executor waiting on it. Without it an answer
 	// is decided and never delivered, which is worse than not deciding.
-	Send func(work, answer string) error
+	Send func(work, question, answer string) error
 	// Close puts work that has finished through the gates that are left. Without
 	// it a task that reported DONE sits in review for ever, and the run that
 	// watched it get there calls a goal finished while its work is unfinished.
@@ -461,7 +461,7 @@ func (d *Driver) turn(goal core.Work, b, spent Budget, settled []core.Work, put 
 			t.Unanswered = append(t.Unanswered, q)
 			continue
 		}
-		if err := d.Send(q.Work, v.Answer); err != nil {
+		if err := d.Send(q.Work, q.Text, v.Answer); err != nil {
 			t.Failed = fmt.Sprintf("sending an answer to %s: %v", q.Work, err)
 			return t, spent, nil
 		}

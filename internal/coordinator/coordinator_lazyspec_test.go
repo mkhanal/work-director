@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -180,11 +181,39 @@ func TestCoordinator(t *testing.T) {
 		}
 	})
 
+	t.Run("A Question The Director Files Keeps Its Choices", func(t *testing.T) {
+		body := QuestionBody([]Action{
+			{Kind: ActAsk, Text: "Tag v1.0.0?", Options: []string{"yes (recommended)", "no"}},
+			{Kind: ActAsk, Text: "Who cherry-picks the fixes?"},
+		})
+		if body != "Tag v1.0.0?\n- yes (recommended)\n- no\nWho cherry-picks the fixes?" {
+			t.Fatalf("body = %q", body)
+		}
+		q := AskedQuestion(core.Event{ID: 7, Body: body})
+		if q.ID != "event-7" || len(q.Items) != 2 || q.Items[0].Question != "Tag v1.0.0?" || q.Items[1].Question != "Who cherry-picks the fixes?" ||
+			len(q.Items[0].Options) != 2 || q.Items[0].Options[0].Label != "yes (recommended)" || q.Items[0].Options[1].Label != "no" || len(q.Items[1].Options) != 0 {
+			t.Fatalf("question = %+v, want two items, the first with its two choices", q)
+		}
+		events := []core.Event{
+			{ID: 1, Work: "g", Kind: core.EventQuestion, Body: "first?"},
+			{ID: 2, Work: "g", Kind: core.EventAnswer, Body: "yes"},
+			{ID: 3, Work: "g", Kind: core.EventQuestion, Body: "second?"},
+			{ID: 4, Work: "t", Kind: core.EventDecision, Body: "on another work"},
+			{ID: 5, Work: "t", Kind: core.EventQuestion, Body: "a task's"},
+		}
+		if e, ok := OpenQuestion(events, "g"); !ok || e.ID != 3 {
+			t.Fatalf("open question = %+v, %v; want the second", e, ok)
+		}
+		if _, ok := OpenQuestion(append(events, core.Event{ID: 6, Work: "g", Kind: core.EventDecision, Body: "settled"}), "g"); ok {
+			t.Fatal("a question decided on since is still open")
+		}
+	})
+
 	t.Run("A Supervision Reply Parses Into Actions", func(t *testing.T) {
 		reply := []string{
 			"The collector never calls the detector. ACTIONS: are below.",
 			"ACTIONS:\n- SEND t1: call detectOperationalImpacts and print impacts\nTASK: weekly running note",
-			"START t9\nDROP t8: the skill already does it\n`RESOLVE #18: the collector task wires it in`\nASK: tag v1.0.0 at 7720d09? I recommend yes\nDONE: all parts fit\nWAIT\n\nthen I will look again",
+			"START t9\nDROP t8: the skill already does it\n`RESOLVE #18: the collector task wires it in`\nASK: tag v1.0.0 at 7720d09? I recommend yes\n- yes (recommended)\n* no, wait\nDONE: all parts fit\nWAIT\n\nthen I will look again",
 		}
 		actions, refused := ParseSupervision(reply)
 		want := []Action{
@@ -193,11 +222,11 @@ func TestCoordinator(t *testing.T) {
 			{Kind: ActStart, Work: "t9"},
 			{Kind: ActDrop, Work: "t8", Text: "the skill already does it"},
 			{Kind: ActResolve, Concern: 18, Text: "the collector task wires it in"},
-			{Kind: ActAsk, Text: "tag v1.0.0 at 7720d09? I recommend yes"},
+			{Kind: ActAsk, Text: "tag v1.0.0 at 7720d09? I recommend yes", Options: []string{"yes (recommended)", "no, wait"}},
 			{Kind: ActDone, Text: "all parts fit"},
 			{Kind: ActWait},
 		}
-		if !slices.Equal(actions, want) {
+		if !reflect.DeepEqual(actions, want) {
 			t.Fatalf("actions = %+v\nwant %+v", actions, want)
 		}
 		if !slices.Equal(refused, []string{"then I will look again"}) {
@@ -373,6 +402,15 @@ func TestCoordinator(t *testing.T) {
 			}
 			if got := eventBodies(t, l, child.ID, core.EventAnswer); !slices.Equal(got, []string{"use modernc.org/sqlite as the database driver"}) {
 				t.Fatalf("answer events = %v", got)
+			}
+			evs, err := l.Events(child.ID, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, e := range evs {
+				if e.Kind == core.EventAnswer && (e.Decision == nil || e.Decision.Question != "which database driver should we use?" || e.Decision.Source != core.AnsweredByDirector) {
+					t.Fatalf("answer = %+v, want it with its question, answered by the director", e.Decision)
+				}
 			}
 			w, err := l.Get(child.ID)
 			if err != nil {

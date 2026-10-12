@@ -59,7 +59,7 @@ func newHarness(t *testing.T, tasks int) *harness {
 	h.d = &Driver{
 		Ledger: l,
 		Now:    func() time.Time { return time.Unix(1700000000, 0) },
-		Send:   func(work, answer string) error { h.sent[work] = answer; return nil },
+		Send:   func(work, _, answer string) error { h.sent[work] = answer; return nil },
 		Spend:  func(work, question string, v Verdict) error { h.spent = append(h.spent, work+":"+question); return nil },
 		Judge:  h.judge,
 	}
@@ -321,7 +321,7 @@ func TestAJudgementIsRecordedBeforeItIsDelivered(t *testing.T) {
 		order = append(order, "record")
 		return nil
 	}
-	h.d.Send = func(work, answer string) error {
+	h.d.Send = func(work, _, answer string) error {
 		order = append(order, "deliver")
 		return nil
 	}

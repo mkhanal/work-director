@@ -27,6 +27,10 @@ events; unknown ids and ids that are not goals return 404.
 - Both are `[]` when empty.
 - A landing whose work is not among the goal's is still listed with its link.
 
+## A Goal Waiting On The Person Serves Its Question
+- While a goal is in needs-input on a question nothing has answered, `GET /api/goal/<id>` returns it as `asking`: one item per question, each with its choices.
+- Otherwise there is no `asking` key.
+
 ## A Goal's Delivery Is Read In The Goal's Own Directory
 - `delivery` on `GET /api/goal/<id>` is derived from git in the goal's working directory: its tasks' directory, else the goal's own.
 - A goal with no working directory has no `delivery` key.

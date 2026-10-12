@@ -37,6 +37,7 @@ func TestServe(t *testing.T) {
 	t.Run("The Server Binds To Loopback", serverBindsToLoopback)
 	t.Run("JSON Endpoints Serve The Board", jsonEndpointsServeTheBoard)
 	t.Run("A Goal Serves What The Loop Decided And Where It Reached", aGoalServesWhatTheLoopDecidedAndWhereItReached)
+	t.Run("A Goal Waiting On The Person Serves Its Question", aGoalWaitingOnThePersonServesItsQuestion)
 	t.Run("A Goal's Delivery Is Read In The Goal's Own Directory", aGoalsDeliveryIsReadInTheGoalsOwnDirectory)
 	t.Run("The Board Places Every Item In One Band", theBoardPlacesEveryItemInOneBand)
 	t.Run("Archived Work Is Not On The Board", archivedWorkIsNotOnTheBoard)
@@ -959,6 +960,45 @@ func archivedWorkIsNotOnTheBoard(t *testing.T) {
 	}
 	if len(b.Goals) != 0 || len(b.Standalone) != 1 || b.Standalone[0].Work.ID != kept.ID {
 		t.Fatalf("board = %+v, want only %s", b, kept.ID)
+	}
+}
+
+func aGoalWaitingOnThePersonServesItsQuestion(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	goal, err := l.Add("p", "Goal", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	var bare map[string]json.RawMessage
+	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &bare)
+	if a, ok := bare["asking"]; ok {
+		t.Fatalf("a goal asking nothing has asking %s", a)
+	}
+	for _, st := range []core.State{core.StateRunning, core.StateNeedsInput} {
+		if _, err := l.Transition(goal.ID, st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := l.AddEvent(goal.ID, core.EventQuestion, "Tag v1.0.0?\n- yes (recommended)\n- no\nWho cherry-picks?"); err != nil {
+		t.Fatal(err)
+	}
+	var view struct {
+		Asking *runner.Question `json:"asking"`
+	}
+	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &view)
+	if q := view.Asking; q == nil || len(q.Items) != 2 || len(q.Items[0].Options) != 2 || q.Items[0].Options[0].Label != "yes (recommended)" || q.Items[1].Question != "Who cherry-picks?" {
+		t.Fatalf("asking = %+v, want both questions, the first with its choices", view.Asking)
+	}
+	if _, err := l.Answer(goal.ID, core.Decision{Question: "Tag v1.0.0?", Answer: "yes", Source: core.AnsweredByPerson}); err != nil {
+		t.Fatal(err)
+	}
+	bare = nil
+	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &bare)
+	if a, ok := bare["asking"]; ok {
+		t.Fatalf("an answered goal still has asking %s", a)
 	}
 }
 

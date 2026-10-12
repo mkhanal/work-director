@@ -90,7 +90,9 @@ TASK: <title of a new task, started at once>
 START <task>  (a task filed and never started)
 DROP <task>: <why it is not needed>  (a task filed and never started)
 RESOLVE <concern number>: <decision>
-ASK: <a question only the person can answer, with your recommendation>
+ASK: <a question only the person can answer>
+- <a choice, your recommendation first, marked (recommended)>
+- <another choice>  (choices are optional; the person can always answer in words)
 DONE: <one line: every part of the goal is built, checked and fits together>
 WAIT  (nothing to do until a task reports)
 `, checks)
@@ -118,6 +120,8 @@ type Action struct {
 	Work    string     `json:"work,omitempty"`
 	Concern int        `json:"concern,omitempty"`
 	Text    string     `json:"text,omitempty"`
+	// Options are the choices an ASK offers, in the order given.
+	Options []string `json:"options,omitempty"`
 }
 
 // Line is the action as the supervisor wrote it.
@@ -134,6 +138,9 @@ func (a Action) Line() string {
 	case ActResolve:
 		return fmt.Sprintf("RESOLVE %d: %s", a.Concern, a.Text)
 	case ActAsk:
+		if len(a.Options) > 0 {
+			return "ASK: " + a.Text + " (" + strings.Join(a.Options, " | ") + ")"
+		}
 		return "ASK: " + a.Text
 	case ActDone:
 		return "DONE: " + a.Text
@@ -152,6 +159,7 @@ var (
 	doneRe    = regexp.MustCompile(`^DONE:\s*(\S.*)$`)
 	waitRe    = regexp.MustCompile(`^WAIT\b`)
 	bulletRe  = regexp.MustCompile("^(?:[-*]\\s+|\\d+\\.\\s+)?`?")
+	listRe    = regexp.MustCompile(`^(?:[-*]\s+|\d+\.\s+)`)
 )
 
 // ParseSupervision reads the actions after the last ACTIONS: line of a reply,
@@ -176,9 +184,15 @@ func ParseSupervision(texts []string) (actions []Action, refused []string) {
 		if l == "" || strings.HasPrefix(l, "```") {
 			continue
 		}
+		listed := listRe.MatchString(l)
 		l = strings.TrimSuffix(bulletRe.ReplaceAllString(l, ""), "`")
 		if a, ok := action(l); ok {
 			actions = append(actions, a)
+			continue
+		}
+		// A listed line under an ASK is one of its choices.
+		if n := len(actions); listed && n > 0 && actions[n-1].Kind == ActAsk {
+			actions[n-1].Options = append(actions[n-1].Options, l)
 			continue
 		}
 		refused = append(refused, strings.TrimSpace(raw))
@@ -283,4 +297,54 @@ func StoppedSaying(events []core.Event) string {
 		}
 	}
 	return ""
+}
+
+// QuestionBody is a supervisor's questions as one question event: each on its
+// own line, followed by its choices as `- ` lines.
+func QuestionBody(asks []Action) string {
+	var lines []string
+	for _, a := range asks {
+		lines = append(lines, a.Text)
+		for _, o := range a.Options {
+			lines = append(lines, "- "+o)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// AskedQuestion reads a question event as the question it asks: each line one
+// question, and the `- ` lines under it its choices.
+func AskedQuestion(e core.Event) runner.Question {
+	q := runner.Question{ID: fmt.Sprintf("event-%d", e.ID), Items: []runner.QuestionItem{}}
+	for _, line := range strings.Split(e.Body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if o, ok := strings.CutPrefix(line, "- "); ok && len(q.Items) > 0 {
+			it := &q.Items[len(q.Items)-1]
+			it.Options = append(it.Options, runner.Option{Label: strings.TrimSpace(o)})
+			continue
+		}
+		q.Items = append(q.Items, runner.QuestionItem{Question: line, Options: []runner.Option{}})
+	}
+	return q
+}
+
+// OpenQuestion is the latest question asked on work that nothing has answered
+// since: no answer, and no decision on it.
+func OpenQuestion(events []core.Event, work string) (core.Event, bool) {
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		if e.Work != work {
+			continue
+		}
+		switch e.Kind {
+		case core.EventQuestion:
+			return e, true
+		case core.EventAnswer, core.EventDecision:
+			return core.Event{}, false
+		}
+	}
+	return core.Event{}, false
 }

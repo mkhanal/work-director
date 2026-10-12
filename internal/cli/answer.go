@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"wd/internal/coordinator"
 	"wd/internal/core"
 	"wd/internal/runner"
 )
@@ -32,17 +33,31 @@ func (c *Cli) answer(rest []string) error {
 	if err != nil {
 		return err
 	}
-	var text string
+	var text, asked string
 	if q, ok := runner.Asking(entries); ok {
 		if text, err = runner.AnswerText(*q, rest[1:]); err != nil {
 			return fail("%s: %v", w.ID, err)
 		}
+		asked = q.Text()
 	} else if w.State == core.StateNeedsInput {
 		text = strings.Join(rest[1:], "\n")
+		events, err := c.Ledger.Events(w.ID, nil)
+		if err != nil {
+			return err
+		}
+		// A question the director filed takes one answer per item, or words.
+		if e, ok := coordinator.OpenQuestion(events, w.ID); ok {
+			asked = e.Body
+			if q := coordinator.AskedQuestion(e); len(rest) > 2 || len(q.Items) == 1 {
+				if text, err = runner.AnswerText(q, rest[1:]); err != nil {
+					return fail("%s: %v", w.ID, err)
+				}
+			}
+		}
 	} else {
 		return fail("%s is not asking anything; tell it something with wd send %s \"<text>\"", w.ID, w.ID)
 	}
-	if _, err := c.Ledger.AddEvent(w.ID, core.EventAnswer, text); err != nil {
+	if _, err := c.Ledger.Answer(w.ID, core.Decision{Question: asked, Answer: text, Source: core.AnsweredByPerson}); err != nil {
 		return err
 	}
 	where, err := c.tellTask(w, text)

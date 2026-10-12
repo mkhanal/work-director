@@ -493,7 +493,7 @@ func Coordinate(w core.Work, known []core.Work, l *ledger.Ledger, r runner.Runne
 		if err := Send(l, w.ID, r, h, answer); err != nil {
 			return "", err
 		}
-		if _, err := l.AddEvent(w.ID, core.EventAnswer, answer); err != nil {
+		if _, err := l.Answer(w.ID, core.Decision{Question: question, Answer: answer, Source: core.AnsweredByDirector}); err != nil {
 			return "", err
 		}
 		if w.State == core.StateNeedsInput {

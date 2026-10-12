@@ -363,7 +363,8 @@ could not with their work, the bound that ran out, and the work still open.
 - A count of answers other than the item count is refused naming the questions, and nothing is sent.
 - Work in needs-input with no such question takes the answers as words.
 - Work asking nothing is refused, pointing at `wd send`.
-- The answer is recorded on the work as an `answer` event and reaches the session as `wd send` does.
+- Work in needs-input on a question the director filed takes one answer per question it asks, or words.
+- The answer is recorded on the work as an `answer` event with the question it answers, as answered by the person, and reaches the session as `wd send` does.
 
 ## Wd Send To A Goal Keeps It As A Decision For The Goal's Supervisor
 - `wd send <goal> "<text>"` files the text as a decision on the goal and has the goal's supervisor look at once, as `wd goal supervise` does, even while tasks are working.
@@ -415,7 +416,7 @@ could not with their work, the bound that ran out, and the work still open.
 ## Wd Goal Supervise Carries Out What The Supervisor Decided
 - A supervisor that has replied since it was last read, and is not working, has the reply's actions carried out once.
 - `SEND` tells a task of the goal as `wd send` does; `TASK` files a task under the goal and starts it; `START` starts a task of the goal not yet started; `DROP` drops a task of the goal not yet started, noting why; `RESOLVE` resolves a concern.
-- `ASK` files a `question` on the goal and moves it to needs-input; `wd answer <goal>` reaches the supervisor.
+- `ASK` files a `question` on the goal, each question with its choices, and moves it to needs-input; `wd answer <goal>` reaches the supervisor.
 - `DONE` files the summary as the goal's `report` and moves the goal to review.
 - `DONE` is refused while a task of the goal is working or not yet started, naming that task.
 - An action that cannot be carried out is refused with why, and the rest still are.

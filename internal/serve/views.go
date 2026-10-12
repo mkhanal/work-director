@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 
+	"wd/internal/coordinator"
 	"wd/internal/core"
 	"wd/internal/delivery"
 	"wd/internal/ledger"
 	"wd/internal/review"
+	"wd/internal/runner"
 )
 
 // Band is where an item sits on the board: what it is waiting on.
@@ -62,6 +64,9 @@ type goalView struct {
 	Delivery *delivery.State `json:"delivery,omitempty"`
 	// Activity is what each task still working is doing now, by task id.
 	Activity map[string]activity `json:"activity"`
+	// Asking is the question the goal waits on the person for, with its
+	// choices, while it does.
+	Asking *runner.Question `json:"asking,omitempty"`
 }
 
 // notFound is a view asked of work that does not exist, or of the wrong kind.
@@ -173,6 +178,10 @@ func (s *Server) goal(id string) (goalView, error) {
 		Claims:   review.ClaimsUnder(events, works),
 		Landings: review.LandingsUnder(events, works),
 		Activity: s.activities(append([]core.Work{goal}, children...)),
+	}
+	if q, ok := coordinator.OpenQuestion(events, goal.ID); ok && goal.State == core.StateNeedsInput {
+		asked := coordinator.AskedQuestion(q)
+		view.Asking = &asked
 	}
 	if dir := goalDir(goal, children); dir != "" {
 		d := delivery.StatusFor(dir, events, goal, children)

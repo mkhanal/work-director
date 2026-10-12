@@ -380,7 +380,7 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 		}
 		return core.Work{}, fmt.Errorf("%s is not a task of %s", id, goal.ID)
 	}
-	var asked []string
+	var asked []coordinator.Action
 	var done *coordinator.Action
 	for _, a := range actions {
 		err := func() error {
@@ -428,7 +428,7 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 				_, err = c.Ledger.ResolveConcern(cx.ID, a.Text)
 				return err
 			case coordinator.ActAsk:
-				asked = append(asked, a.Text)
+				asked = append(asked, a)
 			case coordinator.ActDone:
 				done = &a
 			}
@@ -470,14 +470,14 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 		}
 		out.Actions = append(out.Actions, done.Line())
 	case len(asked) > 0:
-		if _, err := c.Ledger.AddEvent(goal.ID, core.EventQuestion, strings.Join(asked, "\n")); err != nil {
+		if _, err := c.Ledger.AddEvent(goal.ID, core.EventQuestion, coordinator.QuestionBody(asked)); err != nil {
 			return out, err
 		}
 		if _, err := c.Ledger.Transition(goal.ID, core.StateNeedsInput); err != nil {
 			return out, err
 		}
 		for _, q := range asked {
-			out.Actions = append(out.Actions, "ASK: "+q)
+			out.Actions = append(out.Actions, q.Line())
 		}
 	}
 	return out, nil

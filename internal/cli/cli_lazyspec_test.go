@@ -3252,7 +3252,7 @@ func TestAGoalRunsItsLoopWithNobodyWatching(t *testing.T) {
 	}
 	claims := 0
 	for _, e := range events {
-		if e.Decision == nil {
+		if e.Kind != core.EventDecision || e.Decision == nil {
 			continue
 		}
 		claims++
@@ -4355,8 +4355,8 @@ func TestWdAnswerRepliesToTheQuestionASessionIsWaitingOn(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(state, "claude-stopped-ab000002")); err != nil {
 		t.Fatalf("the waiting session was not stopped before it was resumed: %v", err)
 	}
-	if evs := f.runOK(t, "events", t2, "--json"); !strings.Contains(evs, `"answer"`) || !strings.Contains(evs, "Which size?") {
-		t.Fatalf("the answer is not recorded on the work:\n%s", evs)
+	if evs := f.runOK(t, "events", t2, "--json"); !strings.Contains(evs, `"answer"`) || !strings.Contains(evs, "Which size?") || !strings.Contains(evs, `"source": "person"`) {
+		t.Fatalf("the answer is not recorded on the work with its question, from the person:\n%s", evs)
 	}
 
 	os.Remove(filepath.Join(f.home, ".claude", "projects", "anywhere", "ses_000002.jsonl"))
@@ -4713,17 +4713,24 @@ func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
 	}
 
 	// A question goes to the person, and the answer to the supervisor.
-	o.say(t, supervisor, "ACTIONS:", "ASK: Tag v1.0.0 at 7720d09? I recommend yes")
+	o.say(t, supervisor, "ACTIONS:", "ASK: Tag v1.0.0 at 7720d09?", "- yes (recommended)", "- no", "ASK: Who cherry-picks the fixes?")
 	superviseOnce(t, f, o.goal)
 	if got := stateOf(t, f, o.goal); got != core.StateNeedsInput {
 		t.Fatalf("goal after ASK = %s, want needs-input", got)
 	}
-	if qs := f.bodies(t, o.goal, core.EventQuestion); len(qs) != 1 || qs[0] != "Tag v1.0.0 at 7720d09? I recommend yes" {
-		t.Fatalf("questions = %q", qs)
+	asked := "Tag v1.0.0 at 7720d09?\n- yes (recommended)\n- no\nWho cherry-picks the fixes?"
+	if qs := f.bodies(t, o.goal, core.EventQuestion); len(qs) != 1 || qs[0] != asked {
+		t.Fatalf("questions = %q, want both questions with the first one's choices", qs)
 	}
-	f.runOK(t, "answer", o.goal, "yes, tag it")
-	if sent := readFile(t, filepath.Join(o.state, "sent-"+supervisor)); !strings.Contains(sent, "yes, tag it") {
-		t.Fatalf("the supervisor was sent %q, want the answer", sent)
+	if errStr := f.runFail(t, "answer", o.goal, "yes", "one PR", "and more"); !strings.Contains(errStr, "Who cherry-picks the fixes?") {
+		t.Fatalf("three answers to two questions: %q, want a refusal naming them", errStr)
+	}
+	f.runOK(t, "answer", o.goal, "yes, tag it", "one PR")
+	if sent := readFile(t, filepath.Join(o.state, "sent-"+supervisor)); !strings.Contains(sent, `"Tag v1.0.0 at 7720d09?" → yes, tag it`) || !strings.Contains(sent, `"Who cherry-picks the fixes?" → one PR`) {
+		t.Fatalf("the supervisor was sent %q, want one answer per question", sent)
+	}
+	if evs := f.runOK(t, "events", o.goal, "--json"); !strings.Contains(evs, `"source": "person"`) {
+		t.Fatalf("the goal's answer is not recorded as the person's:\n%s", evs)
 	}
 	if got := stateOf(t, f, o.goal); got != core.StateRunning {
 		t.Fatalf("goal after the answer = %s, want running", got)

@@ -257,6 +257,13 @@ type Decision struct {
 	ReversedBy int `json:"reversed_by"`
 }
 
+// Who answered a question, as an answer event's decision records it: the
+// director, from what was already decided or by its judgement, or the person.
+const (
+	AnsweredByDirector = "director"
+	AnsweredByPerson   = "person"
+)
+
 type Feedback struct {
 	ID      int            `json:"id"`
 	Text    string         `json:"text"`

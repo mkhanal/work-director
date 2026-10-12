@@ -690,8 +690,8 @@ func (c *Cli) spendJudgement(work, question string, v driver.Verdict) error {
 // sendAnswer hands an answer to the executor waiting on it and puts it back
 // to work, which is what makes a judgement worth anything: a settled question
 // that never reaches the executor is a decision that changed nothing.
-func (c *Cli) sendAnswer(p *project.Project) func(work, answer string) error {
-	return func(work, answer string) error {
+func (c *Cli) sendAnswer(p *project.Project) func(work, question, answer string) error {
+	return func(work, question, answer string) error {
 		w, err := c.Ledger.Get(work)
 		if err != nil {
 			return err
@@ -710,7 +710,7 @@ func (c *Cli) sendAnswer(p *project.Project) func(work, answer string) error {
 		if err := coordinator.Send(c.Ledger, w.ID, r, h, answer); err != nil {
 			return err
 		}
-		if _, err := c.Ledger.AddEvent(w.ID, core.EventAnswer, answer); err != nil {
+		if _, err := c.Ledger.Answer(w.ID, core.Decision{Question: question, Answer: answer, Source: core.AnsweredByDirector}); err != nil {
 			return err
 		}
 		if w.State == core.StateNeedsInput {

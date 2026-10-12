@@ -1193,6 +1193,21 @@ func (l *Ledger) Decide(work, body string, d core.Decision, effective *string) (
 	return e, nil
 }
 
+// Answer records an answer on work with what it answered and who answered it,
+// so the work's record reads as the question and its answer.
+func (l *Ledger) Answer(work string, d core.Decision) (core.Event, error) {
+	if d.Answer == "" || d.Source == "" {
+		return core.Event{}, fmt.Errorf("an answer needs its words and who gave it")
+	}
+	var e core.Event
+	err := l.inTx(func(tx *sql.Tx) error {
+		var err error
+		e, err = addClaim(tx, work, core.EventAnswer, d.Answer, now(), nil, &d)
+		return err
+	})
+	return e, err
+}
+
 // Reverse records that a decision no longer stands, as a new decision naming
 // the one it undoes. The original is left exactly as it was made, and is
 // marked with what reversed it, so a reader sees both the claim and the

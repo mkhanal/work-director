@@ -52,8 +52,8 @@ the most shared words win.
 
 ## A Known Question Is Answered
 `CoordinateOnce` files the question, sends the known answer, files the
-answer, and lists the child under answered; a needs-input child returns to
-running.
+answer with the question it answers as answered by the director, and lists
+the child under answered; a needs-input child returns to running.
 
 ## An Unknown Question Escalates
 A question with no known answer moves the child to needs-input and lists
@@ -114,8 +114,14 @@ and directory still follow its goal.
 - It forbids editing files, and says landing waits for the person.
 - It asks for a reply ending in an `ACTIONS:` line followed by one `SEND`, `TASK`, `START`, `DROP`, `RESOLVE`, `ASK`, `DONE` or `WAIT` line each.
 
+## A Question The Director Files Keeps Its Choices
+- `QuestionBody(asks)` writes each question on its own line, its choices under it as `- ` lines.
+- `AskedQuestion(event)` reads that back as one item per question, each with its choices.
+- `OpenQuestion(events, work)` is the latest question on the work with no answer or decision on it since.
+
 ## A Supervision Reply Parses Into Actions
 - `ParseSupervision(texts)` reads the lines after the last `ACTIONS:` line.
 - `SEND <id>: <text>`, `TASK: <title>`, `START <id>`, `DROP <id>: <why>`, `RESOLVE <n>: <decision>`, `ASK: <question>`, `DONE: <summary>` and `WAIT` each parse into their action.
+- A listed line under an `ASK` is one of its choices.
 - A non-blank line that is none of these is returned as refused, with the line.
 - A reply with no `ACTIONS:` line has no actions and nothing refused.
