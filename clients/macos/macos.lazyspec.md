@@ -59,6 +59,11 @@ hold only that product's work; with none, every product's.
 - Each later read asks from the first step that can still change: a tool call without its result, or a question without its answer.
 - Steps the session adds, and results and answers that arrive, appear on that read.
 
+## A Conversation Keeps The Newest In View Until You Scroll Up To Read
+- A reader within 48 points of the bottom, or with nothing to scroll, is at the bottom.
+- At the bottom, what comes in keeps the newest in view.
+- Scrolled further up, the conversation stays where the reader is, until they are back at the bottom.
+
 ## A Question Is Answered In Place, One Answer Per Item
 - Picking a single-choice option replaces the item's pick; typed words replace it too.
 - Multiple-choice picks join in the order offered, then any typed words.

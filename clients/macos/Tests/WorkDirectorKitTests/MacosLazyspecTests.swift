@@ -711,4 +711,13 @@ func fakeRunner(_ home: Home) throws {
         let again = try await store.goal(goal)
         #expect(again.yours.map(\.body) == ["use sqlite", "keep it local"])
     }
+
+    @Test("A Conversation Keeps The Newest In View Until You Scroll Up To Read")
+    func followsUntilScrolledUp() {
+        #expect(Follow.atBottom(offset: 0, visible: 600, content: 400), "nothing to scroll")
+        #expect(Follow.atBottom(offset: 1400, visible: 600, content: 2000), "at the very bottom")
+        #expect(Follow.atBottom(offset: 1360, visible: 600, content: 2000), "a few points short still follows")
+        #expect(!Follow.atBottom(offset: 1300, visible: 600, content: 2000), "scrolled up to read")
+        #expect(!Follow.atBottom(offset: 1400, visible: 600, content: 2200), "more came in while reading further up")
+    }
 }

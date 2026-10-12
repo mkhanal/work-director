@@ -24,6 +24,10 @@ struct WorkDetail: View {
     /// The gate this work waits on next, if any.
     @State private var gate: Gate?
     @AppStorage("detail.tab") private var tab: Tab = .conversation
+    /// Whether the reader is at the bottom of the conversation, where it
+    /// follows what comes in.
+    @State private var atBottom = true
+    private static let bottom = "bottom"
     @AppStorage("detail.agents") private var showAgents = true
 
     init(store: Store, id: String, plan: Binding<Plan?>, open: @escaping (String) -> Void) {
@@ -69,9 +73,39 @@ struct WorkDetail: View {
                         }
                     }
                     .readingColumn()
+                    Color.clear.frame(height: 1).id(Self.bottom)
                 }
                 .defaultScrollAnchor(following ? .bottom : .top)
-                .defaultScrollAnchor(following ? .bottom : .top, for: .sizeChanges)
+                // New content keeps the newest in view only while the reader
+                // is at the bottom; scrolled up to read, it stays put.
+                .defaultScrollAnchor(following && atBottom ? .bottom : .top, for: .sizeChanges)
+                .onScrollGeometryChange(for: Bool.self) { g in
+                    Follow.atBottom(offset: g.contentOffset.y, visible: g.containerSize.height, content: g.contentSize.height)
+                } action: { _, now in
+                    atBottom = now
+                }
+                .onChange(of: store.outbox.count) { was, now in
+                    // What you just sent is where you look next.
+                    if now > was { toBottom(proxy) }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if following && !atBottom {
+                        Button { toBottom(proxy) } label: {
+                            Image(systemName: "arrow.down")
+                                .font(.system(size: 14, weight: .semibold))
+                                .frame(width: 34, height: 34)
+                                .background(.regularMaterial, in: Circle())
+                                .overlay(Circle().strokeBorder(.separator))
+                                .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.trailing, Layout.gutter)
+                        .padding(.bottom, 14)
+                        .help("Jump to the latest")
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    }
+                }
+                .animation(.easeOut(duration: 0.15), value: atBottom)
                 if let target = messaged(loaded), !target.atRest || (target.kind.isGoal && target.state == .done) {
                     MessageBar(store: store, work: target, working: working(loaded), about: about(target, in: loaded))
                         .id(target.id)
@@ -282,9 +316,15 @@ struct WorkDetail: View {
 
     private func hasSession(_ work: Work) -> Bool { work.session != nil || work.claim != nil }
 
+    private func toBottom(_ proxy: ScrollViewProxy) {
+        atBottom = true
+        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.bottom, anchor: .bottom) }
+    }
+
     /// A conversation keeps its newest step in view as it grows.
     private var following: Bool {
         if focus != nil { return true }
+        if case .goal = loaded { return true }
         if case .work(let w, _) = loaded { return hasSession(w) && tab == .conversation }
         return false
     }
