@@ -59,7 +59,7 @@ struct WorkDetail: View {
                 // bar grows.
                 VStack(spacing: 0) {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: Layout.step) {
                         if let focus, let focusFeed, let task = focusedTask(focus, in: loaded) {
                             Breadcrumb(work: loaded.work, task: task, focus: focus) { self.focus = nil; self.focusFeed = nil }
                             ConversationView(store: store, work: task, feed: focusFeed)
@@ -68,14 +68,11 @@ struct WorkDetail: View {
                             page(loaded)
                         }
                     }
-                    .padding(24)
-                    .frame(maxWidth: 860, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .readingColumn()
                 }
                 .defaultScrollAnchor(following ? .bottom : .top)
                 .defaultScrollAnchor(following ? .bottom : .top, for: .sizeChanges)
                 if let target = messaged(loaded), !target.atRest || (target.kind.isGoal && target.state == .done) {
-                    Divider()
                     MessageBar(store: store, work: target, working: working(loaded), about: about(target, in: loaded))
                         .id(target.id)
                 }
@@ -609,6 +606,7 @@ struct InputBar: View {
                     .lineLimit(3)
                     .textSelection(.enabled)
             }
+            VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .bottom, spacing: 8) {
                 MessageField(
                     text: $text,
@@ -672,10 +670,17 @@ struct InputBar: View {
                     .foregroundStyle(armed ? AnyShapeStyle(.red) : AnyShapeStyle(.tertiary))
                     .fixedSize()
             }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.separator))
+            .shadow(color: .black.opacity(0.07), radius: 10, y: 3)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.bar)
+        .padding(.horizontal, Layout.gutter)
+        .padding(.top, 6)
+        .padding(.bottom, 18)
+        .background(.background)
         .onAppear { watchEscape() }
         .onChange(of: stop != nil && !busy, initial: true) { _, can in
             escapeStops.stop = can ? stopped : nil

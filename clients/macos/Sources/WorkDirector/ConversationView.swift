@@ -15,7 +15,7 @@ struct ConversationView: View {
     var body: some View {
         // Lazy: a long session has thousands of steps, and only those on
         // screen are laid out on each read.
-        LazyVStack(alignment: .leading, spacing: 14) {
+        LazyVStack(alignment: .leading, spacing: Layout.step) {
             if let failure = feed.failure {
                 Label(failure, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
@@ -110,12 +110,13 @@ struct PromptRow: View {
             }
             .foregroundStyle(.secondary)
             Text(text)
+                .readable()
                 .lineLimit(expanded || !folds ? nil : 4)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(10)
-        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .padding(14)
+        .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var folds: Bool { text.count > 400 || text.split(separator: "\n").count > 4 }
@@ -132,7 +133,7 @@ struct YouBubble<Status: View>: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            Spacer(minLength: 80)
+            Spacer(minLength: 120)
             VStack(alignment: .trailing, spacing: 6) {
                 HStack(spacing: 6) {
                     status
@@ -143,13 +144,13 @@ struct YouBubble<Status: View>: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 Text(text)
+                    .readable()
                     .lineLimit(expanded || !folds ? nil : 6)
                     .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.35)))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.accentColor.opacity(0.35)))
                 if folds {
                     Button(expanded ? "Show less" : "Show all") { expanded.toggle() }
                         .buttonStyle(.link)
@@ -582,27 +583,29 @@ struct MarkdownText: View {
     @MainActor private static var parsed = BoundedCache<String, [Block]>(limit: 2000)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .heading(let level, let text):
-                    inline(text).font(level <= 1 ? .title3.weight(.semibold) : .headline)
+                    inline(text).font(level <= 1 ? .title3.weight(.semibold) : .system(size: 15, weight: .semibold)).padding(.top, 4)
                 case .bullet(let text, let ordered):
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(ordered ?? "•").foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(ordered ?? "•").foregroundStyle(.secondary).frame(minWidth: 12, alignment: .trailing)
                         inline(text)
                     }
                 case .code(let text):
                     Text(text)
-                        .font(.callout.monospaced())
+                        .font(.system(size: 12.5, design: .monospaced))
+                        .lineSpacing(3)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                        .padding(12)
+                        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
                 case .paragraph(let text):
                     inline(text)
                 }
             }
         }
+        .readable()
     }
 
     private func inline(_ text: String) -> Text {

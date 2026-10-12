@@ -35,8 +35,7 @@ struct TastePage: View {
                     ProgressView()
                 }
             }
-            .padding(24)
-            .frame(maxWidth: 860, alignment: .leading)
+            .readingColumn()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .safeAreaInset(edge: .bottom) {

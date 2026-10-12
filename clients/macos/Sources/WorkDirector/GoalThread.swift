@@ -12,7 +12,7 @@ struct GoalThread: View {
     let answered: () -> Void
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 16) {
+        LazyVStack(alignment: .leading, spacing: Layout.step) {
             if let delivery = goal.delivery, delivery.status != "none" || delivery.error != nil || !goal.landings.isEmpty {
                 DeliveryLine(delivery: delivery, landings: goal.landings)
             }
@@ -71,7 +71,7 @@ struct SupervisorRow: View {
     let focus: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
                 Image(systemName: "person.badge.shield.checkmark")
                 Button("Supervisor", action: open).buttonStyle(.link).font(.caption.weight(.semibold))
@@ -95,8 +95,8 @@ struct SupervisorRow: View {
                 Label(line, systemImage: "xmark.circle").font(.caption).foregroundStyle(.orange).textSelection(.enabled)
             }
         }
-        .padding(12)
-        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+        .padding(16)
+        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -123,8 +123,8 @@ struct AgentChip: View {
             Spacer(minLength: 0)
             Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
         }
-        .padding(8)
-        .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
+        .padding(10)
+        .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
     }
 }
@@ -163,8 +163,8 @@ struct PlanBlock: View {
                     }
                 }
             }
-            .padding(12)
-            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+            .padding(16)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
         }
     }
 

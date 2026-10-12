@@ -51,9 +51,7 @@ struct NewGoalPage: View {
                 }
                 phaseView(flow)
             }
-            .padding(24)
-            .frame(maxWidth: 820, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .readingColumn()
         }
         .safeAreaInset(edge: .bottom) {
             InputBar(
