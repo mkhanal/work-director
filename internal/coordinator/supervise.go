@@ -92,7 +92,7 @@ DROP <task>: <why it is not needed>  (a task filed and never started)
 RESOLVE <concern number>: <decision>
 ASK: <a question only the person can answer>
 - <a choice, your recommendation first, marked (recommended)>
-- <another choice>  (choices are optional; the person can always answer in words)
+- <another choice>  (offer choices whenever the answer is one of a few; the person can always answer in words)
 DONE: <one line: every part of the goal is built, checked and fits together>
 WAIT  (nothing to do until a task reports)
 `, checks)
@@ -328,7 +328,50 @@ func AskedQuestion(e core.Event) runner.Question {
 		}
 		q.Items = append(q.Items, runner.QuestionItem{Question: line, Options: []runner.Option{}})
 	}
+	for i := range q.Items {
+		offerYesNo(&q.Items[i])
+	}
 	return q
+}
+
+var (
+	yesNoRe     = regexp.MustCompile(`(?i)^\W*(should|shall|is|are|was|were|do|does|did|can|could|will|would|has|have|had|may|might|must|ok|okay|confirm)\b`)
+	recommendRe = regexp.MustCompile(`(?i)\brecommend(?:ation)?:?\s+(yes|no)\b`)
+)
+
+// offerYesNo gives a yes-or-no question that offers no choices Yes and No,
+// so it is answered with a pick; the one it recommends is marked so.
+func offerYesNo(it *runner.QuestionItem) {
+	if len(it.Options) > 0 || !yesNoRe.MatchString(strings.TrimSpace(it.Question)) {
+		return
+	}
+	yes, no := runner.Option{Label: "Yes"}, runner.Option{Label: "No"}
+	if m := recommendRe.FindStringSubmatch(it.Question); m != nil {
+		if strings.EqualFold(m[1], "yes") {
+			yes.Label = "Yes (recommended)"
+		} else {
+			no.Label = "No (recommended)"
+		}
+	}
+	it.Options = []runner.Option{yes, no}
+}
+
+// ReportQuestion is what a report saying it needs the person asks: what it
+// said with its verdict, else its notes, else the whole report.
+func ReportQuestion(e core.Event) runner.Question {
+	r := core.ParseReport(e.Body)
+	asked := strings.TrimSpace(r.Said)
+	for _, s := range r.Sections {
+		if asked == "" && s.Name == "NOTES" {
+			asked = s.Text
+		}
+	}
+	if asked == "" {
+		asked = strings.TrimSpace(e.Body)
+	}
+	it := runner.QuestionItem{Question: asked, Options: []runner.Option{}}
+	offerYesNo(&it)
+	return runner.Question{ID: fmt.Sprintf("event-%d", e.ID), Items: []runner.QuestionItem{it}}
 }
 
 // OpenQuestion is the latest question asked on work that nothing has answered

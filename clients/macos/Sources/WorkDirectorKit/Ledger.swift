@@ -222,6 +222,14 @@ public struct GoalDetail: Codable, Sendable, Hashable {
     public let asking: Question?
     /// Each report read into its parts, by the id of the event that filed it.
     public let reports: [String: Report]
+    /// Each task in needs-input whose session asks nothing, with what it waits
+    /// on as a question.
+    public let waiting: [WaitingTask]
+}
+
+public struct WaitingTask: Codable, Sendable, Hashable {
+    public let task: String
+    public let question: Question
 }
 
 /// A task's report read into its parts, as wd serves it.

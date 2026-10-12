@@ -71,6 +71,15 @@ type goalView struct {
 	// Reports are the goal's and its tasks' reports read into parts, by the
 	// id of the event that filed each.
 	Reports map[string]core.Report `json:"reports"`
+	// Waiting is each task in needs-input whose session asks nothing, with
+	// what it waits on as a question.
+	Waiting []waitingTask `json:"waiting"`
+}
+
+// waitingTask is a task waiting on the person, and what it waits on.
+type waitingTask struct {
+	Task     string          `json:"task"`
+	Question runner.Question `json:"question"`
 }
 
 // notFound is a view asked of work that does not exist, or of the wrong kind.
@@ -189,6 +198,15 @@ func (s *Server) goal(id string) (goalView, error) {
 			view.Reports[strconv.Itoa(e.ID)] = core.ParseReport(e.Body)
 		}
 	}
+	view.Waiting = []waitingTask{}
+	for _, t := range children {
+		if t.State != core.StateNeedsInput || view.Activity[t.ID].Asking != nil {
+			continue
+		}
+		if q, ok := waitingOn(events, t.ID); ok {
+			view.Waiting = append(view.Waiting, waitingTask{Task: t.ID, Question: q})
+		}
+	}
 	if q, ok := coordinator.OpenQuestion(events, goal.ID); ok && goal.State == core.StateNeedsInput {
 		asked := coordinator.AskedQuestion(q)
 		view.Asking = &asked
@@ -259,4 +277,24 @@ func errorKind(err error) string {
 	default:
 		return "internal"
 	}
+}
+
+// waitingOn is what work waits on the person for: the question it last asked
+// that nothing has answered, else what its last report said it needs.
+func waitingOn(events []core.Event, work string) (runner.Question, bool) {
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		if e.Work != work {
+			continue
+		}
+		switch e.Kind {
+		case core.EventAnswer, core.EventDecision:
+			return runner.Question{}, false
+		case core.EventQuestion:
+			return coordinator.AskedQuestion(e), true
+		case core.EventReport:
+			return coordinator.ReportQuestion(e), true
+		}
+	}
+	return runner.Question{}, false
 }

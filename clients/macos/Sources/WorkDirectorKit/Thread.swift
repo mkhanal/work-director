@@ -300,28 +300,9 @@ extension GoalDetail {
         (asking == nil ? 0 : 1) + tasks.filter { activity[$0.id]?.asking != nil }.count + waitingTasks.count
     }
 
-    /// Tasks waiting on the person with no question open in their session: what
-    /// they last asked, or what their report said they need, to answer in words
-    /// or by the choices offered.
+    /// Tasks waiting on the person with no question open in their session,
+    /// each with what it waits on.
     public var waitingTasks: [(task: Work, question: Question)] {
-        tasks.compactMap { t in
-            guard t.state == .needsInput, activity[t.id]?.asking == nil else { return nil }
-            for e in events.reversed() where e.work == t.id {
-                switch e.kind {
-                case "answer", "decision":
-                    return nil
-                case "question":
-                    let items = e.askedItems.map { QuestionItem(question: $0.question, options: $0.choices.map { QuestionOption(label: $0) }) }
-                    return (t, Question(id: "event-\(e.id)", items: items))
-                case "report":
-                    let r = reports[String(e.id)]
-                    let asked = [r?.said, r?.sections.first { $0.name == "NOTES" }?.text].compactMap { $0 }.first { !$0.isEmpty } ?? e.body
-                    return (t, Question(id: "event-\(e.id)", items: [QuestionItem(question: asked)]))
-                default:
-                    continue
-                }
-            }
-            return nil
-        }
+        waiting.compactMap { w in tasks.first { $0.id == w.task }.map { ($0, w.question) } }
     }
 }

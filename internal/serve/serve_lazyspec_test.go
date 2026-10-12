@@ -1032,6 +1032,53 @@ func aGoalWaitingOnThePersonServesItsQuestion(t *testing.T) {
 	if q := view.Asking; q == nil || len(q.Items) != 2 || len(q.Items[0].Options) != 2 || q.Items[0].Options[0].Label != "yes (recommended)" || q.Items[1].Question != "Who cherry-picks?" {
 		t.Fatalf("asking = %+v, want both questions, the first with its choices", view.Asking)
 	}
+	if len(view.Asking.Items[1].Options) != 0 {
+		t.Fatalf("an open question offers %+v, want none", view.Asking.Items[1].Options)
+	}
+
+	// A task in needs-input waits on what it asked, else on what its report needs.
+	asked, err := l.Add("p", "Asked", ledger.AddOptions{Parent: &goal.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reported, err := l.Add("p", "Reported", ledger.AddOptions{Parent: &goal.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{asked.ID, reported.ID} {
+		for _, st := range []core.State{core.StateRunning, core.StateNeedsInput} {
+			if _, err := l.Transition(w, st); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err := l.AddEvent(asked.ID, core.EventQuestion, "Should the banner stay?"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.AddEvent(reported.ID, core.EventReport, "NEEDS-INPUT\nSTATUS: NEEDS-INPUT which port should it use?\nNOTES: 8080 or 9090"); err != nil {
+		t.Fatal(err)
+	}
+	var waiting struct {
+		Waiting []struct {
+			Task     string          `json:"task"`
+			Question runner.Question `json:"question"`
+		} `json:"waiting"`
+	}
+	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &waiting)
+	if len(waiting.Waiting) != 2 {
+		t.Fatalf("waiting = %+v, want both tasks", waiting.Waiting)
+	}
+	byTask := map[string]runner.Question{}
+	for _, w := range waiting.Waiting {
+		byTask[w.Task] = w.Question
+	}
+	if q := byTask[asked.ID]; len(q.Items) != 1 || q.Items[0].Question != "Should the banner stay?" || len(q.Items[0].Options) != 2 {
+		t.Fatalf("the asking task waits on %+v, want its question with Yes and No", q)
+	}
+	if q := byTask[reported.ID]; len(q.Items) != 1 || q.Items[0].Question != "which port should it use?" {
+		t.Fatalf("the reporting task waits on %+v, want what its report said it needs", q)
+	}
+
 	if _, err := l.Answer(goal.ID, core.Decision{Question: "Tag v1.0.0?", Answer: "yes", Source: core.AnsweredByPerson}); err != nil {
 		t.Fatal(err)
 	}

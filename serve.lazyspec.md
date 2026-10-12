@@ -35,6 +35,7 @@ events; unknown ids and ids that are not goals return 404.
 
 ## A Goal Waiting On The Person Serves Its Question
 - While a goal is in needs-input on a question nothing has answered, `GET /api/goal/<id>` returns it as `asking`: one item per question, each with its choices.
+- Each task in needs-input whose session asks nothing is returned under `waiting`, with what it last asked, or else what its last report said it needs, as a question.
 - Otherwise there is no `asking` key.
 
 ## A Goal's Delivery Is Read In The Goal's Own Directory

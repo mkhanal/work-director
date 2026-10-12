@@ -117,11 +117,13 @@ and directory still follow its goal.
 - A task whose session stopped without a report is listed with what it last said.
 - It lists each open concern under the goal with its number and the work it was raised on.
 - It forbids editing files, and says landing waits for the person.
+- It asks for choices under an `ASK` whenever the answer is one of a few.
 - It asks for a reply ending in an `ACTIONS:` line followed by one `SEND`, `TASK`, `START`, `DROP`, `RESOLVE`, `ASK`, `DONE` or `WAIT` line each.
 
 ## A Question The Director Files Keeps Its Choices
 - `QuestionBody(asks)` writes each question on its own line, its choices under it as `- ` lines.
 - `AskedQuestion(event)` reads that back as one item per question, each with its choices.
+- A question asking yes or no that offers no choices of its own offers Yes and No, marking the one it recommends.
 - `OpenQuestion(events, work)` is the latest question on the work with no answer or decision on it since.
 
 ## A Supervision Reply Parses Into Actions

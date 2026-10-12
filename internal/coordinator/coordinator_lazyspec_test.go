@@ -170,6 +170,7 @@ func TestCoordinator(t *testing.T) {
 			"stopped without a report; it last said: wiring it in belongs to the collector task",
 			"18 (on t2): the collector never calls the detector", "`npm run lint`",
 			"do not edit, create or delete files", "landing (commits, pull requests, tags, pushes) waits for the person",
+			"offer choices whenever the answer is one of a few",
 			"ACTIONS:", "SEND <task>", "TASK: <", "START <task>", "RESOLVE <", "ASK: <", "DONE: <", "WAIT",
 		} {
 			if !strings.Contains(brief, want) {
@@ -203,6 +204,17 @@ func TestCoordinator(t *testing.T) {
 		}
 		if e, ok := OpenQuestion(events, "g"); !ok || e.ID != 3 {
 			t.Fatalf("open question = %+v, %v; want the second", e, ok)
+		}
+		yn := AskedQuestion(core.Event{ID: 8, Body: "Should v1.0.0 go on e328cf57?\nWho cherry-picks the fixes?\nIs it A or B?\n- A\n- B"})
+		if got := yn.Items[0].Options; len(got) != 2 || got[0].Label != "Yes" || got[1].Label != "No" {
+			t.Fatalf("a yes-or-no question offers %+v, want Yes and No", got)
+		}
+		if len(yn.Items[1].Options) != 0 || len(yn.Items[2].Options) != 2 || yn.Items[2].Options[0].Label != "A" {
+			t.Fatalf("questions = %+v, want an open question left open and offered choices kept", yn.Items)
+		}
+		rec := AskedQuestion(core.Event{ID: 9, Body: "Confirm `v1.0.0` goes on e328cf57. I recommend yes: it is the last deployment."})
+		if got := rec.Items[0].Options; len(got) != 2 || got[0].Label != "Yes (recommended)" || got[1].Label != "No" {
+			t.Fatalf("a confirmation recommending yes offers %+v", got)
 		}
 		if _, ok := OpenQuestion(append(events, core.Event{ID: 6, Work: "g", Kind: core.EventDecision, Body: "settled"}), "g"); ok {
 			t.Fatal("a question decided on since is still open")

@@ -214,20 +214,30 @@ public struct AnswerDraft: Sendable, Hashable {
         }
     }
 
-    /// Each item's answer: its picks in the order offered, then anything typed;
-    /// on a single choice, typed words replace a pick. Nil until every item has one.
+    /// Each item's answer: its picks in the order offered, without their
+    /// recommended mark, then anything typed; on a single choice, typed words
+    /// replace a pick. An item left without one is `(no answer)`; nil until
+    /// some item has one.
     public var answers: [String]? {
         var out: [String] = []
         for (i, item) in question.items.enumerated() {
             let words = typed[i].trimmingCharacters(in: .whitespacesAndNewlines)
-            var parts = item.options.map(\.label).filter { picked[i].contains($0) }
+            var parts = item.options.map(\.label).filter { picked[i].contains($0) }.map(Self.unmarked)
             if !words.isEmpty {
                 parts = item.multi ? parts + [words] : [words]
             }
-            guard !parts.isEmpty else { return nil }
-            out.append(parts.joined(separator: ", "))
+            out.append(parts.isEmpty ? Self.unanswered : parts.joined(separator: ", "))
         }
-        return out
+        return out.allSatisfy { $0 == Self.unanswered } ? nil : out
+    }
+
+    static let unanswered = "(no answer)"
+
+    /// A choice's label as an answer: its recommended mark dropped.
+    static func unmarked(_ label: String) -> String {
+        let mark = "(recommended)"
+        guard label.lowercased().hasSuffix(mark) else { return label }
+        return String(label.dropLast(mark.count)).trimmingCharacters(in: .whitespaces)
     }
 }
 

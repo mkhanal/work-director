@@ -589,6 +589,11 @@ struct QuestionCard: View {
         if page < question.items.count - 1 && pageAnswered { page += 1 }
     }
 
+    /// Parts with no answer yet, sent as no answer.
+    private var unanswered: Int {
+        question.items.indices.filter { draft.picked[$0].isEmpty && draft.typed[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
+    }
+
     private var footer: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
             HStack(spacing: Space.s2) {
@@ -603,22 +608,17 @@ struct QuestionCard: View {
                 if many {
                     Button("Back") { page -= 1 }
                         .disabled(page == 0)
-                    if page < question.items.count - 1 {
-                        Button("Next") { advance() }
-                            .disabled(!pageAnswered)
-                            .keyboardShortcut(.defaultAction)
-                    }
+                    Button("Next") { page += 1 }
+                        .disabled(page == question.items.count - 1)
                 }
-                if !many || page == question.items.count - 1 {
-                    Button {
-                        Task { await send() }
-                    } label: {
-                        if sending { ProgressView().controlSize(.small) } else { Text("Answer") }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(plan == nil || sending)
+                Button {
+                    Task { await send() }
+                } label: {
+                    if sending { ProgressView().controlSize(.small) } else { Text(many && unanswered > 0 ? "Answer (\(unanswered) left open)" : "Answer") }
                 }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(plan == nil || sending)
             }
             .controlSize(.large)
             if let failure {

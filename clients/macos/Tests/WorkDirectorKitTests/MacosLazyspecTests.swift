@@ -397,13 +397,18 @@ func fakeRunner(_ home: Home) throws {
         #expect(draft.answers == nil)
         draft.toggle("Red", item: 0)
         draft.toggle("Blue", item: 0)
-        #expect(draft.answers == nil, "an item without an answer holds the whole answer back")
+        #expect(draft.answers == ["Blue", "(no answer)"], "an item left without an answer is sent as no answer")
         draft.toggle("Green", item: 1)
         draft.toggle("Red", item: 1)
         draft.typed[1] = "a stripe"
         #expect(draft.answers == ["Blue", "Red, Green, a stripe"])
         draft.typed[0] = "teal"
         #expect(draft.answers?.first == "teal")
+
+        let yesNo = Question(id: "q2", items: [QuestionItem(question: "Tag it?", options: [QuestionOption(label: "Yes (recommended)"), QuestionOption(label: "No")])])
+        var picked = AnswerDraft(yesNo)
+        picked.toggle("Yes (recommended)", item: 0)
+        #expect(picked.answers == ["Yes"])
 
         let plan = try Plan.answer("w1", q, answers: ["teal", "Red, Green"])
         #expect(plan.argv == ["answer", "w1", "teal", "Red, Green"])
@@ -491,7 +496,7 @@ func fakeRunner(_ home: Home) throws {
         let asking = #"{"id":"event-11","items":[{"header":"","question":"Tag v1.0.0?","multi":false,"options":[{"label":"yes (recommended)","description":""},{"label":"no","description":""}]}],"answers":null,"reply":null}"#
         let json = """
         {"goal":\(work("g", "Release notes", "running")),"tasks":[\(work("a", "Impacts", "running")),\(work("b", "Collector", "review")),\(work("n", "Weekly note", "running"))],
-         "rollup":{"counts":{},"done":0,"total":3},"events":[\(events)],"claims":[],"landings":[],"delivery":null,"activity":{},"asking":\(asking),"reports":{}}
+         "rollup":{"counts":{},"done":0,"total":3},"events":[\(events)],"claims":[],"landings":[],"delivery":null,"activity":{},"asking":\(asking),"reports":{},"waiting":[]}
         """
         let goal = try JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
         #expect(goal.supervised)
@@ -760,7 +765,7 @@ func fakeRunner(_ home: Home) throws {
         {"goal":\(work("g", "running")),"tasks":[\(work("a", "done")),\(work("b", "blocked")),\(work("c", "running")),\(work("d", "queued")),\(work("e", "dropped")),\(work("f", "review"))],
          "rollup":{"counts":{},"done":1,"total":6},"events":[\(events)],"claims":[],"landings":[],"delivery":null,
          "activity":{"c":{"now":"Bash","kind":"tool","at":null,"asking":\(asking),"error":null,"status":"running","usage":null,"subagents":null}},
-         "asking":\(asking),"reports":{"5":\(report)}}
+         "asking":\(asking),"reports":{"5":\(report)},"waiting":[]}
         """
         let goal = try JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
         let p = goal.progress
