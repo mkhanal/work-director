@@ -79,7 +79,7 @@ func TestNewEnforcesForeignKeysAndWaitsOnLocks(t *testing.T) {
 	if _, err := l.AddWorktree("nope", WorktreeInfo{Path: "/tmp/wt", Kind: core.WorktreePrivate, Origin: core.OriginAttached}); err == nil {
 		t.Fatal("worktree for unknown work was stored")
 	}
-	if err := l.File("nope", core.EventQuestion, "x", core.TranscriptMark{Session: "s", Entries: 1}); err == nil {
+	if _, err := l.File("nope", core.EventQuestion, "x", core.TranscriptMark{Session: "s", Entries: 1}); err == nil {
 		t.Fatal("filed event for unknown work was stored")
 	}
 }

@@ -256,12 +256,8 @@ func Stopped(l *ledger.Ledger, w core.Work, h runner.Handle, texts []string) (bo
 	if askRe.MatchString(last) || statusRe.MatchString(last) {
 		return false, nil
 	}
-	at := core.TranscriptMark{Session: h.Session, Entries: len(texts)}
-	if prev, ok, err := l.Filed(w.ID); err != nil || (ok && prev == at) {
-		return false, err
-	}
 	line, _, _ := strings.Cut(strings.TrimSpace(last), "\n")
-	return true, l.File(w.ID, core.EventNote, stoppedPrefix+line, at)
+	return l.File(w.ID, core.EventNote, stoppedPrefix+line, core.TranscriptMark{Session: h.Session, Entries: len(texts)})
 }
 
 // StoppedSaying is what work last said when its latest event is the note that

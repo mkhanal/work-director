@@ -480,8 +480,8 @@ func Coordinate(w core.Work, known []core.Work, l *ledger.Ledger, r runner.Runne
 			return seen, nil
 		}
 		question := strings.TrimSpace(ask[1])
-		if err := l.File(w.ID, core.EventQuestion, question, at); err != nil {
-			return "", err
+		if mine, err := l.File(w.ID, core.EventQuestion, question, at); err != nil || !mine {
+			return seen, err
 		}
 		answer, err := KnownAnswer(question, known, l)
 		if err != nil {
@@ -512,8 +512,8 @@ func Coordinate(w core.Work, known []core.Work, l *ledger.Ledger, r runner.Runne
 		if filed {
 			return seen, nil
 		}
-		if err := l.File(w.ID, core.EventReport, report, at); err != nil {
-			return "", err
+		if mine, err := l.File(w.ID, core.EventReport, report, at); err != nil || !mine {
+			return seen, err
 		}
 		return escalate()
 	}
@@ -544,11 +544,8 @@ func Notice(l *ledger.Ledger, w core.Work, h runner.Handle, texts []string) (boo
 	} else {
 		return false, nil
 	}
-	at := core.TranscriptMark{Session: h.Session, Entries: len(texts)}
-	if prev, ok, err := l.Filed(w.ID); err != nil || (ok && prev == at) {
-		return false, err
-	}
-	if err := l.File(w.ID, kind, body, at); err != nil {
+	filed, err := l.File(w.ID, kind, body, core.TranscriptMark{Session: h.Session, Entries: len(texts)})
+	if err != nil || !filed {
 		return false, err
 	}
 	if _, err := l.Transition(w.ID, target); err != nil {

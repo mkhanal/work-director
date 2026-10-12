@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -4516,6 +4517,32 @@ type supervised struct {
 	Refused []string `json:"refused"`
 }
 
+// superviseAtOnce runs n supervise passes at the same time and waits for them.
+func superviseAtOnce(t *testing.T, f *cliFixture, goal string, n int) {
+	t.Helper()
+	var wg sync.WaitGroup
+	codes := make([]int, n)
+	errs := make([]string, n)
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cmd := exec.Command(f.goBin, "goal", "supervise", goal)
+			cmd.Env, cmd.Dir = f.env(t, f.bin), f.dir
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				codes[i], errs[i] = 1, string(out)
+			}
+		}()
+	}
+	wg.Wait()
+	for i := range n {
+		if codes[i] != 0 {
+			t.Fatalf("a supervise pass run at once failed: %s", errs[i])
+		}
+	}
+}
+
 func superviseOnce(t *testing.T, f *cliFixture, goal string) supervised {
 	t.Helper()
 	var s supervised
@@ -4536,9 +4563,7 @@ func TestWdGoalSuperviseHasTheGoalsSupervisorLookOnceNoTaskIsWorking(t *testing.
 		t.Fatalf("supervise while %s works = %+v, want no look", o.a, s)
 	}
 	o.busy(t, "task-"+o.a, false)
-	if s := superviseOnce(t, f, o.goal); !s.Looked {
-		t.Fatalf("supervise once no task works = %+v, want a look", s)
-	}
+	superviseAtOnce(t, f, o.goal, 4)
 	if notes := f.bodies(t, o.a, core.EventNote); len(notes) == 0 || notes[len(notes)-1] != "stopped without a report: working on it" {
 		t.Fatalf("notes on %s = %q, want its stop without a report noted", o.a, notes)
 	}
@@ -4594,6 +4619,11 @@ func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
 	if s := superviseOnce(t, f, o.goal); !s.Looked {
 		t.Fatalf("first supervise = %+v, want a look", s)
 	}
+	o.say(t, supervisor, "ACTIONS:", "SEND "+o.b+": one message, once")
+	superviseAtOnce(t, f, o.goal, 4)
+	if sent := readFile(t, filepath.Join(o.state, "sent-task-"+o.b)); strings.Count(sent, "one message, once") != 1 {
+		t.Fatalf("%s was sent %q, want the reply carried out once", o.b, sent)
+	}
 	o.say(t, supervisor,
 		"The collector never calls the detector.",
 		"ACTIONS:",
@@ -4629,7 +4659,7 @@ func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
 	if len(tasks) != 3 || added.Title != "Add the weekly running note" || added.State != core.StateRunning || added.Session == nil {
 		t.Fatalf("tasks = %+v, want the new task filed under the goal and started", tasks)
 	}
-	if sup := f.bodies(t, o.goal, core.EventSupervised); len(sup) != 1 || !strings.Contains(sup[0], "The collector never calls the detector.") || !strings.Contains(sup[0], "Refused:") {
+	if sup := f.bodies(t, o.goal, core.EventSupervised); len(sup) != 2 || !strings.Contains(sup[1], "The collector never calls the detector.") || !strings.Contains(sup[1], "Refused:") {
 		t.Fatalf("supervised events = %q, want the reply with what was done and refused", sup)
 	}
 	if s := superviseOnce(t, f, o.goal); s.Applied {

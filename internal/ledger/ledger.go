@@ -1252,18 +1252,70 @@ func getEvent(q queryer, id int) (core.Event, error) {
 	return e, nil
 }
 
-// File records an event read from a transcript together with the point it
-// was read at, so the same entry is recognised as filed.
-func (l *Ledger) File(work string, kind core.EventKind, body string, at core.TranscriptMark) error {
-	return l.inTx(func(tx *sql.Tx) error {
+// ClaimLook files a look on goal, saying why, unless a look or supervised
+// event newer than after is on it already: passes that decide to look at the
+// same moment look once. ok is false when another pass looked first.
+func (l *Ledger) ClaimLook(goal string, after int, why string) (e core.Event, ok bool, err error) {
+	err = l.inTx(func(tx *sql.Tx) error {
+		var latest sql.NullInt64
+		if err := tx.QueryRow(`SELECT MAX(id) FROM event WHERE work = ? AND kind IN (?, ?)`,
+			goal, core.EventLook, core.EventSupervised).Scan(&latest); err != nil {
+			return err
+		}
+		if int(latest.Int64) != after {
+			return nil
+		}
+		e, err = addEvent(tx, goal, core.EventLook, why, now())
+		ok = err == nil
+		return err
+	})
+	return e, ok, err
+}
+
+// SetFiled records the transcript point work was last read at.
+func (l *Ledger) SetFiled(work string, at core.TranscriptMark) error {
+	_, err := l.db.Exec(`INSERT INTO filed (work, session, entries) VALUES (?, ?, ?)
+		ON CONFLICT (work) DO UPDATE SET session = excluded.session, entries = excluded.entries`,
+		work, at.Session, at.Entries)
+	return err
+}
+
+// Advance moves work's transcript point from from to to, only while it is
+// still from: of passes reading the same reply at once, one reads it. ok is
+// false when another pass moved it first.
+func (l *Ledger) Advance(work string, from, to core.TranscriptMark) (bool, error) {
+	res, err := l.db.Exec(`UPDATE filed SET session = ?, entries = ? WHERE work = ? AND session = ? AND entries = ?`,
+		to.Session, to.Entries, work, from.Session, from.Entries)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// File files an event on work from a point of a transcript, unless work was
+// already filed from that point: of passes reading the same point at once,
+// one files it. ok is false when it was filed already.
+func (l *Ledger) File(work string, kind core.EventKind, body string, at core.TranscriptMark) (ok bool, err error) {
+	err = l.inTx(func(tx *sql.Tx) error {
+		var prev core.TranscriptMark
+		err := tx.QueryRow(`SELECT session, entries FROM filed WHERE work = ?`, work).Scan(&prev.Session, &prev.Entries)
+		if err == nil && prev == at {
+			return nil
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 		if _, err := addEvent(tx, work, kind, body, now()); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`INSERT INTO filed (work, session, entries) VALUES (?, ?, ?)
+		_, err = tx.Exec(`INSERT INTO filed (work, session, entries) VALUES (?, ?, ?)
 			ON CONFLICT (work) DO UPDATE SET session = excluded.session, entries = excluded.entries`,
 			work, at.Session, at.Entries)
+		ok = err == nil
 		return err
 	})
+	return ok, err
 }
 
 // Filed is the transcript point work's latest event was filed from; ok is

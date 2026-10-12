@@ -99,16 +99,36 @@ func (c *Cli) supervise(goal core.Work) (supervision, error) {
 			return out, err
 		}
 		if ok && mark.Session == sh.Session && len(said) > mark.Entries {
-			return c.carryOut(goal, p, said[mark.Entries:], core.TranscriptMark{Session: sh.Session, Entries: len(said)})
+			read := core.TranscriptMark{Session: sh.Session, Entries: len(said)}
+			mine, err := c.Ledger.Advance(goal.ID, mark, read)
+			if err != nil || !mine {
+				return out, err
+			}
+			return c.carryOut(goal, p, said[mark.Entries:])
 		}
 	}
 
-	why, decided, err := c.sinceLook(goal, tasks)
+	why, decided, last, err := c.sinceLook(goal, tasks)
 	if err != nil {
 		return out, err
 	}
 	if len(why) == 0 || (working && !decided) {
 		return out, nil
+	}
+	if _, mine, err := c.Ledger.ClaimLook(goal.ID, last, strings.Join(why, "; ")); err != nil || !mine {
+		return out, err
+	}
+	// Another pass may have started the supervisor since it was read above.
+	if sh, has, err = coordinator.Supervisor(c.Ledger, goal, p); err != nil {
+		return out, err
+	}
+	if has && sr == nil {
+		if sr, err = runner.RunnerNamed(sh.Runner); err != nil {
+			return out, err
+		}
+		if said, err = runner.Transcript(sr, sh); err != nil {
+			return out, err
+		}
 	}
 	picture, err := c.picture(goal, p)
 	if err != nil {
@@ -152,7 +172,7 @@ func (c *Cli) supervise(goal core.Work) (supervision, error) {
 		}
 		said = nil
 	}
-	if err := c.Ledger.File(goal.ID, core.EventLook, strings.Join(why, "; "), core.TranscriptMark{Session: sh.Session, Entries: len(said)}); err != nil {
+	if err := c.Ledger.SetFiled(goal.ID, core.TranscriptMark{Session: sh.Session, Entries: len(said)}); err != nil {
 		return out, err
 	}
 	out.Looked = true
@@ -225,11 +245,12 @@ func (c *Cli) tend(tasks []core.Work, p *project.Project) (bool, error) {
 }
 
 // sinceLook is what changed under goal since its supervisor last looked or was
-// last read, and whether the goal itself was decided on since.
-func (c *Cli) sinceLook(goal core.Work, tasks []core.Work) ([]string, bool, error) {
+// last read, whether the goal itself was decided on since, and the id of that
+// last look or reading.
+func (c *Cli) sinceLook(goal core.Work, tasks []core.Work) ([]string, bool, int, error) {
 	events, err := c.Ledger.Events(goal.ID, nil)
 	if err != nil {
-		return nil, false, err
+		return nil, false, 0, err
 	}
 	var ref core.Event
 	for _, e := range events {
@@ -254,7 +275,7 @@ func (c *Cli) sinceLook(goal core.Work, tasks []core.Work) ([]string, bool, erro
 		ids = append(ids, t.ID)
 		evs, err := c.Ledger.Events(t.ID, nil)
 		if err != nil {
-			return nil, false, err
+			return nil, false, 0, err
 		}
 		for _, e := range evs {
 			if why, ok := moved[e.Kind]; ok && e.ID > ref.ID {
@@ -265,7 +286,7 @@ func (c *Cli) sinceLook(goal core.Work, tasks []core.Work) ([]string, bool, erro
 	for _, id := range ids {
 		concerns, err := c.Ledger.Concerns(&id)
 		if err != nil {
-			return nil, false, err
+			return nil, false, 0, err
 		}
 		for _, cx := range concerns {
 			if cx.Resolved == 0 && (ref.ID == 0 || cx.At > ref.At) {
@@ -281,7 +302,7 @@ func (c *Cli) sinceLook(goal core.Work, tasks []core.Work) ([]string, bool, erro
 	if ref.ID == 0 && len(tasks) > 0 && len(why) > 0 {
 		why = []string{"the first look"}
 	}
-	return why, decided, nil
+	return why, decided, ref.ID, nil
 }
 
 // picture is the goal as its supervisor is shown it.
@@ -341,7 +362,7 @@ func (c *Cli) picture(goal core.Work, p *project.Project) (coordinator.Picture, 
 
 // carryOut does what the supervisor's reply says, each action on its own, and
 // files the reply with what was done and refused as one supervised event.
-func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string, at core.TranscriptMark) (supervision, error) {
+func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supervision, error) {
 	out := supervision{Applied: true, Actions: []string{}, Refused: []string{}}
 	actions, unread := coordinator.ParseSupervision(reply)
 	for _, line := range unread {
@@ -423,7 +444,7 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string, at co
 	if len(out.Refused) > 0 {
 		body += "\n\nRefused:\n- " + strings.Join(out.Refused, "\n- ")
 	}
-	if err := c.Ledger.File(goal.ID, core.EventSupervised, body, at); err != nil {
+	if _, err := c.Ledger.AddEvent(goal.ID, core.EventSupervised, body); err != nil {
 		return out, err
 	}
 	switch {

@@ -404,6 +404,7 @@ could not with their work, the bound that ran out, and the work still open.
 - A decision on the goal since then has it look even while tasks are working.
 - The first look starts the supervisor in the goal's shared worktree, else the project's path, on `--runner` else the goal's else the project's runner, with the supervision brief, and records a `spawn` event `supervise <runner> <session> [<ref>]`; a later look sends the brief to that session.
 - Each look is a `look` event on the goal; nothing is looked at while the supervisor is working.
+- Passes run at once, from any process, look once.
 - `--json` prints `{looked, applied, actions, refused}`.
 
 ## Wd Goal Supervise Carries Out What The Supervisor Decided
@@ -412,4 +413,5 @@ could not with their work, the bound that ran out, and the work still open.
 - `ASK` files a `question` on the goal and moves it to needs-input; `wd answer <goal>` reaches the supervisor.
 - `DONE` files the summary as the goal's `report` and moves the goal to review.
 - An action that cannot be carried out is refused with why, and the rest still are.
+- A reply is carried out once, however many passes read it at once.
 - The reply, what was done and what was refused are one `supervised` event on the goal.
