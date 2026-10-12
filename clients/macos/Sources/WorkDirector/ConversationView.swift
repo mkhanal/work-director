@@ -140,7 +140,7 @@ struct PromptRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: Space.s3) {
             Image(systemName: brief ? "doc.text.fill" : "arrow.turn.down.right")
-                .font(.system(size: 15))
+                .font(.system(size: IconSize.turn))
                 .foregroundStyle(.secondary)
                 .frame(width: Space.avatar, height: 18)
             VStack(alignment: .leading, spacing: Space.s2) {
@@ -185,7 +185,7 @@ struct YouBubble<Status: View>: View {
                     status
                     Text(at).foregroundStyle(.tertiary)
                     Text(label).foregroundStyle(.primary)
-                    Speaker.you.mark.font(.system(size: 15))
+                    Speaker.you.mark.font(.system(size: IconSize.turn))
                 }
                 .font(TypeScale.meta)
                 .foregroundStyle(.secondary)
@@ -310,7 +310,7 @@ struct ToolRow: View {
                 Image(systemName: Self.symbol(call.name)).frame(width: 16).foregroundStyle(.secondary)
                 Text(call.name).font(TypeScale.calloutMedium)
                 Text(call.summary)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TypeScale.codeSmall)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -407,7 +407,7 @@ struct Mono: View {
             MicroLabel(title).foregroundStyle(failed ? Palette.failure : .secondary)
             ScrollView {
                 Text(text)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TypeScale.codeSmall)
                     .lineSpacing(TypeScale.codeLeading)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -508,7 +508,7 @@ struct QuestionCard: View {
                 }
             }
             Text(item.question)
-                .font(.system(size: 14, weight: .medium))
+                .font(TypeScale.bodyMedium)
                 .lineSpacing(TypeScale.bodyLeading)
                 .textSelection(.enabled)
             if !item.options.isEmpty {
@@ -542,7 +542,7 @@ struct QuestionCard: View {
         } label: {
             HStack(alignment: .top, spacing: Space.s3) {
                 Image(systemName: item.multi ? (chosen ? "checkmark.square.fill" : "square") : (chosen ? "largecircle.fill.circle" : "circle"))
-                    .font(.system(size: 15))
+                    .font(.system(size: IconSize.turn))
                     .foregroundStyle(chosen ? Color.accentColor : Color.secondary)
                     .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
@@ -599,7 +599,7 @@ struct QuestionCard: View {
             HStack(spacing: Space.s2) {
                 if let command = plan?.commandLine {
                     Text(command)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TypeScale.codeTiny)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -710,7 +710,7 @@ struct MarkdownText: View {
                 case .heading(let level, let text):
                     inline(text).font(level <= 1 ? .system(size: 17, weight: .semibold) : TypeScale.title).padding(.top, Space.s2)
                 case .bullet(let text, let ordered):
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
                         Text(ordered ?? "•").foregroundStyle(.secondary).frame(minWidth: 12, alignment: .trailing)
                         inline(text)
                     }

@@ -131,15 +131,15 @@ struct ReasonSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(ask.title).font(.headline)
-            Text(ask.prompt).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: Space.s3) {
+            Text(ask.title).font(TypeScale.headline)
+            Text(ask.prompt).font(TypeScale.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             TextField("", text: $text, axis: .vertical)
                 .lineLimit(3...6)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(next)
             if let refusal {
-                Text(refusal).font(.caption).foregroundStyle(.red)
+                Text(refusal).font(TypeScale.caption).foregroundStyle(.red)
             }
             HStack {
                 Spacer()
@@ -149,7 +149,7 @@ struct ReasonSheet: View {
                     .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(20)
+        .padding(Space.s5)
         .frame(width: 460)
     }
 
@@ -170,13 +170,13 @@ struct WriteBanner: View {
     let close: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: Space.s3) {
             Image(systemName: done.ok ? "checkmark.circle.fill" : "xmark.octagon.fill")
                 .foregroundStyle(done.ok ? .green : .red)
             VStack(alignment: .leading, spacing: 2) {
-                Text(done.plan.commandLine).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                Text(done.plan.commandLine).font(TypeScale.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 if !done.text.isEmpty {
-                    Text(done.text).font(.callout).lineLimit(4).textSelection(.enabled)
+                    Text(done.text).font(TypeScale.callout).lineLimit(4).textSelection(.enabled)
                 }
             }
             Spacer(minLength: 8)
@@ -185,7 +185,7 @@ struct WriteBanner: View {
             }
             Button(action: close) { Image(systemName: "xmark") }.buttonStyle(.plain).foregroundStyle(.secondary)
         }
-        .padding(10)
+        .padding(Space.s3)
         .background(.bar)
     }
 }
@@ -228,7 +228,7 @@ struct Output: View {
     let text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Space.s2) {
             if code == 0 {
                 Label("Done", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
             } else {
@@ -237,7 +237,7 @@ struct Output: View {
             if !text.isEmpty {
                 ScrollView {
                     Text(text)
-                        .font(.callout.monospaced())
+                        .font(TypeScale.callout.monospaced())
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -254,25 +254,25 @@ struct CommandBar: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Text("wd").font(.title3.monospaced()).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: Space.s3) {
+            HStack(spacing: Space.s2) {
+                Text("wd").font(TypeScale.title.monospaced()).foregroundStyle(.secondary)
                 TextField("status   ·   goal status <id>   ·   decide <id> \"…\"", text: $text)
                     .textFieldStyle(.plain)
-                    .font(.title3.monospaced())
+                    .font(TypeScale.title.monospaced())
                     .onSubmit(submit)
             }
-            .padding(10)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+            .padding(Space.s3)
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.chip + 2))
             preview
             HStack {
-                Text("Nothing runs until you confirm the next step.").font(.caption).foregroundStyle(.secondary)
+                Text("Nothing runs until you confirm the next step.").font(TypeScale.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Continue", action: submit).keyboardShortcut(.defaultAction).disabled(parsed == nil)
             }
         }
-        .padding(16)
+        .padding(Space.s4)
         .frame(width: 620)
     }
 
@@ -286,7 +286,7 @@ struct CommandBar: View {
             case .success(let plan):
                 FlowRow(words: plan.argv)
             case .failure(let error):
-                Text(String(describing: error)).font(.caption).foregroundStyle(.red)
+                Text(String(describing: error)).font(TypeScale.caption).foregroundStyle(.red)
             }
         }
     }
@@ -303,11 +303,11 @@ struct FlowRow: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
+            HStack(spacing: Space.s2) {
                 ForEach(Array(words.enumerated()), id: \.offset) { _, word in
                     Text(word)
-                        .font(.callout.monospaced())
-                        .padding(.horizontal, 8)
+                        .font(TypeScale.callout.monospaced())
+                        .padding(.horizontal, Space.s2)
                         .padding(.vertical, 3)
                         .background(.tint.opacity(0.12), in: Capsule())
                 }

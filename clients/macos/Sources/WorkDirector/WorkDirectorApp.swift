@@ -98,11 +98,11 @@ struct Preferences: View {
             }
             .pickerStyle(.radioGroup)
             Text("Any other chord with Return starts a new line. Esc pressed twice stops a session while it works.")
-                .font(.caption)
+                .font(TypeScale.caption)
                 .foregroundStyle(.secondary)
             Toggle("Tell me when work needs me or reaches a gate", isOn: $notify)
         }
-        .padding(20)
+        .padding(Space.s5)
         .frame(width: 460)
     }
 }

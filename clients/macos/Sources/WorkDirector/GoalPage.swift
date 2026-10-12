@@ -40,7 +40,7 @@ struct PageTabs<Tab: Hashable>: View {
             ForEach(tabs, id: \.self) { tab in
                 Button { selection = tab } label: {
                     HStack(spacing: Space.s1 + 2) {
-                        Image(systemName: symbol(tab)).font(.system(size: 11.5, weight: .medium))
+                        Image(systemName: symbol(tab)).font(.system(size: IconSize.small, weight: .medium))
                         Text(label(tab))
                         if let n = count(tab), n > 0 {
                             Text("\(n)").monospacedDigit().foregroundStyle(.tertiary)
@@ -49,7 +49,7 @@ struct PageTabs<Tab: Hashable>: View {
                             Circle().fill(Palette.attention).frame(width: 6, height: 6)
                         }
                     }
-                    .font(.system(size: 13, weight: selection == tab ? .semibold : .medium))
+                    .font(selection == tab ? TypeScale.calloutStrong : TypeScale.calloutMedium)
                     .foregroundStyle(selection == tab ? .primary : .secondary)
                     .padding(.horizontal, Space.s3)
                     .padding(.vertical, Space.s1 + 2)
@@ -229,7 +229,7 @@ struct FilterChips: View {
                         Text(f.label)
                         if let n = counts[f] { Text("\(n)").monospacedDigit().foregroundStyle(filter == f ? .secondary : .tertiary) }
                     }
-                    .font(.system(size: 12, weight: .medium))
+                    .font(TypeScale.meta)
                     .padding(.horizontal, Space.s3)
                     .padding(.vertical, 5)
                     .background(filter == f ? Color.accentColor.opacity(0.14) : Palette.sunken, in: Capsule())
@@ -248,7 +248,7 @@ struct DayLine: View {
 
     var body: some View {
         HStack(spacing: Space.s3) {
-            Text(day).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+            Text(day).font(TypeScale.meta.weight(.semibold)).foregroundStyle(.secondary)
             Rectangle().fill(Palette.separator).frame(height: 1)
         }
         .padding(.top, Space.s2)
@@ -286,7 +286,7 @@ struct UpdatesRow: View {
                 HStack(spacing: Space.s3) {
                     Rectangle().fill(Palette.separator).frame(height: 1)
                     HStack(spacing: Space.s1 + 2) {
-                        Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 9, weight: .bold))
+                        Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: IconSize.tiny, weight: .bold))
                         Text("\(run.count) updates")
                         Text("· " + when(run[0].event.at))
                     }

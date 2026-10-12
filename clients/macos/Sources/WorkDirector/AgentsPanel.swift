@@ -76,9 +76,9 @@ struct AgentRow: View {
             PhaseMark(phase: card.phase).padding(.top, 5)
             VStack(alignment: .leading, spacing: Space.s1) {
                 HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
-                    Text(card.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    Text(card.title).font(TypeScale.calloutStrong).lineLimit(1)
                     Text(card.kind)
-                        .font(.system(size: 10.5, weight: .medium))
+                        .font(TypeScale.tag)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(Palette.sunken, in: RoundedRectangle(cornerRadius: 4))
@@ -97,7 +97,7 @@ struct AgentRow: View {
                     Text(line).font(TypeScale.callout).foregroundStyle(card.phase == .asking ? Palette.attention : .secondary).lineLimit(1)
                 }
                 if let u = card.usage {
-                    Text(meta(u)).font(.system(size: 11).monospacedDigit()).foregroundStyle(.tertiary)
+                    Text(meta(u)).font(TypeScale.small.monospacedDigit()).foregroundStyle(.tertiary)
                 }
             }
             if let stop, hovering {

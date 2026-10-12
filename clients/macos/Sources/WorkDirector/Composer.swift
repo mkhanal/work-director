@@ -24,7 +24,7 @@ struct NewGoalPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s5) {
                 VStack(alignment: .leading, spacing: Space.s2) {
-                    Text("What should get done?").font(.system(size: 26, weight: .semibold))
+                    Text("What should get done?").font(TypeScale.hero)
                     Text("Say it the way you would to a lead engineer. It is checked against goals it may continue, then planned into tasks and started.")
                         .font(TypeScale.body)
                         .foregroundStyle(.secondary)
@@ -109,28 +109,28 @@ struct NewGoalPage: View {
             }
             .foregroundStyle(.secondary)
         case .offering(let found):
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: Space.s3) {
                 SectionTitle("This may continue a goal you already have", detail: "\(found.count)")
                 ForEach(found, id: \.goal.id) { f in
                     GroupBox {
-                        VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: Space.s2) {
                             HStack {
-                                Text(f.goal.title).font(.body.weight(.semibold))
+                                Text(f.goal.title).font(TypeScale.body.weight(.semibold))
                                 Spacer()
                                 StatePill(state: f.goal.state)
                             }
-                            Text(f.why).font(.callout).foregroundStyle(.secondary)
+                            Text(f.why).font(TypeScale.callout).foregroundStyle(.secondary)
                             HStack {
-                                Text(f.goal.id).font(.caption.monospaced()).foregroundStyle(.tertiary)
+                                Text(f.goal.id).font(TypeScale.caption.monospaced()).foregroundStyle(.tertiary)
                                 if f.goal.archived != nil {
-                                    Label("archived", systemImage: "archivebox").font(.caption).foregroundStyle(.tertiary)
+                                    Label("archived", systemImage: "archivebox").font(TypeScale.caption).foregroundStyle(.tertiary)
                                 }
                                 Spacer()
                                 Button("Continue this goal") { Task { await flow.continueGoal(f.goal.id, text: text) } }
                                     .buttonStyle(.borderedProminent)
                             }
                         }
-                        .padding(4)
+                        .padding(Space.s1)
                     }
                 }
                 Button("Start a new goal instead") { Task { await flow.startNew(project: product, text: text) } }
@@ -143,7 +143,7 @@ struct NewGoalPage: View {
             }
             .foregroundStyle(.secondary)
         case .failed(let reason):
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: Space.s2) {
                 Label(reason, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
                     .textSelection(.enabled)

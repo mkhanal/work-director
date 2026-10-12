@@ -55,16 +55,6 @@ struct RootView: View {
         }
         // The page's own header carries its name; the toolbar keeps to actions.
         .toolbar(removing: .title)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button(action: newGoal) { Label("New Goal", systemImage: "square.and.pencil") }
-                    .help("Start a goal (⌘N)")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button { typing = true } label: { Label("Command", systemImage: "command") }
-                    .help("Run a wd command (⌘K)")
-            }
-        }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
                 if let done = writes.last {
@@ -73,9 +63,9 @@ struct RootView: View {
                 }
                 if let failure = store.failure {
                     Label(failure, systemImage: "exclamationmark.triangle.fill")
-                        .font(.callout)
+                        .font(TypeScale.callout)
                         .foregroundStyle(.red)
-                        .padding(8)
+                        .padding(Space.s2)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(.bar)
                 }
@@ -228,8 +218,8 @@ struct ThreadSidebar: View {
                 } label: {
                     HStack(spacing: Space.s1 + 2) {
                         Image(systemName: "shippingbox.fill").foregroundStyle(.secondary)
-                        Text(scope ?? "All products").font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary)
+                        Text(scope ?? "All products").font(TypeScale.calloutStrong).lineLimit(1)
+                        Image(systemName: "chevron.up.chevron.down").font(.system(size: IconSize.tiny, weight: .semibold)).foregroundStyle(.tertiary)
                     }
                 }
                 .menuStyle(.borderlessButton)
@@ -238,7 +228,7 @@ struct ThreadSidebar: View {
                 .help("Show one product's work, or all of it")
                 Spacer(minLength: 0)
                 Button { place = .newGoal } label: {
-                    Image(systemName: "square.and.pencil").font(.system(size: 14, weight: .medium))
+                    Image(systemName: "square.and.pencil").font(.system(size: IconSize.toolbar, weight: .medium))
                 }
                 .buttonStyle(.borderless)
                 .help("New goal (⌘N)")
@@ -258,9 +248,9 @@ struct GoalThreadRow: View {
         HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
             StateDot(state: thread.work.state, band: thread.band)
                 .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 4 }
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: Space.s1) {
                 Text(thread.work.title)
-                    .font(.system(size: 13, weight: thread.work.kind.isGoal ? .medium : .regular))
+                    .font(thread.work.kind.isGoal ? TypeScale.calloutMedium : TypeScale.callout)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 HStack(spacing: Space.s1) {
@@ -272,7 +262,7 @@ struct GoalThreadRow: View {
                     Spacer(minLength: Space.s1)
                     Text(ago(thread.work.updated)).monospacedDigit()
                 }
-                .font(.system(size: 11.5))
+                .font(TypeScale.small)
                 .foregroundStyle(.tertiary)
             }
         }
@@ -310,26 +300,26 @@ struct WorkRow: View {
     let rollup: Rollup?
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: Space.s3) {
             StateSymbol(state: work.state)
-                .font(.title3)
+                .font(TypeScale.title)
                 .frame(width: 22)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: Space.s1) {
                 Text(work.title)
-                    .font(.body.weight(work.kind.isGoal ? .semibold : .regular))
+                    .font(TypeScale.body.weight(work.kind.isGoal ? .semibold : .regular))
                     .lineLimit(2)
-                HStack(spacing: 6) {
+                HStack(spacing: Space.s2) {
                     Text(work.project)
                     Text("·")
                     Text(work.kind.isGoal ? "goal" : work.kind.rawValue)
                     Text("·")
                     Text(work.id).monospaced()
                 }
-                .font(.caption)
+                .font(TypeScale.caption)
                 .foregroundStyle(.secondary)
                 if let rollup, rollup.total > 0 {
                     ProgressView(value: Double(rollup.done), total: Double(rollup.total)) {
-                        Text("\(rollup.done) of \(rollup.total) tasks done").font(.caption2).foregroundStyle(.secondary)
+                        Text("\(rollup.done) of \(rollup.total) tasks done").font(TypeScale.small).foregroundStyle(.secondary)
                     }
                     .progressViewStyle(.linear)
                     .controlSize(.small)
@@ -358,8 +348,8 @@ struct StatePill: View {
 
     var body: some View {
         Label(state.look.label, systemImage: state.look.symbol)
-            .font(.caption.weight(.medium))
-            .padding(.horizontal, 8)
+            .font(TypeScale.caption.weight(.medium))
+            .padding(.horizontal, Space.s2)
             .padding(.vertical, 3)
             .foregroundStyle(state.look.tint.color)
             .background(state.look.tint.color.opacity(0.12), in: Capsule())

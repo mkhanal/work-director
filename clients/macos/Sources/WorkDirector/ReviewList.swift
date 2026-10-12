@@ -53,7 +53,7 @@ struct ReviewList: View {
                                 ForEach(pass.unshipped, id: \.work.id) { u in
                                     VStack(alignment: .leading) {
                                         Text(u.work.title)
-                                        Text(u.reason).font(.caption).foregroundStyle(.secondary)
+                                        Text(u.reason).font(TypeScale.caption).foregroundStyle(.secondary)
                                     }
                                     .tag(Row.unshipped(work: u.work.id))
                                 }
@@ -63,8 +63,8 @@ struct ReviewList: View {
                             Section("Taste promoted (\(pass.cards.count))") {
                                 ForEach(pass.cards, id: \.card) { card in
                                     VStack(alignment: .leading) {
-                                        Text(card.card).font(.callout.weight(.medium))
-                                        Text(card.text).font(.caption).foregroundStyle(.secondary)
+                                        Text(card.card).font(TypeScale.callout.weight(.medium))
+                                        Text(card.text).font(TypeScale.caption).foregroundStyle(.secondary)
                                     }
                                 }
                             }

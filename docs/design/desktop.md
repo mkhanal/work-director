@@ -43,13 +43,29 @@ SF Mono or the system monospace.
 
 | Token | Size / line | Weight | Use |
 |---|---|---|---|
+| `type.hero` | 26 / 32 | semibold | the new-goal page's question |
 | `type.display` | 22 / 28 | semibold | page title (goal name) |
 | `type.title` | 16 / 22 | semibold | section titles, markdown `#` |
-| `type.body` | 14 / 22 | regular | everything said in the conversation |
+| `type.headline` | 14 / 20 | semibold | a card's title, an emphasised row |
+| `type.body` | 14 / 22 | regular / medium | everything said in the conversation; a question's text in medium |
 | `type.callout` | 13 / 18 | regular / medium | rows, chips, buttons, tool rows |
+| `type.callout` strong | 13 / 18 | semibold | sidebar product, agent names, the selected tab |
+| `type.caption` | 12 / 16 | regular | secondary lines, notes |
 | `type.meta` | 12 / 16 | medium | speaker, time, counts |
+| `type.small` | 11 / 14 | regular | hints under the composer, sidebar row details |
 | `type.micro` | 11 / 14 | semibold, +0.4 tracking, uppercase | sidebar section headers |
-| `type.code` | 12.5 / 19 | regular | code blocks, commands, ids |
+| `type.tag` | 10.5 / 13 | semibold | pills and tags: verdicts, kinds, Recommended |
+| `type.code` | 12.5 / 19 | regular | code blocks; 12 for tool output and file chips; 11 for command hints |
+
+Every text style in an app comes from this table; nothing sets a size of its
+own. Symbols have their own sizes — 9 (disclosure chevrons), 11.5 (tab
+icons), 13 (composer controls), 14 (toolbar), 15 (prompt marks), 17 (turn
+avatars) — and never borrow a text size.
+
+Toolbar actions are grouped by what they do, with space between groups:
+the next gate; Pause or Resume with Actions; Your messages (in the
+conversation) with Open in Editor; then the icon-only Command and Agents
+toggles last. New Goal lives at the top of the sidebar, not in the toolbar.
 
 ### Shape
 

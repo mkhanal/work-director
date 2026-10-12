@@ -193,7 +193,7 @@ struct AgentChip: View {
     var body: some View {
         HStack(alignment: .top, spacing: Space.s3) {
             PhaseMark(phase: AgentRoster.phase(of: activity)).padding(.top, 5)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: Space.s1) {
                 HStack(spacing: Space.s2) {
                     Text(task.title).font(TypeScale.calloutMedium).lineLimit(1)
                     StateSymbol(state: task.state)
@@ -285,7 +285,7 @@ struct ChoiceChips: View {
         VStack(alignment: .leading, spacing: Space.s1 + 2) {
             ForEach(choices, id: \.self) { choice in
                 HStack(spacing: Space.s2) {
-                    Image(systemName: "circle").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Image(systemName: "circle").font(.system(size: IconSize.tiny)).foregroundStyle(.tertiary)
                     Text(Choice(choice).label).font(TypeScale.callout).foregroundStyle(.secondary)
                     if Choice(choice).recommended { RecommendedTag() }
                 }
@@ -340,7 +340,7 @@ struct ReportCard: View {
                             FlowLayout(spacing: Space.s1 + 2) {
                                 ForEach(report.files, id: \.self) { path in
                                     Text(path)
-                                        .font(.system(size: 11.5, design: .monospaced))
+                                        .font(TypeScale.codeSmall)
                                         .padding(.horizontal, 6).padding(.vertical, 2)
                                         .background(Palette.sunken, in: RoundedRectangle(cornerRadius: Radius.chip))
                                         .textSelection(.enabled)
@@ -432,7 +432,7 @@ struct Choice {
 struct RecommendedTag: View {
     var body: some View {
         Text("Recommended")
-            .font(.system(size: 10.5, weight: .semibold))
+            .font(TypeScale.tag)
             .padding(.horizontal, 6).padding(.vertical, 1.5)
             .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.chip))
             .foregroundStyle(Color.accentColor)

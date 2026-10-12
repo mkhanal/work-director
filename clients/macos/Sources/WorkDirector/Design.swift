@@ -18,17 +18,38 @@ enum Space {
 }
 
 enum TypeScale {
+    /// The new-goal page's question.
+    static let hero = Font.system(size: 26, weight: .semibold)
     static let display = Font.system(size: 22, weight: .semibold)
     static let title = Font.system(size: 16, weight: .semibold)
+    static let headline = Font.system(size: 14, weight: .semibold)
     static let body = Font.system(size: 14)
+    static let bodyMedium = Font.system(size: 14, weight: .medium)
     static let callout = Font.system(size: 13)
     static let calloutMedium = Font.system(size: 13, weight: .medium)
+    static let calloutStrong = Font.system(size: 13, weight: .semibold)
+    static let caption = Font.system(size: 12)
     static let meta = Font.system(size: 12, weight: .medium)
+    static let small = Font.system(size: 11)
     static let micro = Font.system(size: 11, weight: .semibold)
+    /// Pills and tags: a verdict, a kind, Recommended.
+    static let tag = Font.system(size: 10.5, weight: .semibold)
     static let code = Font.system(size: 12.5, design: .monospaced)
+    static let codeSmall = Font.system(size: 12, design: .monospaced)
+    static let codeTiny = Font.system(size: 11, design: .monospaced)
     /// Extra leading that brings each size to its line height in the design.
     static let bodyLeading: CGFloat = 5
     static let codeLeading: CGFloat = 4
+}
+
+/// Symbol sizes, set apart from text so a symbol never borrows a text size.
+enum IconSize {
+    static let tiny: CGFloat = 9
+    static let small: CGFloat = 11.5
+    static let control: CGFloat = 13
+    static let toolbar: CGFloat = 14
+    static let turn: CGFloat = 15
+    static let avatar: CGFloat = 17
 }
 
 enum Radius {
@@ -79,5 +100,14 @@ struct MicroLabel: View {
             .font(TypeScale.micro)
             .tracking(0.4)
             .foregroundStyle(.tertiary)
+    }
+}
+
+/// Space between two groups of toolbar actions, where the system draws groups.
+struct GroupGap: ToolbarContent {
+    var body: some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
     }
 }

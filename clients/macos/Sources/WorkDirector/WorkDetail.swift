@@ -96,7 +96,7 @@ struct WorkDetail: View {
                     if following && !atBottom {
                         Button { toBottom(proxy) } label: {
                             Image(systemName: "arrow.down")
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.system(size: IconSize.toolbar, weight: .semibold))
                                 .frame(width: 34, height: 34)
                                 .background(.regularMaterial, in: Circle())
                                 .overlay(Circle().strokeBorder(.separator))
@@ -104,7 +104,7 @@ struct WorkDetail: View {
                         }
                         .buttonStyle(.plain)
                         .padding(.trailing, Space.s6)
-                        .padding(.bottom, 14)
+                        .padding(.bottom, Space.s3)
                         .help("Jump to the latest")
                         .transition(.opacity.combined(with: .scale(scale: 0.8)))
                     }
@@ -124,16 +124,32 @@ struct WorkDetail: View {
                                 .help("\(gate.why ?? "") — \(pass.commandLine)")
                         }
                     }
+                    GroupGap()
                     Actions(work: loaded.work, run: { plan = $0 }, ask: { asking = $0 })
-                    ToolbarItem(placement: .primaryAction) {
+                    GroupGap()
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        if focus == nil, goalView == .conversation, case .goal(let goal) = loaded, !goal.yours.isEmpty {
+                            YoursMenu(yours: goal.yours) { id in
+                                filter = .all
+                                Task {
+                                    try? await Task.sleep(for: .milliseconds(150))
+                                    withAnimation { proxy.scrollTo(id, anchor: .top) }
+                                }
+                            }
+                        }
                         if let target = openTarget(loaded) {
                             Button { plan = Plan.open(target) } label: { Label("Open in Editor", systemImage: "arrow.up.forward.app") }
                                 .labelStyle(.titleAndIcon)
                                 .help("Open where this work is done in your editor: wd open \(target) .")
                         }
                     }
-                    ToolbarItem(placement: .primaryAction) {
+                    GroupGap()
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        Button { NotificationCenter.default.post(name: .openCommandBar, object: nil) } label: { Label("Command", systemImage: "command") }
+                            .labelStyle(.iconOnly)
+                            .help("Run any wd command (⌘K)")
                         Button { showAgents.toggle() } label: { Label("Agents", systemImage: "sidebar.right") }
+                            .labelStyle(.iconOnly)
                             .help(showAgents ? "Hide the agents" : "Show the agents")
                     }
                 }
@@ -142,20 +158,6 @@ struct WorkDetail: View {
                                 choose: { choose($0, in: loaded) }, stop: { plan = Plan.stop($0) },
                                 menu: { card in AnyView(cardMenu(card, in: loaded)) })
                         .inspectorColumnWidth(min: 260, ideal: 340, max: 480)
-                }
-                .toolbar {
-                    ToolbarItem(placement: .navigation) {
-                        if focus == nil, case .goal(let goal) = loaded, !goal.yours.isEmpty {
-                            YoursMenu(yours: goal.yours) { id in
-                                goalView = .conversation
-                                filter = .all
-                                Task {
-                                    try? await Task.sleep(for: .milliseconds(150))
-                                    withAnimation { proxy.scrollTo(id, anchor: .top) }
-                                }
-                            }
-                        }
-                    }
                 }
                 }
             } else if let failure {
@@ -412,22 +414,22 @@ struct Breadcrumb: View {
     let back: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            HStack(spacing: Space.s2) {
                 Button(action: back) { Label(work.title, systemImage: "chevron.backward") }
                     .buttonStyle(.link)
                     .lineLimit(1)
                 if focus.agent != nil {
-                    Image(systemName: "chevron.forward").font(.caption2).foregroundStyle(.tertiary)
+                    Image(systemName: "chevron.forward").font(TypeScale.small).foregroundStyle(.tertiary)
                     Text(task.title).lineLimit(1).foregroundStyle(.secondary)
                 }
             }
-            .font(.caption)
-            Text(focus.title).font(.title3.weight(.semibold)).textSelection(.enabled)
-            HStack(spacing: 8) {
+            .font(TypeScale.caption)
+            Text(focus.title).font(TypeScale.title.weight(.semibold)).textSelection(.enabled)
+            HStack(spacing: Space.s2) {
                 if focus.agent == nil { StatePill(state: task.state) }
-                Text(focus.kind).font(.caption.monospaced()).foregroundStyle(.secondary)
-                Text(focus.agent ?? task.id).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(focus.kind).font(TypeScale.caption.monospaced()).foregroundStyle(.secondary)
+                Text(focus.agent ?? task.id).font(TypeScale.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
             }
         }
     }
@@ -528,14 +530,14 @@ struct Waiting: View {
             QuestionCard(store: store, workID: task.id, question: question, title: "asks you", asker: task.title, answered: answered)
         }
         if !asking.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: Space.s3) {
                 ForEach(asking, id: \.1.id) { task, question in
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: Space.s1) {
                         Button { open(task.id) } label: {
                             Label(task.title, systemImage: "arrow.up.forward.square")
                         }
                         .buttonStyle(.link)
-                        .font(.caption)
+                        .font(TypeScale.caption)
                         QuestionCard(store: store, workID: task.id, question: question, answered: answered)
                     }
                 }
@@ -555,8 +557,8 @@ struct SectionTitle: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title).font(.headline)
-            Text(detail).font(.subheadline).foregroundStyle(.secondary)
+            Text(title).font(TypeScale.headline)
+            Text(detail).font(TypeScale.callout).foregroundStyle(.secondary)
         }
         .padding(.top, 6)
     }
@@ -566,23 +568,23 @@ struct ClaimRow: View {
     let claim: Claim
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: Space.s1) {
             if let d = claim.event.decision {
-                Text(d.question).font(.callout.weight(.medium))
+                Text(d.question).font(TypeScale.callout.weight(.medium))
                 Text(d.answer).strikethrough(!claim.stands)
-                HStack(spacing: 6) {
+                HStack(spacing: Space.s2) {
                     Text(d.source.isEmpty ? "director" : d.source)
                     if !d.model.isEmpty { Text("· \(d.model)") }
                     if d.tokens > 0 { Text("· \(d.tokens) tokens") }
                     Text("· \(claim.event.at)")
                 }
-                .font(.caption).foregroundStyle(.secondary)
+                .font(TypeScale.caption).foregroundStyle(.secondary)
             } else {
                 Text(claim.event.body).strikethrough(!claim.stands).textSelection(.enabled)
-                Text(claim.event.at).font(.caption).foregroundStyle(.secondary)
+                Text(claim.event.at).font(TypeScale.caption).foregroundStyle(.secondary)
             }
             if !claim.stands {
-                Label("Reversed: \(claim.reversed)", systemImage: "arrow.uturn.backward").font(.caption).foregroundStyle(.orange)
+                Label("Reversed: \(claim.reversed)", systemImage: "arrow.uturn.backward").font(TypeScale.caption).foregroundStyle(.orange)
             }
         }
         .padding(.vertical, 2)
@@ -601,7 +603,7 @@ struct LandingRow: View {
                 Text(landed.url)
             }
             Spacer()
-            Text(kind).font(.caption).foregroundStyle(.secondary)
+            Text(kind).font(TypeScale.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -620,14 +622,14 @@ struct EventsSection: View {
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: Space.s2) {
                 ForEach(events.reversed()) { e in
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
                         Text(e.at.prefix(19).replacingOccurrences(of: "T", with: " "))
-                            .font(.caption.monospaced()).foregroundStyle(.secondary)
+                            .font(TypeScale.caption.monospaced()).foregroundStyle(.secondary)
                             .frame(width: 140, alignment: .leading)
-                        Text(e.kind).font(.caption.weight(.medium)).frame(width: 70, alignment: .leading)
-                        Text(e.body).font(.callout).textSelection(.enabled)
+                        Text(e.kind).font(TypeScale.caption.weight(.medium)).frame(width: 70, alignment: .leading)
+                        Text(e.body).font(TypeScale.callout).textSelection(.enabled)
                     }
                 }
             }
@@ -793,7 +795,7 @@ struct InputBar: View {
                         if let stop {
                             Button(action: stopped) {
                                 Image(systemName: "stop.fill")
-                                    .font(.system(size: 11, weight: .bold))
+                                    .font(.system(size: IconSize.small - 0.5, weight: .bold))
                                     .frame(width: 28, height: 28)
                                     .background(Palette.failure.opacity(0.14), in: Circle())
                                     .foregroundStyle(Palette.failure)
@@ -803,7 +805,7 @@ struct InputBar: View {
                         }
                         Button(action: submit) {
                             Image(systemName: "arrow.up")
-                                .font(.system(size: 13, weight: .bold))
+                                .font(.system(size: IconSize.control, weight: .bold))
                                 .frame(width: 28, height: 28)
                                 .background(command == nil ? AnyShapeStyle(Palette.sunken) : AnyShapeStyle(Color.accentColor), in: Circle())
                                 .foregroundStyle(command == nil ? Color.secondary : Color.white)
@@ -822,14 +824,14 @@ struct InputBar: View {
             HStack(spacing: Space.s2) {
                 if let command {
                     Text(command)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TypeScale.codeTiny)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
                 Spacer(minLength: 0)
                 Text(armed ? "Press Esc again to stop" : sendKey.title + (stop == nil ? "" : " · Esc Esc stops"))
-                    .font(.system(size: 11))
+                    .font(TypeScale.small)
                     .foregroundStyle(armed ? AnyShapeStyle(Palette.failure) : AnyShapeStyle(.tertiary))
                     .fixedSize()
             }

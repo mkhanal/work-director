@@ -17,10 +17,10 @@ struct AddProductSheet: View {
     @State private var adding = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Add a product").font(.headline)
+        VStack(alignment: .leading, spacing: Space.s3) {
+            Text("Add a product").font(TypeScale.headline)
             Text("A product is a repository the director plans and works in. Its checks and specifications are read from the repository itself.")
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .font(TypeScale.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Form {
                 LabeledContent("Folder") {
                     HStack {
@@ -44,10 +44,10 @@ struct AddProductSheet: View {
                 .pickerStyle(.radioGroup)
             }
             if let failure {
-                Text(failure).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+                Text(failure).font(TypeScale.caption).foregroundStyle(.red).textSelection(.enabled)
             }
             HStack {
-                if let plan { Text(plan.commandLine).font(.caption2.monospaced()).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle) }
+                if let plan { Text(plan.commandLine).font(TypeScale.small.monospaced()).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle) }
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Add") { Task { await add() } }
@@ -55,7 +55,7 @@ struct AddProductSheet: View {
                     .disabled(plan == nil || adding)
             }
         }
-        .padding(20)
+        .padding(Space.s5)
         .frame(width: 520)
         .task {
             do {

@@ -54,7 +54,7 @@ struct Turn<Content: View, Detail: View>: View {
     var body: some View {
         HStack(alignment: .top, spacing: Space.s3) {
             speaker.mark
-                .font(.system(size: 17))
+                .font(.system(size: IconSize.avatar))
                 .frame(width: Space.avatar, height: 18)
             VStack(alignment: .leading, spacing: Space.s2) {
                 HStack(spacing: Space.s1 + 2) {
