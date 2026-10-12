@@ -29,6 +29,13 @@ they start, with model, tokens, tools and time, and each one's conversation a cl
 write is a `wd` command that runs at once and can be undone; the next gate (verify, land,
 soft-done, done) is one button.
 
+**Download:** each [release](https://github.com/mkhanal/work-director/releases) carries
+`Work-Director-<version>-macos-arm64.zip` (Apple silicon, macOS 15 or later). Unzip it and move
+**Work Director.app** to Applications. The app is not notarized yet, so the first time,
+right-click it and choose **Open** (or run `xattr -dr com.apple.quarantine "/Applications/Work Director.app"`).
+
+**Build it yourself:**
+
 ```
 scripts/build-macos.sh            # dist/Work Director.app, with the matching wd inside
 ```
@@ -63,6 +70,7 @@ session drives — and the hands-off rail for scripted work.
 
 ```
 curl -fsSL https://raw.githubusercontent.com/mkhanal/work-director/main/scripts/install.sh | sh
+# a prerelease by name:  ... | sh -s v1.0.0-rc.1
 wd doctor                         # which runner CLIs are detected; repo state here
 cp projects/example.md ~/.work-director/projects/my-app.md   # edit path, runner, mode, verify
 claude                                                        # in this repo: the session is the director

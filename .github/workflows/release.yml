@@ -58,10 +58,24 @@ jobs:
           unzip -l dist/wd-windows-amd64.zip | grep -q 'wd.exe'
           unzip -l dist/wd-windows-amd64.zip | grep -q 'wd.1'
 
+      # The app people double-click: the native macOS app with the matching wd
+      # inside, zipped for this runner's architecture (Apple silicon).
+      - name: build the mac app
+        run: |
+          VERSION="${GITHUB_REF_NAME}" COMMIT="$(git rev-parse --short HEAD)" scripts/build-macos.sh
+          zip="Work-Director-${GITHUB_REF_NAME}-macos-$(uname -m).zip"
+          ditto -c -k --keepParent "dist/Work Director.app" "dist/$zip"
+          (cd dist && shasum -a 256 "$zip" > "$zip.sha256" && cat "$zip.sha256" >> checksums.txt)
+          "dist/Work Director.app/Contents/MacOS/wd" --version | grep -F "${GITHUB_REF_NAME}"
+
+      - name: build the mac disk image
+        run: VERSION="${GITHUB_REF_NAME}" COMMIT="$(git rev-parse --short HEAD)" scripts/dmg.sh
+
       - name: attest where every asset was built
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
+            dist/Work-Director-*.zip
             dist/wd-*.tar.gz
             dist/wd-*.zip
             dist/wd-*.dmg
@@ -74,18 +88,19 @@ jobs:
           grep -F "${GITHUB_REF_NAME}" scripts/homebrew/wd.rb
           ! grep -q 'depends_on' scripts/homebrew/wd.rb
 
-      - name: build the mac disk image
-        run: VERSION="${GITHUB_REF_NAME}" COMMIT="$(git rev-parse --short HEAD)" scripts/dmg.sh
-
       - name: publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           git tag -l
+          # A tag with a suffix (v1.0.0-rc.1) is a prerelease: offered, never "latest".
+          pre=(); case "${GITHUB_REF_NAME}" in *-*) pre=(--prerelease);; esac
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes \
             --verify-tag \
+            "${pre[@]}" \
+            dist/Work-Director-*.zip \
             dist/wd-*.tar.gz \
             dist/wd-*.zip \
             dist/wd-*.dmg \
