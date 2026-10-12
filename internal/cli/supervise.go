@@ -416,7 +416,7 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string, at co
 			done = nil
 		}
 	}
-	body := strings.TrimSpace(strings.Join(reply, "\n"))
+	body := coordinator.Said(reply)
 	if len(out.Actions) > 0 {
 		body += "\n\nDone:\n- " + strings.Join(out.Actions, "\n- ")
 	}

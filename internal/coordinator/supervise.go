@@ -181,6 +181,19 @@ func ParseSupervision(texts []string) (actions []Action, refused []string) {
 	return actions, refused
 }
 
+// Said is a supervisor's reply without its actions: what it said before the
+// last ACTIONS: line.
+func Said(texts []string) string {
+	lines := strings.Split(strings.Join(texts, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if actionsRe.MatchString(lines[i]) {
+			lines = lines[:i]
+			break
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
 // action is the one action line l says, if it says one.
 func action(l string) (Action, bool) {
 	if m := sendRe.FindStringSubmatch(l); m != nil {
