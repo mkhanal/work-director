@@ -129,6 +129,8 @@ pub struct WorkPage {
     escape: Cell<EscapeTaps>,
     loading: Cell<bool>,
     stale: Cell<bool>,
+    /// Set while the page marks the view it shows, so the tabs do not take it as a choice.
+    syncing: Cell<bool>,
     watch: RefCell<Option<Watch>>,
     /// What the Pause or Resume button runs, for the work as last read.
     pause_plan: RefCell<Option<Plan>>,
@@ -300,7 +302,7 @@ impl WorkPage {
             let weak = self.me.clone();
             button.connect_toggled(move |b| {
                 if b.is_active() {
-                    if let Some(page) = weak.upgrade() {
+                    if let Some(page) = weak.upgrade().filter(|p| !p.syncing.get()) {
                         page.show(tab);
                     }
                 }
@@ -745,7 +747,10 @@ impl WorkPage {
             Tab::Record => &h.record,
         };
         if !button.is_active() {
+            // Marking the view shown is not choosing it.
+            self.syncing.set(true);
             button.set_active(true);
+            self.syncing.set(false);
         }
     }
 
@@ -1491,6 +1496,7 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
         escape: Cell::new(EscapeTaps::default()),
         loading: Cell::new(false),
         stale: Cell::new(false),
+        syncing: Cell::new(false),
         watch: RefCell::new(None),
         pause_plan: RefCell::new(None),
     }

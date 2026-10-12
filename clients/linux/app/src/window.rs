@@ -43,6 +43,8 @@ impl Window {
             .title("Work Director")
             .default_width(1280)
             .default_height(820)
+            .width_request(360)
+            .height_request(480)
             .build();
         let split = adw::OverlaySplitView::builder()
             .min_sidebar_width(240.0)
