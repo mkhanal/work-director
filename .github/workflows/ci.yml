@@ -32,6 +32,39 @@ jobs:
       - run: swift test
         working-directory: clients/macos
 
+  # The Linux app is tested the same way, its model headless against a wd
+  # built from this commit; the GTK app is linted and built.
+  linux-app:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: clients/linux
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-4-dev libadwaita-1-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: 'rustfmt, clippy' }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: clients/linux }
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo build --release --workspace
+      # Last, so a formatting slip never hides a failing test; the patch that
+      # fixes it is kept with the run.
+      - name: formatted as rustfmt formats it
+        run: |
+          cargo fmt --all
+          git diff > "$RUNNER_TEMP/rustfmt.patch"
+          git diff --exit-code --stat || { echo "run cargo fmt in clients/linux"; exit 1; }
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustfmt-patch
+          path: ${{ runner.temp }}/rustfmt.patch
+          if-no-files-found: ignore
+
   # Windows runs the packages whose tests need no Unix shell: the ledger, the
   # state machine, projects, taste, review and delivery's link checks.
   windows:

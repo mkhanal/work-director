@@ -12,3 +12,9 @@
   What a person using the app can rely on: which `wd` it runs, what a write shows before
   it runs, how work reads on screen, and that the screen follows the ledger. Not view
   layout, and nothing the Go side already promises.
+
+- **Linux app (`clients/linux`)** — `clients/linux/*.lazyspec.md`, married tests in
+  `clients/linux/tests/<stem>_lazyspec.rs` (a test fn named for the heading in snake
+  case, apostrophes dropped, with the heading as its doc comment). The same scope as the
+  macOS app: what a person using it can rely on, not GTK layout, and nothing the Go side
+  already promises.

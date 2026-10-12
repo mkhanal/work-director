@@ -1,0 +1,18 @@
+# The GTK4 + libadwaita app over the kit: it renders what wd serves and sends
+# every write back as a wd argv.
+[package]
+name = "work-director"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+publish = false
+
+[[bin]]
+name = "work-director"
+path = "src/main.rs"
+
+[dependencies]
+adw = { package = "libadwaita", version = "0.7", features = ["v1_5"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+gtk = { package = "gtk4", version = "0.9", features = ["v4_14"] }
+kit = { package = "work-director-kit", path = ".." }

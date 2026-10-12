@@ -1,0 +1,26 @@
+# The Linux app's model: the stdio channel to wd, the ledger's types, and the
+# plans and reads the views render. No GTK here, so its tests run headless.
+[package]
+name = "work-director-kit"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+publish = false
+
+[lib]
+name = "kit"
+path = "src/lib.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[workspace]
+members = ["app"]
+resolver = "2"
+
+[profile.release]
+lto = "thin"
+strip = true
