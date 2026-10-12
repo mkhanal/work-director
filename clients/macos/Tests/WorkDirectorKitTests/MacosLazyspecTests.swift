@@ -650,4 +650,48 @@ func fakeRunner(_ home: Home) throws {
         #expect(listed.contains("always pin versions"))
         #expect(throws: PlanError.empty) { try Plan.remember(" ", work: work) }
     }
+
+    @Test("A Message Shows At Once And The Field Is Free Again")
+    func messageShowsAtOnce() async throws {
+        let home = try Home()
+        let goal = try home.goal("demo", "Pick a database")
+        let store = await Store(channel: try home.channel())
+        func settled(_ id: UUID) async throws -> Outgoing {
+            let deadline = Date().addingTimeInterval(5)
+            while Date() < deadline {
+                if let m = await store.outbox.first(where: { $0.id == id }), m.state != .sending { return m }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            throw CancellationError()
+        }
+
+        let taken = await store.post(try Plan.decide(goal, text: "use sqlite"), to: goal)
+        #expect(taken.state == .sending && taken.text == "use sqlite")
+        #expect(await store.outbox.map(\.id) == [taken.id])
+        #expect(try await settled(taken.id).state == .sent)
+        let detail = try await store.goal(goal)
+        #expect(taken.arrived(in: detail))
+        #expect(detail.yours.map(\.body) == ["use sqlite"])
+        #expect(detail.isYours(try #require(detail.yours.first)))
+
+        let refused = await store.post(try Plan.send("nope", text: "hello"), to: "nope")
+        guard case .failed(let why, sent: false) = try await settled(refused.id).state else {
+            Issue.record("a message to unknown work was not refused")
+            return
+        }
+        #expect(!why.isEmpty)
+        await store.discard(refused.id)
+        #expect(await store.outbox.contains { $0.id == refused.id } == false)
+
+        let half = await store.post(try Plan.decide(goal, text: "keep it local"), to: goal, then: try Plan.typed("wd decide nope x"))
+        guard case .failed(_, sent: true) = try await settled(half.id).state else {
+            Issue.record("a message whose follow-up failed is not marked taken")
+            return
+        }
+        await store.retry(half.id)
+        try await Task.sleep(for: .milliseconds(50))
+        _ = try await settled(half.id)
+        let again = try await store.goal(goal)
+        #expect(again.yours.map(\.body) == ["use sqlite", "keep it local"])
+    }
 }

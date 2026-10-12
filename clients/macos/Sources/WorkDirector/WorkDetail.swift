@@ -53,6 +53,7 @@ struct WorkDetail: View {
     var body: some View {
         Group {
             if let loaded {
+                ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         if let focus, let focusFeed, let task = focusedTask(focus, in: loaded) {
@@ -101,6 +102,16 @@ struct WorkDetail: View {
                         MessageBar(store: store, work: target, working: working(loaded), about: about(target, in: loaded))
                             .id(target.id)
                     }
+                }
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        if focus == nil, case .goal(let goal) = loaded, !goal.yours.isEmpty {
+                            YoursMenu(yours: goal.yours) { id in
+                                withAnimation { proxy.scrollTo(id, anchor: .top) }
+                            }
+                        }
+                    }
+                }
                 }
             } else if let failure {
                 ContentUnavailableView("Cannot read \(id)", systemImage: "exclamationmark.triangle", description: Text(failure))
@@ -474,9 +485,10 @@ struct EventsSection: View {
     }
 }
 
-/// Typing to work while it runs, as in a conversation. A goal passes the
-/// message to every open task and keeps it as a decision; a session that is
-/// busy reads it when it is ready. While something works it can be stopped, and
+/// Typing to work while it runs, as in a conversation. A goal keeps the
+/// message as a decision for its supervisor; a session that is busy reads it
+/// when it is ready. Sending never holds the field: the message shows in the
+/// conversation at once. While something works it can be stopped, and
 /// whatever it had not read yet comes back here to be said again.
 struct MessageBar: View {
     let store: Store
@@ -495,7 +507,7 @@ struct MessageBar: View {
         InputBar(
             text: $text,
             placeholder: continuing ? "Continue this goal… say what is being worked on; it is planned and started again"
-                : work.kind.isGoal ? "Tell this goal… every task gets it, and it is kept as a decision" : "Message this task… it reads it when it is ready",
+                : work.kind.isGoal ? "Tell this goal… its supervisor reads it, and it is kept as a decision" : "Message this task… it reads it when it is ready",
             command: plan?.commandLine,
             busy: sending,
             note: outcome,
@@ -517,35 +529,26 @@ struct MessageBar: View {
 
     private func send() async {
         guard let plan else { return }
-        sending = true
-        defer { sending = false }
-        do {
-            if continuing {
+        if continuing {
+            sending = true
+            defer { sending = false }
+            do {
                 _ = try await store.start(plan)
                 failed = false
                 outcome = "continued: planned and started again"
                 text = ""
-                return
+            } catch {
+                failed = true
+                outcome = String(describing: error)
             }
-            let said = text
-            let result = try await store.run(plan)
-            failed = result.code != 0
-            outcome = failed ? (result.stderr.isEmpty ? result.stdout : result.stderr) : result.stdout
-            if !failed && remember {
-                let kept = try await store.run(try Plan.remember(said, work: work))
-                if kept.code != 0 {
-                    failed = true
-                    outcome = "sent, but not remembered: " + (kept.stderr.isEmpty ? kept.stdout : kept.stderr)
-                } else {
-                    outcome = (outcome ?? "") + " · remembered as feedback"
-                }
-            }
-            if !failed { text = "" }
-        } catch {
-            failed = true
-            outcome = String(describing: error)
+            return
         }
-        await store.refresh()
+        // The field is free again at once; the message shows in the
+        // conversation until the work's record holds it.
+        store.post(plan, to: work.id, then: remember ? try? Plan.remember(text, work: work) : nil)
+        text = ""
+        outcome = nil
+        failed = false
     }
 
     private func stop() async {
@@ -706,4 +709,26 @@ struct InputBar: View {
 @MainActor
 final class EscapeTarget {
     var stop: (() -> Void)?
+}
+
+/// What the person said on a goal, newest first, each a jump back to where it
+/// was said.
+struct YoursMenu: View {
+    let yours: [Event]
+    let jump: (Int) -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(yours.reversed()) { event in
+                Button {
+                    jump(event.id)
+                } label: {
+                    Text("\(when(event.at)) · \(String((event.decision?.answer ?? event.body).prefix(80)))")
+                }
+            }
+        } label: {
+            Label("Your messages", systemImage: "person.crop.circle")
+        }
+        .help("Jump to something you said on this goal")
+    }
 }

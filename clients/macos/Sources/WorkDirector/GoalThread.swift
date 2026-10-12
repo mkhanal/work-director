@@ -17,11 +17,13 @@ struct GoalThread: View {
                 DeliveryLine(delivery: delivery, landings: goal.landings)
             }
             if !goal.goal.detail.isEmpty {
-                PromptRow(text: goal.goal.detail, brief: false, at: goal.goal.created, label: "Asked")
+                YouBubble(text: goal.goal.detail, at: when(goal.goal.created), label: "You asked")
             }
             PlanBlock(goal: goal, focus: focus)
             ForEach(goal.thread) { step in
                 switch step {
+                case .event(let event) where goal.isYours(event):
+                    YouBubble(text: event.decision?.answer ?? event.body, at: when(event.at), label: event.kind == "answer" ? "You answered" : "You")
                 case .event(let event):
                     TimelineRow(event: event, task: title(of: event.work), focus: event.work == goal.goal.id ? nil : { focus(event.work) })
                 case .look(let event):
@@ -45,6 +47,9 @@ struct GoalThread: View {
                         Text(said).foregroundStyle(.secondary).lineLimit(3).textSelection(.enabled)
                     }
                 }
+            }
+            ForEach(store.outbox.filter { $0.work == goal.goal.id && !$0.arrived(in: goal) }) { message in
+                OutgoingBubble(store: store, message: message)
             }
             Waiting(store: store, goal: goal, open: focus, answered: answered)
         }

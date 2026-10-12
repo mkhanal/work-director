@@ -38,6 +38,11 @@ struct ConversationView: View {
                     ToolGroup(calls: calls, working: feed.status == .running)
                 }
             }
+            if feed.agent == nil {
+                ForEach(store.outbox.filter { $0.work == work.id && !$0.arrived(in: feed.steps) }) { message in
+                    OutgoingBubble(store: store, message: message, waiting: feed.status == .running ? "queued: read once it is ready" : "sent")
+                }
+            }
             if feed.status == .running {
                 Label {
                     Text("Working…")
@@ -114,6 +119,90 @@ struct PromptRow: View {
     }
 
     private var folds: Bool { text.count > 400 || text.split(separator: "\n").count > 4 }
+}
+
+/// What the person said, set apart from everything else said on the work so
+/// it is found again scrolling back: on the right, in the accent colour.
+struct YouBubble<Status: View>: View {
+    let text: String
+    let at: String
+    var label = "You"
+    @ViewBuilder var status: Status
+    @State private var expanded = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            Spacer(minLength: 80)
+            VStack(alignment: .trailing, spacing: 6) {
+                HStack(spacing: 6) {
+                    status
+                    Text(at).foregroundStyle(.tertiary)
+                    Text(label).font(.caption.weight(.semibold))
+                    Image(systemName: "person.crop.circle.fill").foregroundStyle(Color.accentColor)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Text(text)
+                    .lineLimit(expanded || !folds ? nil : 6)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.35)))
+                if folds {
+                    Button(expanded ? "Show less" : "Show all") { expanded.toggle() }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var folds: Bool { text.count > 600 || text.split(separator: "\n").count > 6 }
+}
+
+extension YouBubble where Status == EmptyView {
+    init(text: String, at: String, label: String = "You") {
+        self.init(text: text, at: at, label: label) { EmptyView() }
+    }
+}
+
+/// A message on its way: sending, waiting to be read, or refused with why and
+/// a way to send it again.
+struct OutgoingBubble: View {
+    let store: Store
+    let message: Outgoing
+    /// What a message `wd` took waits on before it shows in the record.
+    var waiting = "sent"
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            YouBubble(text: message.text, at: message.at.formatted(date: .omitted, time: .shortened)) {
+                switch message.state {
+                case .sending:
+                    ProgressView().controlSize(.mini)
+                    Text("Sending…")
+                case .sent:
+                    Image(systemName: "checkmark")
+                    Text(waiting)
+                case .failed:
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                    Text("Not sent").foregroundStyle(.red)
+                }
+            }
+            if case .failed(let why, _) = message.state {
+                HStack(spacing: 10) {
+                    Text(why).foregroundStyle(.red).lineLimit(3).textSelection(.enabled)
+                    Button("Retry") { store.retry(message.id) }.buttonStyle(.link)
+                    Button("Discard") { store.discard(message.id) }.buttonStyle(.link)
+                }
+                .font(.caption)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
 }
 
 /// The executor's reasoning, as its provider summarises it. Folded unless it

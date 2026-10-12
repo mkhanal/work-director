@@ -141,6 +141,57 @@ public final class Store {
         try await channel.action(plan.argv)
     }
 
+    /// Messages sent to work, oldest first, from the moment they are sent.
+    public private(set) var outbox: [Outgoing] = []
+
+    /// Sends text to work without the person waiting on it: it is in the
+    /// outbox at once, and `then` runs once `wd` has taken it.
+    @discardableResult
+    public func post(_ plan: Plan, to work: String, then: Plan? = nil) -> Outgoing {
+        let message = Outgoing(id: UUID(), work: work, text: plan.argv.last ?? "", at: Date(), state: .sending, plan: plan, then: then)
+        outbox.append(message)
+        Task { await deliver(message.id) }
+        return message
+    }
+
+    /// Sends a refused message again; one `wd` took is not sent twice.
+    public func retry(_ id: UUID) {
+        guard let i = outbox.firstIndex(where: { $0.id == id }), case .failed = outbox[i].state else { return }
+        Task { await deliver(id) }
+    }
+
+    public func discard(_ id: UUID) {
+        outbox.removeAll { $0.id == id }
+    }
+
+    private func deliver(_ id: UUID) async {
+        guard let i = outbox.firstIndex(where: { $0.id == id }) else { return }
+        let message = outbox[i]
+        let alreadySent = if case .failed(_, sent: true) = message.state { true } else { false }
+        outbox[i].state = .sending
+        var state = Outgoing.State.sent
+        do {
+            if !alreadySent {
+                let sent = try await run(message.plan)
+                if sent.code != 0 {
+                    state = .failed(sent.stderr.isEmpty ? sent.stdout : sent.stderr, sent: false)
+                }
+            }
+            if case .sent = state, let then = message.then {
+                let kept = try await run(then)
+                if kept.code != 0 {
+                    state = .failed("sent, but not remembered: " + (kept.stderr.isEmpty ? kept.stdout : kept.stderr), sent: true)
+                }
+            }
+        } catch {
+            state = .failed("\(error)", sent: alreadySent)
+        }
+        if let i = outbox.firstIndex(where: { $0.id == id }) {
+            outbox[i].state = state
+        }
+        await refresh()
+    }
+
     private func decode<T: Decodable>(_ type: T.Type, _ result: ActionResult) throws -> T {
         guard result.code == 0 else {
             throw ChannelError.refused(kind: "exit \(result.code)", message: result.stderr.isEmpty ? result.stdout : result.stderr)

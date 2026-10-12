@@ -74,6 +74,12 @@ hold only that product's work; with none, every product's.
 - Stopping runs `wd stop <id>`.
 - The messages it withdraws come back as one text, oldest first, for the person to edit and send again.
 
+## A Message Shows At Once And The Field Is Free Again
+- Sending puts the message in the outbox at once, sending, and clears the field without waiting for `wd`.
+- A message `wd` took is sent, and shows until the work's record holds it: a decision on a goal, or a prompt in its session.
+- A message `wd` refused stays, with why; retrying sends it again, and what `wd` already took is not sent twice.
+- What the person said on a goal, its decisions and answers, is set apart from what agents said and listed to jump back to.
+
 ## Escape Pressed Twice Quickly Stops The Work
 - A second Escape within 0.8 seconds of the first stops the task or goal on screen, as the Stop button does.
 - A lone Escape, or a second one later than that, stops nothing.

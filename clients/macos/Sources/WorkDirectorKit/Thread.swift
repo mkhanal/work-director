@@ -111,3 +111,18 @@ extension GoalDetail {
         return nil
     }
 }
+
+extension GoalDetail {
+    /// What the person said on the goal itself, oldest first: its decisions
+    /// and answers.
+    public var yours: [Event] {
+        thread.compactMap { step in
+            if case .event(let e) = step, isYours(e) { e } else { nil }
+        }
+    }
+
+    /// Whether the person said it on the goal: a decision or an answer.
+    public func isYours(_ e: Event) -> Bool {
+        e.work == goal.id && (e.kind == "decision" || e.kind == "answer")
+    }
+}
