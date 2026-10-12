@@ -54,6 +54,10 @@ struct WorkDetail: View {
         Group {
             if let loaded {
                 ScrollViewReader { proxy in
+                // The bar sits under the scroll view, not over it: whatever is
+                // last in the conversation ends above the bar however tall the
+                // bar grows.
+                VStack(spacing: 0) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         if let focus, let focusFeed, let task = focusedTask(focus, in: loaded) {
@@ -70,6 +74,12 @@ struct WorkDetail: View {
                 }
                 .defaultScrollAnchor(following ? .bottom : .top)
                 .defaultScrollAnchor(following ? .bottom : .top, for: .sizeChanges)
+                if let target = messaged(loaded), !target.atRest || (target.kind.isGoal && target.state == .done) {
+                    Divider()
+                    MessageBar(store: store, work: target, working: working(loaded), about: about(target, in: loaded))
+                        .id(target.id)
+                }
+                }
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         if let gate, let pass = Plan.passing(gate) {
@@ -96,12 +106,6 @@ struct WorkDetail: View {
                                 choose: { choose($0, in: loaded) }, stop: { plan = Plan.stop($0) },
                                 menu: { card in AnyView(cardMenu(card, in: loaded)) })
                         .inspectorColumnWidth(min: 260, ideal: 340, max: 480)
-                }
-                .safeAreaInset(edge: .bottom) {
-                    if let target = messaged(loaded), !target.atRest || (target.kind.isGoal && target.state == .done) {
-                        MessageBar(store: store, work: target, working: working(loaded), about: about(target, in: loaded))
-                            .id(target.id)
-                    }
                 }
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
