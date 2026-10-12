@@ -84,14 +84,18 @@ impl Step {
             StepKind::Tool => self
                 .tool
                 .as_ref()
-                .map(|t| [t.name.as_str(), t.summary.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" · "))
+                .map(|t| {
+                    [t.name.as_str(), t.summary.as_str()]
+                        .iter()
+                        .filter(|s| !s.is_empty())
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .join(" · ")
+                })
                 .unwrap_or_default(),
-            StepKind::Question => self
-                .question
-                .as_ref()
-                .and_then(|q| q.items.first())
-                .map(|i| i.question.clone())
-                .unwrap_or_default(),
+            StepKind::Question => {
+                self.question.as_ref().and_then(|q| q.items.first()).map(|i| i.question.clone()).unwrap_or_default()
+            }
             _ => self.text().lines().next().unwrap_or("").to_string(),
         }
     }

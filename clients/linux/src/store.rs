@@ -77,7 +77,10 @@ struct Stopped {
 
 fn decode<T: DeserializeOwned>(result: ActionResult) -> Result<T, ChannelError> {
     if result.code != 0 {
-        return Err(ChannelError::Refused { kind: format!("exit {}", result.code), message: result.complaint().to_string() });
+        return Err(ChannelError::Refused {
+            kind: format!("exit {}", result.code),
+            message: result.complaint().to_string(),
+        });
     }
     serde_json::from_str(&result.stdout)
         .map_err(|e| ChannelError::Unreadable(format!("{}: {e}", std::any::type_name::<T>())))
@@ -232,7 +235,12 @@ impl Store {
         self.channel.gate(id).await
     }
 
-    pub async fn conversation(&self, id: &str, from: usize, agent: Option<&str>) -> Result<ConversationPage, ChannelError> {
+    pub async fn conversation(
+        &self,
+        id: &str,
+        from: usize,
+        agent: Option<&str>,
+    ) -> Result<ConversationPage, ChannelError> {
         self.channel.conversation(id, from, agent).await
     }
 
@@ -359,7 +367,10 @@ impl Store {
         if let (OutgoingState::Sent, Some(then)) = (&state, &message.then) {
             match self.run(then).await {
                 Ok(kept) if kept.code != 0 => {
-                    state = OutgoingState::Failed { why: format!("sent, but not remembered: {}", kept.complaint()), sent: true }
+                    state = OutgoingState::Failed {
+                        why: format!("sent, but not remembered: {}", kept.complaint()),
+                        sent: true,
+                    }
                 }
                 Ok(_) => {}
                 Err(e) => state = OutgoingState::Failed { why: format!("sent, but not remembered: {e}"), sent: true },

@@ -14,7 +14,10 @@ pub enum OutgoingState {
     Sent,
     /// Refused, with why. `sent` says whether `wd` took the message itself
     /// and only what ran after it failed.
-    Failed { why: String, sent: bool },
+    Failed {
+        why: String,
+        sent: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

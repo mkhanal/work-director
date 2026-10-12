@@ -15,12 +15,22 @@ pub struct Turn {
     build: Box<dyn FnOnce() -> gtk::Widget>,
 }
 
+/// What a turn is named and shows, before it is built.
+pub struct Key(String);
+
+impl Key {
+    pub fn with(self, build: impl FnOnce() -> gtk::Widget + 'static) -> Turn {
+        Turn { key: self.0, build: Box::new(build) }
+    }
+}
+
 impl Turn {
-    /// A turn named `id`, rebuilt whenever `shown` changes.
-    pub fn new(id: impl std::fmt::Display, shown: &impl Debug, build: impl FnOnce() -> gtk::Widget + 'static) -> Turn {
+    /// The key of a turn named `id`, rebuilt whenever `shown` changes. Ids
+    /// hold no `:`.
+    pub fn key(id: impl std::fmt::Display, shown: &impl Debug) -> Key {
         let mut hasher = DefaultHasher::new();
         format!("{shown:?}").hash(&mut hasher);
-        Turn { key: format!("{id}:{:x}", hasher.finish()), build: Box::new(build) }
+        Key(format!("{id}:{:x}", hasher.finish()))
     }
 
     fn id(&self) -> &str {

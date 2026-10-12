@@ -188,7 +188,12 @@ impl Channel {
     }
 
     /// The work's session steps from index `from` on, or a subagent's.
-    pub async fn conversation(&self, id: &str, from: usize, agent: Option<&str>) -> Result<ConversationPage, ChannelError> {
+    pub async fn conversation(
+        &self,
+        id: &str,
+        from: usize,
+        agent: Option<&str>,
+    ) -> Result<ConversationPage, ChannelError> {
         self.request("conversation", Params { id: Some(id), from: Some(from), agent, ..Params::default() }).await
     }
 
@@ -226,7 +231,9 @@ impl Channel {
             .map_err(|e| ChannelError::Unreadable(format!("{method}: {e}")))?;
         line.push(b'\n');
         let written = match lock(&self.inner.input).as_mut() {
-            Some(input) => input.write_all(&line).and_then(|_| input.flush()).map_err(|e| ChannelError::Io(e.to_string())),
+            Some(input) => {
+                input.write_all(&line).and_then(|_| input.flush()).map_err(|e| ChannelError::Io(e.to_string()))
+            }
             None => Err(ChannelError::Closed),
         };
         if let Err(e) = written {

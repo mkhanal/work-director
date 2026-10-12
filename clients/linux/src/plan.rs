@@ -69,7 +69,10 @@ fn said(text: &str) -> Result<String, PlanError> {
 impl Plan {
     /// The command as a person reads it, quoted so it reads back as typed.
     pub fn command_line(&self) -> String {
-        std::iter::once("wd".to_string()).chain(self.argv.iter().map(|w| quoted(w.as_str()))).collect::<Vec<_>>().join(" ")
+        std::iter::once("wd".to_string())
+            .chain(self.argv.iter().map(|w| quoted(w.as_str())))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     /// Text typed as a command, split into words without a shell.
@@ -101,7 +104,10 @@ impl Plan {
     /// stopped.
     pub fn start(project: &str, text: &str) -> Result<Plan, PlanError> {
         let text = said(text)?;
-        Ok(plan("Start goal", vec!["goal".into(), "start".into(), project.into(), text, "--detach".into(), "--json".into()]))
+        Ok(plan(
+            "Start goal",
+            vec!["goal".into(), "start".into(), project.into(), text, "--detach".into(), "--json".into()],
+        ))
     }
 
     /// Picks a goal up where it stands with what the person typed.

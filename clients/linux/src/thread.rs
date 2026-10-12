@@ -68,9 +68,7 @@ const ENDING_STATES: [&str; 5] = ["done", "dropped", "abandoned", "paused", "blo
 impl GoalDetail {
     /// Whether a supervisor has been started on the goal.
     pub fn supervised(&self) -> bool {
-        self.events
-            .iter()
-            .any(|e| e.work == self.goal.id && e.kind == "spawn" && e.body.starts_with(SUPERVISE_PREFIX))
+        self.events.iter().any(|e| e.work == self.goal.id && e.kind == "spawn" && e.body.starts_with(SUPERVISE_PREFIX))
     }
 
     /// The goal as one conversation, oldest first: each answer read with the
@@ -79,12 +77,8 @@ impl GoalDetail {
         let mut steps: Vec<ThreadStep> = Vec::new();
         let mut open: HashMap<&str, usize> = HashMap::new();
         // An answer reaches its session as a message too; it is read once, as the answer.
-        let answers: HashSet<(&str, &str)> = self
-            .events
-            .iter()
-            .filter(|e| e.kind == "answer")
-            .map(|e| (e.work.as_str(), e.body.as_str()))
-            .collect();
+        let answers: HashSet<(&str, &str)> =
+            self.events.iter().filter(|e| e.kind == "answer").map(|e| (e.work.as_str(), e.body.as_str())).collect();
         let mut events: Vec<&Event> = self.events.iter().collect();
         events.sort_by(|a, b| a.at.cmp(&b.at).then(a.id.cmp(&b.id)));
         for e in events {
@@ -121,10 +115,7 @@ impl GoalDetail {
             "state" => ENDING_STATES.contains(&e.body.as_str()).then(|| ThreadStep::Event(e.clone())),
             "look" => Some(ThreadStep::Look(e.clone())),
             "supervised" => Some(ThreadStep::Supervisor(e.clone(), self.reply(&e.body))),
-            "note" => e
-                .body
-                .strip_prefix(STOPPED_PREFIX)
-                .map(|said| ThreadStep::Stopped(e.clone(), said.to_string())),
+            "note" => e.body.strip_prefix(STOPPED_PREFIX).map(|said| ThreadStep::Stopped(e.clone(), said.to_string())),
             _ => None,
         }
     }

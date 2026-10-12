@@ -40,7 +40,11 @@ fn built_wd() -> &'static Path {
 fn temp_dir() -> PathBuf {
     static N: AtomicU64 = AtomicU64::new(0);
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    let dir = std::env::temp_dir().join(format!("wd-linux-{}-{}-{nanos}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let dir = std::env::temp_dir().join(format!(
+        "wd-linux-{}-{}-{nanos}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::SeqCst)
+    ));
     fs::create_dir_all(&dir).expect("temp dir");
     dir
 }
@@ -271,8 +275,13 @@ fn a_write_runs_at_once_and_shows_the_command_it_ran() {
     let run = Run::new();
     let store = run.store(home.channel());
     assert_eq!(run.wait(store.run(&plan)).expect("ran").code, 0);
-    let decisions: Vec<String> =
-        run.wait(store.events_of(&id)).expect("events").into_iter().filter(|e| e.kind == "decision").map(|e| e.body).collect();
+    let decisions: Vec<String> = run
+        .wait(store.events_of(&id))
+        .expect("events")
+        .into_iter()
+        .filter(|e| e.kind == "decision")
+        .map(|e| e.body)
+        .collect();
     assert_eq!(decisions, vec!["use sqlite, it's what we know"]);
 
     assert_eq!(plan.undo(), None);
@@ -390,7 +399,9 @@ fn a_new_goal_first_offers_the_goals_it_may_continue() {
 
     run.wait(flow.submit("tracker", "add tags to the CSV export"));
     match flow.phase() {
-        NewGoalPhase::Offering(found) => assert_eq!(found.iter().map(|f| f.goal.id.clone()).collect::<Vec<_>>(), vec![csv.clone()]),
+        NewGoalPhase::Offering(found) => {
+            assert_eq!(found.iter().map(|f| f.goal.id.clone()).collect::<Vec<_>>(), vec![csv.clone()])
+        }
         other => panic!("phase = {other:?}, want the CSV goal offered"),
     }
     assert!(home.wd(&["status", "--all"]).contains(&format!("{csv}\tdone")), "nothing started while offering");
@@ -407,7 +418,10 @@ fn a_new_goal_first_offers_the_goals_it_may_continue() {
         NewGoalPhase::Started(fresh) => fresh,
         other => panic!("phase = {other:?}, want a new goal started in one step"),
     };
-    assert!(fresh.goal.title == "A dark mode for the settings page" && fresh.tasks.is_empty(), "the goal returns before it is planned");
+    assert!(
+        fresh.goal.title == "A dark mode for the settings page" && fresh.tasks.is_empty(),
+        "the goal returns before it is planned"
+    );
     let mut planned = 0;
     let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline {
@@ -455,7 +469,10 @@ fn a_sessions_conversation_follows_it_reading_only_what_can_still_change() {
     later.push(r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"q1","name":"AskUserQuestion","input":{"questions":[{"header":"Colour","question":"Which colour?","multiSelect":false,"options":[{"label":"Red","description":""},{"label":"Blue","description":""}]}]}}]}}"#);
     fs::write(&file, lines(&later)).expect("write store");
     run.wait(feed.read());
-    assert_eq!(kinds(&feed), vec![StepKind::Prompt, StepKind::Thinking, StepKind::Text, StepKind::Tool, StepKind::Question]);
+    assert_eq!(
+        kinds(&feed),
+        vec![StepKind::Prompt, StepKind::Thinking, StepKind::Text, StepKind::Tool, StepKind::Question]
+    );
     assert_eq!(feed.state().steps[3].tool.as_ref().and_then(|t| t.result.clone()), Some("ok".to_string()));
     assert_eq!(
         feed.state().asking.as_ref().and_then(|q| q.items.first()).map(|i| i.question.clone()),
@@ -605,7 +622,8 @@ fn the_agents_panel_shows_each_task_and_the_subagents_it_started() {
     let (a, b, c, quiet) = (work("a", "running"), work("b", "needs-input"), work("c", "done"), work("q", "queued"));
     let usage = |tokens: i64, from: &str, to: &str| json!({"model": "m", "tokens": tokens, "tools": 1, "started": from, "last": to});
     let activity = |status: &str, asking: bool, usage: Value, subagents: Value| -> Activity {
-        let question = if asking { json!({"id": "q1", "items": [], "answers": null, "reply": null}) } else { Value::Null };
+        let question =
+            if asking { json!({"id": "q1", "items": [], "answers": null, "reply": null}) } else { Value::Null };
         serde_json::from_value(json!({"now": "working", "kind": "text", "at": null, "asking": question, "error": null,
             "status": status, "usage": usage, "subagents": subagents}))
         .expect("an activity")
@@ -619,14 +637,33 @@ fn the_agents_panel_shows_each_task_and_the_subagents_it_started() {
         false,
         &[a.clone(), b, c, quiet],
         &HashMap::from([
-            ("a".to_string(), activity("running", false, usage(100, "2026-10-11T10:00:00Z", "2026-10-11T10:05:00Z"), subs)),
-            ("b".to_string(), activity("waiting", true, usage(10, "2026-10-11T10:00:00Z", "2026-10-11T10:01:00Z"), json!([]))),
-            ("c".to_string(), activity("stopped", false, usage(1000, "2026-10-11T09:00:00Z", "2026-10-11T09:30:00Z"), json!([]))),
+            (
+                "a".to_string(),
+                activity("running", false, usage(100, "2026-10-11T10:00:00Z", "2026-10-11T10:05:00Z"), subs),
+            ),
+            (
+                "b".to_string(),
+                activity("waiting", true, usage(10, "2026-10-11T10:00:00Z", "2026-10-11T10:01:00Z"), json!([])),
+            ),
+            (
+                "c".to_string(),
+                activity("stopped", false, usage(1000, "2026-10-11T09:00:00Z", "2026-10-11T09:30:00Z"), json!([])),
+            ),
         ]),
     );
-    assert_eq!(roster.cards.iter().map(|c| c.task.as_str()).collect::<Vec<_>>(), vec!["a", "b", "c"], "a task with no session has no card");
-    assert_eq!(roster.cards.iter().map(|c| c.phase).collect::<Vec<_>>(), vec![Phase::Working, Phase::Asking, Phase::Settled]);
-    assert_eq!(roster.cards[0].subagents.iter().map(|c| c.phase).collect::<Vec<_>>(), vec![Phase::Settled, Phase::Working]);
+    assert_eq!(
+        roster.cards.iter().map(|c| c.task.as_str()).collect::<Vec<_>>(),
+        vec!["a", "b", "c"],
+        "a task with no session has no card"
+    );
+    assert_eq!(
+        roster.cards.iter().map(|c| c.phase).collect::<Vec<_>>(),
+        vec![Phase::Working, Phase::Asking, Phase::Settled]
+    );
+    assert_eq!(
+        roster.cards[0].subagents.iter().map(|c| c.phase).collect::<Vec<_>>(),
+        vec![Phase::Settled, Phase::Working]
+    );
     assert_eq!(roster.settled(), 2);
     assert_eq!(roster.tokens(), 1122);
     let now = kit::time::instant("2026-10-11T10:10:00Z").expect("a time");
@@ -644,7 +681,11 @@ fn the_agents_panel_shows_each_task_and_the_subagents_it_started() {
             ("a".to_string(), activity("running", false, short(), json!([]))),
         ]),
     );
-    assert_eq!(planned.cards.iter().map(|c| c.title.as_str()).collect::<Vec<_>>(), vec!["Plan", "T"], "a goal's planning comes first");
+    assert_eq!(
+        planned.cards.iter().map(|c| c.title.as_str()).collect::<Vec<_>>(),
+        vec!["Plan", "T"],
+        "a goal's planning comes first"
+    );
     let overseen = AgentRoster::for_goal(
         Some(&goal),
         true,
@@ -677,8 +718,11 @@ fn the_agents_panel_shows_each_task_and_the_subagents_it_started() {
         "{\"type\":\"user\",\"isSidechain\":true,\"timestamp\":\"2026-10-11T10:01:00Z\",\"message\":{\"content\":\"probe the parser\"}}\n",
     )
     .expect("subagent store");
-    fs::write(dir.join(format!("{session}/subagents/agent-s9.meta.json")), r#"{"agentType":"fork","description":"Probe"}"#)
-        .expect("meta");
+    fs::write(
+        dir.join(format!("{session}/subagents/agent-s9.meta.json")),
+        r#"{"agentType":"fork","description":"Probe"}"#,
+    )
+    .expect("meta");
     let run = Run::new();
     let store = run.store(Channel::spawn(built_wd(), Some(&home.with_home())).expect("wd"));
     let main = Feed::new(Rc::clone(&store), &id, None);
@@ -687,16 +731,17 @@ fn the_agents_panel_shows_each_task_and_the_subagents_it_started() {
     let probe = Feed::new(Rc::clone(&store), &id, Some("s9"));
     run.wait(probe.read());
     assert_eq!(probe.state().failure, None);
-    assert_eq!(probe.state().steps.iter().map(|s| s.text.clone()).collect::<Vec<_>>(), vec![Some("probe the parser".to_string())]);
+    assert_eq!(
+        probe.state().steps.iter().map(|s| s.text.clone()).collect::<Vec<_>>(),
+        vec![Some("probe the parser".to_string())]
+    );
     store.stop();
 }
 
 /// A Goal Reads As One Conversation With Its Supervisor And Its Agents
 #[test]
 fn a_goal_reads_as_one_conversation_with_its_supervisor_and_its_agents() {
-    let event = |id: i64, work: &str, kind: &str, body: &str, at: &str| {
-        json!({"id": id, "work": work, "kind": kind, "body": body, "at": format!("2026-10-12T01:{at}Z"), "effective": null, "decision": null})
-    };
+    let event = |id: i64, work: &str, kind: &str, body: &str, at: &str| json!({"id": id, "work": work, "kind": kind, "body": body, "at": format!("2026-10-12T01:{at}Z"), "effective": null, "decision": null});
     let answer = |id: i64, work: &str, body: &str, source: &str, at: &str| {
         json!({"id": id, "work": work, "kind": "answer", "body": body, "at": format!("2026-10-12T01:{at}Z"), "effective": null,
             "decision": {"question": "q", "answer": body, "source": source, "runner": "", "model": "", "tokens": 0, "reverses": 0, "reversed_by": 0}})
@@ -821,7 +866,8 @@ fn work_that_comes_to_wait_on_you_is_announced_once() {
             .collect();
         serde_json::from_value(json!({"goals": goals, "standalone": []})).expect("a board")
     };
-    let first = board(&[("a", "running", "in-flight"), ("b", "needs-input", "needs-you"), ("c", "running", "in-flight")]);
+    let first =
+        board(&[("a", "running", "in-flight"), ("b", "needs-input", "needs-you"), ("c", "running", "in-flight")]);
     assert!(first.arrivals(None).is_empty(), "nothing is announced from the first read");
     let second = board(&[
         ("a", "needs-input", "needs-you"),
@@ -846,7 +892,8 @@ fn a_product_is_added_from_a_folder() {
     let run = Run::new();
     let store = run.store(home.channel());
     run.wait(store.start());
-    let runners: HashSet<String> = run.wait(store.doctor()).expect("doctor").runners.into_iter().map(|r| r.runner).collect();
+    let runners: HashSet<String> =
+        run.wait(store.doctor()).expect("doctor").runners.into_iter().map(|r| r.runner).collect();
     assert!(["claude", "opencode", "codex"].iter().all(|r| runners.contains(*r)), "{runners:?}");
     let path = folder.display().to_string();
     let plan = Plan::add_product(&Plan::product_name(&path), &path, "claude", "ask").expect("a plan");
@@ -869,7 +916,17 @@ fn a_correction_can_be_kept_as_feedback() {
     let plan = Plan::remember("  always pin versions ", &taught).expect("a plan");
     assert_eq!(
         plan.argv,
-        strings(&["feedback", "add", "always pin versions", "--work", &id, "--project", "demo", "--source", "director"])
+        strings(&[
+            "feedback",
+            "add",
+            "always pin versions",
+            "--work",
+            &id,
+            "--project",
+            "demo",
+            "--source",
+            "director"
+        ])
     );
     assert_eq!(run.wait(store.run(&plan)).expect("ran").code, 0);
     assert!(home.wd(&["feedback", "list"]).contains("always pin versions"));
@@ -890,7 +947,10 @@ fn a_goal_is_renamed_where_its_name_shows() {
     assert_eq!(run.wait(store.run(&plan)).expect("ran").code, 0);
     assert_eq!(run.wait(store.work(&id)).expect("work").title, "Fix the login page");
     let shown = run.until(Duration::from_secs(2), || {
-        store.board().as_ref().is_some_and(|b| b.recent_goals(None).iter().any(|w| w.id == id && w.title == "Fix the login page"))
+        store
+            .board()
+            .as_ref()
+            .is_some_and(|b| b.recent_goals(None).iter().any(|w| w.id == id && w.title == "Fix the login page"))
     });
     assert!(shown, "the sidebar's board has the new name");
     assert_eq!(Plan::rename(&id, " \n "), Err(PlanError::Empty));

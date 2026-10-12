@@ -109,16 +109,20 @@ impl AgentRoster {
     /// Cards for a goal's tasks, in the goal's order, after the goal's own
     /// session while it has one: its supervisor once it is supervised, else
     /// its planner.
-    pub fn for_goal(goal: Option<&Work>, supervised: bool, tasks: &[Work], activity: &HashMap<String, Activity>) -> AgentRoster {
+    pub fn for_goal(
+        goal: Option<&Work>,
+        supervised: bool,
+        tasks: &[Work],
+        activity: &HashMap<String, Activity>,
+    ) -> AgentRoster {
         let own = goal.and_then(|g| {
             activity.get(&g.id).map(|a| {
                 let (title, kind) = if supervised { ("Supervisor", "supervisor") } else { ("Plan", "planner") };
                 AgentCard::session(g, title, kind, a)
             })
         });
-        let tasks = tasks
-            .iter()
-            .filter_map(|t| activity.get(&t.id).map(|a| AgentCard::session(t, &t.title, t.kind.name(), a)));
+        let tasks =
+            tasks.iter().filter_map(|t| activity.get(&t.id).map(|a| AgentCard::session(t, &t.title, t.kind.name(), a)));
         AgentRoster { cards: own.into_iter().chain(tasks).collect() }
     }
 
