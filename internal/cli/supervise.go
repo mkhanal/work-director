@@ -407,6 +407,19 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 					return fmt.Errorf("%s is %s, already under way", t.ID, t.State)
 				}
 				return c.startUnder(goal, p, t)
+			case coordinator.ActDrop:
+				t, err := child(a.Work)
+				if err != nil {
+					return err
+				}
+				if t.State != core.StateQueued && t.State != core.StateBriefed {
+					return fmt.Errorf("%s is %s, already under way", t.ID, t.State)
+				}
+				if _, err := c.Ledger.AddEvent(t.ID, core.EventNote, "dropped by its goal's supervisor: "+a.Text); err != nil {
+					return err
+				}
+				_, err = c.Ledger.Transition(t.ID, core.StateDropped)
+				return err
 			case coordinator.ActResolve:
 				cx, err := c.concernUnder(goal, tasks, a.Concern)
 				if err != nil {
@@ -430,10 +443,10 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 		}
 	}
 	if done != nil {
-		if busy, err := c.stillWorking(goal); err != nil {
+		if open, err := c.unfinished(goal); err != nil {
 			return out, err
-		} else if busy != "" {
-			out.Refused = append(out.Refused, done.Line()+" — "+busy+" is still working")
+		} else if open != "" {
+			out.Refused = append(out.Refused, done.Line()+" — "+open)
 			done = nil
 		}
 	}
@@ -470,9 +483,9 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 	return out, nil
 }
 
-// stillWorking is the first task of goal that is running with a session that
-// is, else "".
-func (c *Cli) stillWorking(goal core.Work) (string, error) {
+// unfinished says which task of goal holds it back from done: one not started
+// yet, or one running with a session that is; else "".
+func (c *Cli) unfinished(goal core.Work) (string, error) {
 	tasks, err := c.Ledger.Tasks(goal.ID)
 	if err != nil {
 		return "", err
@@ -483,14 +496,14 @@ func (c *Cli) stillWorking(goal core.Work) (string, error) {
 	}
 	for _, t := range tasks {
 		if t.State == core.StateQueued || t.State == core.StateBriefed {
-			return t.ID, nil
+			return t.ID + " is not started yet: START it, or DROP it with why", nil
 		}
 		if t.State != core.StateRunning {
 			continue
 		}
 		h, ok, err := coordinator.Handle(c.Ledger, t, p)
 		if err != nil || !ok {
-			return t.ID, err
+			return t.ID + " is still working", err
 		}
 		r, err := runner.RunnerNamed(h.Runner)
 		if err != nil {
@@ -499,14 +512,14 @@ func (c *Cli) stillWorking(goal core.Work) (string, error) {
 		if n, err := c.Ledger.Undelivered(t.ID); err != nil {
 			return "", err
 		} else if len(n) > 0 {
-			return t.ID, nil
+			return t.ID + " is still working", nil
 		}
 		status, err := r.Status(h)
 		if err != nil {
 			return "", err
 		}
 		if status == runner.StatusRunning {
-			return t.ID, nil
+			return t.ID + " is still working", nil
 		}
 	}
 	return "", nil

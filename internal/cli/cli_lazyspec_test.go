@@ -4729,6 +4729,32 @@ func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
 		t.Fatalf("goal after the answer = %s, want running", got)
 	}
 
+	// Done is refused while a task is not started; a task not needed is dropped with why.
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unneeded, err := l.Add("overseen", "Incremental notes", ledger.AddOptions{Parent: &o.goal})
+	l.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.say(t, supervisor, "ACTIONS:", "DONE: every part is built and fits")
+	if s := superviseOnce(t, f, o.goal); len(s.Refused) != 1 || !strings.Contains(s.Refused[0], unneeded.ID+" is not started") {
+		t.Fatalf("DONE while %s is not started = %+v, want it refused naming it", unneeded.ID, s)
+	}
+	o.say(t, supervisor, "ACTIONS:", "DROP "+unneeded.ID+": the skill already does it", "DROP "+o.a+": not needed")
+	s = superviseOnce(t, f, o.goal)
+	if !slices.Equal(s.Actions, []string{"DROP " + unneeded.ID + ": the skill already does it"}) || len(s.Refused) != 1 || !strings.Contains(s.Refused[0], "already under way") {
+		t.Fatalf("DROP = %+v, want the unstarted task dropped and the running one refused", s)
+	}
+	if got := stateOf(t, f, unneeded.ID); got != core.StateDropped {
+		t.Fatalf("%s after DROP = %s, want dropped", unneeded.ID, got)
+	}
+	if notes := f.bodies(t, unneeded.ID, core.EventNote); len(notes) != 1 || !strings.Contains(notes[0], "the skill already does it") {
+		t.Fatalf("notes on the dropped task = %q, want why", notes)
+	}
+
 	// Done is refused while a task works, and moves the goal to review once none does.
 	o.busy(t, "task-"+o.a, true)
 	o.say(t, supervisor, "ACTIONS:", "DONE: every part is built and fits")

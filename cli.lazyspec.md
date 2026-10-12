@@ -414,9 +414,10 @@ could not with their work, the bound that ran out, and the work still open.
 
 ## Wd Goal Supervise Carries Out What The Supervisor Decided
 - A supervisor that has replied since it was last read, and is not working, has the reply's actions carried out once.
-- `SEND` tells a task of the goal as `wd send` does; `TASK` files a task under the goal and starts it; `START` starts a task of the goal not yet started; `RESOLVE` resolves a concern.
+- `SEND` tells a task of the goal as `wd send` does; `TASK` files a task under the goal and starts it; `START` starts a task of the goal not yet started; `DROP` drops a task of the goal not yet started, noting why; `RESOLVE` resolves a concern.
 - `ASK` files a `question` on the goal and moves it to needs-input; `wd answer <goal>` reaches the supervisor.
 - `DONE` files the summary as the goal's `report` and moves the goal to review.
+- `DONE` is refused while a task of the goal is working or not yet started, naming that task.
 - An action that cannot be carried out is refused with why, and the rest still are.
 - A reply is carried out once, however many passes read it at once.
 - The reply, what was done and what was refused are one `supervised` event on the goal.

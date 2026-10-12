@@ -184,13 +184,14 @@ func TestCoordinator(t *testing.T) {
 		reply := []string{
 			"The collector never calls the detector. ACTIONS: are below.",
 			"ACTIONS:\n- SEND t1: call detectOperationalImpacts and print impacts\nTASK: weekly running note",
-			"START t9\n`RESOLVE #18: the collector task wires it in`\nASK: tag v1.0.0 at 7720d09? I recommend yes\nDONE: all parts fit\nWAIT\n\nthen I will look again",
+			"START t9\nDROP t8: the skill already does it\n`RESOLVE #18: the collector task wires it in`\nASK: tag v1.0.0 at 7720d09? I recommend yes\nDONE: all parts fit\nWAIT\n\nthen I will look again",
 		}
 		actions, refused := ParseSupervision(reply)
 		want := []Action{
 			{Kind: ActSend, Work: "t1", Text: "call detectOperationalImpacts and print impacts"},
 			{Kind: ActTask, Text: "weekly running note"},
 			{Kind: ActStart, Work: "t9"},
+			{Kind: ActDrop, Work: "t8", Text: "the skill already does it"},
 			{Kind: ActResolve, Concern: 18, Text: "the collector task wires it in"},
 			{Kind: ActAsk, Text: "tag v1.0.0 at 7720d09? I recommend yes"},
 			{Kind: ActDone, Text: "all parts fit"},

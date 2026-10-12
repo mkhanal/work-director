@@ -88,6 +88,7 @@ End every reply with a line ACTIONS: and then one action per line:
 SEND <task>: <what to do next>
 TASK: <title of a new task, started at once>
 START <task>  (a task filed and never started)
+DROP <task>: <why it is not needed>  (a task filed and never started)
 RESOLVE <concern number>: <decision>
 ASK: <a question only the person can answer, with your recommendation>
 DONE: <one line: every part of the goal is built, checked and fits together>
@@ -103,6 +104,7 @@ const (
 	ActSend    ActionKind = "send"
 	ActTask    ActionKind = "task"
 	ActStart   ActionKind = "start"
+	ActDrop    ActionKind = "drop"
 	ActResolve ActionKind = "resolve"
 	ActAsk     ActionKind = "ask"
 	ActDone    ActionKind = "done"
@@ -127,6 +129,8 @@ func (a Action) Line() string {
 		return "TASK: " + a.Text
 	case ActStart:
 		return "START " + a.Work
+	case ActDrop:
+		return fmt.Sprintf("DROP %s: %s", a.Work, a.Text)
 	case ActResolve:
 		return fmt.Sprintf("RESOLVE %d: %s", a.Concern, a.Text)
 	case ActAsk:
@@ -142,6 +146,7 @@ var (
 	sendRe    = regexp.MustCompile(`^SEND\s+(\S+?):\s*(\S.*)$`)
 	taskActRe = regexp.MustCompile(`^TASK:\s*(\S.*)$`)
 	startRe   = regexp.MustCompile(`^START\s+(\S+)$`)
+	dropRe    = regexp.MustCompile(`^DROP\s+(\S+?):\s*(\S.*)$`)
 	resolveRe = regexp.MustCompile(`^RESOLVE\s+#?(\d+):\s*(\S.*)$`)
 	askActRe  = regexp.MustCompile(`^ASK:\s*(\S.*)$`)
 	doneRe    = regexp.MustCompile(`^DONE:\s*(\S.*)$`)
@@ -204,6 +209,9 @@ func action(l string) (Action, bool) {
 	}
 	if m := startRe.FindStringSubmatch(l); m != nil {
 		return Action{Kind: ActStart, Work: m[1]}, true
+	}
+	if m := dropRe.FindStringSubmatch(l); m != nil {
+		return Action{Kind: ActDrop, Work: m[1], Text: strings.TrimSpace(m[2])}, true
 	}
 	if m := resolveRe.FindStringSubmatch(l); m != nil {
 		n, err := strconv.Atoi(m[1])

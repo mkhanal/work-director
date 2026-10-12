@@ -112,10 +112,10 @@ and directory still follow its goal.
 - A task whose session stopped without a report is listed with what it last said.
 - It lists each open concern under the goal with its number and the work it was raised on.
 - It forbids editing files, and says landing waits for the person.
-- It asks for a reply ending in an `ACTIONS:` line followed by one `SEND`, `TASK`, `START`, `RESOLVE`, `ASK`, `DONE` or `WAIT` line each.
+- It asks for a reply ending in an `ACTIONS:` line followed by one `SEND`, `TASK`, `START`, `DROP`, `RESOLVE`, `ASK`, `DONE` or `WAIT` line each.
 
 ## A Supervision Reply Parses Into Actions
 - `ParseSupervision(texts)` reads the lines after the last `ACTIONS:` line.
-- `SEND <id>: <text>`, `TASK: <title>`, `START <id>`, `RESOLVE <n>: <decision>`, `ASK: <question>`, `DONE: <summary>` and `WAIT` each parse into their action.
+- `SEND <id>: <text>`, `TASK: <title>`, `START <id>`, `DROP <id>: <why>`, `RESOLVE <n>: <decision>`, `ASK: <question>`, `DONE: <summary>` and `WAIT` each parse into their action.
 - A non-blank line that is none of these is returned as refused, with the line.
 - A reply with no `ACTIONS:` line has no actions and nothing refused.
