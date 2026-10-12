@@ -720,4 +720,16 @@ func fakeRunner(_ home: Home) throws {
         #expect(!Follow.atBottom(offset: 1300, visible: 600, content: 2000), "scrolled up to read")
         #expect(!Follow.atBottom(offset: 1400, visible: 600, content: 2200), "more came in while reading further up")
     }
+
+    @Test("Work Is Renamed From Its Page Or Its Menu")
+    func renamedFromPageOrMenu() async throws {
+        let home = try Home()
+        let goal = try home.goal("demo", "fix the config")
+        let plan = try Plan.rename(goal, title: "  Config fixes ")
+        #expect(plan.argv == ["rename", goal, "Config fixes"])
+        #expect(throws: PlanError.empty) { try Plan.rename(goal, title: "  ") }
+        let store = await Store(channel: try home.channel())
+        #expect(try await store.run(plan).code == 0)
+        #expect(try await store.work(goal).title == "Config fixes")
+    }
 }

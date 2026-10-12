@@ -15,7 +15,7 @@ struct MessageField: NSViewRepresentable {
     let send: () -> Void
 
     static let font = NSFont.systemFont(ofSize: 14)
-    static let maxLines: CGFloat = 8
+    static let maxLines: CGFloat = 10
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 

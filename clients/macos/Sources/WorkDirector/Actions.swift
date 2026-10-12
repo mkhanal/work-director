@@ -4,7 +4,7 @@ import WorkDirectorKit
 /// A write that needs words from the person: what reopened work is for, or
 /// the decision itself. Nothing else asks; it runs, and can be undone.
 struct Ask: Identifiable {
-    enum Kind { case reopen, decide }
+    enum Kind { case reopen, decide, rename }
     let kind: Kind
     let work: Work
 
@@ -14,6 +14,7 @@ struct Ask: Identifiable {
         switch kind {
         case .reopen: "Reopen \(work.title)"
         case .decide: "Record a decision on \(work.title)"
+        case .rename: "Rename \(work.title)"
         }
     }
 
@@ -21,6 +22,7 @@ struct Ask: Identifiable {
         switch kind {
         case .reopen: "What is being worked on? A question about finished work is answered without reopening it."
         case .decide: "The decision, in one line."
+        case .rename: "The new name."
         }
     }
 
@@ -28,6 +30,7 @@ struct Ask: Identifiable {
         switch kind {
         case .reopen: try Plan.reopen(work.id, reason: text)
         case .decide: try Plan.decide(work.id, text: text)
+        case .rename: try Plan.rename(work.id, title: text)
         }
     }
 }
@@ -48,6 +51,7 @@ struct WorkMenu: View {
         if work.kind.isGoal && open && work.state != .paused {
             Button("Drive") { run(.drive(work.id)) }
         }
+        Button("Rename…") { ask(Ask(kind: .rename, work: work)) }
         Button("Record a Decision…") { ask(Ask(kind: .decide, work: work)) }
         if work.state == .review {
             Button("Verify") { run(.verify(work.id)) }

@@ -3,7 +3,7 @@ import WorkDirectorKit
 
 /// A goal read as one conversation: what was asked, the plan it became, what
 /// its supervisor and its agents did since, and what waits on you, last, next
-/// to where you answer.
+/// to where you answer. Every turn says who spoke.
 struct GoalThread: View {
     let store: Store
     let goal: GoalDetail
@@ -12,46 +12,13 @@ struct GoalThread: View {
     let answered: () -> Void
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: Layout.step) {
-            if let delivery = goal.delivery, delivery.status != "none" || delivery.error != nil || !goal.landings.isEmpty {
-                DeliveryLine(delivery: delivery, landings: goal.landings)
-            }
+        LazyVStack(alignment: .leading, spacing: Space.s5) {
             if !goal.goal.detail.isEmpty {
                 YouBubble(text: goal.goal.detail, at: when(goal.goal.created), label: "You asked")
             }
-            PlanBlock(goal: goal, focus: focus)
+            PlanTurn(goal: goal, focus: focus)
             ForEach(goal.thread) { step in
-                switch step {
-                case .event(let event) where goal.isYours(event):
-                    YouBubble(text: event.decision?.answer ?? event.body, at: when(event.at), label: event.kind == "answer" ? "You answered" : "You")
-                case .event(let event):
-                    TimelineRow(event: event, task: title(of: event.work), focus: event.work == goal.goal.id ? nil : { focus(event.work) })
-                case .exchange(let question, let answer):
-                    // The question waiting on you is answered below, in place.
-                    if answer != nil || goal.asking?.id != "event-\(question.id)" {
-                        ExchangeRow(question: question, answer: answer, asker: asker(of: question.work), focus: question.work == goal.goal.id ? nil : { focus(question.work) })
-                    }
-                case .look(let event):
-                    Label("Supervisor looking · \(event.body)", systemImage: "eye")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                case .supervisor(let event, let reply):
-                    SupervisorRow(event: event, reply: reply, goal: goal, open: { focus(goal.goal.id) }, focus: focus)
-                case .stopped(let event, let said):
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "pause.circle")
-                            Text("Stopped without a report").font(.caption.weight(.semibold))
-                            if let task = title(of: event.work) {
-                                Button(task) { focus(event.work) }.buttonStyle(.link).lineLimit(1)
-                            }
-                            Text(when(event.at)).foregroundStyle(.tertiary)
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        Text(said).foregroundStyle(.secondary).lineLimit(3).textSelection(.enabled)
-                    }
-                }
+                row(step).id(step.id)
             }
             ForEach(store.outbox.filter { $0.work == goal.goal.id && !$0.arrived(in: goal) }) { message in
                 OutgoingBubble(store: store, message: message)
@@ -60,53 +27,129 @@ struct GoalThread: View {
         }
     }
 
-    /// Who asked: the goal's supervisor, or the task.
-    private func asker(of id: String) -> String {
-        id == goal.goal.id ? (goal.supervised ? "Supervisor" : "Plan") : title(of: id) ?? id
+    @ViewBuilder private func row(_ step: ThreadStep) -> some View {
+        switch step {
+        case .event(let event) where goal.isYours(event):
+            YouBubble(text: event.decision?.answer ?? event.answerText, at: when(event.at), label: event.kind == "answer" ? "You answered" : "You")
+        case .event(let event) where event.kind == "report":
+            Turn(speaker: speaker(of: event.work), at: event.at, open: opener(event.work)) {
+                ReportCard(text: event.body)
+            }
+        case .event(let event) where event.kind == "answer":
+            DirectorTurn(answer: event)
+        case .event(let event) where event.kind == "sent":
+            if event.work != goal.goal.id {
+                EventLine(text: "Told \(speaker(of: event.work).name): \(firstLine(event.body))", symbol: "arrow.turn.down.right", at: event.at)
+            }
+        case .event(let event):
+            EventLine(text: line(event), symbol: symbol(event), at: event.at, tint: tint(event))
+        case .exchange(let question, let answer):
+            // The question waiting on you is answered below, in place.
+            if answer != nil || goal.asking?.id != "event-\(question.id)" {
+                VStack(alignment: .leading, spacing: Space.s5) {
+                    Turn(speaker: speaker(of: question.work), at: question.at, open: opener(question.work), detail: { Text("asked").foregroundStyle(.secondary) }) {
+                        AskedBody(question: question)
+                    }
+                    if let answer {
+                        if answer.answeredByDirector {
+                            DirectorTurn(answer: answer)
+                        } else {
+                            YouBubble(text: answer.answerText, at: when(answer.at), label: "You answered")
+                        }
+                    }
+                }
+            }
+        case .look(let event):
+            EventLine(text: "Supervisor looking: \(event.body)", symbol: "eye", at: event.at)
+        case .supervisor(let event, let reply):
+            Turn(speaker: .supervisor, at: event.at, open: { focus(goal.goal.id) }) {
+                SupervisorBody(reply: reply, goal: goal, focus: focus)
+            }
+        case .stopped(let event, let said):
+            Turn(speaker: speaker(of: event.work), at: event.at, open: opener(event.work), detail: { Text("stopped without a report").foregroundStyle(.secondary) }) {
+                Text(said).readable().foregroundStyle(.secondary).lineLimit(4).textSelection(.enabled)
+            }
+        }
     }
 
-    private func title(of id: String) -> String? {
-        id == goal.goal.id ? nil : goal.tasks.first { $0.id == id }?.title
+    private func speaker(of id: String) -> Speaker {
+        if id == goal.goal.id { return goal.supervised ? .supervisor : .plan }
+        if let task = goal.tasks.first(where: { $0.id == id }) { return .task(task) }
+        return .agent(id)
+    }
+
+    private func opener(_ id: String) -> (() -> Void)? {
+        id == goal.goal.id ? nil : { focus(id) }
+    }
+
+    private func firstLine(_ text: String) -> String {
+        String(text.split(separator: "\n", maxSplits: 1).first ?? "")
+    }
+
+    private func line(_ e: Event) -> String {
+        let who = e.work == goal.goal.id ? "Goal" : speaker(of: e.work).name
+        switch e.kind {
+        case "decision": return "Decided: \(firstLine(e.body))"
+        case "verify": return "\(who) \(e.body.hasPrefix("pass") ? "passed its checks" : "failed its checks")"
+        case "pr": return "\(who) landed"
+        case "state": return "\(who) is now \(e.body)"
+        default: return "\(who): \(firstLine(e.body))"
+        }
+    }
+
+    private func symbol(_ e: Event) -> String {
+        switch e.kind {
+        case "decision": "checkmark.seal"
+        case "verify": e.body.hasPrefix("pass") ? "checkmark.shield" : "xmark.shield"
+        case "pr": "arrow.triangle.pull"
+        case "state": "circle.dashed"
+        default: "circle"
+        }
+    }
+
+    private func tint(_ e: Event) -> Color {
+        switch e.kind {
+        case "verify": e.body.hasPrefix("pass") ? Palette.settled : Palette.failure
+        case "pr": Palette.settled
+        default: .secondary
+        }
     }
 }
 
-/// A supervisor's reply in the goal's conversation: what it said, then each
-/// agent it told, started or filed, live, and what was refused.
-struct SupervisorRow: View {
-    let event: Event
+/// What the supervisor said, then each agent it told, started or filed, live,
+/// then what was refused.
+struct SupervisorBody: View {
     let reply: SupervisorReply
     let goal: GoalDetail
-    /// Shows the supervisor's own conversation.
-    let open: () -> Void
     let focus: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Image(systemName: "person.badge.shield.checkmark")
-                Button("Supervisor", action: open).buttonStyle(.link).font(.caption.weight(.semibold))
-                Text(when(event.at)).foregroundStyle(.tertiary)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: Space.s3) {
             if !reply.said.isEmpty {
                 MarkdownText(reply.said)
             }
-            ForEach(Array(reply.actions.enumerated()), id: \.offset) { _, action in
-                if let id = action.task, let task = goal.tasks.first(where: { $0.id == id }) {
-                    Button { focus(id) } label: { AgentChip(task: task, activity: goal.activity[id], line: action.line) }
-                        .buttonStyle(.plain)
-                        .help("Show this agent's conversation")
-                } else {
-                    Label(action.line, systemImage: "checkmark.circle").font(.callout).foregroundStyle(.secondary)
+            if !reply.actions.isEmpty {
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    ForEach(Array(reply.actions.enumerated()), id: \.offset) { _, action in
+                        if let id = action.task, let task = goal.tasks.first(where: { $0.id == id }) {
+                            Button { focus(id) } label: { AgentChip(task: task, activity: goal.activity[id], line: action.line) }
+                                .buttonStyle(.plain)
+                                .help("Show this agent's conversation")
+                        } else {
+                            Label(action.line, systemImage: "checkmark.circle")
+                                .font(TypeScale.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             ForEach(reply.refused, id: \.self) { line in
-                Label(line, systemImage: "xmark.circle").font(.caption).foregroundStyle(.orange).textSelection(.enabled)
+                Label(line, systemImage: "xmark.circle")
+                    .font(TypeScale.callout)
+                    .foregroundStyle(Palette.failure)
+                    .textSelection(.enabled)
             }
         }
-        .padding(16)
-        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -118,63 +161,62 @@ struct AgentChip: View {
     let line: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: Space.s3) {
             PhaseMark(phase: AgentRoster.phase(of: activity)).padding(.top, 5)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(task.title).font(.callout.weight(.medium)).lineLimit(1)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: Space.s2) {
+                    Text(task.title).font(TypeScale.calloutMedium).lineLimit(1)
                     StateSymbol(state: task.state)
                 }
-                Text(line).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Text(line).font(TypeScale.callout).foregroundStyle(.secondary).lineLimit(2)
                 if let now = activity?.error ?? activity?.now, !now.isEmpty {
-                    Text(now).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                    Text(now).font(TypeScale.meta).foregroundStyle(.tertiary).lineLimit(1)
                 }
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            Image(systemName: "chevron.right").font(TypeScale.meta).foregroundStyle(.tertiary).padding(.top, 3)
         }
-        .padding(10)
-        .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+        .card(padding: Space.s3)
         .contentShape(Rectangle())
     }
 }
 
-/// The tasks a goal was planned into, grouped as planned, each a way into its
+/// The plan a goal became: its tasks grouped as planned, each a way into its
 /// conversation.
-struct PlanBlock: View {
+struct PlanTurn: View {
     let goal: GoalDetail
     let focus: (String) -> Void
 
     var body: some View {
-        if goal.tasks.isEmpty {
-            Label("Not planned yet.", systemImage: "list.bullet.rectangle").foregroundStyle(.secondary)
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Label("Plan", systemImage: "list.bullet.rectangle").font(.caption.weight(.semibold))
-                    Text("\(goal.rollup.done) of \(goal.rollup.total) done").font(.caption)
-                }
-                .foregroundStyle(.secondary)
-                ForEach(headings, id: \.self) { heading in
-                    if !heading.isEmpty && heading != "(no heading)" {
-                        Text(heading).font(.caption.weight(.medium)).foregroundStyle(.secondary).padding(.top, 2)
-                    }
-                    ForEach(goal.tasks.filter { ($0.heading ?? "") == heading }) { task in
-                        Button { focus(task.id) } label: {
-                            HStack(spacing: 8) {
-                                StateSymbol(state: task.state)
-                                Text(task.title).lineLimit(2).multilineTextAlignment(.leading)
-                                Spacer(minLength: 0)
-                            }
-                            .contentShape(Rectangle())
+        Turn(speaker: .plan, at: nil, detail: {
+            Text(goal.tasks.isEmpty ? "not planned yet" : "\(goal.rollup.done) of \(goal.rollup.total) done").foregroundStyle(.secondary)
+        }) {
+            if !goal.tasks.isEmpty {
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    ForEach(headings, id: \.self) { heading in
+                        if !heading.isEmpty && heading != "(no heading)" {
+                            MicroLabel(heading).padding(.top, Space.s1)
                         }
-                        .buttonStyle(.plain)
-                        .help("Show this task's conversation")
+                        ForEach(goal.tasks.filter { ($0.heading ?? "") == heading }) { task in
+                            Button { focus(task.id) } label: {
+                                HStack(spacing: Space.s2) {
+                                    StateSymbol(state: task.state)
+                                    Text(task.title)
+                                        .font(TypeScale.callout)
+                                        .strikethrough(task.state == .dropped)
+                                        .foregroundStyle(task.atRest ? .secondary : .primary)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.leading)
+                                    Spacer(minLength: 0)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Show this task's conversation")
+                        }
                     }
                 }
             }
-            .padding(16)
-            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
         }
     }
 
@@ -185,71 +227,148 @@ struct PlanBlock: View {
     }
 }
 
-/// One thing that happened on a goal or one of its tasks.
-struct TimelineRow: View {
-    let event: Event
-    /// The task it happened on, or nil for the goal itself.
-    let task: String?
-    let focus: (() -> Void)?
+/// A question as it was asked: each part, and the choices it offered.
+struct AskedBody: View {
+    let question: Event
 
     var body: some View {
-        switch event.kind {
-        case "sent":
-            PromptRow(text: event.body, brief: false, at: event.at)
-        case "report":
-            VStack(alignment: .leading, spacing: 6) {
-                label("Reported", "doc.text.magnifyingglass")
-                MarkdownText(event.body)
-            }
-        default:
-            VStack(alignment: .leading, spacing: 4) {
-                label(title, symbol)
-                Text(event.decision?.answer ?? event.body)
-                    .foregroundStyle(event.kind == "state" ? .secondary : .primary)
-                    .textSelection(.enabled)
-                    .lineLimit(6)
-            }
-        }
-    }
-
-    private func label(_ text: String, _ symbol: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: symbol)
-            Text(text).font(.caption.weight(.semibold))
-            if let task {
-                if let focus {
-                    Button(task, action: focus).buttonStyle(.link).lineLimit(1)
-                } else {
-                    Text(task).lineLimit(1)
+        VStack(alignment: .leading, spacing: Space.s3) {
+            ForEach(Array(question.askedItems.enumerated()), id: \.offset) { _, item in
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    Text(item.question).readable().textSelection(.enabled)
+                    if !item.choices.isEmpty {
+                        ChoiceChips(choices: item.choices)
+                    }
                 }
             }
-            Text(when(event.at)).foregroundStyle(.tertiary)
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-    }
-
-    private var title: String {
-        switch event.kind {
-        case "decision": "Decided"
-        case "answer": "Answered"
-        case "question": "Asked"
-        case "verify": event.body.hasPrefix("pass") ? "Verified" : "Verify failed"
-        case "pr": "Landed"
-        case "state": "Now \(event.body)"
-        default: event.kind.capitalized
         }
     }
+}
 
-    private var symbol: String {
-        switch event.kind {
-        case "decision": "checkmark.seal"
-        case "answer": "arrowshape.turn.up.left"
-        case "question": "questionmark.bubble"
-        case "verify": event.body.hasPrefix("pass") ? "checkmark.shield" : "xmark.shield"
-        case "pr": "arrow.triangle.pull"
-        default: "circle.dashed"
+/// The choices a question offered, read-only.
+struct ChoiceChips: View {
+    let choices: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s1 + 2) {
+            ForEach(choices, id: \.self) { choice in
+                HStack(spacing: Space.s2) {
+                    Image(systemName: "circle").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text(Choice(choice).label).font(TypeScale.callout).foregroundStyle(.secondary)
+                    if Choice(choice).recommended { RecommendedTag() }
+                }
+            }
         }
+    }
+}
+
+/// The director answering in your place, from what was already decided or by
+/// its judgement.
+struct DirectorTurn: View {
+    let answer: Event
+
+    var body: some View {
+        Turn(speaker: .director, at: answer.at, detail: {
+            Text(answer.decision.map { $0.model.isEmpty ? "answered from what was decided" : "answered · \($0.model)" } ?? "answered")
+                .foregroundStyle(.secondary)
+        }) {
+            Text(answer.answerText)
+                .readable()
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .card(Palette.settled, padding: Space.s3)
+        }
+    }
+}
+
+/// A task's report: its verdict and what it said, folded when long.
+struct ReportCard: View {
+    let text: String
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s3) {
+            HStack(spacing: Space.s2) {
+                Image(systemName: "doc.text").foregroundStyle(.secondary)
+                Text("Report").font(TypeScale.calloutMedium)
+                if let verdict {
+                    Text(verdict)
+                        .font(TypeScale.meta)
+                        .padding(.horizontal, Space.s2).padding(.vertical, 2)
+                        .background(verdictTint.opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.chip))
+                        .foregroundStyle(verdictTint)
+                }
+                Spacer(minLength: 0)
+                if folds {
+                    Button(expanded ? "Show less" : "Show all") { expanded.toggle() }
+                        .buttonStyle(.link)
+                        .font(TypeScale.meta)
+                }
+            }
+            MarkdownText(shown)
+        }
+        .card()
+    }
+
+    /// The report without the verdict the pill already shows: a bare verdict
+    /// line, and the `STATUS:` word, keeping anything said after it.
+    private var lines: [String] {
+        var out: [String] = []
+        for (i, raw) in text.components(separatedBy: "\n").enumerated() {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if i == 0, ["DONE", "BLOCKED", "NEEDS-INPUT"].contains(line) { continue }
+            if let rest = line.range(of: #"^STATUS:\s*(DONE|BLOCKED|NEEDS-INPUT)\s*"#, options: .regularExpression) {
+                let said = line[rest.upperBound...].trimmingCharacters(in: .whitespaces)
+                if !said.isEmpty { out.append(said) }
+                continue
+            }
+            out.append(raw)
+        }
+        return out
+    }
+    private var folds: Bool { lines.count > 12 }
+    private var shown: String { (expanded || !folds ? lines : Array(lines.prefix(12))).joined(separator: "\n") }
+
+    private var verdict: String? {
+        for word in ["DONE", "BLOCKED", "NEEDS-INPUT"] where text.contains("STATUS: \(word)") || text.hasPrefix(word) {
+            return word.lowercased()
+        }
+        return nil
+    }
+
+    private var verdictTint: Color {
+        switch verdict {
+        case "done": Palette.settled
+        case "blocked": Palette.failure
+        default: Palette.attention
+        }
+    }
+}
+
+/// A choice as offered: its label, and whether it was recommended.
+struct Choice {
+    let label: String
+    let recommended: Bool
+
+    init(_ text: String) {
+        let suffix = "(recommended)"
+        if text.lowercased().hasSuffix(suffix) {
+            label = String(text.dropLast(suffix.count)).trimmingCharacters(in: .whitespaces)
+            recommended = true
+        } else {
+            label = text
+            recommended = false
+        }
+    }
+}
+
+struct RecommendedTag: View {
+    var body: some View {
+        Text("Recommended")
+            .font(.system(size: 10.5, weight: .semibold))
+            .padding(.horizontal, 6).padding(.vertical, 1.5)
+            .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.chip))
+            .foregroundStyle(Color.accentColor)
     }
 }
 
@@ -259,112 +378,20 @@ struct DeliveryLine: View {
     let landings: [Landed]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: Space.s1) {
+            HStack(spacing: Space.s1 + 2) {
                 Image(systemName: "shippingbox")
-                Text(delivery.status).font(.callout.weight(.medium))
+                Text(delivery.status)
                 if !delivery.detail.isEmpty {
-                    Text(delivery.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text("· " + delivery.detail).lineLimit(1)
                 }
             }
             if let error = delivery.error {
-                Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange).textSelection(.enabled)
+                Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Palette.attention).textSelection(.enabled)
             }
-            ForEach(landings, id: \.url) { LandingRow(landed: $0).font(.caption) }
+            ForEach(landings, id: \.url) { LandingRow(landed: $0) }
         }
-    }
-}
-
-/// A question and its answer, read together: who asked, what, the choices
-/// offered, and who answered — the director from what was already decided, or
-/// you.
-struct ExchangeRow: View {
-    let question: Event
-    let answer: Event?
-    let asker: String
-    let focus: (() -> Void)?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Image(systemName: "questionmark.bubble")
-                if let focus {
-                    Button(asker, action: focus).buttonStyle(.link).lineLimit(1)
-                } else {
-                    Text(asker)
-                }
-                Text("asked").font(.caption.weight(.semibold))
-                Text(when(question.at)).foregroundStyle(.tertiary)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            ForEach(Array(question.askedItems.enumerated()), id: \.offset) { _, item in
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(item.question).readable().textSelection(.enabled)
-                    if !item.choices.isEmpty {
-                        FlowChoices(choices: item.choices)
-                    }
-                }
-            }
-            if let answer {
-                if answer.answeredByDirector {
-                    DirectorAnswer(answer: answer)
-                } else {
-                    YouBubble(text: answer.answerText, at: when(answer.at), label: "You answered")
-                }
-            } else {
-                Label("Not answered yet", systemImage: "hourglass").font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .padding(16)
-        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
-    }
-}
-
-/// The choices a question offered, each as a chip.
-struct FlowChoices: View {
-    let choices: [String]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(choices, id: \.self) { choice in
-                Text(choice)
-                    .font(.callout)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(.background, in: Capsule())
-                    .overlay(Capsule().strokeBorder(.separator))
-            }
-        }
-    }
-}
-
-/// The director answering in your place: what it answered, and that it was
-/// the director.
-struct DirectorAnswer: View {
-    let answer: Event
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
-                Text("Director answered").font(.caption.weight(.semibold))
-                if let model = answer.decision?.model, !model.isEmpty {
-                    Text("· \(model)").foregroundStyle(.tertiary)
-                } else {
-                    Text("· from what was already decided").foregroundStyle(.tertiary)
-                }
-                Text(when(answer.at)).foregroundStyle(.tertiary)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            Text(answer.answerText)
-                .readable()
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.green.opacity(0.3)))
-        }
+        .font(TypeScale.meta)
+        .foregroundStyle(.secondary)
     }
 }

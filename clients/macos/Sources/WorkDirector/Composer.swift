@@ -22,13 +22,17 @@ struct NewGoalPage: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("New goal").font(.title2.weight(.semibold))
-                    HStack(spacing: 8) {
-                        Label("Product", systemImage: "shippingbox").font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: Space.s5) {
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    Text("What should get done?").font(.system(size: 26, weight: .semibold))
+                    Text("Say it the way you would to a lead engineer. It is checked against goals it may continue, then planned into tasks and started.")
+                        .font(TypeScale.body)
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(TypeScale.bodyLeading)
+                    HStack(spacing: Space.s2) {
+                        Image(systemName: "shippingbox.fill").foregroundStyle(.secondary)
                         if let scope {
-                            Text(scope).font(.caption.weight(.medium))
+                            Text(scope).font(TypeScale.calloutMedium)
                         } else {
                             Picker("Product", selection: Binding(get: { product }, set: { chosen = $0 })) {
                                 ForEach(store.projects) { p in Text(p.name).tag(p.name) }
@@ -51,12 +55,15 @@ struct NewGoalPage: View {
                 }
                 phaseView(flow)
             }
-            .readingColumn()
+            .frame(maxWidth: 680, alignment: .leading)
+            .padding(.horizontal, Space.s6)
+            .padding(.top, Space.s7 + Space.s5)
+            .frame(maxWidth: .infinity)
         }
         .safeAreaInset(edge: .bottom) {
             InputBar(
                 text: $text,
-                placeholder: "What do you want done? Work Director checks for a goal it continues, then plans and starts it",
+                placeholder: "Describe the goal…",
                 command: plan?.commandLine,
                 busy: flow.phase == .finding || flow.phase == .starting
             ) { Task { await submit(flow) } }
