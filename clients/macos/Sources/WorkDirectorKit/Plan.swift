@@ -93,6 +93,13 @@ public struct Plan: Hashable, Sendable, Identifiable {
         return Plan(title: "Send", argv: ["send", id, text])
     }
 
+    /// A new title a person chose; a goal renamed keeps it when it is planned.
+    public static func rename(_ id: String, title: String) throws -> Plan {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { throw PlanError.empty }
+        return Plan(title: "Rename", argv: ["rename", id, title])
+    }
+
     /// The answers to the question a session is waiting on, one per item in
     /// the order asked.
     public static func answer(_ id: String, _ question: Question, answers: [String]) throws -> Plan {

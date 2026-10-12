@@ -53,13 +53,15 @@ struct RootView: View {
                 ReviewList(store: store, project: project, selected: opened, plan: $plan)
             }
         }
+        // The page's own header carries its name; the toolbar keeps to actions.
+        .toolbar(removing: .title)
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button(action: newGoal) { Label("New Goal", systemImage: "square.and.pencil") }
                     .help("Start a goal (⌘N)")
             }
             ToolbarItem(placement: .primaryAction) {
-                Button { typing = true } label: { Label("Run a wd Command", systemImage: "terminal") }
+                Button { typing = true } label: { Label("Command", systemImage: "command") }
                     .help("Run a wd command (⌘K)")
             }
         }
@@ -145,8 +147,6 @@ struct ThreadSidebar: View {
         let threads = store.board?.threads(project: scope, band: band) ?? .none
         let matching = { (t: BoardThread) in search.isEmpty || t.work.title.localizedCaseInsensitiveContains(search) || t.work.id.hasPrefix(search) }
         List(selection: $place) {
-            Label("New Goal", systemImage: "square.and.pencil")
-                .tag(Place.newGoal)
             Section {
                 ForEach(threads.open.filter(matching)) { thread in
                     GoalThreadRow(thread: thread)
@@ -155,11 +155,12 @@ struct ThreadSidebar: View {
                 }
                 if threads.open.filter(matching).isEmpty {
                     Text(band == nil ? "Nothing open." : "Nothing \(band!.label.lowercased()).")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(TypeScale.callout).foregroundStyle(.secondary)
+                        .padding(.vertical, Space.s1)
                 }
             } header: {
                 HStack {
-                    Text(band?.label ?? "Open")
+                    MicroLabel(band?.label ?? "Open")
                     Spacer()
                     Menu {
                         Picker("Show", selection: $bandName) {
@@ -186,7 +187,7 @@ struct ThreadSidebar: View {
                         .contextMenu { WorkMenu(work: thread.work, run: { plan = $0 }, ask: { asking = $0 }) }
                 }
             } header: {
-                Text("Queued (\(threads.queued.count))")
+                MicroLabel("Queued · \(threads.queued.count)")
             }
             Section(isExpanded: $showSettled) {
                 ForEach(threads.settled.filter(matching)) { thread in
@@ -195,9 +196,9 @@ struct ThreadSidebar: View {
                         .contextMenu { WorkMenu(work: thread.work, run: { plan = $0 }, ask: { asking = $0 }) }
                 }
             } header: {
-                Text("Settled (\(threads.settled.count))")
+                MicroLabel("Settled · \(threads.settled.count)")
             }
-            Section("More") {
+            Section {
                 Label("Taste", systemImage: "sparkles").tag(Place.taste)
                 Label("Archived", systemImage: "archivebox").tag(Place.archived)
                 if let scope {
@@ -207,28 +208,44 @@ struct ThreadSidebar: View {
                         Label("Review \(project.name)", systemImage: "checklist").tag(Place.review(project.name))
                     }
                 }
+            } header: {
+                MicroLabel("More")
             }
         }
         .listStyle(.sidebar)
         .searchable(text: $search, placement: .sidebar, prompt: "Search goals")
         .safeAreaInset(edge: .top) {
-            HStack(spacing: 4) {
-                Picker(selection: $scopeName) {
-                    Text("All products").tag("")
+            HStack(spacing: Space.s2) {
+                Menu {
+                    Picker("Product", selection: $scopeName) {
+                        Text("All products").tag("")
+                        Divider()
+                        ForEach(store.projects) { p in Text(p.name).tag(p.name) }
+                    }
+                    .pickerStyle(.inline)
                     Divider()
-                    ForEach(store.projects) { p in Text(p.name).tag(p.name) }
+                    Button("Add Product…") { NotificationCenter.default.post(name: .addProduct, object: nil) }
                 } label: {
-                    Label("Product", systemImage: "shippingbox")
+                    HStack(spacing: Space.s1 + 2) {
+                        Image(systemName: "shippingbox.fill").foregroundStyle(.secondary)
+                        Text(scope ?? "All products").font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary)
+                    }
                 }
-                .pickerStyle(.menu)
-                Button { NotificationCenter.default.post(name: .addProduct, object: nil) } label: {
-                    Image(systemName: "plus")
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Show one product's work, or all of it")
+                Spacer(minLength: 0)
+                Button { place = .newGoal } label: {
+                    Image(systemName: "square.and.pencil").font(.system(size: 14, weight: .medium))
                 }
                 .buttonStyle(.borderless)
-                .help("Add a product: a repository the director works in")
+                .help("New goal (⌘N)")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.horizontal, Space.s4)
+            .padding(.top, Space.s1)
+            .padding(.bottom, Space.s2)
         }
     }
 }
@@ -238,38 +255,28 @@ struct GoalThreadRow: View {
     let thread: BoardThread
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            StateDot(state: thread.work.state, band: thread.band).padding(.top, 5)
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+            StateDot(state: thread.work.state, band: thread.band)
+                .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 4 }
+            VStack(alignment: .leading, spacing: 3) {
                 Text(thread.work.title)
-                    .font(.callout.weight(thread.work.kind.isGoal ? .medium : .regular))
-                    .lineLimit(2)
-                HStack(spacing: 4) {
+                    .font(.system(size: 13, weight: thread.work.kind.isGoal ? .medium : .regular))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                HStack(spacing: Space.s1) {
                     Text(thread.work.project)
                     if let r = thread.rollup, r.total > 0 {
-                        Text("· \(r.done)/\(r.total)")
+                        Text("·")
+                        Text("\(r.done)/\(r.total)").monospacedDigit()
                     }
-                    Spacer(minLength: 4)
-                    Text(ago(thread.work.updated))
+                    Spacer(minLength: Space.s1)
+                    Text(ago(thread.work.updated)).monospacedDigit()
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11.5))
+                .foregroundStyle(.tertiary)
             }
         }
-        .padding(.vertical, 2)
-    }
-
-    private func ago(_ stamp: String) -> String {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let d = f.date(from: stamp) ?? ISO8601DateFormatter().date(from: stamp) else { return "" }
-        let s = Int(Date().timeIntervalSince(d))
-        switch s {
-        case ..<60: return "now"
-        case ..<3600: return "\(s / 60)m"
-        case ..<86400: return "\(s / 3600)h"
-        default: return "\(s / 86400)d"
-        }
+        .padding(.vertical, Space.s1)
     }
 }
 
@@ -282,7 +289,7 @@ struct StateDot: View {
     var body: some View {
         Group {
             if band == .needsYou {
-                Circle().fill(.orange)
+                Circle().strokeBorder(Palette.attention, lineWidth: 2).background(Circle().fill(Palette.attention.opacity(0.25)))
             } else {
                 switch state {
                 case .running: Circle().fill(.green)
@@ -293,7 +300,7 @@ struct StateDot: View {
                 }
             }
         }
-        .frame(width: 7, height: 7)
+        .frame(width: 8, height: 8)
         .help(state.look.label)
     }
 }

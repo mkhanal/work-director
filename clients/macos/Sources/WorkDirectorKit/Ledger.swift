@@ -220,6 +220,30 @@ public struct GoalDetail: Codable, Sendable, Hashable {
     public let activity: [String: Activity]
     /// The question the goal waits on the person for, with its choices.
     public let asking: Question?
+    /// Each report read into its parts, by the id of the event that filed it.
+    public let reports: [String: Report]
+}
+
+/// A task's report read into its parts, as wd serves it.
+public struct Report: Codable, Sendable, Hashable {
+    /// `done`, `blocked`, `needs-input`, or empty when the report gave none.
+    public let verdict: String
+    /// What the report said with its verdict.
+    public let said: String
+    public let files: [String]
+    /// What the report said about its files beyond naming them.
+    public let fileNote: String
+    public let sections: [ReportSection]
+
+    enum CodingKeys: String, CodingKey {
+        case verdict, said, files, sections
+        case fileNote = "file_note"
+    }
+}
+
+public struct ReportSection: Codable, Sendable, Hashable {
+    public let name: String
+    public let text: String
 }
 
 public struct ActionResult: Codable, Sendable, Hashable {

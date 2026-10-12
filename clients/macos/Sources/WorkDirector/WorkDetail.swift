@@ -24,6 +24,8 @@ struct WorkDetail: View {
     /// The gate this work waits on next, if any.
     @State private var gate: Gate?
     @AppStorage("detail.tab") private var tab: Tab = .conversation
+    @AppStorage("goal.view") private var goalView: GoalView = .overview
+    @State private var filter: ThreadFilter = .all
     /// Whether the reader is at the bottom of the conversation, where it
     /// follows what comes in.
     @State private var atBottom = true
@@ -62,13 +64,15 @@ struct WorkDetail: View {
                 // last in the conversation ends above the bar however tall the
                 // bar grows.
                 VStack(spacing: 0) {
+                if focus == nil {
+                    pageTop(loaded)
+                }
                 ScrollView {
-                    VStack(alignment: .leading, spacing: Layout.step) {
+                    VStack(alignment: .leading, spacing: Space.s5) {
                         if let focus, let focusFeed, let task = focusedTask(focus, in: loaded) {
                             Breadcrumb(work: loaded.work, task: task, focus: focus) { self.focus = nil; self.focusFeed = nil }
                             ConversationView(store: store, work: task, feed: focusFeed, directorAnswers: directorAnswers(task.id, in: loaded))
                         } else {
-                            Header(work: loaded.work, open: open)
                             page(loaded)
                         }
                     }
@@ -99,7 +103,7 @@ struct WorkDetail: View {
                                 .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
                         }
                         .buttonStyle(.plain)
-                        .padding(.trailing, Layout.gutter)
+                        .padding(.trailing, Space.s6)
                         .padding(.bottom, 14)
                         .help("Jump to the latest")
                         .transition(.opacity.combined(with: .scale(scale: 0.8)))
@@ -123,7 +127,8 @@ struct WorkDetail: View {
                     Actions(work: loaded.work, run: { plan = $0 }, ask: { asking = $0 })
                     ToolbarItem(placement: .primaryAction) {
                         if let target = openTarget(loaded) {
-                            Button { plan = Plan.open(target) } label: { Label("Open", systemImage: "arrow.up.forward.app") }
+                            Button { plan = Plan.open(target) } label: { Label("Open in Editor", systemImage: "arrow.up.forward.app") }
+                                .labelStyle(.titleAndIcon)
                                 .help("Open where this work is done in your editor: wd open \(target) .")
                         }
                     }
@@ -142,7 +147,12 @@ struct WorkDetail: View {
                     ToolbarItem(placement: .navigation) {
                         if focus == nil, case .goal(let goal) = loaded, !goal.yours.isEmpty {
                             YoursMenu(yours: goal.yours) { id in
-                                withAnimation { proxy.scrollTo(id, anchor: .top) }
+                                goalView = .conversation
+                                filter = .all
+                                Task {
+                                    try? await Task.sleep(for: .milliseconds(150))
+                                    withAnimation { proxy.scrollTo(id, anchor: .top) }
+                                }
                             }
                         }
                     }
@@ -179,17 +189,19 @@ struct WorkDetail: View {
     private func page(_ loaded: Loaded) -> some View {
         switch loaded {
         case .goal(let goal):
-            GoalThread(store: store, goal: goal, focus: { id in choose(id, in: loaded) }) { Task { await load() } }
-        case .work(let work, let events):
-            if hasSession(work) {
-                Picker("Show", selection: $tab) {
-                    Text("Conversation").tag(Tab.conversation)
-                    Text("Record").tag(Tab.record)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
+            let focusTask = { (id: String) in choose(id, in: loaded) }
+            switch goalView {
+            case .overview:
+                GoalOverview(store: store, goal: goal, gate: gate, pass: { plan = $0 }, focus: focusTask,
+                             answered: { Task { await load() } }, show: { goalView = $0 })
+            case .conversation:
+                GoalThread(store: store, goal: goal, focus: focusTask, answered: { Task { await load() } }, filter: $filter)
+            case .tasks:
+                GoalTasks(goal: goal, focus: focusTask)
+            case .record:
+                EventsSection(events: goal.events, expanded: true)
             }
+        case .work(let work, let events):
             if hasSession(work) && tab == .conversation {
                 ConversationView(store: store, work: work, feed: feed, directorAnswers: directorAnswers(work.id, in: loaded))
             } else {
@@ -255,6 +267,43 @@ struct WorkDetail: View {
         case .goal(let g): g.goal.id == id ? g.goal : g.tasks.first { $0.id == id }
         case .work(let w, _): w.id == id ? w : nil
         }
+    }
+
+    /// The page's fixed top: its name and where it stands, and the views it
+    /// is read in. It stays while the view under it scrolls.
+    @ViewBuilder private func pageTop(_ loaded: Loaded) -> some View {
+        VStack(alignment: .leading, spacing: Space.s4) {
+            Header(work: loaded.work, goal: goalDetail(loaded), open: open,
+                   rename: { title in plan = try? Plan.rename(loaded.work.id, title: title) })
+            switch loaded {
+            case .goal(let g):
+                PageTabs(tabs: GoalView.allCases, selection: $goalView, label: \.label, symbol: \.symbol,
+                         count: { view in
+                             switch view {
+                             case .tasks: g.tasks.count
+                             case .record: g.events.count
+                             default: nil
+                             }
+                         },
+                         alert: { $0 == .overview && g.waitingOnYou > 0 })
+            case .work(let w, _):
+                if hasSession(w) {
+                    PageTabs(tabs: [Tab.conversation, Tab.record], selection: $tab,
+                             label: { $0 == .conversation ? "Conversation" : "Record" },
+                             symbol: { $0 == .conversation ? "bubble.left.and.bubble.right" : "list.bullet.rectangle" })
+                }
+            }
+        }
+        .padding(.horizontal, Space.s6)
+        .padding(.top, Space.s4)
+        .padding(.bottom, Space.s3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        Divider()
+    }
+
+    private func goalDetail(_ loaded: Loaded) -> GoalDetail? {
+        if case .goal(let g) = loaded { return g }
+        return nil
     }
 
     /// What the director answered work in the person's place.
@@ -324,7 +373,7 @@ struct WorkDetail: View {
     /// A conversation keeps its newest step in view as it grows.
     private var following: Bool {
         if focus != nil { return true }
-        if case .goal = loaded { return true }
+        if case .goal = loaded { return goalView == .conversation }
         if case .work(let w, _) = loaded { return hasSession(w) && tab == .conversation }
         return false
     }
@@ -384,33 +433,80 @@ struct Breadcrumb: View {
     }
 }
 
+/// The top of a work page: its name, which a double-click or Rename… makes
+/// editable, and in a line under it where it stands.
 struct Header: View {
     let work: Work
+    var goal: GoalDetail? = nil
     let open: (String) -> Void
+    let rename: (String) -> Void
+    @State private var editing = false
+    @State private var draft = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Space.s2) {
             if let parent = work.parent {
                 Button { open(parent) } label: {
-                    Label("Goal \(parent)", systemImage: "chevron.backward")
+                    Label("Goal", systemImage: "chevron.backward")
                 }
                 .buttonStyle(.link)
-                .font(.caption)
+                .font(TypeScale.meta)
             }
-            Text(work.title).font(.title2.weight(.semibold)).textSelection(.enabled)
-            HStack(spacing: 8) {
+            if editing {
+                TextField("Name", text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(TypeScale.display)
+                    .focused($focused)
+                    .onSubmit(save)
+                    .onExitCommand { editing = false }
+                    .onChange(of: focused) { _, now in if !now { editing = false } }
+            } else {
+                Text(work.title)
+                    .font(TypeScale.display)
+                    .textSelection(.enabled)
+                    .onTapGesture(count: 2, perform: begin)
+                    .contextMenu { Button("Rename…", action: begin) }
+                    .help("Double-click to rename")
+            }
+            HStack(spacing: Space.s2) {
                 StatePill(state: work.state)
-                if let type = work.goalType {
-                    Text(type.rawValue).font(.caption).foregroundStyle(.secondary)
+                Group {
+                    Text(work.project)
+                    if let goal, goal.rollup.total > 0 {
+                        Text("·")
+                        Text("\(goal.rollup.done) of \(goal.rollup.total) tasks done")
+                    }
+                    if let type = work.goalType {
+                        Text("·")
+                        Text(type.rawValue)
+                    }
+                    Text("·")
+                    Text(work.id).monospaced().textSelection(.enabled)
                 }
-                Text(work.project).font(.caption).foregroundStyle(.secondary)
-                Text(work.id).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                .font(TypeScale.meta)
+                .foregroundStyle(.secondary)
+            }
+            if let goal, let delivery = goal.delivery, delivery.status != "none" || delivery.error != nil || !goal.landings.isEmpty {
+                DeliveryLine(delivery: delivery, landings: goal.landings)
             }
             // A goal's request opens its thread; a task's detail is its brief.
             if !work.detail.isEmpty && !work.kind.isGoal {
-                Text(work.detail).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(work.detail).readable().foregroundStyle(.secondary).textSelection(.enabled).lineLimit(6)
             }
         }
+    }
+
+    private func begin() {
+        draft = work.title
+        editing = true
+        focused = true
+    }
+
+    private func save() {
+        let title = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        editing = false
+        if !title.isEmpty && title != work.title { rename(title) }
     }
 }
 
@@ -427,6 +523,9 @@ struct Waiting: View {
         if let question = goal.asking {
             QuestionCard(store: store, workID: goal.goal.id, question: question,
                          title: goal.supervised ? "The supervisor asks you" : "Waiting on you", answered: answered)
+        }
+        ForEach(goal.waitingTasks, id: \.question.id) { task, question in
+            QuestionCard(store: store, workID: task.id, question: question, title: "asks you", asker: task.title, answered: answered)
         }
         if !asking.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
@@ -651,16 +750,16 @@ struct InputBar: View {
     @State private var armed = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Space.s2) {
             if let note {
                 Label(note, systemImage: noteIsError ? "exclamationmark.triangle.fill" : "paperplane")
-                    .font(.caption)
-                    .foregroundStyle(noteIsError ? .red : .secondary)
+                    .font(TypeScale.meta)
+                    .foregroundStyle(noteIsError ? Palette.failure : .secondary)
                     .lineLimit(3)
                     .textSelection(.enabled)
+                    .padding(.horizontal, Space.s1)
             }
-            VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .bottom, spacing: 8) {
+            VStack(alignment: .leading, spacing: Space.s3) {
                 MessageField(
                     text: $text,
                     placeholder: placeholder,
@@ -670,69 +769,75 @@ struct InputBar: View {
                     send: { if command != nil && !busy { submit() } }
                 )
                 .frame(height: height)
-                if busy {
-                    ProgressView().controlSize(.small)
-                } else {
-                    if let remember {
-                        Toggle(isOn: remember) { Image(systemName: "graduationcap") }
-                            .toggleStyle(.button)
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(remember.wrappedValue ? Color.accentColor : Color.secondary)
-                            .help(remember.wrappedValue ? "This message is also kept as feedback, so the director can learn a rule from it" : "Keep this message as feedback too, so the director can learn a rule from it")
+                HStack(spacing: Space.s2) {
+                    ForEach(about, id: \.self) { chip in
+                        Text(chip)
+                            .font(TypeScale.meta)
+                            .padding(.horizontal, Space.s2)
+                            .padding(.vertical, 3)
+                            .background(Palette.sunken, in: RoundedRectangle(cornerRadius: Radius.chip))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
-                    if let stop {
-                        Button(action: stopped) {
-                            Image(systemName: "stop.circle.fill").font(.title2)
+                    Spacer(minLength: Space.s2)
+                    if busy {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        if let remember {
+                            Toggle(isOn: remember) { Image(systemName: "graduationcap") }
+                                .toggleStyle(.button)
+                                .buttonStyle(.borderless)
+                                .foregroundStyle(remember.wrappedValue ? Color.accentColor : Color.secondary)
+                                .help(remember.wrappedValue ? "This message is also kept as feedback, so the director can learn a rule from it" : "Keep this message as feedback too, so the director can learn a rule from it")
+                        }
+                        if let stop {
+                            Button(action: stopped) {
+                                Image(systemName: "stop.fill")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .frame(width: 28, height: 28)
+                                    .background(Palette.failure.opacity(0.14), in: Circle())
+                                    .foregroundStyle(Palette.failure)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Stop (Esc Esc): \(stop.commandLine)\nWhat it has not read yet comes back here to edit")
+                        }
+                        Button(action: submit) {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 13, weight: .bold))
+                                .frame(width: 28, height: 28)
+                                .background(command == nil ? AnyShapeStyle(Palette.sunken) : AnyShapeStyle(Color.accentColor), in: Circle())
+                                .foregroundStyle(command == nil ? Color.secondary : Color.white)
                         }
                         .buttonStyle(.plain)
-                        .foregroundStyle(.red)
-                        .help("Stop (Esc Esc): \(stop.commandLine)\nWhat it has not read yet comes back here to edit")
+                        .disabled(command == nil)
+                        .help(command.map { "\(sendKey.symbol) \($0)" } ?? "Type what you want")
                     }
-                    Button(action: submit) {
-                        Image(systemName: "arrow.up.circle.fill").font(.title2)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(command == nil ? Color.secondary : Color.accentColor)
-                    .disabled(command == nil)
-                    .help(command.map { "\(sendKey.symbol) \($0)" } ?? "Type what you want")
                 }
             }
-            .padding(10)
-            .background(.background, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
-            HStack(spacing: 8) {
-                ForEach(about, id: \.self) { chip in
-                    Text(chip)
-                        .font(.caption2)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.quaternary.opacity(0.6), in: Capsule())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+            .padding(.horizontal, Space.s4 - 2)
+            .padding(.vertical, Space.s3)
+            .background(Palette.raised, in: RoundedRectangle(cornerRadius: Radius.bubble))
+            .overlay(RoundedRectangle(cornerRadius: Radius.bubble).strokeBorder(Palette.separator))
+            .shadow(color: .black.opacity(0.07), radius: 10, y: 2)
+            HStack(spacing: Space.s2) {
                 if let command {
                     Text(command)
-                        .font(.caption2.monospaced())
+                        .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
                 Spacer(minLength: 0)
                 Text(armed ? "Press Esc again to stop" : sendKey.title + (stop == nil ? "" : " · Esc Esc stops"))
-                    .font(.caption2)
-                    .foregroundStyle(armed ? AnyShapeStyle(.red) : AnyShapeStyle(.tertiary))
+                    .font(.system(size: 11))
+                    .foregroundStyle(armed ? AnyShapeStyle(Palette.failure) : AnyShapeStyle(.tertiary))
                     .fixedSize()
             }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.separator))
-            .shadow(color: .black.opacity(0.07), radius: 10, y: 3)
+            .padding(.horizontal, Space.s1)
         }
-        .padding(.horizontal, Layout.gutter)
-        .padding(.top, 6)
-        .padding(.bottom, 18)
+        .padding(.horizontal, Space.s6)
+        .padding(.top, Space.s3)
+        .padding(.bottom, Space.s4)
         .background(.background)
         .onAppear { watchEscape() }
         .onChange(of: stop != nil && !busy, initial: true) { _, can in
@@ -791,6 +896,7 @@ struct YoursMenu: View {
         } label: {
             Label("Your messages", systemImage: "person.crop.circle")
         }
+        .labelStyle(.titleAndIcon)
         .help("Jump to something you said on this goal")
     }
 }

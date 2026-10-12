@@ -3,6 +3,7 @@ package serve
 import (
 	"errors"
 	"fmt"
+	"strconv"
 
 	"wd/internal/coordinator"
 	"wd/internal/core"
@@ -67,6 +68,9 @@ type goalView struct {
 	// Asking is the question the goal waits on the person for, with its
 	// choices, while it does.
 	Asking *runner.Question `json:"asking,omitempty"`
+	// Reports are the goal's and its tasks' reports read into parts, by the
+	// id of the event that filed each.
+	Reports map[string]core.Report `json:"reports"`
 }
 
 // notFound is a view asked of work that does not exist, or of the wrong kind.
@@ -178,6 +182,12 @@ func (s *Server) goal(id string) (goalView, error) {
 		Claims:   review.ClaimsUnder(events, works),
 		Landings: review.LandingsUnder(events, works),
 		Activity: s.activities(append([]core.Work{goal}, children...)),
+	}
+	view.Reports = map[string]core.Report{}
+	for _, e := range events {
+		if e.Kind == core.EventReport {
+			view.Reports[strconv.Itoa(e.ID)] = core.ParseReport(e.Body)
+		}
 	}
 	if q, ok := coordinator.OpenQuestion(events, goal.ID); ok && goal.State == core.StateNeedsInput {
 		asked := coordinator.AskedQuestion(q)

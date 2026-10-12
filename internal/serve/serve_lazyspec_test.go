@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -37,6 +38,7 @@ func TestServe(t *testing.T) {
 	t.Run("The Server Binds To Loopback", serverBindsToLoopback)
 	t.Run("JSON Endpoints Serve The Board", jsonEndpointsServeTheBoard)
 	t.Run("A Goal Serves What The Loop Decided And Where It Reached", aGoalServesWhatTheLoopDecidedAndWhereItReached)
+	t.Run("A Goal Serves Each Report In Sections", aGoalServesEachReportInSections)
 	t.Run("A Goal Waiting On The Person Serves Its Question", aGoalWaitingOnThePersonServesItsQuestion)
 	t.Run("A Goal's Delivery Is Read In The Goal's Own Directory", aGoalsDeliveryIsReadInTheGoalsOwnDirectory)
 	t.Run("The Board Places Every Item In One Band", theBoardPlacesEveryItemInOneBand)
@@ -960,6 +962,44 @@ func archivedWorkIsNotOnTheBoard(t *testing.T) {
 	}
 	if len(b.Goals) != 0 || len(b.Standalone) != 1 || b.Standalone[0].Work.ID != kept.ID {
 		t.Fatalf("board = %+v, want only %s", b, kept.ID)
+	}
+}
+
+func aGoalServesEachReportInSections(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	goal, err := l.Add("p", "Goal", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := l.Add("p", "Task", ledger.AddOptions{Parent: &goal.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := "DONE\nSTATUS: DONE (validate not fully green)\nFILES: scripts/a.ts, `b/c.go`, plus my earlier files (uncommitted)\nVERIFY: `go test` → 0\n  27/27 pass\nPR: none\nNOTES: all good"
+	e, err := l.AddEvent(task.ID, core.EventReport, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	var view struct {
+		Reports map[string]core.Report `json:"reports"`
+	}
+	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &view)
+	r, ok := view.Reports[strconv.Itoa(e.ID)]
+	if !ok {
+		t.Fatalf("reports = %+v, want the task's report by its event id", view.Reports)
+	}
+	if r.Verdict != "done" || r.Said != "(validate not fully green)" {
+		t.Fatalf("verdict = %q, said %q", r.Verdict, r.Said)
+	}
+	if !slices.Equal(r.Files, []string{"scripts/a.ts", "b/c.go"}) || r.FileNote != "uncommitted; plus my earlier files" {
+		t.Fatalf("files = %q, note %q", r.Files, r.FileNote)
+	}
+	want := []core.ReportSection{{Name: "VERIFY", Text: "`go test` → 0\n  27/27 pass"}, {Name: "PR", Text: "none"}, {Name: "NOTES", Text: "all good"}}
+	if !slices.Equal(r.Sections, want) {
+		t.Fatalf("sections = %+v, want %+v", r.Sections, want)
 	}
 }
 

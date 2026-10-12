@@ -5,6 +5,7 @@ package core
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -556,4 +557,88 @@ func Clipped(text string, n int) string {
 		cut = cut[:i]
 	}
 	return strings.TrimSpace(cut)
+}
+
+// Report is a task's report read into its parts: the verdict and what was
+// said with it, the files it names, and each named section in order.
+type Report struct {
+	Verdict  string          `json:"verdict"`
+	Said     string          `json:"said"`
+	Files    []string        `json:"files"`
+	FileNote string          `json:"file_note"`
+	Sections []ReportSection `json:"sections"`
+}
+
+// ReportSection is one named part of a report, such as VERIFY or NOTES.
+type ReportSection struct {
+	Name string `json:"name"`
+	Text string `json:"text"`
+}
+
+var (
+	reportNameRe   = regexp.MustCompile(`^([A-Z][A-Z -]{1,24}):\s*(.*)$`)
+	reportStatusRe = regexp.MustCompile(`^(DONE|BLOCKED|NEEDS-INPUT)\b\s*(.*)$`)
+	reportPathRe   = regexp.MustCompile(`^[^\s]*[/.][^\s]*$`)
+)
+
+// ParseReport reads a report as executors write it: a STATUS line, then
+// named lines (FILES, VERIFY, PR, NOTES...) each running to the next.
+func ParseReport(body string) Report {
+	r := Report{Files: []string{}, Sections: []ReportSection{}}
+	var files string
+	current := -1
+	for i, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if i == 0 && reportStatusRe.MatchString(trimmed) && !strings.Contains(trimmed, ":") {
+			continue
+		}
+		m := reportNameRe.FindStringSubmatch(trimmed)
+		switch {
+		case m != nil && m[1] == "STATUS":
+			if s := reportStatusRe.FindStringSubmatch(m[2]); s != nil {
+				r.Verdict = strings.ToLower(s[1])
+				r.Said = strings.TrimSpace(s[2])
+			}
+			current = -1
+		case m != nil && m[1] == "FILES":
+			files = m[2]
+			current = -2
+		case m != nil:
+			r.Sections = append(r.Sections, ReportSection{Name: m[1], Text: m[2]})
+			current = len(r.Sections) - 1
+		case current >= 0:
+			r.Sections[current].Text += "\n" + line
+		case current == -1 && trimmed != "":
+			r.Said = strings.TrimSpace(r.Said + "\n" + line)
+		case current == -2 && trimmed != "":
+			files += " " + trimmed
+		}
+	}
+	for i := range r.Sections {
+		r.Sections[i].Text = strings.TrimSpace(r.Sections[i].Text)
+	}
+	r.Files, r.FileNote = reportFiles(files)
+	return r
+}
+
+// reportFiles splits a FILES line into the paths it names and what else it
+// says: a note in brackets, or words that are not a path.
+func reportFiles(text string) ([]string, string) {
+	paths := []string{}
+	var notes []string
+	if open := strings.Index(text, " ("); open >= 0 {
+		notes = append(notes, strings.Trim(strings.TrimSpace(text[open:]), "()"))
+		text = text[:open]
+	}
+	for _, part := range strings.Split(text, ",") {
+		part = strings.Trim(strings.TrimSpace(part), "`")
+		switch {
+		case part == "":
+		case reportPathRe.MatchString(part):
+			paths = append(paths, part)
+		default:
+			notes = append(notes, part)
+		}
+	}
+	return paths, strings.Join(notes, "; ")
 }
