@@ -62,7 +62,7 @@ struct WorkDetail: View {
                     VStack(alignment: .leading, spacing: Layout.step) {
                         if let focus, let focusFeed, let task = focusedTask(focus, in: loaded) {
                             Breadcrumb(work: loaded.work, task: task, focus: focus) { self.focus = nil; self.focusFeed = nil }
-                            ConversationView(store: store, work: task, feed: focusFeed)
+                            ConversationView(store: store, work: task, feed: focusFeed, directorAnswers: directorAnswers(task.id, in: loaded))
                         } else {
                             Header(work: loaded.work, open: open)
                             page(loaded)
@@ -157,7 +157,7 @@ struct WorkDetail: View {
                 .fixedSize()
             }
             if hasSession(work) && tab == .conversation {
-                ConversationView(store: store, work: work, feed: feed)
+                ConversationView(store: store, work: work, feed: feed, directorAnswers: directorAnswers(work.id, in: loaded))
             } else {
                 EventsSection(events: events, expanded: true)
             }
@@ -221,6 +221,15 @@ struct WorkDetail: View {
         case .goal(let g): g.goal.id == id ? g.goal : g.tasks.first { $0.id == id }
         case .work(let w, _): w.id == id ? w : nil
         }
+    }
+
+    /// What the director answered work in the person's place.
+    private func directorAnswers(_ id: String, in loaded: Loaded) -> [String] {
+        let events: [Event] = switch loaded {
+        case .goal(let g): g.events
+        case .work(_, let e): e
+        }
+        return events.filter { $0.work == id && $0.answeredByDirector }.map(\.body)
     }
 
     private func focusedTask(_ card: AgentCard, in loaded: Loaded) -> Work? { task(card.task, in: loaded) }
@@ -375,6 +384,10 @@ struct Waiting: View {
 
     var body: some View {
         let asking = goal.tasks.compactMap { t in goal.activity[t.id]?.asking.map { (t, $0) } }
+        if let question = goal.asking {
+            QuestionCard(store: store, workID: goal.goal.id, question: question,
+                         title: goal.supervised ? "The supervisor asks you" : "Waiting on you", answered: answered)
+        }
         if !asking.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(asking, id: \.1.id) { task, question in

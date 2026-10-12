@@ -11,10 +11,12 @@ public enum ThreadStep: Sendable, Hashable, Identifiable {
     case supervisor(Event, SupervisorReply)
     /// A task's session stopped without a report, and what it last said.
     case stopped(Event, said: String)
+    /// A question asked on the goal or a task, with its answer once it has one.
+    case exchange(Event, answer: Event?)
 
     public var event: Event {
         switch self {
-        case .event(let e), .look(let e), .supervisor(let e, _), .stopped(let e, _): e
+        case .event(let e), .look(let e), .supervisor(let e, _), .stopped(let e, _), .exchange(let e, _): e
         }
     }
 
@@ -46,26 +48,44 @@ extension GoalDetail {
         events.contains { $0.work == goal.id && $0.kind == "spawn" && $0.body.hasPrefix(supervisePrefix) }
     }
 
-    /// The goal as one conversation, oldest first.
+    /// The goal as one conversation, oldest first: each answer read with the
+    /// question it answers.
     public var thread: [ThreadStep] {
-        events
-            .sorted { $0.at == $1.at ? $0.id < $1.id : $0.at < $1.at }
-            .compactMap { e -> ThreadStep? in
-                switch e.kind {
-                case "decision", "report", "sent", "answer", "verify", "pr", "question":
-                    return .event(e)
-                case "state":
-                    return ["done", "dropped", "abandoned", "paused", "blocked"].contains(e.body) ? .event(e) : nil
-                case "look":
-                    return .look(e)
-                case "supervised":
-                    return .supervisor(e, reply(e.body))
-                case "note" where e.body.hasPrefix(stoppedPrefix):
-                    return .stopped(e, said: String(e.body.dropFirst(stoppedPrefix.count)))
-                default:
-                    return nil
-                }
+        var steps: [ThreadStep] = []
+        var open: [String: Int] = [:]
+        // An answer reaches its session as a message too; it is read once, as the answer.
+        let answers = Set(events.filter { $0.kind == "answer" }.map { "\($0.work)\n\($0.body)" })
+        for e in events.sorted(by: { $0.at == $1.at ? $0.id < $1.id : $0.at < $1.at }) {
+            if e.kind == "sent", answers.contains("\(e.work)\n\(e.body)") { continue }
+            if e.kind == "question" {
+                open[e.work] = steps.count
+                steps.append(.exchange(e, answer: nil))
+                continue
             }
+            if e.kind == "answer", let i = open.removeValue(forKey: e.work), case .exchange(let q, nil) = steps[i] {
+                steps[i] = .exchange(q, answer: e)
+                continue
+            }
+            if let step = step(e) { steps.append(step) }
+        }
+        return steps
+    }
+
+    private func step(_ e: Event) -> ThreadStep? {
+        switch e.kind {
+        case "decision", "report", "sent", "answer", "verify", "pr":
+            return .event(e)
+        case "state":
+            return ["done", "dropped", "abandoned", "paused", "blocked"].contains(e.body) ? .event(e) : nil
+        case "look":
+            return .look(e)
+        case "supervised":
+            return .supervisor(e, reply(e.body))
+        case "note" where e.body.hasPrefix(stoppedPrefix):
+            return .stopped(e, said: String(e.body.dropFirst(stoppedPrefix.count)))
+        default:
+            return nil
+        }
     }
 
     /// A supervised event's body: the reply, then `Done:` and `Refused:`
@@ -117,12 +137,51 @@ extension GoalDetail {
     /// and answers.
     public var yours: [Event] {
         thread.compactMap { step in
-            if case .event(let e) = step, isYours(e) { e } else { nil }
+            switch step {
+            case .event(let e) where isYours(e): e
+            case .exchange(_, let a?) where isYours(a): a
+            default: nil
+            }
         }
     }
 
-    /// Whether the person said it on the goal: a decision or an answer.
+    /// Whether the person said it: a decision on the goal, or an answer the
+    /// director did not give.
     public func isYours(_ e: Event) -> Bool {
-        e.work == goal.id && (e.kind == "decision" || e.kind == "answer")
+        switch e.kind {
+        case "decision": e.work == goal.id
+        case "answer": !e.answeredByDirector
+        default: false
+        }
+    }
+}
+
+extension Event {
+    /// Whether the director gave this answer, from what was decided or by its
+    /// judgement, rather than the person.
+    public var answeredByDirector: Bool { kind == "answer" && decision?.source == "director" }
+
+    /// An answer's words, one `question → answer` line per item when it
+    /// answers several.
+    public var answerText: String {
+        let lines = body.components(separatedBy: "\n")
+        guard lines.first == "Answers to your questions:" else { return body }
+        return lines.dropFirst().joined(separator: "\n")
+    }
+
+    /// A question's parts: each line a question, the `- ` lines under it its
+    /// choices.
+    public var askedItems: [(question: String, choices: [String])] {
+        var items: [(question: String, choices: [String])] = []
+        for raw in body.components(separatedBy: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty { continue }
+            if line.hasPrefix("- "), !items.isEmpty {
+                items[items.count - 1].choices.append(String(line.dropFirst(2)))
+            } else {
+                items.append((line, []))
+            }
+        }
+        return items
     }
 }

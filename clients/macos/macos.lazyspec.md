@@ -78,7 +78,7 @@ hold only that product's work; with none, every product's.
 - Sending puts the message in the outbox at once, sending, and clears the field without waiting for `wd`.
 - A message `wd` took is sent, and shows until the work's record holds it: a decision on a goal, or a prompt in its session.
 - A message `wd` refused stays, with why; retrying sends it again, and what `wd` already took is not sent twice.
-- What the person said on a goal, its decisions and answers, is set apart from what agents said and listed to jump back to.
+- What the person said on a goal, its decisions and the answers they gave, is set apart from what agents said and listed to jump back to.
 
 ## Escape Pressed Twice Quickly Stops The Work
 - A second Escape within 0.8 seconds of the first stops the task or goal on screen, as the Stop button does.
@@ -98,6 +98,8 @@ hold only that product's work; with none, every product's.
 - A supervisor's reply shows what it said without its action lines, then what was done, each with the task it told, started or filed, and then what was refused.
 - A look shows as the supervisor looking, with why.
 - A task that stopped without a report shows as such, with what it last said.
+- A question reads with its answer, and the answer says whether the director gave it or the person did; the answer's message to the session is not shown again.
+- The question a goal waits on the person for is answered in place, one answer per question, its choices offered as a session's are.
 
 ## The Sidebar Lists Work As Threads, Most Recently Active First
 - Goals and standalone work in the product in scope are listed most recently updated first.

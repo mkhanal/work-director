@@ -465,6 +465,10 @@ func fakeRunner(_ home: Home) throws {
             let quoted = String(data: try! JSONEncoder().encode(body), encoding: .utf8)!
             return #"{"id":\#(id),"work":"\#(work)","kind":"\#(kind)","body":\#(quoted),"at":"2026-10-12T01:\#(at)Z","effective":null,"decision":null}"#
         }
+        func answer(_ id: Int, _ work: String, _ body: String, by source: String, _ at: String) -> String {
+            let decision = #"{"question":"q","answer":"\#(body)","source":"\#(source)","runner":"","model":"","tokens":0,"reverses":0,"reversed_by":0}"#
+            return #"{"id":\#(id),"work":"\#(work)","kind":"answer","body":"\#(body)","at":"2026-10-12T01:\#(at)Z","effective":null,"decision":\#(decision)}"#
+        }
         func work(_ id: String, _ title: String, _ state: String) -> String {
             workJSON(state: state).replacingOccurrences(of: #""id":"w1""#, with: #""id":"\#(id)""#)
                 .replacingOccurrences(of: #""title":"T""#, with: #""title":"\#(title)""#)
@@ -478,15 +482,28 @@ func fakeRunner(_ home: Home) throws {
             event(4, "g", "look", "a task was noted on (1)", "04:00"),
             event(6, "g", "spawn", "supervise claude s1", "04:00"),
             event(7, "b", "state", "dropped", "06:00"),
+            event(8, "a", "question", "which driver?", "07:00"),
+            answer(9, "a", "sqlite", by: "director", "08:00"),
+            event(10, "a", "sent", "sqlite", "08:00"),
+            event(11, "g", "question", "Tag v1.0.0?\n- yes (recommended)\n- no", "09:00"),
+            answer(12, "g", "yes", by: "person", "10:00"),
         ].joined(separator: ",")
+        let asking = #"{"id":"event-11","items":[{"header":"","question":"Tag v1.0.0?","multi":false,"options":[{"label":"yes (recommended)","description":""},{"label":"no","description":""}]}],"answers":null,"reply":null}"#
         let json = """
         {"goal":\(work("g", "Release notes", "running")),"tasks":[\(work("a", "Impacts", "running")),\(work("b", "Collector", "review")),\(work("n", "Weekly note", "running"))],
-         "rollup":{"counts":{},"done":0,"total":3},"events":[\(events)],"claims":[],"landings":[],"delivery":null,"activity":{}}
+         "rollup":{"counts":{},"done":0,"total":3},"events":[\(events)],"claims":[],"landings":[],"delivery":null,"activity":{},"asking":\(asking)}
         """
         let goal = try JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
         #expect(goal.supervised)
+        #expect(goal.asking?.items.first?.options.map(\.label) == ["yes (recommended)", "no"])
         let steps = goal.thread
-        #expect(steps.map(\.id) == [1, 3, 4, 5, 7], "oldest first; a state change that does not end work and a spawn are left out")
+        #expect(steps.map(\.id) == [1, 3, 4, 5, 7, 8, 11], "oldest first; a state change that does not end work, a spawn and an answer's message are left out")
+        guard case .exchange(_, let auto?) = steps[5] else { Issue.record("step 6 is \(steps[5])"); return }
+        #expect(auto.id == 9 && auto.answeredByDirector && !goal.isYours(auto))
+        guard case .exchange(let asked, let mine?) = steps[6] else { Issue.record("step 7 is \(steps[6])"); return }
+        #expect(asked.askedItems.map(\.question) == ["Tag v1.0.0?"] && asked.askedItems.first?.choices == ["yes (recommended)", "no"])
+        #expect(mine.id == 12 && !mine.answeredByDirector)
+        #expect(goal.yours.map(\.id) == [1, 12])
         guard case .stopped(_, let said) = steps[1] else { Issue.record("step 2 is \(steps[1])"); return }
         #expect(said == "wiring belongs to the collector")
         guard case .look(let look) = steps[2] else { Issue.record("step 3 is \(steps[2])"); return }

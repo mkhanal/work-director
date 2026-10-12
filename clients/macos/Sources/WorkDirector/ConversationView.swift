@@ -11,6 +11,9 @@ struct ConversationView: View {
     /// The session, or one of its subagents, as it is read; whoever shows the
     /// conversation owns it, so the agents panel reads the same reads.
     let feed: Feed
+    /// What the director answered this work in its place, so those prompts
+    /// read as the director's.
+    var directorAnswers: [String] = []
 
     var body: some View {
         // Lazy: a long session has thousands of steps, and only those on
@@ -33,6 +36,7 @@ struct ConversationView: View {
                 case .step(let index, let step):
                     StepView(store: store, work: work, step: step, first: index == 0,
                              latest: index == feed.steps.count - 1 && feed.status == .running,
+                             directorAnswered: step.kind == .prompt && directorAnswers.contains { (step.text ?? "").contains($0) },
                              answered: { Task { await feed.read() } })
                 case .tools(_, let calls):
                     ToolGroup(calls: calls, working: feed.status == .running)
@@ -65,10 +69,14 @@ struct StepView: View {
     let first: Bool
     /// The newest step of a session still working.
     let latest: Bool
+    /// Whether this prompt is the director answering in the person's place.
+    var directorAnswered = false
     let answered: () -> Void
 
     var body: some View {
         switch step.kind {
+        case .prompt where directorAnswered:
+            DirectorAnswerText(text: step.text ?? "", at: step.at)
         case .prompt:
             PromptRow(text: step.text ?? "", brief: first, at: step.at)
         case .text:
@@ -685,6 +693,31 @@ struct BoundedCache<Key: Hashable, Value> {
         set {
             if store.count >= limit { store.removeAll(keepingCapacity: true) }
             store[key] = newValue
+        }
+    }
+}
+
+/// The director answering a session's question in the person's place.
+struct DirectorAnswerText: View {
+    let text: String
+    let at: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                Text("Director answered").font(.caption.weight(.semibold))
+                if let at { Text(when(at)).foregroundStyle(.tertiary) }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Text(text)
+                .readable()
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.green.opacity(0.3)))
         }
     }
 }

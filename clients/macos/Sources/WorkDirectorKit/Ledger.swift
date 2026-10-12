@@ -218,6 +218,8 @@ public struct GoalDetail: Codable, Sendable, Hashable {
     public let delivery: Delivery?
     /// What each task still working is doing now, by task id.
     public let activity: [String: Activity]
+    /// The question the goal waits on the person for, with its choices.
+    public let asking: Question?
 }
 
 public struct ActionResult: Codable, Sendable, Hashable {

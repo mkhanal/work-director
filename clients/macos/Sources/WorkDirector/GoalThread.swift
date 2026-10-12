@@ -26,6 +26,11 @@ struct GoalThread: View {
                     YouBubble(text: event.decision?.answer ?? event.body, at: when(event.at), label: event.kind == "answer" ? "You answered" : "You")
                 case .event(let event):
                     TimelineRow(event: event, task: title(of: event.work), focus: event.work == goal.goal.id ? nil : { focus(event.work) })
+                case .exchange(let question, let answer):
+                    // The question waiting on you is answered below, in place.
+                    if answer != nil || goal.asking?.id != "event-\(question.id)" {
+                        ExchangeRow(question: question, answer: answer, asker: asker(of: question.work), focus: question.work == goal.goal.id ? nil : { focus(question.work) })
+                    }
                 case .look(let event):
                     Label("Supervisor looking · \(event.body)", systemImage: "eye")
                         .font(.caption)
@@ -53,6 +58,11 @@ struct GoalThread: View {
             }
             Waiting(store: store, goal: goal, open: focus, answered: answered)
         }
+    }
+
+    /// Who asked: the goal's supervisor, or the task.
+    private func asker(of id: String) -> String {
+        id == goal.goal.id ? (goal.supervised ? "Supervisor" : "Plan") : title(of: id) ?? id
     }
 
     private func title(of id: String) -> String? {
@@ -261,6 +271,100 @@ struct DeliveryLine: View {
                 Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange).textSelection(.enabled)
             }
             ForEach(landings, id: \.url) { LandingRow(landed: $0).font(.caption) }
+        }
+    }
+}
+
+/// A question and its answer, read together: who asked, what, the choices
+/// offered, and who answered — the director from what was already decided, or
+/// you.
+struct ExchangeRow: View {
+    let question: Event
+    let answer: Event?
+    let asker: String
+    let focus: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: "questionmark.bubble")
+                if let focus {
+                    Button(asker, action: focus).buttonStyle(.link).lineLimit(1)
+                } else {
+                    Text(asker)
+                }
+                Text("asked").font(.caption.weight(.semibold))
+                Text(when(question.at)).foregroundStyle(.tertiary)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            ForEach(Array(question.askedItems.enumerated()), id: \.offset) { _, item in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(item.question).readable().textSelection(.enabled)
+                    if !item.choices.isEmpty {
+                        FlowChoices(choices: item.choices)
+                    }
+                }
+            }
+            if let answer {
+                if answer.answeredByDirector {
+                    DirectorAnswer(answer: answer)
+                } else {
+                    YouBubble(text: answer.answerText, at: when(answer.at), label: "You answered")
+                }
+            } else {
+                Label("Not answered yet", systemImage: "hourglass").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+/// The choices a question offered, each as a chip.
+struct FlowChoices: View {
+    let choices: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(choices, id: \.self) { choice in
+                Text(choice)
+                    .font(.callout)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(.background, in: Capsule())
+                    .overlay(Capsule().strokeBorder(.separator))
+            }
+        }
+    }
+}
+
+/// The director answering in your place: what it answered, and that it was
+/// the director.
+struct DirectorAnswer: View {
+    let answer: Event
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                Text("Director answered").font(.caption.weight(.semibold))
+                if let model = answer.decision?.model, !model.isEmpty {
+                    Text("· \(model)").foregroundStyle(.tertiary)
+                } else {
+                    Text("· from what was already decided").foregroundStyle(.tertiary)
+                }
+                Text(when(answer.at)).foregroundStyle(.tertiary)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Text(answer.answerText)
+                .readable()
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.green.opacity(0.3)))
         }
     }
 }
