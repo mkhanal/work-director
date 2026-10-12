@@ -11,17 +11,20 @@ use kit::{Plan, SendKey, Store};
 
 use crate::app::{App, Place};
 use crate::new_goal_page::NewGoalPage;
-use crate::pages::{self, Shown};
+use crate::pages;
 use crate::settings::Settings;
 use crate::sidebar::{band_named, Sidebar};
 use crate::ui;
 use crate::work_page::WorkPage;
 
-enum Current {
-    Nothing,
-    NewGoal(Rc<NewGoalPage>),
-    Work(Rc<WorkPage>),
-    Other(Shown),
+type IdAction = Box<dyn Fn(&Window, String)>;
+
+/// The page in the main pane.
+struct Current {
+    /// The work page shown, to rename in place.
+    work: Option<Rc<WorkPage>>,
+    /// What the page needs kept alive while it shows.
+    _page: Box<dyn std::any::Any>,
 }
 
 pub struct Window {
@@ -69,7 +72,7 @@ impl Window {
             app: app.clone(),
             me: me.clone(),
             sidebar,
-            current: RefCell::new(Current::Nothing),
+            current: RefCell::new(Current { work: None, _page: Box::new(()) }),
             banner,
             watch: RefCell::new(None),
         });
@@ -101,7 +104,7 @@ impl Window {
 
     /// Shows a place in the main pane.
     pub fn open(&self, place: Place) {
-        if let (Place::Work(id), Current::Work(page)) = (&place, &*self.current.borrow()) {
+        if let (Place::Work(id), Some(page)) = (&place, &self.current.borrow().work) {
             if page.id() == id {
                 return;
             }
@@ -110,23 +113,23 @@ impl Window {
         let (widget, current): (gtk::Widget, Current) = match &place {
             Place::NewGoal => {
                 let page = NewGoalPage::new(&self.app, scope);
-                (page.widget.clone().upcast(), Current::NewGoal(page))
+                (page.widget.clone().upcast(), Current { work: None, _page: Box::new(page) })
             }
             Place::Work(id) => {
                 let page = WorkPage::new(&self.app, id);
-                (page.widget.clone().upcast(), Current::Work(page))
+                (page.widget.clone().upcast(), Current { work: Some(Rc::clone(&page)), _page: Box::new(page) })
             }
             Place::Archived => {
                 let shown = pages::archived(&self.app, scope);
-                (shown.widget.clone(), Current::Other(shown))
+                (shown.widget.clone(), Current { work: None, _page: Box::new(shown) })
             }
             Place::Taste => {
                 let shown = pages::taste(&self.app, scope);
-                (shown.widget.clone(), Current::Other(shown))
+                (shown.widget.clone(), Current { work: None, _page: Box::new(shown) })
             }
             Place::Review(project) => {
                 let shown = pages::review(&self.app, project);
-                (shown.widget.clone(), Current::Other(shown))
+                (shown.widget.clone(), Current { work: None, _page: Box::new(shown) })
             }
         };
         self.app.sidebar_split.set_content(Some(&widget));
@@ -146,7 +149,7 @@ impl Window {
 
     fn rename(&self, id: &str) {
         self.open(Place::Work(id.to_string()));
-        if let Current::Work(page) = &*self.current.borrow() {
+        if let Some(page) = &self.current.borrow().work {
             page.start_rename();
         }
     }
@@ -167,7 +170,7 @@ impl Window {
         simple("command", Box::new(|w| w.app.ask_command()));
         simple("add-product", Box::new(|w| w.add_product()));
 
-        let with_id = |name: &str, f: Box<dyn Fn(&Window, String)>| {
+        let with_id = |name: &str, f: IdAction| {
             let action = gio::SimpleAction::new(name, Some(glib::VariantTy::STRING));
             let weak = self.me.clone();
             action.connect_activate(move |_, param| {

@@ -13,6 +13,8 @@ use kit::{Plan, PlanError, Store, Work, WorkState};
 use crate::settings::Settings;
 use crate::ui;
 
+type Opener = Rc<dyn Fn(Place)>;
+
 /// What the main pane shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Place {
@@ -31,7 +33,7 @@ pub struct App {
     pub toasts: adw::ToastOverlay,
     /// The split that holds the sidebar, so a page can show or hide it.
     pub sidebar_split: adw::OverlaySplitView,
-    opener: Rc<RefCell<Option<Rc<dyn Fn(Place)>>>>,
+    opener: Rc<RefCell<Option<Opener>>>,
 }
 
 impl App {

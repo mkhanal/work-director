@@ -13,7 +13,7 @@ use crate::ui;
 /// A page the window shows and keeps its subscription alive with.
 pub struct Shown {
     pub widget: gtk::Widget,
-    pub watch: Option<Watch>,
+    pub _watch: Option<Watch>,
 }
 
 /// A page's frame: a header with the sidebar toggle and a title, then its content.
@@ -100,7 +100,7 @@ pub fn archived(app: &App, scope: Option<String>) -> Shown {
             again();
         }
     });
-    Shown { widget: frame(app, "Archived", &page, None).upcast(), watch: Some(watch) }
+    Shown { widget: frame(app, "Archived", &page, None).upcast(), _watch: Some(watch) }
 }
 
 /// The rules in effect, and what feedback has gathered toward new ones.
@@ -146,7 +146,7 @@ pub fn taste(app: &App, scope: Option<String>) -> Shown {
         };
         refill(&p, &g, fill);
     });
-    Shown { widget: frame(app, "Taste", &page, None).upcast(), watch: None }
+    Shown { widget: frame(app, "Taste", &page, None).upcast(), _watch: None }
 }
 
 /// What the loop decided for a product since it was last reviewed, with the way to acknowledge it.
@@ -203,5 +203,5 @@ pub fn review(app: &App, project: &str) -> Shown {
         };
         refill(&pg, &g, fill);
     });
-    Shown { widget: frame(app, &format!("Review {project}"), &page, Some(&ack.upcast())).upcast(), watch: None }
+    Shown { widget: frame(app, &format!("Review {project}"), &page, Some(&ack.upcast())).upcast(), _watch: None }
 }

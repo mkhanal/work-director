@@ -15,6 +15,7 @@ use crate::ui::{self, SPACE_2};
 const LINE: i32 = 22;
 
 type Sender = Rc<dyn Fn(String)>;
+type Stopper = Rc<dyn Fn()>;
 
 pub struct Composer {
     pub widget: gtk::Box,
@@ -26,7 +27,7 @@ pub struct Composer {
     chips: gtk::Box,
     note: gtk::Label,
     on_send: Rc<RefCell<Option<Sender>>>,
-    on_stop: Rc<RefCell<Option<Rc<dyn Fn()>>>>,
+    on_stop: Rc<RefCell<Option<Stopper>>>,
 }
 
 impl Composer {
