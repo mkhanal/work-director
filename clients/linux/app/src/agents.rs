@@ -29,7 +29,7 @@ impl AgentsPanel {
         head.set_margin_top(SPACE_4);
         head.set_margin_start(SPACE_4);
         head.set_margin_end(SPACE_4);
-        head.append(&ui::line("AGENTS", &["micro", "text3"]));
+        head.append(&ui::micro("Agents", &["text3"]));
         let summary = ui::line("", &["meta", "text3"]);
         summary.set_hexpand(true);
         summary.set_xalign(1.0);

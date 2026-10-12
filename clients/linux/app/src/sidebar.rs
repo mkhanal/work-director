@@ -81,7 +81,7 @@ impl Sidebar {
             bands.append_item(&item);
         }
         let filter = gtk::MenuButton::builder()
-            .icon_name("funnel-symbolic")
+            .icon_name("view-list-bullet-symbolic")
             .menu_model(&bands)
             .tooltip_text("Show only what waits on one thing")
             .build();
@@ -379,7 +379,8 @@ fn header_row(title: &str, open: Option<bool>) -> gtk::ListBoxRow {
     if let Some(open) = open {
         row.append(&ui::icon(if open { "pan-down-symbolic" } else { "pan-end-symbolic" }, &["text3"]));
     }
-    row.append(&ui::line(&title.to_uppercase(), &["micro", "text3"]));
+    let label = ui::micro(title, &["text3"]);
+    row.append(&label);
     gtk::ListBoxRow::builder().child(&row).selectable(false).activatable(false).build()
 }
 

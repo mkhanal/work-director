@@ -147,7 +147,10 @@ struct NewGoalPage: View {
                 Label(reason, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
                     .textSelection(.enabled)
-                Button("Try again") { flow.reset() }
+                HStack(spacing: Space.s2) {
+                    Button("Start a new goal") { Task { await flow.startNew(project: product, text: text) } }
+                    Button("Try again") { flow.reset() }
+                }
             }
         }
     }

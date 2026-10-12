@@ -112,9 +112,11 @@ impl Window {
             }
         }
         let scope = self.sidebar.scope();
+        let mut new_goal = None;
         let (widget, current): (gtk::Widget, Current) = match &place {
             Place::NewGoal => {
                 let page = NewGoalPage::new(&self.app, scope);
+                new_goal = Some(Rc::clone(&page));
                 (page.widget.clone().upcast(), Current { work: None, _page: Box::new(page) })
             }
             Place::Work(id) => {
@@ -137,6 +139,10 @@ impl Window {
         self.app.sidebar_split.set_content(Some(&widget));
         *self.current.borrow_mut() = current;
         self.sidebar.set_place(&place);
+        // Only a page in the window can take focus; what you type next is the ask.
+        if let Some(page) = new_goal {
+            page.focus();
+        }
         let last = match &place {
             Place::Work(id) => Some(id.as_str()),
             _ => None,

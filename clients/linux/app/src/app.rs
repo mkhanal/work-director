@@ -113,17 +113,19 @@ impl App {
         dialog.set_close_response("cancel");
         let entry = gtk::Entry::builder().text(initial).activates_default(true).build();
         dialog.set_extra_child(Some(&entry));
-        let app = self.clone();
+        let (app, field) = (self.clone(), entry.clone());
         dialog.connect_response(None, move |_, response| {
             if response != "go" {
                 return;
             }
-            match plan(&entry.text()) {
+            match plan(&field.text()) {
                 Ok(plan) => app.run(plan),
                 Err(e) => app.complain(&e.to_string()),
             }
         });
         dialog.present(Some(&self.window));
+        // Typing goes into the field, not onto the default button.
+        dialog.set_focus(Some(&entry));
     }
 
     /// Asks for a decision on work, in one line.

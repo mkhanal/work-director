@@ -60,7 +60,7 @@ Package: work-director
 Version: $deb_version
 Architecture: $deb_arch
 Maintainer: Mridul Khanal <mkhanal@users.noreply.github.com>
-Depends: libgtk-4-1 (>= 4.14), libadwaita-1-0 (>= 1.5)
+Depends: libgtk-4-1 (>= 4.14), libadwaita-1-0 (>= 1.5), librsvg2-common
 Section: devel
 Priority: optional
 Homepage: https://github.com/mkhanal/work-director

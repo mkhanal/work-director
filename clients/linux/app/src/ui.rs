@@ -42,6 +42,16 @@ pub fn line(text: &str, classes: &[&str]) -> gtk::Label {
     label
 }
 
+/// A small capitalised label naming a section; never cut short.
+pub fn micro(text: &str, classes: &[&str]) -> gtk::Label {
+    let label = gtk::Label::builder().label(text.to_uppercase()).xalign(0.0).build();
+    label.add_css_class("micro");
+    for class in classes {
+        label.add_css_class(class);
+    }
+    label
+}
+
 /// Text a reader may want to copy: wrapping and selectable.
 pub fn said(text: &str, classes: &[&str]) -> gtk::Label {
     let label = self::text(text, classes);
@@ -79,7 +89,7 @@ pub fn state_pill(state: WorkState) -> gtk::Box {
 
 /// A small rounded tag.
 pub fn tag(text: &str, classes: &[&str]) -> gtk::Label {
-    let label = gtk::Label::new(Some(text));
+    let label = gtk::Label::builder().label(text).valign(gtk::Align::Center).build();
     label.add_css_class("tag");
     for class in classes {
         label.add_css_class(class);

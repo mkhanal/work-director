@@ -21,7 +21,7 @@ use crate::app::{work_menu, App, Place};
 use crate::composer::Composer;
 use crate::question;
 use crate::turns::{Turn, Turns};
-use crate::ui::{self, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7};
+use crate::ui::{self, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6};
 
 /// Consecutive turns by one speaker within this many seconds read as one.
 const MERGE_SECONDS: i64 = 120;
@@ -182,14 +182,19 @@ impl WorkPage {
             if let Some(page) = weak.upgrade() {
                 let bottom = follow::at_bottom(a.value(), a.page_size(), a.upper());
                 page.at_bottom.set(bottom);
-                page.jump.set_visible(!bottom);
+                page.jump.set_visible(!bottom && page.following());
             }
         });
         let weak = self.me.clone();
         adjustment.connect_changed(move |a| {
             if let Some(page) = weak.upgrade() {
-                if page.at_bottom.get() {
-                    a.set_value(a.upper() - a.page_size());
+                if !page.following() {
+                    page.jump.set_visible(false);
+                } else if page.at_bottom.get() {
+                    // This runs inside the viewport's allocation, which would
+                    // not move its child for a value set now; set it after.
+                    let a = a.clone();
+                    glib::idle_add_local_once(move || a.set_value(a.upper() - a.page_size()));
                 } else {
                     page.jump.set_visible(true);
                 }
@@ -409,6 +414,13 @@ impl WorkPage {
         if goal_live && tick % 2 == 0 {
             Rc::clone(self).load().await;
         }
+    }
+
+    /// A conversation keeps its newest step in view as it grows; the other
+    /// views stay where the person put them.
+    fn following(&self) -> bool {
+        let state = self.state.borrow();
+        state.focus.is_some() || self.tab(&state) == Tab::Conversation
     }
 
     fn to_bottom(&self) {
@@ -1364,12 +1376,18 @@ impl WorkPage {
 fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
     let header = build_header();
     let turns = Turns::new(SPACE_5);
+    // The header and its views stay put while the page scrolls under them.
+    let top = ui::vbox(0);
+    top.set_margin_top(SPACE_4);
+    top.set_margin_bottom(SPACE_3);
+    top.set_margin_start(SPACE_6);
+    top.set_margin_end(SPACE_6);
+    top.append(&header.widget);
     let column = ui::vbox(SPACE_5);
-    column.set_margin_top(SPACE_7);
+    column.set_margin_top(SPACE_5);
     column.set_margin_bottom(SPACE_5);
     column.set_margin_start(SPACE_6);
     column.set_margin_end(SPACE_6);
-    column.append(&header.widget);
     column.append(&turns.widget);
     let scroller =
         gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&column).build();
@@ -1396,6 +1414,8 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
     composer_box.append(&composer.widget);
 
     let body = ui::vbox(0);
+    body.append(&top);
+    body.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     body.append(&overlay);
     body.append(&composer_box);
 
@@ -1407,8 +1427,7 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
     bar.pack_start(&sidebar);
     let agents_toggle =
         gtk::ToggleButton::builder().icon_name("sidebar-show-right-symbolic").tooltip_text("Agents").build();
-    let actions =
-        gtk::MenuButton::builder().label("Actions").tooltip_text("Every write this work's state allows").build();
+    let actions = gtk::MenuButton::builder().label("Actions").build();
     let open = gtk::Button::builder()
         .label("Open in Editor")
         .tooltip_text("Open where this work is done in your editor")
@@ -2106,8 +2125,7 @@ fn updates_row(count: usize, at: &str, inner: Vec<Turn>) -> gtk::Widget {
 
 /// A section's small title on the overview; orange for what waits on you.
 fn section_title(title: &str, attention: bool) -> gtk::Widget {
-    let classes: &[&str] = if attention { &["micro", "attention-text"] } else { &["micro", "text3"] };
-    ui::line(&title.to_uppercase(), classes).upcast()
+    ui::micro(title, &[if attention { "attention-text" } else { "text3" }]).upcast()
 }
 
 /// Done of total, a bar segmented by where each task stands, and a legend.

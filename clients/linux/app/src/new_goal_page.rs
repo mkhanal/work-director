@@ -118,8 +118,11 @@ impl NewGoalPage {
         }));
         page.render_products();
         page.render();
-        page.composer.focus();
         page
+    }
+
+    pub fn focus(&self) {
+        self.composer.focus();
     }
 
     fn render_products(&self) {
@@ -186,12 +189,35 @@ impl NewGoalPage {
 
     fn render_offers(self: &Rc<Self>, phase: &NewGoalPhase, product: &str, text: &str) {
         self.render_phase(phase);
-        let NewGoalPhase::Offering(found) = phase else { return };
-        self.status.append(&ui::line(&"This may continue a goal you already have".to_uppercase(), &["micro", "text3"]));
-        for f in found {
-            self.status.append(&self.offer(f, text));
+        match phase {
+            NewGoalPhase::Offering(found) => {
+                self.status.append(&ui::micro("This may continue a goal you already have", &["text3"]));
+                for f in found {
+                    self.status.append(&self.offer(f, text));
+                }
+                self.status.append(&self.start_new("Start a new goal instead", product, text));
+            }
+            NewGoalPhase::Failed(_) => {
+                let row = ui::hbox(SPACE_2);
+                row.append(&self.start_new("Start a new goal", product, text));
+                let again = gtk::Button::with_label("Try again");
+                let weak = self.me.clone();
+                again.connect_clicked(move |_| {
+                    if let Some(page) = weak.upgrade() {
+                        page.flow.reset();
+                        page.render();
+                    }
+                });
+                row.append(&again);
+                self.status.append(&row);
+            }
+            _ => {}
         }
-        let fresh = ui::link("Start a new goal instead");
+    }
+
+    /// Starts the goal as asked, without continuing one already there.
+    fn start_new(self: &Rc<Self>, label: &str, product: &str, text: &str) -> gtk::Button {
+        let fresh = ui::link(label);
         let (weak, product, text) = (self.me.clone(), product.to_string(), text.to_string());
         fresh.connect_clicked(move |_| {
             let Some(page) = weak.upgrade() else { return };
@@ -202,7 +228,7 @@ impl NewGoalPage {
                 page.after(&product, &text);
             });
         });
-        self.status.append(&fresh);
+        fresh
     }
 
     fn offer(self: &Rc<Self>, f: &Found, text: &str) -> gtk::Widget {
