@@ -121,6 +121,14 @@ verify event.
 - `wd stop <goal>` stops the goal's own live session as well as its tasks'.
 - The goal's own session is its latest planning or supervising session.
 
+## A Goal Is Named By Its Planner Until A Person Renames It
+- A goal its planner names takes that name as its title, noting it.
+- A goal a person has renamed keeps their name when it is planned.
+
+## Wd Rename Gives Work A New Title
+- `wd rename <id> "<title>"` sets the work's title and notes the title it had.
+- A blank title is refused.
+
 ## Wd Goal Start Files Nothing When The Request Says Nothing To Change
 - A planner replying `ASK: <question>` makes `wd goal start` exit 1 with the question.
 - The goal it filed is dropped with the question as the reason and archived, with no tasks.

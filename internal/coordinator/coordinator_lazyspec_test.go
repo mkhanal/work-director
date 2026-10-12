@@ -131,7 +131,7 @@ func TestCoordinator(t *testing.T) {
 			"wd (/repo)", "`npm run lint`", "`npm run validate`", "Rewrite the core", "in Go",
 			"## <heading>", "- [ ] <task title>",
 			"director runs the checks itself", "no task only runs checks, plans, sets up a worktree or finds out what the goal is",
-			"Specifications this repository keeps: SPEC.md", "ASK: <",
+			"Specifications this repository keeps: SPEC.md", "ASK: <", "NAME: <",
 		} {
 			if !strings.Contains(brief, want) {
 				t.Fatalf("brief missing %q:\n%s", want, brief)
@@ -235,6 +235,19 @@ func TestCoordinator(t *testing.T) {
 		none, unread := ParseSupervision([]string{"I looked; nothing to do."})
 		if len(none) != 0 || len(unread) != 0 {
 			t.Fatalf("a reply with no ACTIONS line = %+v, %q; want nothing", none, unread)
+		}
+	})
+
+	t.Run("A Plan Reply Names Its Goal", func(t *testing.T) {
+		if name, ok := PlanName([]string{"Read the repo.", "**NAME:** \"Login page fixes\"\n## Core\n- [ ] fix it"}); !ok || name != "Login page fixes" {
+			t.Fatalf("name = %q, %v", name, ok)
+		}
+		long := "NAME: " + strings.Repeat("word ", 30)
+		if name, _ := PlanName([]string{long}); len([]rune(name)) > 72 || strings.HasSuffix(name, " ") || !strings.HasPrefix(name, "word") {
+			t.Fatalf("a long name = %q, want it cut at a word to 72", name)
+		}
+		if name, ok := PlanName([]string{"## Core\n- [ ] port the ledger"}); ok {
+			t.Fatalf("a plan with no NAME line named its goal %q", name)
 		}
 	})
 

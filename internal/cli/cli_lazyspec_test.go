@@ -943,7 +943,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"status"}, {"status", "--all"},
 		{"context"}, {"context", "sample-app"}, {"context", t2},
 		{"open", "README.md"}, {"open", t2, "README.md"},
-		{"claim", t3, "me"}, {"claim", t3, "--drop"},
+		{"claim", t3, "me"}, {"claim", t3, "--drop"}, {"rename", t3, "Renamed"},
 		{"impact", t3, "+src/x"}, {"impact", t3, "--clear"},
 		{"conflict", epic},
 		{"worktree", "list", epic}, {"worktree", "attach", t3, filepath.Join(f.dir, "elsewhere")},
@@ -4094,8 +4094,8 @@ func TestGoalStartsFromOneSentence(t *testing.T) {
 	if !core.IsGoal(g.Kind) || g.Project != "sample-app" || g.Detail != text {
 		t.Fatalf("goal = %+v, want a sample-app goal carrying the whole text", g)
 	}
-	if g.Title != "Let people export their tasks to a CSV file they can open in a" {
-		t.Fatalf("title = %q, want the first line cut at a word within 72 characters", g.Title)
+	if g.Title != "Config parsing and schema" {
+		t.Fatalf("title = %q, want the name its planner gave", g.Title)
 	}
 	if len(started.Tasks) != 2 {
 		t.Fatalf("tasks = %d, want the planner's two", len(started.Tasks))
@@ -4109,9 +4109,10 @@ func TestGoalStartsFromOneSentence(t *testing.T) {
 		t.Errorf("goal state = %s, want running once its tasks were spawned", g.State)
 	}
 
-	short := f.runOK(t, "goal", "start", "sample-app", "Fix the login page", "--runner", "planner", "--json")
-	if !strings.Contains(short, `"title": "Fix the login page"`) {
-		t.Errorf("a one-line goal should keep its line as the title:\n%s", short)
+	// Until its planner names it, a goal is titled by its first line, cut at a word.
+	unplanned := f.runOK(t, "goal", "start", "sample-app", text, "--detach", "--runner", "finder", "--json")
+	if !strings.Contains(unplanned, `"title": "Let people export their tasks to a CSV file they can open in a"`) {
+		t.Errorf("a goal not yet planned should be titled by its first line within 72 characters:\n%s", unplanned)
 	}
 
 	// The finder replies with neither tasks nor a question.
@@ -5036,4 +5037,56 @@ func TestWdGoalContinuePicksAGoalUpWhereItStands(t *testing.T) {
 	if errStr := f.runFail(t, "goal", "continue", f.ids["planEpic"], "again"); !strings.Contains(errStr, "wd goal start") {
 		t.Fatalf("continuing a dropped goal: %q, want it refused naming wd goal start", errStr)
 	}
+}
+
+func TestAGoalIsNamedByItsPlannerUntilAPersonRenamesIt(t *testing.T) {
+	f := newCLIFixture(t)
+	if err := os.MkdirAll(filepath.Join(f.dir, "fake-state"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	named := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "the config is read as strings everywhere and the decision is not in the schema", "--json"), "id")
+	f.runOK(t, "goal", "begin", named, "--runner", "planner")
+	if title := titleOf(t, f, named); title != "Config parsing and schema" {
+		t.Fatalf("title after planning = %q, want the planner's name", title)
+	}
+	if notes := f.bodies(t, named, core.EventNote); !slices.Contains(notes, "named by its planner: Config parsing and schema") {
+		t.Fatalf("notes = %q, want the naming noted", notes)
+	}
+
+	mine := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "fix the config", "--json"), "id")
+	f.runOK(t, "rename", mine, "My config goal")
+	f.runOK(t, "goal", "begin", mine, "--runner", "planner")
+	if title := titleOf(t, f, mine); title != "My config goal" {
+		t.Fatalf("title of a goal a person renamed = %q, want theirs kept", title)
+	}
+}
+
+func TestWdRenameGivesWorkANewTitle(t *testing.T) {
+	f := newCLIFixture(t)
+	id := jsonString(t, f.runOK(t, "add", "sample-app", "Fix the thing", "--json"), "id")
+	f.runOK(t, "rename", id, "  Fix the login page  ")
+	if title := titleOf(t, f, id); title != "Fix the login page" {
+		t.Fatalf("title = %q", title)
+	}
+	if notes := f.bodies(t, id, core.EventNote); !slices.Contains(notes, "renamed from: Fix the thing") {
+		t.Fatalf("notes = %q, want the old title noted", notes)
+	}
+	if errStr := f.runFail(t, "rename", id, "   "); !strings.Contains(errStr, "usage") {
+		t.Fatalf("a blank title = %q, want it refused", errStr)
+	}
+}
+
+func titleOf(t *testing.T, f *cliFixture, id string) string {
+	t.Helper()
+	var rows []core.Work
+	if err := json.Unmarshal([]byte(f.runOK(t, "status", "--all", "--json")), &rows); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	for _, w := range rows {
+		if w.ID == id {
+			return w.Title
+		}
+	}
+	t.Fatalf("%s is not listed", id)
+	return ""
 }

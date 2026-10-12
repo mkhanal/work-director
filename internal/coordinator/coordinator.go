@@ -48,10 +48,27 @@ Analyse this goal and decompose it into concrete, independent tasks. Read the re
 
 Each task is a change to the repository, small enough that one session can finish it. The director runs the checks itself after each task reports: %s. So no task only runs checks, plans, sets up a worktree or finds out what the goal is.
 Specifications this repository keeps: %s.
+Open the plan with one line NAME: <the goal's name in a few words, as a person would title it>.
 If the goal does not say what should change, reply with only one line, ASK: <the question that would settle it>, and no tasks.
 
 The goal: %s%s`,
 		p.Name, p.Path, verify, specs, goal.Title, detail), nil
+}
+
+// PlanName is the name a planner gave the goal, if it gave one.
+func PlanName(texts []string) (string, bool) {
+	for _, text := range texts {
+		for _, line := range strings.Split(text, "\n") {
+			if m := planNameRe.FindStringSubmatch(line); m != nil {
+				name := strings.Trim(strings.TrimSpace(m[1]), "\"'`*")
+				if name == "" {
+					continue
+				}
+				return core.Clipped(name, 72), true
+			}
+		}
+	}
+	return "", false
 }
 
 // PlanQuestion is the question a planner asked instead of planning.
@@ -75,6 +92,7 @@ type PlanTask struct {
 
 var headingRe = regexp.MustCompile(`^##\s+(.+)`)
 var planAskRe = regexp.MustCompile(`^\s*ASK:\s*(\S.*)`)
+var planNameRe = regexp.MustCompile(`^\s*\**NAME:\**\s*(\S.*)`)
 var taskRe = regexp.MustCompile(`^[-*]\s+\[[ xX]\]\s*(.+)`)
 
 // ParsePlan parses the planner session's reply into tasks. Heading lines

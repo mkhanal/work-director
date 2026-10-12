@@ -543,3 +543,17 @@ func PathsOverlap(a, b string) bool {
 	y := strings.TrimRight(b, "/")
 	return x == y || strings.HasPrefix(x, y+"/") || strings.HasPrefix(y, x+"/")
 }
+
+// Clipped is the first line of text cut at a word to at most n characters.
+func Clipped(text string, n int) string {
+	line, _, _ := strings.Cut(text, "\n")
+	runes := []rune(strings.TrimSpace(line))
+	if len(runes) <= n {
+		return string(runes)
+	}
+	cut := string(runes[:n])
+	if i := strings.LastIndex(cut, " "); i > 0 {
+		cut = cut[:i]
+	}
+	return strings.TrimSpace(cut)
+}

@@ -888,18 +888,7 @@ func (c *Cli) planAndSpawn(goal core.Work, p *project.Project) (core.Work, []cor
 
 // goalTitle is the first line of what someone typed, cut at a word to at most
 // 72 characters.
-func goalTitle(text string) string {
-	line, _, _ := strings.Cut(text, "\n")
-	runes := []rune(strings.TrimSpace(line))
-	if len(runes) <= 72 {
-		return string(runes)
-	}
-	cut := string(runes[:72])
-	if i := strings.LastIndex(cut, " "); i > 0 {
-		cut = cut[:i]
-	}
-	return strings.TrimSpace(cut)
-}
+func goalTitle(text string) string { return core.Clipped(text, 72) }
 
 // abandon ends work that stopped without shipping, whatever kind it is: a
 // task's pull request can go unmerged as easily as a goal's. The reason is one
@@ -1117,7 +1106,7 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 	if _, err := c.Ledger.AddEvent(goal.ID, core.EventSpawn, coordinator.PlanEvent(h)); err != nil {
 		return nil, err
 	}
-	tasks, err := awaitPlan(rn, h, time.Duration(wait)*time.Second)
+	tasks, name, err := awaitPlan(rn, h, time.Duration(wait)*time.Second)
 	// The planning session answers once; whatever it said, it is not left running.
 	if serr := runner.Dismiss(rn, h); serr != nil && err == nil {
 		err = serr
@@ -1127,6 +1116,9 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 	}
 	if tasks == nil {
 		return nil, fail("plan session %s produced no task list", h.Session)
+	}
+	if err := c.nameGoal(goal, name); err != nil {
+		return nil, err
 	}
 	rows := make([]core.Work, 0, len(tasks))
 	for _, t := range tasks {
@@ -1152,29 +1144,75 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 
 // awaitPlan reads the planning session until it lists tasks or asks a
 // question; nil tasks is a wait that ran out.
-func awaitPlan(rn runner.Runner, h runner.Handle, wait time.Duration) ([]coordinator.PlanTask, error) {
+func awaitPlan(rn runner.Runner, h runner.Handle, wait time.Duration) ([]coordinator.PlanTask, string, error) {
 	deadline := time.Now().Add(wait)
 	for time.Now().Before(deadline) {
 		texts, err := runner.Transcript(rn, h)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if ts := coordinator.ParsePlan(texts); len(ts) > 0 {
-			return ts, nil
+			name, _ := coordinator.PlanName(texts)
+			return ts, name, nil
 		}
 		if q, ok := coordinator.PlanQuestion(texts); ok {
-			return nil, planAsked{q}
+			return nil, "", planAsked{q}
 		}
 		// A planning session that stopped, or was stopped, has given all the
 		// plan it will give.
 		if st, err := rn.Status(h); err != nil {
-			return nil, err
+			return nil, "", err
 		} else if st == runner.StatusStopped || st == runner.StatusExited {
-			return nil, fail("planning session %s ended without a plan", h.Session)
+			return nil, "", fail("planning session %s ended without a plan", h.Session)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return nil, nil
+	return nil, "", nil
+}
+
+// renamedPrefix opens the note a person's rename leaves; a goal carrying one
+// keeps the name it was given.
+const renamedPrefix = "renamed from: "
+
+// nameGoal gives goal the name its planner chose, unless a person has named it.
+func (c *Cli) nameGoal(goal core.Work, name string) error {
+	if name == "" || name == goal.Title {
+		return nil
+	}
+	events, err := c.Ledger.Events(goal.ID, nil)
+	if err != nil {
+		return err
+	}
+	for _, e := range events {
+		if e.Kind == core.EventNote && strings.HasPrefix(e.Body, renamedPrefix) {
+			return nil
+		}
+	}
+	if err := c.Ledger.SetTitle(goal.ID, name); err != nil {
+		return err
+	}
+	_, err = c.Ledger.AddEvent(goal.ID, core.EventNote, "named by its planner: "+name)
+	return err
+}
+
+// rename gives work the title a person chose, noting the one it had.
+func (c *Cli) rename(rest []string) error {
+	if len(rest) != 2 || strings.TrimSpace(rest[1]) == "" {
+		return fail("usage: wd rename <id> \"<title>\"")
+	}
+	w, err := c.Ledger.Get(rest[0])
+	if err != nil {
+		return err
+	}
+	title := strings.TrimSpace(rest[1])
+	if err := c.Ledger.SetTitle(w.ID, title); err != nil {
+		return err
+	}
+	if _, err := c.Ledger.AddEvent(w.ID, core.EventNote, renamedPrefix+w.Title); err != nil {
+		return err
+	}
+	w.Title = title
+	return c.out(w, fmt.Sprintf("%s is now: %s", w.ID, title))
 }
 
 func (c *Cli) goalSpawn(cmd string, goal core.Work) error {

@@ -15,6 +15,7 @@ case "$1" in
       echo 'ASK: What should change in the new worktree?'
       exit 0
     fi
+    echo 'NAME: Config parsing and schema'
     echo '## Analysis'
     echo '- [ ] parse the config into a domain type'
     echo '- [ ] wire the decision into the schema'

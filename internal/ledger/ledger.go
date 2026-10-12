@@ -1107,6 +1107,10 @@ func (l *Ledger) SetRef(id string, ref *string) error {
 	return updateWork(l.db, id, `UPDATE work SET ref = ?, updated = ? WHERE id = ?`, ref, now(), id)
 }
 
+func (l *Ledger) SetTitle(id, title string) error {
+	return updateWork(l.db, id, `UPDATE work SET title = ?, updated = ? WHERE id = ?`, title, now(), id)
+}
+
 func (l *Ledger) SetCwd(id, cwd string) error {
 	return updateWork(l.db, id, `UPDATE work SET cwd = ?, updated = ? WHERE id = ?`, cwd, now(), id)
 }

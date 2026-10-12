@@ -58,6 +58,7 @@ var help = map[string]commandHelp{
 	"distill":    {"wd distill", "Turn recorded feedback into candidate rule cards."},
 	"archive":    {"wd archive <id> [\"<why>\"]", "Put work out of sight, dropping it first if it is open."},
 	"unarchive":  {"wd unarchive <id>", "Bring archived work back into sight."},
+	"rename":     {"wd rename <id> \"<title>\"", "Give work a new title; a goal you rename keeps your name."},
 	"stop":       {"wd stop <id>", "Stop what work's sessions are doing and take back what they had not read."},
 	"pause":      {"wd pause <id>", "Stop work's sessions and hold it paused."},
 	"resume":     {"wd resume <id> [\"<note>\"]", "Carry on paused or cancelled work where it left off."},

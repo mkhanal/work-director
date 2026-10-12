@@ -17,6 +17,11 @@ are specified in `ledger.lazyspec.md`.
 - It forbids tasks that only run checks, plan, set up a worktree or find out what the goal is.
 - It names the specifications the repository keeps, or says it keeps none and no task adds any.
 - It asks for `ASK: <question>` alone when the goal does not say what should change.
+- It asks the plan to open with `NAME: <name>`, naming the goal in a few words.
+
+## A Plan Reply Names Its Goal
+- `PlanName(texts)` returns the name of a `NAME:` line in the planner's reply, without surrounding quotes, cut at a word to at most 72 characters.
+- A reply with no `NAME:` line has no name.
 
 ## A Plan Reply Asking A Question Is A Question
 - `PlanQuestion(texts)` returns the question of an `ASK:` line in the planner's reply.

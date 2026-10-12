@@ -370,6 +370,7 @@ var commands = map[string]func(c *Cli, rest []string) error{
 	"resume":    (*Cli).resume,
 	"cancel":    (*Cli).cancel,
 	"unarchive": (*Cli).unarchive,
+	"rename":    (*Cli).rename,
 }
 
 func (c *Cli) dispatch() error {
