@@ -87,6 +87,12 @@ const (
 	// "<reason>: <detail>" so a reader sees the reason and the evidence in one
 	// line, and the reason is one of AbandonReasons.
 	EventAbandon EventKind = "abandon"
+	// EventLook is the director asking a goal's supervisor to look; the body
+	// says what changed since it last looked.
+	EventLook EventKind = "look"
+	// EventSupervised is a supervisor's reply carried out: what it said, what
+	// was done and what was refused.
+	EventSupervised EventKind = "supervised"
 )
 
 type FeedbackSource string
@@ -421,7 +427,7 @@ const (
 
 var (
 	WorkKinds       = []WorkKind{WorkTask, WorkEvolution, WorkWorkflow, WorkGoal, WorkRoadmap, WorkItem}
-	EventKinds      = []EventKind{EventState, EventReport, EventVerify, EventPr, EventNote, EventSent, EventSpawn, EventAttach, EventQuestion, EventAnswer, EventDecision, EventAbandon}
+	EventKinds      = []EventKind{EventState, EventReport, EventVerify, EventPr, EventNote, EventSent, EventSpawn, EventAttach, EventQuestion, EventAnswer, EventDecision, EventAbandon, EventLook, EventSupervised}
 	FeedbackSources = []FeedbackSource{FeedbackDirector, FeedbackNote, FeedbackAttached}
 	LandingKinds    = []LandingKind{LandingCommit, LandingPullRequest}
 	WorktreeKinds   = []WorktreeKind{WorktreeShared, WorktreePrivate}

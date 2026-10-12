@@ -26,18 +26,22 @@ type Server struct {
 	ledger   *ledger.Ledger
 	cliPath  string
 	sessions Sessions
-	hub      *wsHub
+	// supervise is one supervise pass over a running goal; nil supervises
+	// nothing.
+	supervise Supervise
+	hub       *wsHub
 }
 
 // New creates a serve server over the given ledger; cliPath is the path to
-// the wd CLI binary, and sessions reaches the session work runs in (nil serves
-// no conversations).
-func New(l *ledger.Ledger, cliPath string, sessions Sessions) *Server {
+// the wd CLI binary, sessions reaches the session work runs in (nil serves no
+// conversations), and supervise moves a running goal on (nil supervises none).
+func New(l *ledger.Ledger, cliPath string, sessions Sessions, supervise Supervise) *Server {
 	return &Server{
-		ledger:   l,
-		cliPath:  cliPath,
-		sessions: sessions,
-		hub:      newWSHub(),
+		ledger:    l,
+		cliPath:   cliPath,
+		sessions:  sessions,
+		supervise: supervise,
+		hub:       newWSHub(),
 	}
 }
 

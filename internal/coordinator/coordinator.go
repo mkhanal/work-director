@@ -251,29 +251,57 @@ func PlanEvent(h runner.Handle) string {
 	return strings.TrimSpace(planPrefix + h.Runner + " " + h.Session + " " + ref)
 }
 
-// planning is the session that last planned a goal, run in the project's own
-// directory, as its plan event records it.
+// planning is the goal's own session: the one that last planned or
+// supervised it, as its spawn events record it.
 func planning(l *ledger.Ledger, goal core.Work, p *project.Project) (runner.Handle, bool, error) {
+	return goalSession(l, goal, p, planPrefix, supervisePrefix)
+}
+
+// goalSession is the latest session a spawn event with one of prefixes
+// records on goal. A planner runs in the project's directory and a supervisor
+// in the goal's shared worktree, where it was spawned.
+func goalSession(l *ledger.Ledger, goal core.Work, p *project.Project, prefixes ...string) (runner.Handle, bool, error) {
 	spawns, err := l.Events(goal.ID, ptrKind(core.EventSpawn))
 	if err != nil {
 		return runner.Handle{}, false, err
 	}
 	for i := len(spawns) - 1; i >= 0; i-- {
-		rest, ok := strings.CutPrefix(spawns[i].Body, planPrefix)
-		if !ok {
-			continue
+		for _, prefix := range prefixes {
+			rest, ok := strings.CutPrefix(spawns[i].Body, prefix)
+			if !ok {
+				continue
+			}
+			f := strings.Fields(rest)
+			if len(f) < 2 {
+				return runner.Handle{}, false, fmt.Errorf("goal %s: spawn event %q names no session", goal.ID, spawns[i].Body)
+			}
+			h := runner.Handle{Runner: f[0], Session: f[1], Cwd: p.Path}
+			if prefix == supervisePrefix {
+				if h.Cwd, err = SharedWorktree(l, goal.ID, p.Path); err != nil {
+					return runner.Handle{}, false, err
+				}
+			}
+			if len(f) > 2 {
+				h.Ref = &f[2]
+			}
+			return h, true, nil
 		}
-		f := strings.Fields(rest)
-		if len(f) < 2 {
-			return runner.Handle{}, false, fmt.Errorf("goal %s: plan event %q names no session", goal.ID, spawns[i].Body)
-		}
-		h := runner.Handle{Runner: f[0], Session: f[1], Cwd: p.Path}
-		if len(f) > 2 {
-			h.Ref = &f[2]
-		}
-		return h, true, nil
 	}
 	return runner.Handle{}, false, nil
+}
+
+// SharedWorktree is the goal's active shared worktree, else fallback.
+func SharedWorktree(l *ledger.Ledger, goal, fallback string) (string, error) {
+	wts, err := l.Worktrees(goal)
+	if err != nil {
+		return "", err
+	}
+	for _, wt := range wts {
+		if wt.Kind == core.WorktreeShared && wt.State == core.WorktreeActive {
+			fallback = wt.Path
+		}
+	}
+	return fallback, nil
 }
 
 func ptrKind(k core.EventKind) *core.EventKind { return &k }

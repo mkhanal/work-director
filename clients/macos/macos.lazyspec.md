@@ -81,11 +81,17 @@ hold only that product's work; with none, every product's.
 
 ## The Agents Panel Shows Each Task And The Subagents It Started
 - A goal's panel has a card for each task with a session, in the goal's order, with the subagents its session started under it.
-- While a goal is planned, its planning session is the first card, titled Plan.
+- The goal's own session is the first card while it has one: titled Supervisor once the goal is supervised, else Plan.
 - A card is asking when its session waits on a question, working while its session runs, resting while it is up with nothing to do, and settled otherwise; a subagent works until its last reply ends its turn.
 - A card's time runs from its first record to now while it works, and to its last record once it does not.
 - The panel counts settled cards and adds every card's tokens, subagents included.
 - Choosing a subagent shows its own conversation.
+
+## A Goal Reads As One Conversation With Its Supervisor And Its Agents
+- A goal's thread holds, oldest first, what was decided, said, asked, answered, reported, verified and landed on the goal or its tasks, and the state changes that end work.
+- A supervisor's reply shows what it said without its action lines, then what was done, each with the task it told, started or filed, and then what was refused.
+- A look shows as the supervisor looking, with why.
+- A task that stopped without a report shows as such, with what it last said.
 
 ## The Sidebar Lists Work As Threads, Most Recently Active First
 - Goals and standalone work in the product in scope are listed most recently updated first.

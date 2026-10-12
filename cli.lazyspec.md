@@ -119,6 +119,7 @@ verify event.
 - While it plans, the planning session is the goal's own session, recorded as a `spawn` event `plan <runner> <session> [<ref>]`.
 - A planning session that ends without a plan ends planning at once, saying so, and planning that fails is filed on the goal as a note.
 - `wd stop <goal>` stops the goal's own live session as well as its tasks'.
+- The goal's own session is its latest planning or supervising session.
 
 ## Wd Goal Start Files Nothing When The Request Says Nothing To Change
 - A planner replying `ASK: <question>` makes `wd goal start` exit 1 with the question.
@@ -359,10 +360,10 @@ could not with their work, the bound that ran out, and the work still open.
 - Work asking nothing is refused, pointing at `wd send`.
 - The answer is recorded on the work as an `answer` event and reaches the session as `wd send` does.
 
-## Wd Send To A Goal Tells Every Open Task And Keeps It As A Decision
-- `wd send <goal> "<text>"` files the text as a decision on the goal and sends it, as `wd send` does, to every open task with a session.
-- An open task with no session yet reads it in its brief.
-- `--json` prints the task ids under `delivered`, `queued` and `brief`.
+## Wd Send To A Goal Keeps It As A Decision For The Goal's Supervisor
+- `wd send <goal> "<text>"` files the text as a decision on the goal and has the goal's supervisor look at once, as `wd goal supervise` does, even while tasks are working.
+- No task is sent the text; a task not yet started reads it in its brief.
+- `--json` prints `{decision, looked}`.
 
 ## Wd Stop Interrupts A Session And Hands Back What It Had Not Read
 - `wd stop <id>` stops a task's live session, working, idle or waiting, through its runner; the task keeps its state, and the next message continues the same session.
@@ -396,3 +397,19 @@ could not with their work, the bound that ran out, and the work still open.
 - On a done goal it unarchives it when archived, reopens it with the text as the reason, plans it and spawns its tasks, as `wd goal start` does.
 - On a dropped or abandoned goal it is refused naming `wd goal start`.
 - `--json` prints `{goal, tasks}`.
+
+## Wd Goal Supervise Has The Goal's Supervisor Look Once No Task Is Working
+- `wd goal supervise <goal>` on a running goal first delivers its tasks' queued messages to sessions that are not running, and notes each running task whose session stopped without a report, as serving does.
+- When no task is working and a task reported, asked, was answered, changed state or was noted, a concern was raised, or the goal was decided on since the supervisor last looked, the supervisor looks.
+- A decision on the goal since then has it look even while tasks are working.
+- The first look starts the supervisor in the goal's shared worktree, else the project's path, on `--runner` else the goal's else the project's runner, with the supervision brief, and records a `spawn` event `supervise <runner> <session> [<ref>]`; a later look sends the brief to that session.
+- Each look is a `look` event on the goal; nothing is looked at while the supervisor is working.
+- `--json` prints `{looked, applied, actions, refused}`.
+
+## Wd Goal Supervise Carries Out What The Supervisor Decided
+- A supervisor that has replied since it was last read, and is not working, has the reply's actions carried out once.
+- `SEND` tells a task of the goal as `wd send` does; `TASK` files a task under the goal and starts it; `START` starts a task of the goal not yet started; `RESOLVE` resolves a concern.
+- `ASK` files a `question` on the goal and moves it to needs-input; `wd answer <goal>` reaches the supervisor.
+- `DONE` files the summary as the goal's `report` and moves the goal to review.
+- An action that cannot be carried out is refused with why, and the rest still are.
+- The reply, what was done and what was refused are one `supervised` event on the goal.

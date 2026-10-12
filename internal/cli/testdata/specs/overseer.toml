@@ -1,0 +1,9 @@
+name = "overseer"
+spawn = "overseer run {brief}"
+session_id = 'session=([A-Za-z0-9-]+)'
+send = "overseer send {session} {text}"
+status = "overseer status {session}"
+running = 'state: *working'
+transcript = "overseer export {session}"
+models = "overseer models"
+stop = "overseer stop {session}"

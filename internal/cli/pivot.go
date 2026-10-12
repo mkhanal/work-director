@@ -22,7 +22,7 @@ const (
 const resumeText = "Resume where you left off."
 
 // send says something to work while it runs. A goal keeps it as a decision and
-// passes it to every open task; a task gets it now when its session is idle,
+// its supervisor routes it; a task gets it now when its session is idle,
 // and when it is ready otherwise.
 func (c *Cli) send(rest []string) error {
 	if len(rest) < 2 {
@@ -37,8 +37,11 @@ func (c *Cli) send(rest []string) error {
 		if err != nil {
 			return err
 		}
-		return c.out(out, fmt.Sprintf("kept as a decision on %s; delivered to %d task(s), queued for %d, in the brief of %d",
-			w.ID, len(out["delivered"]), len(out["queued"]), len(out["brief"])))
+		text := fmt.Sprintf("kept as a decision on %s; its supervisor reads it at its next look", w.ID)
+		if out["looked"] == true {
+			text = fmt.Sprintf("kept as a decision on %s; its supervisor is looking", w.ID)
+		}
+		return c.out(out, text)
 	}
 	where, err := c.tellTask(w, rest[1])
 	if err != nil {
@@ -104,43 +107,30 @@ func (c *Cli) tellTask(w core.Work, text string) (told, error) {
 }
 
 // tellGoal keeps text as a decision on the goal, which every later brief and
-// judgement reads, and passes it to every open task that has a session.
-func (c *Cli) tellGoal(goal core.Work, text string) (map[string][]string, error) {
+// judgement reads, and has the goal's supervisor look at once, so it reaches
+// the tasks it is for rather than every task.
+func (c *Cli) tellGoal(goal core.Work, text string) (map[string]any, error) {
 	if core.Reopenable(goal.State) {
 		return nil, fail("%s is done; a message is not a reason to work on it again — wd reopen %s \"<what is being worked on>\"", goal.ID, goal.ID)
 	}
 	if core.AtRest(goal.State) {
 		return nil, fail("goal %s is %s: there is nothing running to tell", goal.ID, goal.State)
 	}
-	if _, err := c.Ledger.AddEvent(goal.ID, core.EventDecision, text); err != nil {
-		return nil, err
-	}
-	tasks, err := c.Ledger.Tasks(goal.ID)
+	decision, err := c.Ledger.AddEvent(goal.ID, core.EventDecision, text)
 	if err != nil {
 		return nil, err
 	}
-	out := map[string][]string{"delivered": {}, "queued": {}, "brief": {}}
-	for _, t := range tasks {
-		if core.AtRest(t.State) {
-			continue
-		}
-		p, err := c.project(t.Project)
-		if err != nil {
+	// A person writing to a goal waiting on them has answered it.
+	if goal.State == core.StateNeedsInput {
+		if goal, err = c.Ledger.Transition(goal.ID, core.StateRunning); err != nil {
 			return nil, err
 		}
-		if _, ok, err := coordinator.Handle(c.Ledger, t, p); err != nil {
-			return nil, err
-		} else if !ok {
-			out["brief"] = append(out["brief"], t.ID)
-			continue
-		}
-		where, err := c.tellTask(t, text)
-		if err != nil {
-			return nil, err
-		}
-		out[string(where)] = append(out[string(where)], t.ID)
 	}
-	return out, nil
+	s, err := c.supervise(goal)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"decision": decision, "looked": s.Looked}, nil
 }
 
 // stop interrupts what a task's session is doing and takes back the messages

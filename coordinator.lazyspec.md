@@ -105,3 +105,17 @@ and directory still follow its goal.
 - Each pass delivers a running or needs-input child's undelivered messages when its runner reports the session is not running: as one message, oldest first, since a session busy with the first would fork on the second. Each is marked delivered and the child is listed under `delivered`.
 - A child whose session is running keeps its messages queued.
 - A needs-input child that was sent a message returns to running.
+
+## The Supervision Brief Gives A Goal's Supervisor The Whole Picture
+- `SupervisionBrief(picture)` carries the goal's id, title and detail, every decision on it, and the project's checks or that there are none.
+- It lists each task with its id, state and title, and its latest report.
+- A task whose session stopped without a report is listed with what it last said.
+- It lists each open concern under the goal with its number and the work it was raised on.
+- It forbids editing files, and says landing waits for the person.
+- It asks for a reply ending in an `ACTIONS:` line followed by one `SEND`, `TASK`, `START`, `RESOLVE`, `ASK`, `DONE` or `WAIT` line each.
+
+## A Supervision Reply Parses Into Actions
+- `ParseSupervision(texts)` reads the lines after the last `ACTIONS:` line.
+- `SEND <id>: <text>`, `TASK: <title>`, `START <id>`, `RESOLVE <n>: <decision>`, `ASK: <question>`, `DONE: <summary>` and `WAIT` each parse into their action.
+- A non-blank line that is none of these is returned as refused, with the line.
+- A reply with no `ACTIONS:` line has no actions and nothing refused.

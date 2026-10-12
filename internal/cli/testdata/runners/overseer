@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# A runner whose every session is a file a test writes: said-<session> is what
+# it said, busy-<session> makes it working, sent-<session> keeps what it was sent.
+set -u
+state=${WD_FAKE_STATE:?WD_FAKE_STATE needed}
+mkdir -p "$state"
+case "$1" in
+  run)
+    n=$(( $(cat "$state/overseer-n" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" > "$state/overseer-n"
+    s=$(printf 'overseer-s%05x' "$n")
+    printf '%s' "$2" > "$state/brief-$s"
+    echo "session=$s";;
+  export) cat "$state/said-$2" 2>/dev/null; true;;
+  status) if [ -f "$state/busy-$2" ]; then echo 'state: working'; else echo 'state: idle'; fi;;
+  send) printf '%s\n' "$3" >> "$state/sent-$2"; echo ok;;
+  stop) echo "overseer $2" >> "$state/stopped"; echo stopped;;
+  models) echo 'overseer/m1';;
+  *) echo "unhandled overseer $*" >&2; exit 1;;
+esac

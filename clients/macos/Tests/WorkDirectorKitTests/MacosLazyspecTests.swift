@@ -459,6 +459,44 @@ func fakeRunner(_ home: Home) throws {
         #expect(slow.tap(at: t0.addingTimeInterval(1.2)) == false, "a second Escape after the window stops nothing")
     }
 
+    @Test("A Goal Reads As One Conversation With Its Supervisor And Its Agents")
+    func goalConversation() throws {
+        func event(_ id: Int, _ work: String, _ kind: String, _ body: String, _ at: String) -> String {
+            let quoted = String(data: try! JSONEncoder().encode(body), encoding: .utf8)!
+            return #"{"id":\#(id),"work":"\#(work)","kind":"\#(kind)","body":\#(quoted),"at":"2026-10-12T01:\#(at)Z","effective":null,"decision":null}"#
+        }
+        func work(_ id: String, _ title: String, _ state: String) -> String {
+            workJSON(state: state).replacingOccurrences(of: #""id":"w1""#, with: #""id":"\#(id)""#)
+                .replacingOccurrences(of: #""title":"T""#, with: #""title":"\#(title)""#)
+        }
+        let supervised = "The collector never calls the detector.\nACTIONS:\nSEND a: wire it in\nTASK: Weekly note\n\nDone:\n- SEND a: wire it in\n- TASK: Weekly note\n- RESOLVE 18: a wires it in\n\nRefused:\n- START b — b is review, already under way"
+        let events = [
+            event(5, "g", "supervised", supervised, "05:00"),
+            event(1, "g", "decision", "keep the js script", "01:00"),
+            event(2, "a", "state", "running", "02:00"),
+            event(3, "a", "note", "stopped without a report: wiring belongs to the collector", "03:00"),
+            event(4, "g", "look", "a task was noted on (1)", "04:00"),
+            event(6, "g", "spawn", "supervise claude s1", "04:00"),
+            event(7, "b", "state", "dropped", "06:00"),
+        ].joined(separator: ",")
+        let json = """
+        {"goal":\(work("g", "Release notes", "running")),"tasks":[\(work("a", "Impacts", "running")),\(work("b", "Collector", "review")),\(work("n", "Weekly note", "running"))],
+         "rollup":{"counts":{},"done":0,"total":3},"events":[\(events)],"claims":[],"landings":[],"delivery":null,"activity":{}}
+        """
+        let goal = try JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
+        #expect(goal.supervised)
+        let steps = goal.thread
+        #expect(steps.map(\.id) == [1, 3, 4, 5, 7], "oldest first; a state change that does not end work and a spawn are left out")
+        guard case .stopped(_, let said) = steps[1] else { Issue.record("step 2 is \(steps[1])"); return }
+        #expect(said == "wiring belongs to the collector")
+        guard case .look(let look) = steps[2] else { Issue.record("step 3 is \(steps[2])"); return }
+        #expect(look.body == "a task was noted on (1)")
+        guard case .supervisor(_, let reply) = steps[3] else { Issue.record("step 4 is \(steps[3])"); return }
+        #expect(reply.said == "The collector never calls the detector.", "the action lines are not said twice")
+        #expect(reply.actions.map(\.task) == ["a", "n", nil], "each action names the task it told or filed")
+        #expect(reply.refused == ["START b — b is review, already under way"])
+    }
+
     @Test("The Agents Panel Shows Each Task And The Subagents It Started")
     func agentsPanel() async throws {
         func task(_ id: String, _ state: String) throws -> Work {
@@ -492,6 +530,10 @@ func fakeRunner(_ home: Home) throws {
             "a": try activity("running", usage: usage(1, "2026-10-11T10:00:00Z", "2026-10-11T10:00:30Z")),
         ])
         #expect(planned.cards.map(\.title) == ["Plan", "T"], "a goal's planning comes first")
+        let overseen = AgentRoster(goal: goal, supervised: true, tasks: [a], activity: [
+            "g": try activity("idle", usage: usage(9, "2026-10-11T10:00:00Z", "2026-10-11T10:00:30Z")),
+        ])
+        #expect(overseen.cards.map(\.title) == ["Supervisor"], "a supervised goal's own session is its supervisor")
         #expect(AgentRoster(goal: goal, tasks: [a], activity: ["a": try activity("running", usage: usage(1, "2026-10-11T10:00:00Z", "2026-10-11T10:00:30Z"))]).cards.count == 1)
 
         let home = try Home()

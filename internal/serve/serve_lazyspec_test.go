@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,7 +30,7 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatalf("ledger: %v", err)
 	}
 	t.Cleanup(func() { l.Close() })
-	return New(l, "", nil)
+	return New(l, "", nil, nil)
 }
 
 func TestServe(t *testing.T) {
@@ -44,6 +45,8 @@ func TestServe(t *testing.T) {
 	t.Run("A Goal Serves What Each Of Its Tasks Is Doing", aGoalServesWhatEachOfItsTasksIsDoing)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("A Running Session's Report Moves Its Work On", aRunningSessionsReportMovesItsWorkOn)
+	t.Run("A Running Session That Stops Without A Report Is Noted", aRunningSessionThatStopsWithoutAReportIsNoted)
+	t.Run("A Running Goal Is Supervised While Serving", aRunningGoalIsSupervisedWhileServing)
 	t.Run("Work Items Serve Over HTTP", workItemsServeOverHTTP)
 	t.Run("A Work Item Serves The Next Gate It Waits On", aWorkItemServesTheNextGateItWaitsOn)
 	t.Run("Actions Dispatch To The CLI", actionsDispatchToTheCLI)
@@ -358,7 +361,7 @@ func webSocketServesLiveEvents(t *testing.T) {
 	if _, err := l.AddEvent(w.ID, core.EventNote, "before serve"); err != nil {
 		t.Fatalf("event before serve: %v", err)
 	}
-	addr, _, err := New(l, "/bin/echo", nil).Start(0)
+	addr, _, err := New(l, "/bin/echo", nil, nil).Start(0)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -443,7 +446,7 @@ func aClientThatStopsReadingNeverDelaysTheOthers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	srv := New(l, "/bin/echo", nil)
+	srv := New(l, "/bin/echo", nil, nil)
 	addr, _, err := srv.Start(0)
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -1364,5 +1367,100 @@ func aRunningSessionsReportMovesItsWorkOn(t *testing.T) {
 	}
 	if w, _ := s.ledger.Get(done.ID); w.State != core.StateRunning {
 		t.Fatalf("a filed report moved the work again: %s", w.State)
+	}
+}
+
+func aRunningSessionThatStopsWithoutAReportIsNoted(t *testing.T) {
+	s := newTestServer(t)
+	r := &sessionRunner{steps: map[string][]runner.Entry{
+		"quiet": {{Kind: runner.EntryText, Text: "working"}, {Kind: runner.EntryText, Text: "Wiring it in belongs to the collector task.\nSay so if I should."}},
+	}}
+	withSessions(s, r)
+	quiet := inSession(t, s, "Quiet", "quiet", nil)
+	stop := make(chan struct{})
+	ended := make(chan error, 1)
+	go func() { ended <- s.watchSessions(stop) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		notes, err := s.ledger.Events(quiet.ID, kindOf(core.EventNote))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(notes) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no note that the session stopped without a report")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	time.Sleep(sessionWatch + time.Second)
+	close(stop)
+	if err := <-ended; err != nil {
+		t.Fatal(err)
+	}
+	notes, err := s.ledger.Events(quiet.ID, kindOf(core.EventNote))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 || notes[0].Body != "stopped without a report: Wiring it in belongs to the collector task." {
+		t.Fatalf("notes = %+v, want one note with the first line it said", notes)
+	}
+	if w, _ := s.ledger.Get(quiet.ID); w.State != core.StateRunning {
+		t.Fatalf("a stop without a report moved the work to %s", w.State)
+	}
+}
+
+func aRunningGoalIsSupervisedWhileServing(t *testing.T) {
+	s := newTestServer(t)
+	withSessions(s, &sessionRunner{steps: map[string][]runner.Entry{}})
+	running, err := s.ledger.Add("p", "Running goal", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ledger.Transition(running.ID, core.StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	failing, err := s.ledger.Add("p", "Failing goal", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ledger.Transition(failing.ID, core.StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := s.ledger.Add("p", "Queued goal", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	passes := map[string]int{}
+	s.supervise = func(goal core.Work) error {
+		mu.Lock()
+		defer mu.Unlock()
+		passes[goal.ID]++
+		if goal.ID == failing.ID {
+			return fmt.Errorf("no runner named overseer")
+		}
+		return nil
+	}
+	stop := make(chan struct{})
+	ended := make(chan error, 1)
+	go func() { ended <- s.watchSessions(stop) }()
+	time.Sleep(3*sessionWatch + time.Second)
+	close(stop)
+	if err := <-ended; err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if passes[running.ID] < 2 || passes[queued.ID] != 0 {
+		t.Fatalf("passes = %v, want the running goal supervised every few seconds and the queued one not", passes)
+	}
+	notes, err := s.ledger.Events(failing.ID, kindOf(core.EventNote))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 || notes[0].Body != "supervising failed: no runner named overseer" {
+		t.Fatalf("notes on the failing goal = %+v, want the failure filed once", notes)
 	}
 }

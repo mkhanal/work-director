@@ -47,11 +47,12 @@ public struct AgentRoster: Sendable, Hashable {
     public let cards: [AgentCard]
 
     /// Cards for a goal's tasks, in the goal's order, after the goal's own
-    /// planning session while it has one.
-    public init(goal: Work? = nil, tasks: [Work], activity: [String: Activity]) {
+    /// session while it has one: its supervisor once it is supervised, else
+    /// its planner.
+    public init(goal: Work? = nil, supervised: Bool = false, tasks: [Work], activity: [String: Activity]) {
         let planning: [AgentCard] = goal.flatMap { g in
             activity[g.id].map { a in
-                [AgentCard(id: g.id, task: g.id, agent: nil, title: "Plan", kind: "planner",
+                [AgentCard(id: g.id, task: g.id, agent: nil, title: supervised ? "Supervisor" : "Plan", kind: supervised ? "supervisor" : "planner",
                            line: a.error ?? a.now, phase: AgentRoster.phase(a.status, asking: a.asking != nil),
                            usage: a.usage, subagents: (a.subagents ?? []).map { AgentRoster.card(g.id, $0) })]
             }
@@ -77,6 +78,12 @@ public struct AgentRoster: Sendable, Hashable {
     static func card(_ task: String, _ s: Subagent) -> AgentCard {
         AgentCard(id: task + "/" + s.id, task: task, agent: s.id, title: s.description.isEmpty ? s.id : s.description,
                   kind: s.type, line: s.said, phase: s.done ? .settled : .working, usage: s.usage, subagents: [])
+    }
+
+    /// Where a task's agent is, from its activity; settled with none.
+    public static func phase(of activity: Activity?) -> AgentCard.Phase {
+        guard let activity else { return .settled }
+        return phase(activity.status, asking: activity.asking != nil)
     }
 
     static func phase(_ status: SessionStatus?, asking: Bool) -> AgentCard.Phase {

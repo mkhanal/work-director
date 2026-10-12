@@ -54,14 +54,20 @@ tasks and starts an agent on each, all on one shared branch.
 ## 4. Watch it work
 
 The goal opens as a thread: what you asked, the plan, then what happened. The **Agents**
-panel on the right shows the planner while it plans, then every task's agent and the
+panel on the right shows the planner while it plans, then the supervisor, then every task's agent and the
 subagents each one starts, with what each is doing, its model, its tokens and its time.
 Choose any card to read its conversation, thinking and tool calls included.
 
 - **A question** an agent asks appears at the end of the goal and in its conversation,
   answered in place: `wd answer <task> "<answer>"`.
-- **A message** to the goal reaches every task and is kept as a decision:
-  `wd send <goal> "<text>"`. To one task: `wd send <task> "<text>"`.
+- **The supervisor** keeps the goal whole. Whenever no task is working and something changed,
+  it reads the reports and the combined work against what you asked. Then it tells a task
+  what is missing, starts a new task for a gap no task owns, settles concerns tasks raise
+  about each other, asks you only what only you can answer, and reports the goal done once
+  every part fits. Its replies, and the agents it told or started, appear in the goal's
+  thread: `wd goal supervise <goal>` runs one pass by hand.
+- **A message** to the goal is kept as a decision and goes to its supervisor, which passes it
+  to the tasks it concerns: `wd send <goal> "<text>"`. To one task: `wd send <task> "<text>"`.
 - **Stop** a task from its card, or everything on screen by pressing Esc twice:
   `wd stop <id>`. A message it had not read yet comes back for you to edit.
 - **Pause, resume, cancel**: every write runs at once and can be undone; a cancelled goal

@@ -150,6 +150,64 @@ func TestCoordinator(t *testing.T) {
 		}
 	})
 
+	t.Run("The Supervision Brief Gives A Goal's Supervisor The Whole Picture", func(t *testing.T) {
+		pic := Picture{
+			Goal:      core.Work{ID: "g1", Title: "Release notes", Detail: "for engineers and customers", Kind: core.WorkGoal},
+			Decisions: []string{"keep the js bump script"},
+			Tasks: []TaskPicture{
+				{Work: core.Work{ID: "t1", Title: "Collector", State: core.StateReview}, Report: "STATUS: DONE\nFILES: collect.ts"},
+				{Work: core.Work{ID: "t2", Title: "Impacts", State: core.StateRunning}, Stopped: "wiring it in belongs to the collector task"},
+			},
+			Concerns: []core.Concern{{ID: 18, Work: "t2", Text: "the collector never calls the detector"}},
+			Checks:   []string{"npm run lint"},
+			Worktree: "/wt/g1",
+		}
+		brief := SupervisionBrief(pic)
+		for _, want := range []string{
+			"g1", "Release notes", "for engineers and customers", "keep the js bump script",
+			"t1 [review] Collector", "STATUS: DONE", "t2 [running] Impacts",
+			"stopped without a report; it last said: wiring it in belongs to the collector task",
+			"18 (on t2): the collector never calls the detector", "`npm run lint`",
+			"do not edit, create or delete files", "landing (commits, pull requests, tags, pushes) waits for the person",
+			"ACTIONS:", "SEND <task>", "TASK: <", "START <task>", "RESOLVE <", "ASK: <", "DONE: <", "WAIT",
+		} {
+			if !strings.Contains(brief, want) {
+				t.Fatalf("brief missing %q:\n%s", want, brief)
+			}
+		}
+		if bare := SupervisionBrief(Picture{Goal: pic.Goal}); !strings.Contains(bare, "none: the repository defines no checks") {
+			t.Fatalf("brief with no checks does not say so:\n%s", bare)
+		}
+	})
+
+	t.Run("A Supervision Reply Parses Into Actions", func(t *testing.T) {
+		reply := []string{
+			"The collector never calls the detector. ACTIONS: are below.",
+			"ACTIONS:\n- SEND t1: call detectOperationalImpacts and print impacts\nTASK: weekly running note",
+			"START t9\n`RESOLVE #18: the collector task wires it in`\nASK: tag v1.0.0 at 7720d09? I recommend yes\nDONE: all parts fit\nWAIT\n\nthen I will look again",
+		}
+		actions, refused := ParseSupervision(reply)
+		want := []Action{
+			{Kind: ActSend, Work: "t1", Text: "call detectOperationalImpacts and print impacts"},
+			{Kind: ActTask, Text: "weekly running note"},
+			{Kind: ActStart, Work: "t9"},
+			{Kind: ActResolve, Concern: 18, Text: "the collector task wires it in"},
+			{Kind: ActAsk, Text: "tag v1.0.0 at 7720d09? I recommend yes"},
+			{Kind: ActDone, Text: "all parts fit"},
+			{Kind: ActWait},
+		}
+		if !slices.Equal(actions, want) {
+			t.Fatalf("actions = %+v\nwant %+v", actions, want)
+		}
+		if !slices.Equal(refused, []string{"then I will look again"}) {
+			t.Fatalf("refused = %q, want the line that is no action", refused)
+		}
+		none, unread := ParseSupervision([]string{"I looked; nothing to do."})
+		if len(none) != 0 || len(unread) != 0 {
+			t.Fatalf("a reply with no ACTIONS line = %+v, %q; want nothing", none, unread)
+		}
+	})
+
 	t.Run("A Plan Reply Asking A Question Is A Question", func(t *testing.T) {
 		q, ok := PlanQuestion([]string{"Looking at the repo.", "ASK: What should change in the new worktree?"})
 		if !ok || q != "What should change in the new worktree?" {

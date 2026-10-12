@@ -188,18 +188,77 @@ func firstLine(s string) string {
 // sessionWatch is how often running sessions are read for a question or a report.
 const sessionWatch = 3 * time.Second
 
-// watchSessions files the question or report a running session ends on and
-// moves its work on, until stop closes, so a question reaches a person and
-// finished work reaches review without a coordination pass. A session that cannot be read is passed over:
+// Supervise is one supervise pass over a running goal.
+type Supervise func(goal core.Work) error
+
+// watchSessions files the question or report a running task's session ends
+// on, notes one that stopped without either, and moves its work on, until stop
+// closes, so a question reaches a person and finished work reaches review
+// without a coordination pass. A goal's own session is its supervisor's, read
+// by the supervise pass instead. A session that cannot be read is passed over:
 // the conversation and goal views report that read's error to whoever opens
 // the work.
 func (s *Server) watchSessions(stop <-chan struct{}) error {
 	if s.sessions == nil {
 		return nil
 	}
+	supervised := make(chan error, 1)
+	if s.supervise != nil {
+		go func() { supervised <- s.superviseGoals(stop) }()
+	}
 	tick := time.NewTicker(sessionWatch)
 	defer tick.Stop()
 	onBoard := false
+	for {
+		select {
+		case <-stop:
+			return nil
+		case err := <-supervised:
+			return err
+		case <-tick.C:
+		}
+		running, err := s.ledger.List(ledger.ListFilter{States: []core.State{core.StateRunning}, Archived: &onBoard})
+		if err != nil {
+			return err
+		}
+		for _, w := range running {
+			if core.IsGoal(w.Kind) {
+				continue
+			}
+			r, h, ok, err := s.sessions(w)
+			if err != nil || !ok {
+				continue
+			}
+			texts, err := runner.Transcript(r, h)
+			if err != nil {
+				continue
+			}
+			filed, err := coordinator.Notice(s.ledger, w, h, texts)
+			if err != nil {
+				return err
+			}
+			if filed {
+				continue
+			}
+			status, err := r.Status(h)
+			if err != nil || status == runner.StatusRunning {
+				continue
+			}
+			if _, err := coordinator.Stopped(s.ledger, w, h, texts); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// superviseGoals supervises every running goal on the board every few
+// seconds, until stop closes. A pass that fails is filed on its goal as a
+// note, once for each different failure, and the goal is tried again later.
+func (s *Server) superviseGoals(stop <-chan struct{}) error {
+	tick := time.NewTicker(sessionWatch)
+	defer tick.Stop()
+	onBoard := false
+	failed := map[string]string{}
 	for {
 		select {
 		case <-stop:
@@ -211,17 +270,19 @@ func (s *Server) watchSessions(stop <-chan struct{}) error {
 			return err
 		}
 		for _, w := range running {
-			r, h, ok, err := s.sessions(w)
-			if err != nil || !ok {
+			if !core.IsGoal(w.Kind) {
 				continue
 			}
-			texts, err := runner.Transcript(r, h)
-			if err != nil {
+			if err := s.supervise(w); err != nil {
+				if failed[w.ID] != err.Error() {
+					failed[w.ID] = err.Error()
+					if _, err := s.ledger.AddEvent(w.ID, core.EventNote, "supervising failed: "+err.Error()); err != nil {
+						return err
+					}
+				}
 				continue
 			}
-			if _, err := coordinator.Notice(s.ledger, w, h, texts); err != nil {
-				return err
-			}
+			delete(failed, w.ID)
 		}
 	}
 }

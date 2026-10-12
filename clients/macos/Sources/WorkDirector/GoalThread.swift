@@ -1,9 +1,9 @@
 import SwiftUI
 import WorkDirectorKit
 
-/// A goal read as a conversation: what was asked, the plan it became, what
-/// happened since across its tasks, and what waits on you, last, next to
-/// where you answer.
+/// A goal read as one conversation: what was asked, the plan it became, what
+/// its supervisor and its agents did since, and what waits on you, last, next
+/// to where you answer.
 struct GoalThread: View {
     let store: Store
     let goal: GoalDetail
@@ -20,29 +20,107 @@ struct GoalThread: View {
                 PromptRow(text: goal.goal.detail, brief: false, at: goal.goal.created, label: "Asked")
             }
             PlanBlock(goal: goal, focus: focus)
-            ForEach(timeline, id: \.id) { event in
-                TimelineRow(event: event, task: title(of: event.work), focus: event.work == goal.goal.id ? nil : { focus(event.work) })
+            ForEach(goal.thread) { step in
+                switch step {
+                case .event(let event):
+                    TimelineRow(event: event, task: title(of: event.work), focus: event.work == goal.goal.id ? nil : { focus(event.work) })
+                case .look(let event):
+                    Label("Supervisor looking · \(event.body)", systemImage: "eye")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .supervisor(let event, let reply):
+                    SupervisorRow(event: event, reply: reply, goal: goal, open: { focus(goal.goal.id) }, focus: focus)
+                case .stopped(let event, let said):
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "pause.circle")
+                            Text("Stopped without a report").font(.caption.weight(.semibold))
+                            if let task = title(of: event.work) {
+                                Button(task) { focus(event.work) }.buttonStyle(.link).lineLimit(1)
+                            }
+                            Text(when(event.at)).foregroundStyle(.tertiary)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        Text(said).foregroundStyle(.secondary).lineLimit(3).textSelection(.enabled)
+                    }
+                }
             }
             Waiting(store: store, goal: goal, open: focus, answered: answered)
         }
     }
 
-    /// What happened, oldest first: what was said and decided, reported,
-    /// verified and landed. A state change is shown only where it ends work.
-    private var timeline: [Event] {
-        goal.events
-            .filter { e in
-                switch e.kind {
-                case "decision", "report", "sent", "answer", "verify", "pr", "question": true
-                case "state": ["done", "dropped", "abandoned", "paused", "blocked"].contains(e.body)
-                default: false
-                }
-            }
-            .sorted { $0.at == $1.at ? $0.id < $1.id : $0.at < $1.at }
-    }
-
     private func title(of id: String) -> String? {
         id == goal.goal.id ? nil : goal.tasks.first { $0.id == id }?.title
+    }
+}
+
+/// A supervisor's reply in the goal's conversation: what it said, then each
+/// agent it told, started or filed, live, and what was refused.
+struct SupervisorRow: View {
+    let event: Event
+    let reply: SupervisorReply
+    let goal: GoalDetail
+    /// Shows the supervisor's own conversation.
+    let open: () -> Void
+    let focus: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "person.badge.shield.checkmark")
+                Button("Supervisor", action: open).buttonStyle(.link).font(.caption.weight(.semibold))
+                Text(when(event.at)).foregroundStyle(.tertiary)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            if !reply.said.isEmpty {
+                MarkdownText(reply.said)
+            }
+            ForEach(Array(reply.actions.enumerated()), id: \.offset) { _, action in
+                if let id = action.task, let task = goal.tasks.first(where: { $0.id == id }) {
+                    Button { focus(id) } label: { AgentChip(task: task, activity: goal.activity[id], line: action.line) }
+                        .buttonStyle(.plain)
+                        .help("Show this agent's conversation")
+                } else {
+                    Label(action.line, systemImage: "checkmark.circle").font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            ForEach(reply.refused, id: \.self) { line in
+                Label(line, systemImage: "xmark.circle").font(.caption).foregroundStyle(.orange).textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+/// An agent inside the conversation: where its session is, what it is doing,
+/// and what it was told.
+struct AgentChip: View {
+    let task: Work
+    let activity: Activity?
+    let line: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            PhaseMark(phase: AgentRoster.phase(of: activity)).padding(.top, 5)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(task.title).font(.callout.weight(.medium)).lineLimit(1)
+                    StateSymbol(state: task.state)
+                }
+                Text(line).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                if let now = activity?.error ?? activity?.now, !now.isEmpty {
+                    Text(now).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+        }
+        .padding(8)
+        .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
     }
 }
 

@@ -673,6 +673,12 @@ func (c *Cli) goalLike(cmd string, rest []string) error {
 		}
 		return c.begin(goal, p)
 	}
+	if cmd == "goal" && sub == "supervise" {
+		if len(rest) != 2 {
+			return fail("usage: wd goal supervise <id> [--runner <runner>]")
+		}
+		return c.goalSupervise(rest[1])
+	}
 	if cmd == "goal" && sub == "find" {
 		if len(rest) < 3 {
 			return fail("usage: wd goal find <project> \"<what you want done>\" [--runner <runner>]")
@@ -2824,7 +2830,7 @@ func (c *Cli) serve(rest []string) error {
 	// A server reads every working session's status every few seconds; one
 	// claude listing a beat serves all of them.
 	runner.ShareAgentListing(1500 * time.Millisecond)
-	srv := serve.New(c.Ledger, cliPath, c.sessionOf)
+	srv := serve.New(c.Ledger, cliPath, c.sessionOf, c.Supervise)
 	if flag(c.Args, "stdio") {
 		if c.JSON {
 			return fail("wd serve --stdio speaks its own protocol on stdout and has no --json document")

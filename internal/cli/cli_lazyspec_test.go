@@ -1262,6 +1262,20 @@ func TestAGoalIsPlannedWhereItsPlanningCanBeWatchedAndStopped(t *testing.T) {
 	if stopped := readFile(t, filepath.Join(state, "stopped")); !strings.Contains(stopped, "planner planner-s0beef") {
 		t.Fatalf("stopped = %q, want the goal's planning session stopped", stopped)
 	}
+
+	// Once it is supervised, its supervisor is its own session.
+	l, err = ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.AddEvent(planning, core.EventSpawn, "supervise overseer overseer-s0cafe"); err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	f.runOK(t, "stop", planning)
+	if stopped := readFile(t, filepath.Join(state, "stopped")); !strings.Contains(stopped, "overseer overseer-s0cafe") {
+		t.Fatalf("stopped = %q, want the goal's supervisor stopped", stopped)
+	}
 }
 
 func readFile(t *testing.T, path string) string {
@@ -4410,29 +4424,282 @@ func TestWdSendQueuesForABusySessionAndNeverForksIt(t *testing.T) {
 	}
 }
 
-func TestWdSendToAGoalTellsEveryOpenTaskAndKeepsItAsADecision(t *testing.T) {
+// overseen is a goal on a project run by the overseer fake, with task a
+// running and saying "working on it", task b in review with a report, and a
+// concern on a. It returns the goal, the two tasks, the concern and the fake's
+// state directory.
+type overseen struct {
+	goal, a, b string
+	concern    int
+	state      string
+}
+
+func overseenGoal(t *testing.T, f *cliFixture) overseen {
+	t.Helper()
+	proj := "---\npath: " + f.sample + "\nrunner: overseer\nmode: auto\nverify: [test -f README.md]\n---\n"
+	if err := os.WriteFile(filepath.Join(f.wdHome, "projects", "overseen.md"), []byte(proj), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o := overseen{state: filepath.Join(f.dir, "fake-state")}
+	if err := os.MkdirAll(o.state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	goal, err := l.Add("overseen", "Release notes for engineers and customers", ledger.AddOptions{Kind: core.WorkGoal})
+	must(err)
+	_, err = l.Transition(goal.ID, core.StateRunning)
+	must(err)
+	for _, x := range []struct {
+		id    *string
+		title string
+	}{{&o.a, "Detect operational impacts"}, {&o.b, "Collect the changes"}} {
+		w, err := l.Add("overseen", x.title, ledger.AddOptions{Parent: &goal.ID})
+		must(err)
+		must(l.SetSession(w.ID, ledger.SessionInfo{Runner: "overseer", Session: "task-" + w.ID, Cwd: f.sample}))
+		_, err = l.Transition(w.ID, core.StateRunning)
+		must(err)
+		*x.id = w.ID
+	}
+	_, err = l.AddEvent(o.b, core.EventReport, "DONE\nSTATUS: DONE\nFILES: collect.ts")
+	must(err)
+	_, err = l.Transition(o.b, core.StateReview)
+	must(err)
+	cx, err := l.AddConcern(o.a, "the collector never calls the detector")
+	must(err)
+	o.goal, o.concern = goal.ID, cx.ID
+	o.say(t, "task-"+o.a, "working on it")
+	return o
+}
+
+// say appends lines to what session said.
+func (o overseen) say(t *testing.T, session string, lines ...string) {
+	t.Helper()
+	fh, err := os.OpenFile(filepath.Join(o.state, "said-"+session), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fh.Close()
+	if _, err := fh.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// busy makes session working, or not.
+func (o overseen) busy(t *testing.T, session string, working bool) {
+	t.Helper()
+	path := filepath.Join(o.state, "busy-"+session)
+	if working {
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+}
+
+type supervised struct {
+	Looked  bool     `json:"looked"`
+	Applied bool     `json:"applied"`
+	Actions []string `json:"actions"`
+	Refused []string `json:"refused"`
+}
+
+func superviseOnce(t *testing.T, f *cliFixture, goal string) supervised {
+	t.Helper()
+	var s supervised
+	out := f.runOK(t, "goal", "supervise", goal, "--json")
+	if err := json.Unmarshal([]byte(out), &s); err != nil {
+		t.Fatalf("supervise --json: %v\n%s", err, out)
+	}
+	return s
+}
+
+const supervisor = "overseer-s00001"
+
+func TestWdGoalSuperviseHasTheGoalsSupervisorLookOnceNoTaskIsWorking(t *testing.T) {
 	f := newCLIFixture(t)
-	state := liveClaude(t, f)
-	epic, t1, t2, t3 := f.ids["epic"], f.ids["t1"], f.ids["t2"], f.ids["t3"]
-	out := f.runOK(t, "send", epic, "drop the mobile app", "--json")
+	o := overseenGoal(t, f)
+	o.busy(t, "task-"+o.a, true)
+	if s := superviseOnce(t, f, o.goal); s.Looked || s.Applied {
+		t.Fatalf("supervise while %s works = %+v, want no look", o.a, s)
+	}
+	o.busy(t, "task-"+o.a, false)
+	if s := superviseOnce(t, f, o.goal); !s.Looked {
+		t.Fatalf("supervise once no task works = %+v, want a look", s)
+	}
+	if notes := f.bodies(t, o.a, core.EventNote); len(notes) == 0 || notes[len(notes)-1] != "stopped without a report: working on it" {
+		t.Fatalf("notes on %s = %q, want its stop without a report noted", o.a, notes)
+	}
+	if spawns := f.bodies(t, o.goal, core.EventSpawn); len(spawns) != 1 || spawns[0] != "supervise overseer "+supervisor {
+		t.Fatalf("spawn events = %q, want the supervisor recorded", spawns)
+	}
+	brief := readFile(t, filepath.Join(o.state, "brief-"+supervisor))
+	for _, want := range []string{"Release notes for engineers and customers", o.a, "it last said: working on it", "FILES: collect.ts", "the collector never calls the detector", "ACTIONS:"} {
+		if !strings.Contains(brief, want) {
+			t.Fatalf("the supervisor's brief lacks %q:\n%s", want, brief)
+		}
+	}
+	if looks := f.bodies(t, o.goal, core.EventLook); len(looks) != 1 {
+		t.Fatalf("look events = %q, want one", looks)
+	}
+	if s := superviseOnce(t, f, o.goal); s.Looked || s.Applied {
+		t.Fatalf("supervise with nothing new = %+v, want nothing", s)
+	}
+
+	// The supervisor working holds the next look.
+	o.busy(t, supervisor, true)
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.AddEvent(o.goal, core.EventDecision, "keep the js bump script"); err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	if s := superviseOnce(t, f, o.goal); s.Looked {
+		t.Fatalf("supervise while the supervisor works = %+v, want no look", s)
+	}
+	// A decision has it look even while a task works, through the session it has.
+	o.busy(t, supervisor, false)
+	o.busy(t, "task-"+o.a, true)
+	if s := superviseOnce(t, f, o.goal); !s.Looked {
+		t.Fatalf("supervise after a decision = %+v, want a look although %s works", s, o.a)
+	}
+	if sent := readFile(t, filepath.Join(o.state, "sent-"+supervisor)); !strings.Contains(sent, "keep the js bump script") {
+		t.Fatalf("the supervisor was sent %q, want the brief with the decision", sent)
+	}
+	if spawns := f.bodies(t, o.goal, core.EventSpawn); len(spawns) != 1 {
+		t.Fatalf("spawn events = %q, want the same supervisor reused", spawns)
+	}
+	if errStr := f.runFail(t, "goal", "supervise", o.b); !strings.Contains(errStr, "only a running goal is supervised") {
+		t.Fatalf("supervise of a task = %q, want it refused", errStr)
+	}
+}
+
+func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
+	f := newCLIFixture(t)
+	o := overseenGoal(t, f)
+	if s := superviseOnce(t, f, o.goal); !s.Looked {
+		t.Fatalf("first supervise = %+v, want a look", s)
+	}
+	o.say(t, supervisor,
+		"The collector never calls the detector.",
+		"ACTIONS:",
+		"SEND "+o.a+": wire the detector into the collector",
+		fmt.Sprintf("RESOLVE %d: %s wires it in", o.concern, o.a),
+		"TASK: Add the weekly running note",
+		"START "+o.b,
+		"SEND nobody: hello",
+		"and then some prose")
+	s := superviseOnce(t, f, o.goal)
+	if !s.Applied || s.Looked {
+		t.Fatalf("supervise after a reply = %+v, want it carried out and no look", s)
+	}
+	wantDone := []string{"SEND " + o.a + ": wire the detector into the collector", fmt.Sprintf("RESOLVE %d: %s wires it in", o.concern, o.a), "TASK: Add the weekly running note"}
+	if !slices.Equal(s.Actions, wantDone) {
+		t.Fatalf("actions = %q, want %q", s.Actions, wantDone)
+	}
+	if len(s.Refused) != 3 || !strings.Contains(strings.Join(s.Refused, "|"), "already under way") ||
+		!strings.Contains(strings.Join(s.Refused, "|"), "not a task of") || !strings.Contains(strings.Join(s.Refused, "|"), "and then some prose — not an action") {
+		t.Fatalf("refused = %q, want START of work under way, a task not of the goal and the prose refused", s.Refused)
+	}
+	if sent := readFile(t, filepath.Join(o.state, "sent-task-"+o.a)); !strings.Contains(sent, "wire the detector into the collector") {
+		t.Fatalf("%s was sent %q", o.a, sent)
+	}
+	if concerns := f.runOK(t, "concern", "list", o.a); !strings.Contains(concerns, "no open concerns") {
+		t.Fatalf("concern not resolved:\n%s", concerns)
+	}
+	var tasks []core.Work
+	if err := json.Unmarshal([]byte(f.runOK(t, "tasks", o.goal, "--json")), &tasks); err != nil {
+		t.Fatal(err)
+	}
+	added := tasks[len(tasks)-1]
+	if len(tasks) != 3 || added.Title != "Add the weekly running note" || added.State != core.StateRunning || added.Session == nil {
+		t.Fatalf("tasks = %+v, want the new task filed under the goal and started", tasks)
+	}
+	if sup := f.bodies(t, o.goal, core.EventSupervised); len(sup) != 1 || !strings.Contains(sup[0], "The collector never calls the detector.") || !strings.Contains(sup[0], "Refused:") {
+		t.Fatalf("supervised events = %q, want the reply with what was done and refused", sup)
+	}
+	if s := superviseOnce(t, f, o.goal); s.Applied {
+		t.Fatalf("a reply already carried out was carried out again: %+v", s)
+	}
+
+	// A question goes to the person, and the answer to the supervisor.
+	o.say(t, supervisor, "ACTIONS:", "ASK: Tag v1.0.0 at 7720d09? I recommend yes")
+	superviseOnce(t, f, o.goal)
+	if got := stateOf(t, f, o.goal); got != core.StateNeedsInput {
+		t.Fatalf("goal after ASK = %s, want needs-input", got)
+	}
+	if qs := f.bodies(t, o.goal, core.EventQuestion); len(qs) != 1 || qs[0] != "Tag v1.0.0 at 7720d09? I recommend yes" {
+		t.Fatalf("questions = %q", qs)
+	}
+	f.runOK(t, "answer", o.goal, "yes, tag it")
+	if sent := readFile(t, filepath.Join(o.state, "sent-"+supervisor)); !strings.Contains(sent, "yes, tag it") {
+		t.Fatalf("the supervisor was sent %q, want the answer", sent)
+	}
+	if got := stateOf(t, f, o.goal); got != core.StateRunning {
+		t.Fatalf("goal after the answer = %s, want running", got)
+	}
+
+	// Done is refused while a task works, and moves the goal to review once none does.
+	o.busy(t, "task-"+o.a, true)
+	o.say(t, supervisor, "ACTIONS:", "DONE: every part is built and fits")
+	if s := superviseOnce(t, f, o.goal); len(s.Refused) != 1 || !strings.Contains(s.Refused[0], "still working") {
+		t.Fatalf("DONE while %s works = %+v, want it refused", o.a, s)
+	}
+	o.busy(t, "task-"+o.a, false)
+	o.say(t, supervisor, "ACTIONS:", "DONE: every part is built and fits")
+	superviseOnce(t, f, o.goal)
+	if got := stateOf(t, f, o.goal); got != core.StateReview {
+		t.Fatalf("goal after DONE = %s, want review", got)
+	}
+	if reports := f.bodies(t, o.goal, core.EventReport); len(reports) != 1 || !strings.Contains(reports[0], "every part is built and fits") {
+		t.Fatalf("goal reports = %q", reports)
+	}
+}
+
+func TestWdSendToAGoalKeepsItAsADecisionForTheGoalsSupervisor(t *testing.T) {
+	f := newCLIFixture(t)
+	o := overseenGoal(t, f)
+	o.busy(t, "task-"+o.a, true)
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unstarted, err := l.Add("overseen", "Write the skill", ledger.AddOptions{Parent: &o.goal})
+	l.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
 	var told struct {
-		Delivered []string `json:"delivered"`
-		Queued    []string `json:"queued"`
-		Brief     []string `json:"brief"`
+		Decision core.Event `json:"decision"`
+		Looked   bool       `json:"looked"`
 	}
-	if err := json.Unmarshal([]byte(out), &told); err != nil {
-		t.Fatalf("send --json: %v\n%s", err, out)
+	if err := json.Unmarshal([]byte(f.runOK(t, "send", o.goal, "keep the js bump script", "--json")), &told); err != nil {
+		t.Fatal(err)
 	}
-	if !slices.Equal(told.Delivered, []string{t2}) || len(told.Queued) != 0 || !slices.Equal(told.Brief, []string{t3}) {
-		t.Fatalf("told = %+v, want %s delivered and %s told through its brief (%s is done)", told, t2, t3, t1)
+	if told.Decision.Kind != core.EventDecision || told.Decision.Body != "keep the js bump script" || !told.Looked {
+		t.Fatalf("send to a goal = %+v, want the decision and a look", told)
 	}
-	if got := sends(t, state); len(got) != 1 || got[0] != "drop the mobile app" {
-		t.Fatalf("sends = %q, want the message delivered to %s", got, t2)
+	if sent := readFile(t, filepath.Join(o.state, "sent-task-"+o.a)); sent != "" {
+		t.Fatalf("%s was sent %q; a goal's message goes to its supervisor", o.a, sent)
 	}
-	if events := f.runOK(t, "events", epic); !strings.Contains(events, "decision\tdrop the mobile app") {
-		t.Fatalf("goal events lack the decision:\n%s", events)
+	if brief := readFile(t, filepath.Join(o.state, "brief-"+supervisor)); !strings.Contains(brief, "keep the js bump script") {
+		t.Fatalf("the supervisor's brief lacks the decision:\n%s", brief)
 	}
-	if brief := f.runOK(t, "brief", t3); !strings.Contains(brief, "drop the mobile app") {
+	if brief := f.runOK(t, "brief", unstarted.ID); !strings.Contains(brief, "keep the js bump script") {
 		t.Fatalf("a task not yet started does not read the goal's decision in its brief:\n%s", brief)
 	}
 }

@@ -68,7 +68,7 @@ JSON message per line to stdout:
 - An unknown id is not-found; a negative or non-numeric `from` is bad-request.
 
 ## A Goal Serves What Each Of Its Tasks Is Doing
-- `activity` on a goal maps each task with a session, and the goal itself while its planning session is recorded, to its latest step as one line (`now`), that step's `kind`, and `asking`.
+- `activity` on a goal maps each task with a session, and the goal itself while its planning or supervising session is recorded, to its latest step as one line (`now`), that step's `kind`, and `asking`.
 - Where the runner can say, each carries the session's `usage` and its `subagents`.
 - A tool step reads as its name and what it acted on; a question as its questions; others as their first line.
 - Each carries its session's `status`, `unknown` when the runner cannot say.
@@ -84,6 +84,13 @@ JSON message per line to stdout:
 - While serving, a running work item whose session ends on a `STATUS: DONE` report has it filed as a `report` event and moves to review within seconds.
 - `STATUS: BLOCKED` moves it to blocked, and `STATUS: NEEDS-INPUT` to needs-input.
 - A report already filed at that point of the conversation is not filed again.
+
+## A Running Session That Stops Without A Report Is Noted
+- While serving, a running work item whose session is not running and ends on neither a question nor a report has a `note` filed, `stopped without a report: ` and the first line it last said; its state stays.
+- It is noted once at that point of the conversation.
+
+## A Running Goal Is Supervised While Serving
+- While serving, each running goal is supervised every few seconds, as `wd goal supervise` does.
 
 ## Work Items Serve Over HTTP
 `GET /api/work` lists all work items. `GET /api/work/<id>` returns one

@@ -157,7 +157,7 @@ struct WorkDetail: View {
     private func roster(_ loaded: Loaded) -> AgentRoster {
         switch loaded {
         case .goal(let g):
-            AgentRoster(goal: g.goal, tasks: g.tasks, activity: g.activity)
+            AgentRoster(goal: g.goal, supervised: g.supervised, tasks: g.tasks, activity: g.activity)
         case .work(let w, _):
             hasSession(w)
                 ? AgentRoster(task: w, status: feed.status, asking: feed.asking != nil,
