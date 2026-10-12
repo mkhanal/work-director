@@ -53,5 +53,28 @@ for t in "$swift_tests"/*LazyspecTests.swift; do
   [ -f "clients/macos/$stem.lazyspec.md" ] || { echo "orphan test: $t (no clients/macos/$stem.lazyspec.md)"; fail=1; }
 done
 
+# The Linux app: clients/linux/<stem>.lazyspec.md is married to
+# clients/linux/tests/<stem>_lazyspec.rs by a test fn named for the heading: lower
+# case, apostrophes dropped, every other run of punctuation and spaces one `_`.
+snake() {
+  printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -d "'" | tr -c 'a-z0-9' '_' | tr -s '_' | sed 's/^_//; s/_$//'
+}
+for spec in clients/linux/*.lazyspec.md; do
+  [ -f "$spec" ] || continue
+  stem=$(basename "$spec" .lazyspec.md)
+  test="clients/linux/tests/${stem}_lazyspec.rs"
+  [ -f "$test" ] || { echo "orphan spec: $spec (no $test)"; fail=1; continue; }
+  while IFS= read -r h; do
+    grep -qx "fn $(snake "$h")() {" "$test" && continue
+    echo "unmarried: $spec :: $h"
+    fail=1
+  done < <(grep '^## ' "$spec" | grep -v 'no-test:' | sed 's/^## //')
+done
+for t in clients/linux/tests/*_lazyspec.rs; do
+  [ -f "$t" ] || continue
+  stem=$(basename "$t" _lazyspec.rs)
+  [ -f "clients/linux/$stem.lazyspec.md" ] || { echo "orphan test: $t (no clients/linux/$stem.lazyspec.md)"; fail=1; }
+done
+
 [ $fail -eq 0 ] && echo "lazyspec: all requirements married"
 exit $fail

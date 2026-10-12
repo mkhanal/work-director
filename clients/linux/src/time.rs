@@ -1,0 +1,54 @@
+//! Ledger times, as wd writes them (RFC 3339) and as a reader wants them.
+
+use chrono::{DateTime, Local, Utc};
+
+pub fn instant(stamp: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(stamp).ok().map(|t| t.with_timezone(&Utc))
+}
+
+/// A time as a reader wants it: the time today, the date and time otherwise.
+/// A stamp that is not a time reads as written.
+pub fn when(stamp: &str) -> String {
+    let Some(t) = instant(stamp) else { return stamp.to_string() };
+    let local = t.with_timezone(&Local);
+    if local.date_naive() == Local::now().date_naive() {
+        local.format("%H:%M").to_string()
+    } else {
+        local.format("%-d %b %H:%M").to_string()
+    }
+}
+
+/// The day a time falls on, as a day line reads it: Today, Yesterday, or
+/// "Monday, Oct 12". A stamp that is not a time reads as written.
+pub fn day(stamp: &str) -> String {
+    let Some(t) = instant(stamp) else { return stamp.to_string() };
+    let date = t.with_timezone(&Local).date_naive();
+    let today = Local::now().date_naive();
+    if date == today {
+        "Today".to_string()
+    } else if today.pred_opt() == Some(date) {
+        "Yesterday".to_string()
+    } else {
+        date.format("%A, %b %-d").to_string()
+    }
+}
+
+/// How long ago, in the fewest characters: now, 5m, 3h, 2d.
+pub fn ago(stamp: &str, now: DateTime<Utc>) -> String {
+    let Some(t) = instant(stamp) else { return String::new() };
+    let s = (now - t).num_seconds();
+    if s < 60 {
+        "now".to_string()
+    } else if s < 3600 {
+        format!("{}m", s / 60)
+    } else if s < 86400 {
+        format!("{}h", s / 3600)
+    } else {
+        format!("{}d", s / 86400)
+    }
+}
+
+/// Seconds between two stamps, when both are times.
+pub fn between(earlier: &str, later: &str) -> Option<i64> {
+    Some((instant(later)? - instant(earlier)?).num_seconds())
+}

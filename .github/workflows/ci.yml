@@ -32,6 +32,73 @@ jobs:
       - run: swift test
         working-directory: clients/macos
 
+  # The Linux app is tested the same way, its model headless against a wd
+  # built from this commit; the GTK app is linted and built.
+  linux-app:
+    env: { CARGO_TERM_COLOR: never }
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: clients/linux
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-4-dev libadwaita-1-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: 'rustfmt, clippy' }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: clients/linux }
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo build --release --workspace
+      - name: the release packaging builds
+        working-directory: .
+        run: |
+          scripts/build-linux.sh
+          dpkg-deb -c dist/Work-Director-dev-linux-*.deb | grep 'usr/lib/work-director/wd$' > /dev/null
+          git clean -fdxq dist
+      # The app itself, launched on a virtual display against a ledger with a
+      # goal in it, on each of the goal's views and on a new goal: it must
+      # still be running when it is stopped, with nothing panicked.
+      - name: the app opens each view
+        working-directory: .
+        run: |
+          sudo apt-get install -y --no-install-recommends xvfb
+          export WD_HOME="$RUNNER_TEMP/smoke-home" XDG_CONFIG_HOME="$RUNNER_TEMP/smoke-config"
+          export WD_BIN="$RUNNER_TEMP/wd" GTK_A11Y=none RUST_BACKTRACE=1
+          go build -o "$WD_BIN" ./cmd/wd
+          mkdir -p "$WD_HOME/demo" "$XDG_CONFIG_HOME/work-director"
+          "$WD_BIN" projects add demo "$WD_HOME/demo" --runner claude --lazyspec n
+          goal=$("$WD_BIN" goal add demo "Smoke the app" --json | jq -r .id)
+          "$WD_BIN" decide "$goal" "keep it small"
+          "$WD_BIN" add demo "A task on its own"
+          for view in overview conversation tasks record new; do
+            if [ "$view" = new ]; then
+              printf 'scope=demo\n' > "$XDG_CONFIG_HOME/work-director/settings"
+            else
+              printf 'last-work=%s\ngoal-tab=%s\n' "$goal" "$view" > "$XDG_CONFIG_HOME/work-director/settings"
+            fi
+            code=0
+            timeout 8 xvfb-run -a clients/linux/target/release/work-director 2> "$RUNNER_TEMP/app.log" || code=$?
+            cat "$RUNNER_TEMP/app.log"
+            [ "$code" -eq 124 ] || { echo "the app exited ($code) on the $view view"; exit 1; }
+            if grep -q panicked "$RUNNER_TEMP/app.log"; then echo "the app panicked on the $view view"; exit 1; fi
+          done
+      # Last, so a formatting slip never hides a failing test; the patch that
+      # fixes it is kept with the run.
+      - name: formatted as rustfmt formats it
+        run: |
+          cargo fmt --all
+          git diff > "$RUNNER_TEMP/rustfmt.patch"
+          git diff --exit-code --stat || { echo "run cargo fmt in clients/linux"; exit 1; }
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustfmt-patch
+          path: ${{ runner.temp }}/rustfmt.patch
+          if-no-files-found: ignore
+
   # Windows runs the packages whose tests need no Unix shell: the ledger, the
   # state machine, projects, taste, review and delivery's link checks.
   windows:

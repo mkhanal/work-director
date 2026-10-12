@@ -1,0 +1,123 @@
+/* The desktop design's tokens (docs/design/desktop.md) over libadwaita's
+   named colours, so light and dark both follow the system. */
+
+/* Type */
+.display { font-size: 22px; font-weight: 600; }
+.title { font-size: 16px; font-weight: 600; }
+.body { font-size: 14px; }
+.callout { font-size: 13px; }
+.meta { font-size: 12px; font-weight: 500; }
+.micro { font-size: 11px; font-weight: 600; letter-spacing: 0.4px; }
+.code { font-family: monospace; font-size: 12.5px; }
+.strong { font-weight: 600; }
+.numeric { font-feature-settings: "tnum"; }
+.speaker { font-size: 12px; font-weight: 600; }
+
+/* Text colours */
+.text2 { color: alpha(@window_fg_color, 0.72); }
+.text3 { color: alpha(@window_fg_color, 0.5); }
+.failure { color: @error_color; }
+.attention-text { color: @warning_color; }
+.settled-text { color: @success_color; }
+.accent-text { color: @accent_color; }
+
+/* Boxes that mean something */
+.bubble-you {
+  background-color: alpha(@accent_bg_color, 0.14);
+  border: 1px solid alpha(@accent_bg_color, 0.30);
+  border-radius: 14px;
+  padding: 10px 14px;
+}
+.raised {
+  background-color: @card_bg_color;
+  border: 1px solid alpha(@window_fg_color, 0.10);
+  border-radius: 10px;
+  padding: 16px;
+}
+.attention {
+  background-color: alpha(@warning_color, 0.08);
+  border: 1px solid alpha(@warning_color, 0.45);
+  border-left: 3px solid @warning_color;
+  border-radius: 10px;
+  padding: 16px;
+}
+.settled {
+  background-color: alpha(@success_color, 0.08);
+  border: 1px solid alpha(@success_color, 0.30);
+  border-radius: 10px;
+  padding: 12px;
+}
+.sunken {
+  background-color: alpha(@window_fg_color, 0.06);
+  border-radius: 10px;
+}
+.sunken > viewport > label, .sunken label { padding: 12px; }
+
+/* Chips, tags, pills */
+.tag, .pill:not(button) {
+  border-radius: 6px;
+  padding: 2px 8px;
+  background-color: alpha(@window_fg_color, 0.08);
+}
+.chip { border-radius: 6px; padding: 2px 10px; font-size: 13px; }
+.agent-chip {
+  border-radius: 8px;
+  padding: 10px;
+  background-color: alpha(@window_fg_color, 0.04);
+}
+.link-button { padding: 0 2px; min-height: 0; color: @accent_color; }
+
+/* The composer */
+.composer {
+  background-color: @card_bg_color;
+  border: 1px solid alpha(@window_fg_color, 0.12);
+  border-radius: 14px;
+  padding: 12px 14px;
+  box-shadow: 0 2px 10px alpha(black, 0.07);
+}
+.composer-field, .composer-field text { background-color: transparent; font-size: 14px; }
+button.send { min-width: 28px; min-height: 28px; padding: 0; }
+button.jump { min-width: 34px; min-height: 34px; }
+
+/* Event lines */
+.event-line separator { background-color: alpha(@window_fg_color, 0.12); min-height: 1px; }
+
+/* Dots and state tints */
+.dot { min-width: 8px; min-height: 8px; border-radius: 4px; background-color: alpha(@window_fg_color, 0.35); }
+.dot.asking { background-color: transparent; border: 2px solid @warning_color; min-width: 6px; min-height: 6px; }
+.dot.resting { background-color: transparent; border: 1.5px solid alpha(@window_fg_color, 0.5); min-width: 6px; min-height: 6px; }
+.dot.band-in-flight { background-color: @accent_bg_color; }
+.dot.band-ready { background-color: @success_color; }
+.dot.band-in-review { background-color: @purple_3; }
+.dot.band-paused { background-color: transparent; border: 1.5px solid alpha(@window_fg_color, 0.5); }
+.dot.band-at-rest { background-color: alpha(@window_fg_color, 0.25); }
+
+.tint-gray { color: alpha(@window_fg_color, 0.6); }
+.tint-blue { color: @blue_3; }
+.tint-indigo { color: @purple_2; }
+.tint-orange { color: @warning_color; }
+.tint-red { color: @error_color; }
+.tint-purple { color: @purple_3; }
+.tint-teal { color: @green_4; }
+.tint-green { color: @success_color; }
+.tint-brown { color: @brown_3; }
+
+/* The progress bar, one cell per task */
+.progress-bar { min-height: 8px; border-radius: 4px; }
+.progress-bar > box { min-height: 8px; }
+.bar-done { background-color: @success_color; }
+.bar-working { background-color: @accent_bg_color; }
+.bar-review { background-color: @purple_3; }
+.bar-blocked { background-color: @error_color; }
+.bar-waiting { background-color: alpha(@window_fg_color, 0.3); }
+.bar-dropped { background-color: alpha(@window_fg_color, 0.12); }
+.dot.bar-done { background-color: @success_color; }
+.dot.bar-working { background-color: @accent_bg_color; }
+.dot.bar-review { background-color: @purple_3; }
+.dot.bar-blocked { background-color: @error_color; }
+.dot.bar-waiting { background-color: alpha(@window_fg_color, 0.3); }
+.dot.bar-dropped { background-color: alpha(@window_fg_color, 0.12); }
+
+/* The agents inspector */
+.inspector { background-color: @sidebar_bg_color; }
+.agent-card { padding: 6px 4px; }
