@@ -17,6 +17,7 @@ out=$(mkdir -p "${1:-$root/ui-shots/macos}" && cd "${1:-$root/ui-shots/macos}" &
 work=$(mktemp -d "${TMPDIR:-/tmp}/wd-ui-macos.XXXXXX")
 (cd "$root" && go build -o "$work/wd" ./cmd/wd)
 (cd "$root/clients/macos" && swift build -c release -q)
+swiftc -O -o "$work/window" "$root/scripts/ui/macos/window.swift"
 app=$root/clients/macos/.build/release/WorkDirector
 export WD_HOME=$work/home WD_BIN=$work/wd
 eval "$("$root/scripts/ui/seed-goal-tree.sh" "$WD_BIN" | tail -1)" # goal= subgoal= … finish=
@@ -40,7 +41,6 @@ for scheme in light dark; do
     for _ in $(seq 150); do
       bounds=$(osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid)
         if (count of windows) is 0 then return \"\"
-        set frontmost to true
         set position of window 1 to {40, 60}
         set size of window 1 to {1280, 900}
         delay 2
@@ -52,15 +52,8 @@ for scheme in light dark; do
     done
     [ -n "$bounds" ] || { echo "no window for $screen"; cat "$work/app-$screen.log"; kill "$pid"; exit 1; }
     name=$screen; [ "$scheme" = dark ] && name=$screen-dark
-    screencapture -x -R "$bounds" "$out/$name.png"
+    screencapture -x -o -l "$("$work/window" "$pid")" "$out/$name.png"
     sips -z 900 1280 "$out/$name.png" >/dev/null
-    if [ "$view" = overview ]; then
-      IFS=, read -r bx by _ _ <<<"$bounds"
-      swift "$root/scripts/ui/macos/scroll.swift" $((bx + 760)) $((by + 600)) 200
-      sleep 1
-      screencapture -x -R "$bounds" "$out/$name-bottom.png"
-      sips -z 900 1280 "$out/$name-bottom.png" >/dev/null
-    fi
     kill "$pid"; wait "$pid" 2>/dev/null || true
   done
 done

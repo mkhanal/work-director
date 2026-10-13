@@ -17,6 +17,7 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/wd-ui-act.XXXXXX")
 (cd "$root" && go build -o "$work/wd" ./cmd/wd)
 (cd "$root/clients/macos" && swift build -c release -q)
 swiftc -O -o "$work/press" "$root/scripts/ui/macos/press.swift"
+swiftc -O -o "$work/window" "$root/scripts/ui/macos/window.swift"
 app=$root/clients/macos/.build/release/WorkDirector
 export WD_HOME=$work/home WD_BIN=$work/wd
 eval "$("$root/scripts/ui/seed-goal-tree.sh" "$WD_BIN" | tail -1)"
@@ -37,7 +38,6 @@ open_app() { # work view
   # A window just counted can still refuse to be placed for a moment.
   for _ in $(seq 10); do
     osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid)
-      set frontmost to true
       set position of window 1 to {40, 60}
       set size of window 1 to {1280, 900}
     end tell" >/dev/null 2>&1 && break
@@ -53,7 +53,7 @@ press() { # role text
   "$work/press" "$pid" "$1" "$2" | grep -q clicked || { echo "no $1 containing '$2'"; return 1; }
   sleep 3
 }
-shot() { screencapture -x "$out/$1.png"; }
+shot() { screencapture -x -o -l "$("$work/window" "$pid")" "$out/$1.png"; }
 
 open_app "$pivot" overview
 press AXButton "Change course" && shot act-pivot
