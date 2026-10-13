@@ -49,6 +49,15 @@ recent reopening; work never reopened is judged on all its events.
 - A top goal's state is never rolled up.
 - A bare transition of a goal under a goal is refused, naming what sets it.
 
+## An Agent's Steps Replace The Last Ones It Gave
+- `SetSteps(work, steps)` stores the steps numbered from 1 in the order given, replacing any before.
+- `Steps(work)` returns them in order with their states: todo, doing, done or dropped.
+- A step with empty text, or a state outside that set, is refused and nothing is replaced.
+
+## A Sub-Goal Waits Only On Its Siblings
+- `SetAfter(work, ids)` records what the work waits on, replacing the set before; `After(work)` reads it.
+- Waiting on itself, on work with another parent, or on work that already waits on it at any remove is refused naming the two.
+
 ## Dropped Work Is Restored With Everything Dropped Alongside It
 - `Restore(id)` returns dropped work to the state it was dropped from, with every work under it dropped at the same moment.
 - Work under it dropped at another moment stays dropped.
@@ -144,7 +153,7 @@ For a goal, `SoftDone` also requires every task under it done, dropped or supers
 Work added to a file-backed ledger is still there after closing and reopening it.
 
 ## Old Ledgers Stay Readable
-- `New` opens a ledger lacking any later column or table — work without parent, heading, claim, impact, goal_type, archived, done_when, finish_line or finish_source; event without effective or payload; no concern, worktree, filed or cursor tables.
+- `New` opens a ledger lacking any later column or table — work without parent, heading, claim, impact, goal_type, archived, done_when, finish_line or finish_source; event without effective or payload; no concern, worktree, filed, cursor, step or after tables.
 - It reads every existing row, adds what is missing in place, and changes no stored value.
 - A row stored with kind `epic` reads as `goal`.
 - An event stored without effective or payload reads with both absent.

@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS cursor (project TEXT NOT NULL, name TEXT NOT NULL, va
 CREATE UNIQUE INDEX IF NOT EXISTS worktree_one_active_shared ON worktree(work) WHERE kind = 'shared' AND state = 'active';
 CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), text TEXT NOT NULL, at TEXT NOT NULL, delivered TEXT);
 CREATE TABLE IF NOT EXISTS workspace (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, creates INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL, updated TEXT NOT NULL);
-`
+` + goalTreeSchema
 
 // Additive migration for ledgers created before parents, worktree origins,
 // goal types, structured decisions or the epic rename existed. A worktree row
@@ -65,6 +65,14 @@ var addedColumns = []struct{ table, col, decl string }{
 // because a PRIMARY KEY cannot be added with ALTER TABLE ADD COLUMN, and the
 // uniqueness on path is the whole point: one directory is one workspace.
 const workspaceSchema = `CREATE TABLE IF NOT EXISTS workspace (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, creates INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL, updated TEXT NOT NULL);`
+
+// goalTreeSchema is the additive statement for ledgers created before steps
+// and sibling order existed. Both are whole tables: a composite primary key
+// cannot be added with ALTER TABLE ADD COLUMN.
+const goalTreeSchema = `CREATE TABLE IF NOT EXISTS step (work TEXT NOT NULL REFERENCES work(id), n INTEGER NOT NULL,
+  text TEXT NOT NULL, state TEXT NOT NULL, PRIMARY KEY (work, n));
+CREATE TABLE IF NOT EXISTS after (work TEXT NOT NULL REFERENCES work(id),
+  waits_on TEXT NOT NULL REFERENCES work(id), PRIMARY KEY (work, waits_on));`
 
 type Ledger struct {
 	db   *sql.DB
@@ -100,6 +108,9 @@ func New(path string) (*Ledger, error) {
 
 func migrate(db *sql.DB) error {
 	if _, err := db.Exec(workspaceSchema); err != nil {
+		return err
+	}
+	if _, err := db.Exec(goalTreeSchema); err != nil {
 		return err
 	}
 	for _, c := range addedColumns {
@@ -583,6 +594,124 @@ func (l *Ledger) SetGoalType(id string, gt core.GoalType) (core.Work, error) {
 		return core.Work{}, err
 	}
 	return l.Get(id)
+}
+
+// SetSteps replaces work's steps with these, numbered from 1 in the order
+// given. A step with no text or an unknown state refuses the whole list.
+func (l *Ledger) SetSteps(work string, steps []core.Step) error {
+	for i, st := range steps {
+		if strings.TrimSpace(st.Text) == "" {
+			return fmt.Errorf("step %d of %s has no text", i+1, work)
+		}
+		if _, err := core.ParseStepState(string(st.State)); err != nil {
+			return err
+		}
+	}
+	return l.inTx(func(tx *sql.Tx) error {
+		if _, err := getWork(tx, work); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM step WHERE work = ?`, work); err != nil {
+			return err
+		}
+		for i, st := range steps {
+			if _, err := tx.Exec(`INSERT INTO step (work, n, text, state) VALUES (?, ?, ?, ?)`,
+				work, i+1, strings.TrimSpace(st.Text), string(st.State)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// Steps are work's steps in order.
+func (l *Ledger) Steps(work string) ([]core.Step, error) {
+	rows, err := l.db.Query(`SELECT n, text, state FROM step WHERE work = ? ORDER BY n`, work)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []core.Step{}
+	for rows.Next() {
+		var st core.Step
+		var state string
+		if err := rows.Scan(&st.N, &st.Text, &state); err != nil {
+			return nil, err
+		}
+		if st.State, err = core.ParseStepState(state); err != nil {
+			return nil, fmt.Errorf("step %d of %s: %w", st.N, work, err)
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
+// SetAfter replaces what work waits on. Only siblings are waited on, and
+// never in a loop: an order that cannot be satisfied is refused.
+func (l *Ledger) SetAfter(work string, waitsOn []string) error {
+	return l.inTx(func(tx *sql.Tx) error {
+		w, err := getWork(tx, work)
+		if err != nil {
+			return err
+		}
+		for _, id := range waitsOn {
+			if id == work {
+				return fmt.Errorf("%s cannot wait on itself", work)
+			}
+			o, err := getWork(tx, id)
+			if err != nil {
+				return err
+			}
+			if w.Parent == nil || o.Parent == nil || *w.Parent != *o.Parent {
+				return fmt.Errorf("%s and %s are not siblings; a sub-goal waits only on its siblings", work, id)
+			}
+			reaches, err := waitsOnAtAnyRemove(tx, id, work)
+			if err != nil {
+				return err
+			}
+			if reaches {
+				return fmt.Errorf("%s already waits on %s", id, work)
+			}
+		}
+		if _, err := tx.Exec(`DELETE FROM after WHERE work = ?`, work); err != nil {
+			return err
+		}
+		for _, id := range waitsOn {
+			if _, err := tx.Exec(`INSERT OR IGNORE INTO after (work, waits_on) VALUES (?, ?)`, work, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// waitsOnAtAnyRemove reports whether from waits on target, directly or
+// through what it waits on.
+func waitsOnAtAnyRemove(tx *sql.Tx, from, target string) (bool, error) {
+	var n int
+	err := tx.QueryRow(`WITH RECURSIVE reach(id) AS (
+			SELECT waits_on FROM after WHERE work = ?
+			UNION SELECT after.waits_on FROM after JOIN reach ON after.work = reach.id)
+		SELECT COUNT(*) FROM reach WHERE id = ?`, from, target).Scan(&n)
+	return n > 0, err
+}
+
+// After is the work that work waits on.
+func (l *Ledger) After(work string) ([]string, error) {
+	rows, err := l.db.Query(`SELECT waits_on FROM after WHERE work = ? ORDER BY waits_on`, work)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // SetDoneWhen stores what makes the work done; empty text clears it to unset.

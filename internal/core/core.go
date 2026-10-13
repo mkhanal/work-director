@@ -176,6 +176,24 @@ const (
 	FinishFromPerson FinishSource = "person"
 )
 
+// StepState is where one of an agent's own steps stands.
+type StepState string
+
+const (
+	StepTodo    StepState = "todo"
+	StepDoing   StepState = "doing"
+	StepDone    StepState = "done"
+	StepDropped StepState = "dropped"
+)
+
+// Step is one step of an agent's own plan for its work, numbered from 1. Steps
+// are never handed out as work: each plan or report replaces the whole list.
+type Step struct {
+	N     int       `json:"n"`
+	Text  string    `json:"text"`
+	State StepState `json:"state"`
+}
+
 // WorktreeOrigin says who made a worktree. Only a director-made worktree is
 // ever removed by wd: an attached one belongs to whoever created it.
 type WorktreeOrigin string
@@ -506,6 +524,7 @@ var (
 	GoalTypes       = []GoalType{GoalQuery, GoalBuild, GoalFix, GoalChange, GoalReview}
 	AbandonReasons  = []string{AbandonNoPR, AbandonUnmerged}
 	FinishSources   = []FinishSource{FinishFromGoal, FinishFromRepo, FinishFromTaste, FinishFromPerson}
+	StepStates      = []StepState{StepTodo, StepDoing, StepDone, StepDropped}
 )
 
 func parse[T ~string](what string, known []T, s string) (T, error) {
@@ -534,6 +553,8 @@ func ParseGoalType(s string) (GoalType, error) { return parse("goal type", GoalT
 func ParseAbandonReason(s string) (string, error) {
 	return parse("abandon reason", AbandonReasons, s)
 }
+
+func ParseStepState(s string) (StepState, error) { return parse("step state", StepStates, s) }
 
 func ParseFinishSource(s string) (FinishSource, error) {
 	return parse("finish source", FinishSources, s)

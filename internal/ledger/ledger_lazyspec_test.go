@@ -859,6 +859,102 @@ func TestLedger(t *testing.T) {
 		}
 	})
 
+	t.Run("An Agent's Steps Replace The Last Ones It Gave", func(t *testing.T) {
+		l := newTestLedger(t)
+		task := add(t, l, "p", "T", AddOptions{})
+		steps := func() []core.Step {
+			t.Helper()
+			got, err := l.Steps(task.ID)
+			wantNoErr(t, err)
+			return got
+		}
+		if got := steps(); len(got) != 0 {
+			t.Fatalf("steps of new work = %v, want none", got)
+		}
+		wantNoErr(t, l.SetSteps(task.ID, []core.Step{
+			{Text: "read the tag script", State: core.StepDone},
+			{Text: "port it", State: core.StepDoing},
+			{Text: "add a self-test", State: core.StepTodo},
+		}))
+		want := []core.Step{
+			{N: 1, Text: "read the tag script", State: core.StepDone},
+			{N: 2, Text: "port it", State: core.StepDoing},
+			{N: 3, Text: "add a self-test", State: core.StepTodo},
+		}
+		if got := steps(); !slices.Equal(got, want) {
+			t.Fatalf("steps = %v, want %v", got, want)
+		}
+		// The next plan replaces the list whole.
+		wantNoErr(t, l.SetSteps(task.ID, []core.Step{
+			{Text: "port it", State: core.StepDone},
+			{Text: "add a self-test", State: core.StepDropped},
+		}))
+		want = []core.Step{
+			{N: 1, Text: "port it", State: core.StepDone},
+			{N: 2, Text: "add a self-test", State: core.StepDropped},
+		}
+		if got := steps(); !slices.Equal(got, want) {
+			t.Fatalf("steps after replacing = %v, want %v", got, want)
+		}
+		// A bad step refuses the whole list and keeps the last one.
+		err := l.SetSteps(task.ID, []core.Step{{Text: "fine", State: core.StepTodo}, {Text: " ", State: core.StepTodo}})
+		wantErrNaming(t, err, "step 2")
+		err = l.SetSteps(task.ID, []core.Step{{Text: "fine", State: "maybe"}})
+		wantErr(t, err, `unknown step state "maybe"`)
+		if got := steps(); !slices.Equal(got, want) {
+			t.Fatalf("steps after refusals = %v, want %v", got, want)
+		}
+		for _, raw := range []string{"todo", "doing", "done", "dropped"} {
+			if _, err := core.ParseStepState(raw); err != nil {
+				t.Fatalf("step state %s: %v", raw, err)
+			}
+		}
+	})
+
+	t.Run("A Sub-Goal Waits Only On Its Siblings", func(t *testing.T) {
+		l := newTestLedger(t)
+		goal := add(t, l, "p", "G", AddOptions{Kind: core.WorkGoal})
+		a := add(t, l, "p", "A", AddOptions{Parent: &goal.ID})
+		b := add(t, l, "p", "B", AddOptions{Kind: core.WorkGoal, Parent: &goal.ID})
+		c := add(t, l, "p", "C", AddOptions{Parent: &goal.ID})
+		cousin := add(t, l, "p", "X", AddOptions{Parent: &b.ID})
+		after := func(id string) []string {
+			t.Helper()
+			got, err := l.After(id)
+			wantNoErr(t, err)
+			slices.Sort(got)
+			return got
+		}
+		if got := after(c.ID); len(got) != 0 {
+			t.Fatalf("after of new work = %v, want none", got)
+		}
+		wantNoErr(t, l.SetAfter(c.ID, []string{a.ID, b.ID}))
+		want := []string{a.ID, b.ID}
+		slices.Sort(want)
+		if got := after(c.ID); !slices.Equal(got, want) {
+			t.Fatalf("after = %v, want %v", got, want)
+		}
+		wantNoErr(t, l.SetAfter(c.ID, []string{b.ID}))
+		if got := after(c.ID); !slices.Equal(got, []string{b.ID}) {
+			t.Fatalf("after replacing = %v, want [%s]", got, b.ID)
+		}
+		wantNoErr(t, l.SetAfter(b.ID, []string{a.ID}))
+
+		err := l.SetAfter(a.ID, []string{a.ID})
+		wantErr(t, err, a.ID+" cannot wait on itself")
+		err = l.SetAfter(c.ID, []string{cousin.ID})
+		wantErr(t, err, c.ID+" and "+cousin.ID+" are not siblings; a sub-goal waits only on its siblings")
+		// a <- b <- c: a waiting on c would close the loop two removes away.
+		err = l.SetAfter(a.ID, []string{c.ID})
+		wantErr(t, err, c.ID+" already waits on "+a.ID)
+		if got := after(a.ID); len(got) != 0 {
+			t.Fatalf("after of %s = %v after refusals, want none", a.ID, got)
+		}
+		if got := after(c.ID); !slices.Equal(got, []string{b.ID}) {
+			t.Fatalf("after of %s = %v after refusals, want [%s]", c.ID, got, b.ID)
+		}
+	})
+
 	t.Run("Soft Done Requires Goal Tasks Done", func(t *testing.T) {
 		l := newTestLedger(t)
 		epic := add(t, l, "p", "E", AddOptions{Kind: core.WorkEpic})
@@ -1081,7 +1177,7 @@ CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT,
 				t.Fatalf("column %s changed: %v -> %v", name, want, got)
 			}
 		}
-		for _, tbl := range []string{"concern", "worktree", "filed", "cursor"} {
+		for _, tbl := range []string{"concern", "worktree", "filed", "cursor", "step", "after"} {
 			var n int
 			if err := openDirect(t, path).QueryRow("SELECT COUNT(*) FROM " + tbl).Scan(&n); err != nil {
 				t.Fatalf("table %s missing after migration: %v", tbl, err)
