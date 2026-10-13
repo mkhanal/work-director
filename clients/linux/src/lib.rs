@@ -30,13 +30,13 @@ pub use locator::{locate_wd, LocatorError};
 pub use look::{Mark, StateLook, Tint, Tone};
 pub use new_goal::{NewGoal, NewGoalPhase};
 pub use outbox::{Outgoing, OutgoingState};
-pub use overview::SubGoalRow;
+pub use overview::{sentence, ProposedCard, SubGoalRow};
 pub use plan::{Plan, PlanError};
 pub use record::{RecordBy, RecordEntry, RecordFilter, RecordKind, RecordSummary, RecordView};
 pub use send_key::{Chord, ReturnPress, SendKey};
 pub use store::{Change, Feed, FeedState, Spawner, Store, Watch};
 pub use thread::{AskedItem, FilterChip, SupervisorAction, SupervisorReply, ThreadFilter, ThreadItem, ThreadStep};
 pub use tree::{
-    Course, Finish, FinishLine, FinishSource, Judgement, Link, NeedYou, Node, Owner, PlanStep, Progress, StepState,
-    Superseded,
+    ChangeKind, Course, Finish, FinishLine, FinishSource, GoalChange, Judgement, Link, NeedYou, Node, Owner, PlanStep,
+    Progress, Shape, StepState, Superseded,
 };

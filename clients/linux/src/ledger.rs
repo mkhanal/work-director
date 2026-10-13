@@ -201,6 +201,8 @@ pub struct BoardGoal {
     pub finish: Option<Finish>,
     /// Where a done goal finished, as a person names it.
     pub finished: Option<String>,
+    /// Whether its breakdown waits for the person's approval.
+    pub proposed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -236,6 +238,8 @@ pub struct SidebarRow {
     pub meta: String,
     /// How many questions under it wait on the person.
     pub needs_you: i64,
+    /// Whether its breakdown waits for the person's approval.
+    pub proposed: bool,
 }
 
 /// The sidebar's bands, each most recently active first.
@@ -314,13 +318,14 @@ impl Board {
                 Some(lead) => lead,
                 None => ago(&g.work),
             };
-            SidebarRow { work: g.work.clone(), band, meta, needs_you: g.needs_you }
+            SidebarRow { work: g.work.clone(), band, meta, needs_you: g.needs_you, proposed: g.proposed }
         });
         let standalone = self.standalone.iter().filter(|s| mine(&s.work)).map(|s| SidebarRow {
             work: s.work.clone(),
             band: sidebar_band(&s.work, s.band, 0),
             meta: format!("{} · {}", s.work.state.look().label, ago(&s.work)),
             needs_you: 0,
+            proposed: false,
         });
         let mut rows: Vec<SidebarRow> = goals.chain(standalone).collect();
         rows.sort_by(|a, b| b.work.updated.cmp(&a.work.updated));
@@ -422,6 +427,8 @@ pub struct GoalDetail {
     pub needs_you: Vec<NeedYou>,
     pub course: Option<Course>,
     pub superseded: Vec<Superseded>,
+    /// Whether the goal's breakdown waits for the person's approval.
+    pub proposed: bool,
 }
 
 impl GoalDetail {

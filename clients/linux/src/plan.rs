@@ -172,6 +172,41 @@ impl Plan {
         ))
     }
 
+    /// Starts a proposed breakdown.
+    pub fn approve(goal: &str) -> Plan {
+        plan("Approve and start", words(&["goal", "approve", goal]))
+    }
+
+    /// Plans a goal again.
+    pub fn replan(goal: &str) -> Plan {
+        plan("Re-plan", words(&["goal", "plan", goal]))
+    }
+
+    /// A sub-goal's title and done-when changed; a field left as it was is not sent.
+    pub fn edit_sub_goal(id: &str, title: Option<&str>, done_when: Option<&str>) -> Result<Plan, PlanError> {
+        let mut argv = words(&["goal", "edit", id]);
+        for (flag, value) in [("--title", title), ("--done-when", done_when)] {
+            if let Some(value) = value {
+                argv.push(flag.into());
+                argv.push(required(value, "an edit")?);
+            }
+        }
+        if argv.len() == 3 {
+            return Err(PlanError::Empty);
+        }
+        Ok(plan("Edit", argv))
+    }
+
+    /// A sub-goal made a goal of its own, to be planned further.
+    pub fn split_sub_goal(id: &str) -> Plan {
+        plan("Split", words(&["goal", "split", id]))
+    }
+
+    /// A sub-goal let go of, with why.
+    pub fn drop_sub_goal(id: &str, why: &str) -> Result<Plan, PlanError> {
+        Ok(plan("Drop", vec!["goal".into(), "drop".into(), id.into(), required(why, "dropping a sub-goal")?]))
+    }
+
     /// Interrupts what work's sessions are doing and takes back the messages
     /// they have not read; the work keeps its state.
     pub fn stop(id: &str) -> Plan {

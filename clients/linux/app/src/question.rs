@@ -19,7 +19,7 @@ fn shown(label: &str) -> (&str, bool) {
 }
 
 /// The question waiting on the person, answered in place; `label` heads the
-/// card, `extra` sits between the question and its buttons, and `answered`
+/// card, `extra` sits between the first question and its options, and `answered`
 /// runs once wd has taken the answer.
 pub fn pending(
     app: &App,
@@ -54,13 +54,11 @@ pub fn pending(
 
     let count = question.items.len();
     for (i, item) in question.items.iter().enumerate() {
-        let page = item_page(item, i, count, &draft, &refresh);
+        let shows = if i == 0 { extra.as_ref() } else { None };
+        let page = item_page(item, i, count, shows, &draft, &refresh);
         pages.add_named(&page, Some(&i.to_string()));
     }
     card.append(&pages);
-    if let Some(extra) = extra {
-        card.append(&extra);
-    }
 
     let footer = ui::hbox(SPACE_2);
     footer.set_margin_top(6);
@@ -145,6 +143,7 @@ fn item_page(
     item: &QuestionItem,
     i: usize,
     count: usize,
+    extra: Option<&gtk::Widget>,
     draft: &Rc<RefCell<AnswerDraft>>,
     refresh: &Rc<dyn Fn()>,
 ) -> gtk::Box {
@@ -167,6 +166,10 @@ fn item_page(
     asked.set_margin_top(6);
     asked.set_margin_bottom(SPACE_2);
     page.append(&asked);
+    if let Some(extra) = extra {
+        extra.set_margin_bottom(SPACE_2);
+        page.append(extra);
+    }
 
     let rows: Rc<RefCell<Vec<(gtk::Box, String)>>> = Rc::new(RefCell::new(Vec::new()));
     let mark_chosen = {

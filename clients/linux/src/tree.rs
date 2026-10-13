@@ -126,6 +126,31 @@ impl FinishLine {
         }
     }
 
+    /// The finish line a choice's words name.
+    pub fn from_label(label: &str) -> Option<FinishLine> {
+        let all = [
+            FinishLine::Discovery,
+            FinishLine::Research,
+            FinishLine::LocalBuild,
+            FinishLine::CompletePr,
+            FinishLine::Merged,
+            FinishLine::Released,
+        ];
+        all.into_iter().find(|f| f.name().eq_ignore_ascii_case(label.trim()))
+    }
+
+    /// The finish line as a choice reads it.
+    pub fn choice(self) -> &'static str {
+        match self {
+            FinishLine::Discovery => "Discovery: the cause found and explained",
+            FinishLine::Research => "Research complete: a written comparison and a pick",
+            FinishLine::LocalBuild => "A local build you can try",
+            FinishLine::CompletePr => "A complete PR",
+            FinishLine::Merged => "Merged",
+            FinishLine::Released => "Released",
+        }
+    }
+
     /// The finish line in a word or two, as the sidebar shows it.
     pub fn name(self) -> &'static str {
         match self {
@@ -178,12 +203,51 @@ pub struct Finish {
     pub source: FinishSource,
 }
 
-/// A question on work in the tree that waits on the person.
+/// A question on work in the tree that waits on the person, and what
+/// answering it with its first choice would change.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
 pub struct NeedYou {
     pub work: String,
     pub path: String,
     pub question: Question,
+    pub change: Option<GoalChange>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChangeKind {
+    /// The plan under a goal changes.
+    Plan,
+    /// The top goal itself changes: its title, done-when or finish line.
+    Course,
+    /// Where the goal finishes is chosen.
+    Finish,
+}
+
+/// A goal's title, done-when and finish line.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+pub struct Shape {
+    pub title: String,
+    pub done_when: Option<String>,
+    pub finish: Option<FinishLine>,
+}
+
+/// What a question would change: a plan change's actions and the same in
+/// sentences, the top goal now and as proposed and why, or the finish lines
+/// offered.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+pub struct GoalChange {
+    pub kind: ChangeKind,
+    #[serde(default)]
+    pub actions: Vec<String>,
+    #[serde(default)]
+    pub lines: Vec<String>,
+    pub now: Option<Shape>,
+    pub proposed: Option<Shape>,
+    #[serde(default)]
+    pub why: String,
+    #[serde(default)]
+    pub choices: Vec<String>,
 }
 
 /// A supervisor's latest verdict on whether its goal is on course.

@@ -2,10 +2,11 @@
 //! and each sub-goal as a row. Every fact comes from the goal view; this only
 //! words it.
 
+use crate::conversation::Question;
 use crate::ledger::{GoalDetail, WorkState};
 use crate::look::{Mark, Tone};
 use crate::record::{RecordBy, RecordEntry, RecordKind, RecordView};
-use crate::tree::{Course, Node, PlanStep, StepState};
+use crate::tree::{ChangeKind, Course, FinishLine, NeedYou, Node, PlanStep, Shape, StepState};
 
 /// One sub-goal as its row reads.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -24,6 +25,11 @@ pub struct SubGoalRow {
     pub steps: Vec<PlanStep>,
     /// Whether its steps start shown.
     pub open: bool,
+}
+
+/// Ledger text read as a sentence: its first letter capitalised.
+pub fn sentence(text: &str) -> String {
+    capitalised(text)
 }
 
 fn capitalised(text: &str) -> String {
@@ -50,13 +56,13 @@ impl Node {
             return why.map_or_else(|| "Superseded".to_string(), |w| format!("Superseded: {w}"));
         }
         if self.opens().is_some() || self.group {
-            let n = self.planned_into.unwrap_or(self.children.len() as i64);
-            let mut parts = vec![format!("Planned into {}", plural(n, "sub-goal", "sub-goals"))];
-            if let Some(p) = self.progress {
-                parts.push(format!("{} of {} done", p.done, p.total));
-            }
-            if let Some(why) = &self.why_not_moving {
-                parts.push(capitalised(why));
+            let p = self.progress.unwrap_or_default();
+            let mut parts = vec![
+                format!("Planned into {}", plural(p.total, "sub-goal", "sub-goals")),
+                format!("{} of {} done", p.done, p.total),
+            ];
+            if p.superseded > 0 {
+                parts.push(format!("{} superseded", p.superseded));
             }
             return parts.join(" · ");
         }
@@ -188,5 +194,118 @@ impl RecordView {
                 )
             })
             .collect()
+    }
+}
+
+/// One sub-goal of a proposed breakdown, as its card reads.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ProposedCard {
+    pub id: String,
+    pub number: usize,
+    pub title: String,
+    /// What makes it done.
+    pub meta: String,
+    /// When it starts, and whether one agent does it or it is planned further.
+    pub chips: Vec<String>,
+    /// Whether it can be split: a task can, a goal already is.
+    pub splits: bool,
+}
+
+fn numbers(ns: &[usize]) -> String {
+    let ns: Vec<String> = ns.iter().map(usize::to_string).collect();
+    match ns.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        _ => ns.join(""),
+    }
+}
+
+impl GoalDetail {
+    /// The breakdown waiting for approval, numbered in plan order; none once approved.
+    pub fn proposal(&self) -> Option<Vec<ProposedCard>> {
+        if !self.proposed {
+            return None;
+        }
+        let shown: Vec<&Node> =
+            self.tree.iter().filter(|n| !n.group && n.work.state != WorkState::Superseded).collect();
+        let number = |id: &str| shown.iter().position(|n| n.work.id == id).map(|i| i + 1);
+        Some(
+            shown
+                .iter()
+                .enumerate()
+                .map(|(i, n)| {
+                    let after: Vec<usize> = n.after.iter().filter_map(|a| number(a)).collect();
+                    let start = if after.is_empty() {
+                        "Starts first".to_string()
+                    } else {
+                        format!("After {}", numbers(&after))
+                    };
+                    let who = if n.work.kind.is_goal() { "Will be planned further" } else { "One agent" };
+                    ProposedCard {
+                        id: n.work.id.clone(),
+                        number: i + 1,
+                        title: n.work.title.clone(),
+                        meta: n
+                            .done_when
+                            .as_ref()
+                            .map_or_else(|| "Done when: not set".to_string(), |d| format!("Done when {d}")),
+                        chips: vec![start, who.to_string()],
+                        splits: !n.work.kind.is_goal(),
+                    }
+                })
+                .collect(),
+        )
+    }
+}
+
+impl NeedYou {
+    /// The line that heads its card: what kind of question it is, and where.
+    pub fn label(&self, goal: &str) -> String {
+        let place = if self.work == goal { String::new() } else { format!(" · in {}", self.path) };
+        match self.change.as_ref().map(|c| c.kind) {
+            Some(ChangeKind::Course) => "Course change on the top goal · always yours to decide".to_string(),
+            Some(ChangeKind::Finish) => "Before I plan it · where does this goal finish?".to_string(),
+            Some(ChangeKind::Plan) => format!("Needs you · a change to the plan{place}"),
+            None => format!("Needs you{place}"),
+        }
+    }
+
+    /// The question as its card asks it: a change's question by its first
+    /// line, the rest being shown as the change; a finish line's choices each
+    /// with what it means.
+    pub fn shown_question(&self) -> Question {
+        let mut q = self.question.clone();
+        match self.change.as_ref().map(|c| c.kind) {
+            Some(ChangeKind::Course | ChangeKind::Plan) => {
+                for item in &mut q.items {
+                    item.question = item.question.lines().next().unwrap_or("").to_string();
+                }
+            }
+            Some(ChangeKind::Finish) => {
+                for option in q.items.iter_mut().flat_map(|i| i.options.iter_mut()) {
+                    if let Some(line) = FinishLine::from_label(crate::conversation::unmarked(&option.label)) {
+                        if option.description.is_empty() {
+                            option.description = line.choice().to_string();
+                        }
+                    }
+                }
+            }
+            None => {}
+        }
+        q
+    }
+
+    /// A course change as rows of what it is now and what is proposed:
+    /// goal, done when, finishes at.
+    pub fn compare(&self) -> Vec<(&'static str, String, String)> {
+        let Some((now, proposed)) = self.change.as_ref().and_then(|c| c.now.as_ref().zip(c.proposed.as_ref())) else {
+            return Vec::new();
+        };
+        let done = |s: &Shape| s.done_when.clone().unwrap_or_else(|| "not set".to_string());
+        let finish = |s: &Shape| s.finish.map_or_else(|| "not decided".to_string(), |f| f.title().to_string());
+        vec![
+            ("Goal", now.title.clone(), proposed.title.clone()),
+            ("Done when", done(now), done(proposed)),
+            ("Finishes at", finish(now), finish(proposed)),
+        ]
     }
 }

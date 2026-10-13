@@ -156,7 +156,7 @@ fn work(id: &str, state: &str) -> Work {
 fn goal_view(mut v: Value) -> GoalDetail {
     let empty = json!({"chain": [], "tree": [], "paths": {}, "done_when": null, "finish": null,
         "progress": {"done": 0, "total": 0, "superseded": 0}, "not_done_because": [], "needs_you": [],
-        "course": null, "superseded": []});
+        "course": null, "superseded": [], "proposed": false});
     for (k, value) in empty.as_object().expect("an object") {
         if v.get(k).is_none() {
             v[k] = value.clone();
@@ -168,7 +168,7 @@ fn goal_view(mut v: Value) -> GoalDetail {
 /// A goal as the board lists it, with nothing of its tree told.
 fn board_goal(work: Value, band: &str) -> Value {
     json!({"work": work, "rollup": {"counts": {}, "done": 0, "total": 1}, "band": band,
-        "progress": {"done": 0, "total": 1, "superseded": 0}, "needs_you": 0, "finish": null, "finished": null})
+        "progress": {"done": 0, "total": 1, "superseded": 0}, "needs_you": 0, "finish": null, "finished": null, "proposed": false})
 }
 
 fn strings(words: &[&str]) -> Vec<String> {
@@ -953,6 +953,10 @@ fn the_conversation_tags_each_turn_with_its_sub_goal_and_filters_by_it() {
             event(3, "t", "state", "done"),
             event(4, "r", "question", "down scripts?"),
             event(5, "g", "supervised", "On course.\nACTIONS:\nWAIT"),
+            event(6, "d", "decision", "done when: rollback steps listed"),
+            json!({"id": 7, "work": "g", "kind": "decision", "body": "added r: Rollback", "at": "2026-10-12T01:07:00Z",
+                "effective": null, "decision": {"question": "the sub-goals of g", "answer": "added r: Rollback", "source": "person",
+                "runner": "", "model": "", "tokens": 0, "reverses": 0, "reversed_by": 0}}),
         ],
         "tree": [
             node_json("t", "task", "done", json!({"judged": {"verdict": "met", "why": "tags"}})),
@@ -1043,6 +1047,110 @@ fn the_record_lists_what_was_decided_and_done_filtered_by_kind_and_sub_goal() {
     assert_eq!(badge(3), Some(("Decision".to_string(), Tone::Decision)));
     assert_eq!(record.entries[1].by, RecordBy::Director);
     assert_eq!(record.entries[6].place, "Release notes (top)");
+}
+
+/// A Change Waiting For The Person Shows What Would Change
+#[test]
+fn a_change_waiting_for_the_person_shows_what_would_change() {
+    let question = |id: &str, options: &[&str]| {
+        json!({"id": id, "items": [{"header": "", "question": "Change course?", "multi": false,
+            "options": options.iter().map(|o| json!({"label": o, "description": ""})).collect::<Vec<_>>()}],
+            "answers": null, "reply": null})
+    };
+    let course = json!({"work": "g", "path": "Why does sync drop events?", "question": question("q1", &["Change course (recommended)", "Keep the goal as it is"]),
+        "change": {"kind": "course", "actions": ["SUPERSEDE d3: no longer needed"], "lines": ["Supersede “Compare vendors”: no longer needed"],
+            "now": {"title": "Why does sync drop events?", "done_when": "The cause is found", "finish": "discovery"},
+            "proposed": {"title": "Sync never drops events", "done_when": "A 429 batch is retried", "finish": "complete PR"},
+            "why": "The fix is small."}});
+    let finish = json!({"work": "f", "path": "Pick a queue", "question": question("q2", &["research (recommended)", "local build"]),
+        "change": {"kind": "finish", "choices": ["research (recommended)", "local build"]}});
+    let plan = json!({"work": "s", "path": "Guide", "question": question("q3", &["yes", "no"]),
+        "change": {"kind": "plan", "actions": ["GOAL s: Flags | done when: listed"], "lines": ["Add “Flags” under Guide, done when listed"]}});
+    let plain =
+        json!({"work": "r", "path": "Guide › Rollback", "question": question("q4", &["a", "b"]), "change": null});
+    let goal = goal_view(json!({
+        "goal": work_json("g", "running"), "tasks": [], "rollup": {"counts": {}, "done": 0, "total": 4},
+        "events": [], "claims": [], "landings": [], "delivery": null, "activity": {}, "reports": {}, "asking": null,
+        "proposed": true,
+        "needs_you": [course, finish, plan, plain],
+        "tree": [
+            node_json("a1", "goal", "queued", json!({"done_when": "every change keeps who and why", "why_not_moving": "proposed — needs approval"})),
+            node_json("a2", "task", "queued", json!({"done_when": "the export is signed", "after": ["a1"]})),
+            node_json("a3", "task", "queued", json!({"done_when": "nothing can change it", "after": ["a1"]})),
+            node_json("a4", "task", "queued", json!({"done_when": "each clause is mapped", "after": ["a2", "a3"]})),
+        ],
+    }));
+    let cards = goal.proposal().expect("a proposed breakdown");
+    let shown: Vec<(usize, String, Vec<String>, bool)> =
+        cards.iter().map(|c| (c.number, c.meta.clone(), c.chips.clone(), c.splits)).collect();
+    assert_eq!(
+        shown,
+        vec![
+            (
+                1,
+                "Done when every change keeps who and why".into(),
+                strings(&["Starts first", "Will be planned further"]),
+                false
+            ),
+            (2, "Done when the export is signed".into(), strings(&["After 1", "One agent"]), true),
+            (3, "Done when nothing can change it".into(), strings(&["After 1", "One agent"]), true),
+            (4, "Done when each clause is mapped".into(), strings(&["After 2 and 3", "One agent"]), true),
+        ]
+    );
+    let mut approved = goal.clone();
+    approved.proposed = false;
+    assert_eq!(approved.proposal(), None, "an approved breakdown is the plan, not a proposal");
+    assert_eq!(Plan::approve("g").argv, strings(&["goal", "approve", "g"]));
+    assert_eq!(Plan::replan("g").argv, strings(&["goal", "plan", "g"]));
+    assert_eq!(
+        Plan::edit_sub_goal("a2", None, Some(" the export is a signed PDF ")).map(|p| p.argv),
+        Ok(strings(&["goal", "edit", "a2", "--done-when", "the export is a signed PDF"]))
+    );
+    assert!(Plan::edit_sub_goal("a2", None, None).is_err());
+    assert_eq!(Plan::split_sub_goal("a2").argv, strings(&["goal", "split", "a2"]));
+    assert_eq!(
+        Plan::drop_sub_goal("a4", "not asked").map(|p| p.argv),
+        Ok(strings(&["goal", "drop", "a4", "not asked"]))
+    );
+    assert!(Plan::drop_sub_goal("a4", " ").is_err(), "dropping says why");
+
+    let [course, finish, plan, plain] = [0, 1, 2, 3].map(|i| goal.needs_you[i].clone());
+    assert_eq!(course.label("g"), "Course change on the top goal · always yours to decide");
+    assert_eq!(
+        course.compare(),
+        vec![
+            ("Goal", "Why does sync drop events?".to_string(), "Sync never drops events".to_string()),
+            ("Done when", "The cause is found".to_string(), "A 429 batch is retried".to_string()),
+            ("Finishes at", "Discovery".to_string(), "A complete PR".to_string()),
+        ]
+    );
+    let change = course.change.as_ref().expect("a change");
+    assert_eq!((change.why.as_str(), change.lines.len()), ("The fix is small.", 1));
+    assert_eq!(finish.label("g"), "Before I plan it · where does this goal finish?");
+    assert_eq!(finish.change.as_ref().map(|c| c.choices.len()), Some(2));
+    let offered: Vec<(String, String)> =
+        finish.shown_question().items[0].options.iter().map(|o| (o.label.clone(), o.description.clone())).collect();
+    assert_eq!(
+        offered,
+        vec![
+            ("research (recommended)".to_string(), "Research complete: a written comparison and a pick".to_string()),
+            ("local build".to_string(), "A local build you can try".to_string()),
+        ],
+        "each finish line with what it means, answered by its own words"
+    );
+    assert_eq!(course.shown_question().items[0].question, "Change course?");
+    assert_eq!(plan.label("g"), "Needs you · a change to the plan · in Guide");
+    assert_eq!(
+        plan.change.as_ref().map(|c| c.lines.clone()),
+        Some(strings(&["Add “Flags” under Guide, done when listed"]))
+    );
+    assert_eq!(plain.label("g"), "Needs you · in Guide › Rollback");
+    assert!(plain.compare().is_empty());
+    assert_eq!(
+        Plan::answer(&course.work, &course.question, &strings(&["Change course"])).map(|p| p.argv),
+        Ok(strings(&["answer", "g", "Change course"])),
+        "a change is answered as its question"
+    );
 }
 
 /// The Kit Reads A Goal As A Tree
@@ -1188,6 +1296,8 @@ fn the_sidebar_bands_top_goals_by_whether_they_need_you_work_or_are_completed() 
     };
     let mut discovery = goal(item("why", "running", "demo", "2026-10-03T00:00:00Z"), "in-flight", 0, 0, 0);
     discovery["finish"] = json!({"line": "discovery", "source": "goal"});
+    let mut audit = goal(item("audit", "queued", "demo", "2026-10-02T00:00:00Z"), "needs-you", 0, 4, 0);
+    audit["proposed"] = json!(true);
     let mut shipped = goal(item("shipped", "done", "demo", "2026-10-10T00:00:00Z"), "at-rest", 4, 4, 0);
     shipped["finished"] = json!("Complete PR #512");
     let board: Board = serde_json::from_value(json!({
@@ -1197,6 +1307,7 @@ fn the_sidebar_bands_top_goals_by_whether_they_need_you_work_or_are_completed() 
             goal(item("later", "queued", "demo", "2026-10-08T00:00:00Z"), "in-flight", 0, 0, 0),
             goal(item("push", "review", "demo", "2026-10-07T00:00:00Z"), "ready-to-push", 2, 2, 0),
             shipped,
+            audit,
             discovery,
             goal(item("gone", "superseded", "demo", "2026-10-06T00:00:00Z"), "at-rest", 0, 1, 0),
             goal(item("elsewhere", "running", "other", "2026-10-11T00:00:00Z"), "in-flight", 0, 1, 0),
@@ -1207,7 +1318,8 @@ fn the_sidebar_bands_top_goals_by_whether_they_need_you_work_or_are_completed() 
     let now = kit::time::instant("2026-10-10T02:00:00Z").expect("a time");
     let ids = |rows: &[SidebarRow]| rows.iter().map(|r| r.work.id.clone()).collect::<Vec<_>>();
     let b = board.bands(Some("demo"), now);
-    assert_eq!(ids(&b.needs_you), strings(&["asks", "push"]), "a question under it, or a gate for a person");
+    assert_eq!(ids(&b.needs_you), strings(&["asks", "push", "audit"]), "a question under it, or a gate for a person");
+    assert!(b.needs_you.iter().all(|r| r.proposed == (r.work.id == "audit")), "only a breakdown waiting is proposed");
     assert_eq!(ids(&b.working), strings(&["later", "fix", "why", "old"]));
     assert_eq!(ids(&b.completed), strings(&["shipped"]));
     assert_eq!(ids(&b.settled), strings(&["gone"]));

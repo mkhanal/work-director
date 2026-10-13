@@ -110,13 +110,20 @@ hold only that product's work; with none, every product's.
 ## The Conversation Tags Each Turn With Its Sub-Goal And Filters By It
 - Every turn on work under the goal is tagged with that work's path through the tree.
 - It narrows to everything, to the person and the director, or to one sub-goal and everything under it, each choice with how many turns it keeps.
-- A sub-goal finishing reads as one line, with how it was judged.
+- A sub-goal finishing reads as one line, with how it was judged; the tree being reshaped is left to the record.
 - A message goes to the whole goal or to any sub-goal chosen, as `wd send` to it.
 
 ## The Record Lists What Was Decided And Done, Filtered By Kind And Sub-Goal
 - It counts decisions and how many were the person's, course checks and how many corrected course, questions and how many the director answered, chores the director ran, and reports judged.
 - Each entry reads its time, its kind, what it says, where in the tree it was recorded and who made it, newest first, under the day it fell on.
 - Kind filters keep decisions, course, questions, reports, chores or delivery; a sub-goal filter keeps what was recorded on that sub-goal or under it.
+
+## A Change Waiting For The Person Shows What Would Change
+- A proposed breakdown shows each sub-goal numbered, with what makes it done, when it starts and whether one agent does it; each can be edited, split or dropped.
+- A proposed breakdown is approved and started, planned again with a note, or discarded.
+- A course change shows the top goal now and as proposed — its title, done-when and finish line — and why; a plan change shows each change it makes in a sentence.
+- A question on where the goal finishes offers each finish line with what it means.
+- Each is answered through the question's own answer.
 
 ## The Kit Reads A Goal As A Tree
 - A goal at any depth reads as its breadcrumb, done-when, finish line, progress, what keeps it from done, what needs the person, its course and its sub-goals as a tree.
@@ -141,6 +148,7 @@ hold only that product's work; with none, every product's.
 - Top goals and standalone work in the product in scope are listed in bands, each most recently updated first.
 - Needs you holds work with a question open anywhere under it, or waiting on a person to push or close it.
 - Completed holds done work; dropped, abandoned and superseded work is listed apart as settled.
+- A goal whose breakdown waits for approval says it is proposed.
 - Everything else is working.
 - A goal reads its progress, or its finish line before it has sub-goals, and how many questions need the person; a completed one reads where it finished and when.
 

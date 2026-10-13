@@ -117,7 +117,7 @@ impl GoalDetail {
         let mut events: Vec<&Event> = self.events.iter().collect();
         events.sort_by(|a, b| a.at.cmp(&b.at).then(a.id.cmp(&b.id)));
         for e in events {
-            if e.kind == "sent" && answers.contains(&(e.work.as_str(), e.body.as_str())) {
+            if e.kind == "sent" && answers.contains(&(e.work.as_str(), e.body.as_str())) || e.reshapes() {
                 continue;
             }
             if e.kind == "question" {
@@ -238,6 +238,15 @@ impl GoalDetail {
 }
 
 impl Event {
+    /// Whether it records the tree being reshaped: a sub-goal added, edited,
+    /// ordered, split, merged or dropped, or what makes one done. The record
+    /// holds these; the conversation does not.
+    pub fn reshapes(&self) -> bool {
+        self.kind == "decision"
+            && (self.body.starts_with("done when: ")
+                || self.decision.as_ref().is_some_and(|d| d.question.starts_with("the sub-goals of ")))
+    }
+
     /// Whether the director gave this answer, from what was decided or by its
     /// judgement, rather than the person.
     pub fn answered_by_director(&self) -> bool {

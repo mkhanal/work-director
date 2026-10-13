@@ -118,7 +118,7 @@ fn table(rows: &[RecordEntry]) -> gtk::Widget {
         let row = cells(
             ui::line(&clock(&e.at), &["meta", "text3", "numeric"]).upcast(),
             ui::badge(&text, tone).upcast(),
-            ui::said(&e.what, &["callout"]),
+            ui::said(&kit::sentence(&e.what), &["callout"]),
             ui::text(&e.place, &["meta", "text2"]),
             e.by.name(),
         );

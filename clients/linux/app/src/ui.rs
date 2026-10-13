@@ -433,12 +433,12 @@ pub fn inline_link(text: &str) -> gtk::Button {
 
 /// A filter chip; chips in one row share a group so one is chosen.
 pub fn fchip(text: &str, chosen: bool, group: Option<&gtk::ToggleButton>) -> gtk::ToggleButton {
-    // A chip is never narrower than its words, up to 32 characters.
-    let chars = text.chars().count().min(32) as i32;
+    // A chip is never narrower than its words, up to 28 characters.
+    let chars = text.chars().count().min(28) as i32;
     let label = gtk::Label::builder()
         .label(text)
         .width_chars(chars)
-        .max_width_chars(32)
+        .max_width_chars(28)
         .ellipsize(pango::EllipsizeMode::End)
         .build();
     let chip = gtk::ToggleButton::builder().child(&label).active(chosen).tooltip_text(text).build();

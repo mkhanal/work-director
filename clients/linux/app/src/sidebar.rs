@@ -318,7 +318,10 @@ impl Sidebar {
         column.append(&title);
         let meta = ui::hbox(6);
         meta.append(&ui::line(&r.meta, &["meta", "text3"]));
-        if r.needs_you > 0 {
+        if r.proposed {
+            meta.append(&ui::line("·", &["meta", "text3"]));
+            meta.append(&ui::badge("Proposed", Tone::Attention));
+        } else if r.needs_you > 0 {
             meta.append(&ui::line("·", &["meta", "text3"]));
             meta.append(&ui::badge(&format!("{} needs you", r.needs_you), Tone::Attention));
         }
