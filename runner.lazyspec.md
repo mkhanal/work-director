@@ -37,6 +37,10 @@ provider is a TOML file of commands under `~/.work-director/runners/`.
 ## Spawning Records Runner Session And Attach Hint
 `spawn` returns a handle with the runner's session id and a hint a human can run to join the session.
 
+## Every Session Wd Starts Is Named wd: And Its Label
+- A claude session's `-n`, an opencode session's `--title` and a runner file's `{name}` are `wd:` followed by the label, at most 60 characters; `{name20}` is its first 20.
+- A codex session, which takes no name, has that name as the first line of its first message.
+
 ## Sending Continues The Same Session
 - `send` addresses the runner with the handle's session id, never starting a new session.
 - claude stops a session that is idle or waiting, and resumes it once the process `claude agents` listed for it has exited.

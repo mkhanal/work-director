@@ -137,7 +137,7 @@ transcript = "cat {log}"
 
 	t.Run("Spawning Records Runner Session And Attach Hint", func(t *testing.T) {
 		t.Run("claude: session id from claude agents, hint uses bg id", func(t *testing.T) {
-			h, err := claude.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-1 t", Brief: "B"})
+			h, err := claude.Spawn(SpawnOptions{Cwd: cwd, Name: "1 t", Brief: "B"})
 			if err != nil {
 				t.Fatalf("claude spawn: %v", err)
 			}
@@ -150,12 +150,12 @@ transcript = "cat {log}"
 			if got := claude.AttachHint(h); got != "claude attach b765c0a2" {
 				t.Fatalf("attachHint = %q, want %q", got, "claude attach b765c0a2")
 			}
-			if !strings.Contains(calls(t, bin), "claude --bg -n wd-1 t --permission-mode bypassPermissions --settings {\"showThinkingSummaries\":true} B") {
+			if !strings.Contains(calls(t, bin), "claude --bg -n wd:1 t --permission-mode bypassPermissions --settings {\"showThinkingSummaries\":true} B") {
 				t.Fatalf("calls.log missing claude spawn:\n%s", calls(t, bin))
 			}
 		})
 		t.Run("opencode: session id from json stream, hint resumes it", func(t *testing.T) {
-			h, err := opencode.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-2 t", Brief: "B"})
+			h, err := opencode.Spawn(SpawnOptions{Cwd: cwd, Name: "2 t", Brief: "B"})
 			if err != nil {
 				t.Fatalf("opencode spawn: %v", err)
 			}
@@ -251,7 +251,7 @@ transcript = "cat {log}"
 			}
 		})
 		t.Run("codex reads every turn's recorded stream, from any process", func(t *testing.T) {
-			h, err := codex.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-5 t", Brief: "B"})
+			h, err := codex.Spawn(SpawnOptions{Cwd: cwd, Name: "5 t", Brief: "B"})
 			if err != nil {
 				t.Fatalf("codex spawn: %v", err)
 			}
@@ -574,24 +574,55 @@ transcript = "cat {log}"
 		}
 	})
 
+	t.Run("Every Session Wd Starts Is Named wd: And Its Label", func(t *testing.T) {
+		long := strings.Repeat("x", 70)
+		name := "wd:" + strings.Repeat("x", 57)
+		if _, err := claude.Spawn(SpawnOptions{Cwd: cwd, Name: long, Brief: "B"}); err != nil {
+			t.Fatalf("claude spawn: %v", err)
+		}
+		if !strings.Contains(calls(t, bin), "claude --bg -n "+name+" --permission-mode") {
+			t.Fatalf("claude was not named %s:\n%s", name, calls(t, bin))
+		}
+		if _, err := opencode.Spawn(SpawnOptions{Cwd: cwd, Name: "6 t", Brief: "B"}); err != nil {
+			t.Fatalf("opencode spawn: %v", err)
+		}
+		waitForCall(t, bin, "opencode run --format json --auto --title wd:6 t B")
+		r, err := RunnerNamed("myagent")
+		if err != nil {
+			t.Fatalf("myagent: %v", err)
+		}
+		if _, err := r.Spawn(SpawnOptions{Cwd: cwd, Name: "7 t", Brief: "B"}); err != nil {
+			t.Fatalf("myagent spawn: %v", err)
+		}
+		if !strings.Contains(calls(t, bin), "myagent run --name wd:7 t B") {
+			t.Fatalf("myagent was not named wd:7 t:\n%s", calls(t, bin))
+		}
+		if _, err := codex.Spawn(SpawnOptions{Cwd: cwd, Name: "8 t", Brief: "B"}); err != nil {
+			t.Fatalf("codex spawn: %v", err)
+		}
+		if !strings.Contains(calls(t, bin), "--full-auto wd:8 t\n\nB") {
+			t.Fatalf("codex's first message does not open with wd:8 t:\n%s", calls(t, bin))
+		}
+	})
+
 	t.Run("A Runner Forwards The Chosen Model", func(t *testing.T) {
 		t.Run("claude passes --model on spawn", func(t *testing.T) {
-			if _, err := claude.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-1 t", Brief: "B", Model: strPtr("fable")}); err != nil {
+			if _, err := claude.Spawn(SpawnOptions{Cwd: cwd, Name: "1 t", Brief: "B", Model: strPtr("fable")}); err != nil {
 				t.Fatalf("claude spawn: %v", err)
 			}
-			if !strings.Contains(calls(t, bin), "claude --bg -n wd-1 t --permission-mode bypassPermissions --settings {\"showThinkingSummaries\":true} --model fable B") {
+			if !strings.Contains(calls(t, bin), "claude --bg -n wd:1 t --permission-mode bypassPermissions --settings {\"showThinkingSummaries\":true} --model fable B") {
 				t.Fatalf("calls.log missing claude model spawn:\n%s", calls(t, bin))
 			}
 		})
 		t.Run("codex passes --model and records the session from its jsonl", func(t *testing.T) {
-			h, err := codex.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-4 t", Brief: "B", Model: strPtr("opus")})
+			h, err := codex.Spawn(SpawnOptions{Cwd: cwd, Name: "4 t", Brief: "B", Model: strPtr("opus")})
 			if err != nil {
 				t.Fatalf("codex spawn: %v", err)
 			}
 			if h.Session != "codex-abc123" {
 				t.Fatalf("session = %q, want codex-abc123", h.Session)
 			}
-			if !strings.Contains(calls(t, bin), "codex exec --cd "+cwd+" --json --full-auto --model opus B") {
+			if !strings.Contains(calls(t, bin), "codex exec --cd "+cwd+" --json --full-auto --model opus wd:4 t\n\nB") {
 				t.Fatalf("calls.log missing codex model spawn:\n%s", calls(t, bin))
 			}
 		})
@@ -600,7 +631,7 @@ transcript = "cat {log}"
 			if err != nil {
 				t.Fatalf("RunnerNamed: %v", err)
 			}
-			_, err = r.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-3 t", Brief: "B", Model: strPtr("fable")})
+			_, err = r.Spawn(SpawnOptions{Cwd: cwd, Name: "3 t", Brief: "B", Model: strPtr("fable")})
 			if err == nil || !strings.Contains(err.Error(), "model") {
 				t.Fatalf("err = %v, want a loud model refusal", err)
 			}
@@ -774,7 +805,7 @@ transcript = "cat {log}"
 			if err != nil {
 				t.Fatalf("RunnerNamed: %v", err)
 			}
-			h, err := r.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-8 t", Brief: "B"})
+			h, err := r.Spawn(SpawnOptions{Cwd: cwd, Name: "8 t", Brief: "B"})
 			if err != nil {
 				t.Fatalf("myagent spawn: %v", err)
 			}
@@ -787,7 +818,7 @@ transcript = "cat {log}"
 			if err := r.Send(&h, "more"); err != nil {
 				t.Fatalf("myagent send: %v", err)
 			}
-			if !strings.Contains(calls(t, bin), "myagent run --name wd-8 t B") {
+			if !strings.Contains(calls(t, bin), "myagent run --name wd:8 t B") {
 				t.Fatalf("calls.log missing myagent spawn:\n%s", calls(t, bin))
 			}
 			if !strings.Contains(calls(t, bin), "myagent send victory-001 more") {
@@ -827,7 +858,7 @@ transcript = "cat {log}"
 			if err != nil {
 				t.Fatalf("RunnerNamed: %v", err)
 			}
-			h, err := r.Spawn(SpawnOptions{Cwd: cwd, Name: "wd-9 t", Brief: "B"})
+			h, err := r.Spawn(SpawnOptions{Cwd: cwd, Name: "9 t", Brief: "B"})
 			if err != nil {
 				t.Fatalf("detached spawn: %v", err)
 			}

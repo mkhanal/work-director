@@ -529,7 +529,7 @@ func (c *Cli) spawn(rest []string) error {
 	}
 	h, err := rn.Spawn(runner.SpawnOptions{
 		Cwd:      cwd,
-		Name:     slice60(fmt.Sprintf("wd-%s %s", id, w.Title)),
+		Name:     fmt.Sprintf("%s %s", id, w.Title),
 		Brief:    briefText,
 		Agent:    agent,
 		Worktree: runnerWorktree,
@@ -596,7 +596,7 @@ func (c *Cli) spawnTasks(goal core.Work, p *project.Project, runners []string, d
 		}
 		h, err := rn.Spawn(runner.SpawnOptions{
 			Cwd:   cwd,
-			Name:  slice60(fmt.Sprintf("wd-%s %s", child.ID, child.Title)),
+			Name:  fmt.Sprintf("%s %s", child.ID, child.Title),
 			Brief: briefText,
 			Agent: agent,
 			Model: model,
@@ -1095,7 +1095,7 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 	}
 	h, err := rn.Spawn(runner.SpawnOptions{
 		Cwd:   p.Path,
-		Name:  slice60(fmt.Sprintf("wd-%s plan", goal.ID)),
+		Name:  fmt.Sprintf("%s plan", goal.ID),
 		Brief: planBrief,
 		Agent: agent,
 		Model: model,
@@ -1271,7 +1271,7 @@ func (c *Cli) goalSpawn(cmd string, goal core.Work) error {
 		}
 		h, err := rn.Spawn(runner.SpawnOptions{
 			Cwd:   cwd,
-			Name:  slice60(fmt.Sprintf("wd-%s %s", goal.ID, name)),
+			Name:  fmt.Sprintf("%s %s", goal.ID, name),
 			Brief: briefText,
 			Agent: agent,
 			Model: model,

@@ -53,7 +53,7 @@ func (c *Cli) Reflect(w core.Work, texts []string) (reflectResult, error) {
 	brief := reflect.Brief(w, p, texts)
 	h, err := rn.Spawn(runner.SpawnOptions{
 		Cwd:   cwd,
-		Name:  slice60(fmt.Sprintf("wd-%s reflect", w.ID)),
+		Name:  fmt.Sprintf("%s reflect", w.ID),
 		Brief: brief,
 		Model: p.Model,
 	})

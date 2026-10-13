@@ -100,7 +100,7 @@ func (claudeRunner) Spawn(o SpawnOptions) (Handle, error) {
 	if o.PermissionMode != nil {
 		permissionMode = *o.PermissionMode
 	}
-	args := []string{"claude", "--bg", "-n", o.Name, "--permission-mode", permissionMode, "--settings", thinkingSummaries}
+	args := []string{"claude", "--bg", "-n", sessionName(o.Name), "--permission-mode", permissionMode, "--settings", thinkingSummaries}
 	if o.Model != nil {
 		args = append(args, "--model", *o.Model)
 	}

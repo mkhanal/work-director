@@ -50,7 +50,7 @@ func (c *Cli) goalFind(name, text string) error {
 	}
 	h, err := rn.Spawn(runner.SpawnOptions{
 		Cwd:   p.Path,
-		Name:  "wd find",
+		Name:  "find",
 		Brief: find.Brief(text, goals),
 		Model: optionalModel(model),
 	})

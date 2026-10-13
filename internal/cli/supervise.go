@@ -160,7 +160,7 @@ func (c *Cli) supervise(goal core.Work) (supervision, error) {
 		}
 		if sh, err = rn.Spawn(runner.SpawnOptions{
 			Cwd:   cwd,
-			Name:  slice60(fmt.Sprintf("wd-%s supervise %s", goal.ID, goal.Title)),
+			Name:  fmt.Sprintf("%s supervise %s", goal.ID, goal.Title),
 			Brief: brief,
 			Model: p.Model,
 		}); err != nil {

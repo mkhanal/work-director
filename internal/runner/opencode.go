@@ -89,7 +89,7 @@ func (opencodeRunner) Spawn(o SpawnOptions) (Handle, error) {
 		return Handle{}, err
 	}
 	log := filepath.Join(dir, fmt.Sprintf("%s-%d.jsonl", logName(o.Name), time.Now().UnixMilli()))
-	args := []string{"opencode", "run", "--format", "json", "--auto", "--title", o.Name}
+	args := []string{"opencode", "run", "--format", "json", "--auto", "--title", sessionName(o.Name)}
 	if o.Model != nil {
 		args = append(args, "--model", *o.Model)
 	}

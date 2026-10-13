@@ -313,7 +313,7 @@ func (r *specRunnerAdapter) Spawn(o SpawnOptions) (Handle, error) {
 		return Handle{}, &RunnerError{Runner: r.spec.Name, Detail: "model " + *o.Model + ": spawn line has no {model} placeholder"}
 	}
 	cmd := fill(r.spec.Spawn, map[string]string{
-		"cwd": o.Cwd, "name": o.Name, "name20": name20(o.Name), "brief": o.Brief,
+		"cwd": o.Cwd, "name": sessionName(o.Name), "name20": name20(sessionName(o.Name)), "brief": o.Brief,
 		"model": strOrEmpty(o.Model), "agent": strOrEmpty(o.Agent), "home": r.spec.home,
 		"slug_cwd": projectSlug(o.Cwd),
 	})

@@ -25,7 +25,8 @@ type Handle struct {
 // SpawnOptions is everything a runner needs to start a session. Optional
 // fields are pointers: unset means the runner's own default.
 type SpawnOptions struct {
-	Cwd            string
+	Cwd string
+	// Name is the session's label; the runner starts it as sessionName(Name).
 	Name           string
 	Brief          string
 	Agent          *string
@@ -229,6 +230,19 @@ var logNameRe = regexp.MustCompile(`[^A-Za-z0-9-]+`)
 // non-[A-Za-z0-9-] become a single '-'.
 func logName(s string) string {
 	return logNameRe.ReplaceAllString(s, "-")
+}
+
+// SessionPrefix opens the name of every session wd starts, so a runner's own
+// session list can be filtered to wd's sessions, or past them.
+const SessionPrefix = "wd:"
+
+// sessionName is the name a session is started under: the prefix, then the
+// label, at most 60 characters.
+func sessionName(label string) string {
+	if r := []rune(SessionPrefix + label); len(r) > 60 {
+		return string(r[:60])
+	}
+	return SessionPrefix + label
 }
 
 // name20 truncates a display name to 20 characters (the {name20} spec placeholder).

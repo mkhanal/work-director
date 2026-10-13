@@ -170,7 +170,7 @@ func (c *Cli) tasteJudgeOnce(p *project.Project) driver.Judge {
 		}
 		h, err := rn.Spawn(runner.SpawnOptions{
 			Cwd:   p.Path,
-			Name:  "wd judge taste",
+			Name:  "judge taste",
 			Brief: brief,
 			Model: optionalModel(model),
 		})
@@ -625,7 +625,7 @@ func (c *Cli) judgeOnce(goal core.Work, p *project.Project) driver.Judge {
 		}
 		h, err := rn.Spawn(runner.SpawnOptions{
 			Cwd:   cwd,
-			Name:  slice60(fmt.Sprintf("wd-%s judge", goal.ID)),
+			Name:  fmt.Sprintf("%s judge", goal.ID),
 			Brief: brief,
 			Model: optionalModel(model),
 		})

@@ -54,7 +54,8 @@ func (codexRunner) Spawn(o SpawnOptions) (Handle, error) {
 	if o.Model != nil {
 		args = append(args, "--model", *o.Model)
 	}
-	args = append(args, o.Brief)
+	// codex takes no session name, so its first message carries it.
+	args = append(args, sessionName(o.Name)+"\n\n"+o.Brief)
 	pid, err := detach(args, o.Cwd, pending, dir)
 	if err != nil {
 		return Handle{}, err
