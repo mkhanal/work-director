@@ -2,10 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"wd/internal/coordinator"
 	"wd/internal/core"
+	"wd/internal/project"
 	"wd/internal/runner"
 )
 
@@ -59,6 +62,12 @@ func (c *Cli) answer(rest []string) error {
 	} else {
 		return fail("%s is not asking anything; tell it something with wd send %s \"<text>\"", w.ID, w.ID)
 	}
+	var setting *finishSetting
+	if flag(c.Args, "remember") {
+		if setting, err = c.finishToRemember(w, filed, rest[1:]); err != nil {
+			return err
+		}
+	}
 	if _, err := c.Ledger.Answer(w.ID, core.Decision{Question: asked, Answer: text, Source: core.AnsweredByPerson}); err != nil {
 		return err
 	}
@@ -66,6 +75,16 @@ func (c *Cli) answer(rest []string) error {
 	if filed != nil {
 		if applied, err = c.answered(w, *filed, rest[1:]); err != nil {
 			return err
+		}
+		if setting != nil {
+			if err := os.WriteFile(setting.path, []byte(setting.text), 0o644); err != nil {
+				return err
+			}
+			said := "finish setting: " + string(setting.line)
+			if _, err := c.Ledger.Decide(w.ID, said, core.Decision{Question: "where " + w.Project + "'s goals finish", Answer: string(setting.line), Source: core.AnsweredByPerson}, nil); err != nil {
+				return err
+			}
+			applied = append(applied, said)
 		}
 		// Carrying out a change can have moved the work on.
 		if w, err = c.Ledger.Get(w.ID); err != nil {
@@ -84,6 +103,43 @@ func (c *Cli) answer(rest []string) error {
 		human += "\n" + strings.Join(applied, "\n")
 	}
 	return c.out(map[string]any{"ok": true, "told": where, "answer": text, "applied": applied}, human)
+}
+
+// finishSetting is a project file rewritten to finish its goals at line.
+type finishSetting struct {
+	path string
+	text string
+	line core.FinishLine
+}
+
+// finishToRemember is the project file of w with its finish setting set to
+// the finish line answers pick on filed's finish-line question; anything
+// else is refused before the answer is recorded.
+func (c *Cli) finishToRemember(w core.Work, filed *core.Event, answers []string) (*finishSetting, error) {
+	if filed != nil {
+		q := coordinator.AskedQuestion(*filed)
+		for i, it := range q.Items {
+			head, _, _ := strings.Cut(it.Question, "\n")
+			if head != coordinator.FinishQuestion || len(answers) != len(q.Items) {
+				continue
+			}
+			line, ok := coordinator.FinishChoice(answers[i])
+			if !ok {
+				return nil, fail("--remember keeps a finish line, and %q is not one", answers[i])
+			}
+			path := filepath.Join(c.ProjectsDir, w.Project+".md")
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return nil, err
+			}
+			text, err := project.WithFinish(string(raw), line)
+			if err != nil {
+				return nil, fail("%s: %v; nothing was answered", path, err)
+			}
+			return &finishSetting{path: path, text: text, line: line}, nil
+		}
+	}
+	return nil, fail("--remember keeps a finish-line choice, and %s is not asking where it finishes", w.ID)
 }
 
 // answered carries out what the person's answers to a question the director

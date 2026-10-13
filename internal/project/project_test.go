@@ -3,6 +3,8 @@ package project
 import (
 	"path/filepath"
 	"testing"
+
+	"wd/internal/core"
 )
 
 // setHome points the user's home at dir the way each system reads it:
@@ -63,5 +65,18 @@ func TestParseProjectTreatsAnEmptyAgentAsUnset(t *testing.T) {
 	}
 	if p.Agent == nil || *p.Agent != "build" {
 		t.Fatalf("agent = %v, want build", p.Agent)
+	}
+}
+
+func TestWithFinishKeepsEveryOtherByte(t *testing.T) {
+	crlf := "---\r\npath: /r\r\nfinish: merged\r\nrunner: claude\r\n---\r\nBody\r\n"
+	got, err := WithFinish(crlf, core.FinishResearch)
+	if err != nil || got != "---\r\npath: /r\r\nfinish: research\r\nrunner: claude\r\n---\r\nBody\r\n" {
+		t.Fatalf("crlf = %q, %v", got, err)
+	}
+	for _, bad := range []string{"no frontmatter here\n", "---\npath: /r\n", ""} {
+		if got, err := WithFinish(bad, core.FinishPR); err == nil {
+			t.Errorf("%q = %q, want it refused", bad, got)
+		}
 	}
 }

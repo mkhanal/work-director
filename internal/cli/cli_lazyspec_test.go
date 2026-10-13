@@ -5547,6 +5547,69 @@ func TestPlanningFilesSubGoalsWithTheirDoneWhenAndOrder(t *testing.T) {
 	}
 }
 
+func TestAFinishChoiceCanBecomeTheProductsSetting(t *testing.T) {
+	f := newCLIFixture(t)
+	file := filepath.Join(f.wdHome, "projects", "sample-app.md")
+	before := readFile(t, file)
+	unsure := func(title string) string {
+		t.Helper()
+		goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", title, "--json"), "id")
+		f.planReply(t, "NAME: "+title+"\nFINISH: ?\n- research (recommended)\n- complete PR\n- The cache's misses are explained\n  done when: a report names each cause\n")
+		f.runOK(t, "goal", "plan", goal, "--runner", "planner")
+		return goal
+	}
+
+	// Refused: an answer that is not a finish line, and work not asking where it finishes.
+	goal := unsure("Look into the cache")
+	if errStr := f.runFail(t, "answer", goal, "whenever", "--remember"); !strings.Contains(errStr, "not one") {
+		t.Errorf("remembering a non-line = %q, want it refused", errStr)
+	}
+	plain := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Pick a tone", "--json"), "id")
+	f.planReply(t, "NAME: Pick a tone\nFINISH: complete PR | from: taste\n- The tone is settled\n  done when: the guide names it\n")
+	f.runOK(t, "goal", "plan", plain, "--runner", "planner")
+	f.runOK(t, "set", plain, "running")
+	f.runOK(t, "set", plain, "needs-input")
+	if errStr := f.runFail(t, "answer", plain, "formal", "--remember"); !strings.Contains(errStr, "not asking where it finishes") {
+		t.Errorf("remembering on a plain question = %q, want it refused", errStr)
+	}
+	if got := readFile(t, file); got != before || len(f.bodies(t, goal, core.EventAnswer)) != 0 {
+		t.Fatalf("a refused --remember changed something: file %q, answers %v", got, f.bodies(t, goal, core.EventAnswer))
+	}
+
+	// A project file with no finish line gains one, last in its frontmatter.
+	f.runOK(t, "answer", goal, "research (recommended)", "--remember")
+	want := strings.Replace(before, "default_branch: main\n---\n", "default_branch: main\nfinish: research\n---\n", 1)
+	if got := readFile(t, file); got != want {
+		t.Fatalf("project file = %q, want %q", got, want)
+	}
+	if g := f.workRow(t, goal); g.FinishLine == nil || *g.FinishLine != core.FinishResearch {
+		t.Errorf("goal finish = %v, want research", g.FinishLine)
+	}
+	decided := func(goal string) []core.Event {
+		var out []core.Event
+		for _, e := range f.ledgerEvents(t, goal) {
+			if e.Kind == core.EventDecision && strings.HasPrefix(e.Body, "finish setting: ") {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
+	if d := decided(goal); len(d) != 1 || d[0].Body != "finish setting: research" || d[0].Decision == nil || d[0].Decision.Source != core.AnsweredByPerson {
+		t.Errorf("decisions = %+v, want the finish setting decided by the person", d)
+	}
+
+	// One that has one has that line rewritten, and nothing else.
+	second := unsure("Look into the queue")
+	f.runOK(t, "answer", second, "complete PR", "--remember")
+	want = strings.Replace(want, "finish: research\n", "finish: complete PR\n", 1)
+	if got := readFile(t, file); got != want {
+		t.Fatalf("project file = %q, want %q", got, want)
+	}
+	if d := decided(second); len(d) != 1 || d[0].Body != "finish setting: complete PR" {
+		t.Errorf("decisions = %+v, want the new setting", d)
+	}
+}
+
 func TestASubGoalStartsOnlyOnceWhatItWaitsOnIsSettled(t *testing.T) {
 	f := newCLIFixture(t)
 	f.planReply(t, "NAME: Release notes\nFINISH: complete PR | from: taste\n- Every release is tagged\n  done when: each release has a tag\n- Customers read what changed\n  done when: the changelog lists it\n  after: 1\n")

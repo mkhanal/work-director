@@ -158,6 +158,34 @@ func ParseProject(text, path string) (*Project, error) {
 	return p, nil
 }
 
+// WithFinish is a project file's text with its frontmatter's finish line set
+// to line: the finish: line rewritten, or added last when there is none, and
+// every other byte kept. Text with no frontmatter is refused.
+func WithFinish(text string, line core.FinishLine) (string, error) {
+	lines := strings.Split(text, "\n")
+	fence := func(s string) bool { return strings.TrimSuffix(s, "\r") == "---" }
+	if len(lines) < 2 || !fence(lines[0]) {
+		return "", fmt.Errorf("missing frontmatter")
+	}
+	end := slices.IndexFunc(lines[1:], fence) + 1
+	if end == 0 {
+		return "", fmt.Errorf("missing frontmatter")
+	}
+	cr := ""
+	if strings.HasSuffix(lines[end], "\r") {
+		cr = "\r"
+	}
+	set := "finish: " + string(line) + cr
+	for i := 1; i < end; i++ {
+		if key, _, ok := strings.Cut(lines[i], ":"); ok && strings.TrimSpace(key) == "finish" {
+			lines[i] = set
+			return strings.Join(lines, "\n"), nil
+		}
+	}
+	lines = slices.Insert(lines, end, set)
+	return strings.Join(lines, "\n"), nil
+}
+
 // ExpandHome expands a leading ~ or ~/ to the user's home directory, and
 // fails when that directory cannot be resolved; ~user paths stay as given.
 func ExpandHome(path string) (string, error) {

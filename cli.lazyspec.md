@@ -131,6 +131,11 @@ verify event.
 - In ask mode the breakdown is proposed and nothing starts until `wd goal approve`.
 - The planner's why, left out and judge by are filed on the goal as one `reasoning:` note carrying them.
 
+## A Finish Choice Can Become The Product's Setting
+- `wd answer <goal> "<line>" --remember` on a finish-line question also sets `finish:` in the project's file to that line: that one line rewritten, or added last in the frontmatter, every other byte kept.
+- It records the decision `finish setting: <line>` on the goal, by the person.
+- `--remember` on work not asking where it finishes, or with an answer that is not a finish line, is refused and nothing is answered.
+
 ## A Sub-Goal Starts Only Once What It Waits On Is Settled
 - Starting a sub-goal that waits on an unsettled sibling is refused naming the sibling.
 - Starting every open sub-goal of a goal starts only those with nothing left to wait on.
