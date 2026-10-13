@@ -8,7 +8,7 @@ public enum StateMark: Sendable, Hashable {
         case .needsYou: "Needs you"
         case .working: "Working"
         case .waiting: "Waiting"
-        case .superseded: "Superseded"
+        case .superseded: "Set aside"
         }
     }
 }
@@ -40,21 +40,16 @@ extension WorkState {
         }
     }
 
-    /// The badge beside a goal's title or a sub-goal's row.
+    /// The badge beside a goal's title or a sub-goal's row: its label, in
+    /// the colour role of where it stands.
     public var badge: GoalBadge {
-        switch self {
-        case .done: GoalBadge("Done", .settled)
-        case .needsInput: GoalBadge("Needs you", .attention)
-        case .blocked: GoalBadge("Blocked", .attention)
-        case .running: GoalBadge("Working", .live)
-        case .review: GoalBadge("In review", .live)
-        case .softDone: GoalBadge("Ready to close", .live)
-        case .queued, .briefed: GoalBadge("Waiting", .waiting)
-        case .paused: GoalBadge("Paused", .waiting)
-        case .dropped: GoalBadge("Dropped", .waiting)
-        case .abandoned: GoalBadge("Abandoned", .waiting)
-        case .superseded: GoalBadge("Superseded", .waiting)
+        let tone: Tone = switch self {
+        case .done: .settled
+        case .needsInput, .blocked: .attention
+        case .running, .review, .softDone: .live
+        case .queued, .briefed, .paused, .dropped, .abandoned, .superseded: .waiting
         }
+        return GoalBadge(look.label, tone)
     }
 }
 
@@ -64,7 +59,7 @@ public enum Tint: String, Sendable {
 }
 
 /// How one state reads on screen. Each state has its own symbol and label,
-/// so needs-input (a question waiting) is never mistaken for blocked (a stop).
+/// so a question waiting is never mistaken for blocked (a stop).
 public struct StateLook: Sendable, Hashable {
     public let label: String
     public let symbol: String
@@ -74,18 +69,18 @@ public struct StateLook: Sendable, Hashable {
 extension WorkState {
     public var look: StateLook {
         switch self {
-        case .queued: StateLook(label: "Queued", symbol: "circle.dotted", tint: .gray)
-        case .briefed: StateLook(label: "Briefed", symbol: "doc.text", tint: .gray)
-        case .running: StateLook(label: "Running", symbol: "play.circle", tint: .blue)
-        case .needsInput: StateLook(label: "Needs input", symbol: "questionmark.bubble", tint: .orange)
+        case .queued: StateLook(label: "Waiting", symbol: "circle.dotted", tint: .gray)
+        case .briefed: StateLook(label: "Ready to start", symbol: "doc.text", tint: .gray)
+        case .running: StateLook(label: "Working", symbol: "play.circle", tint: .blue)
+        case .needsInput: StateLook(label: "Needs you", symbol: "questionmark.bubble", tint: .orange)
         case .blocked: StateLook(label: "Blocked", symbol: "hand.raised", tint: .red)
-        case .review: StateLook(label: "In review", symbol: "eye", tint: .indigo)
-        case .softDone: StateLook(label: "Ready to close", symbol: "checkmark.circle", tint: .teal)
+        case .review: StateLook(label: "To review", symbol: "eye", tint: .indigo)
+        case .softDone: StateLook(label: "Waiting to be confirmed", symbol: "checkmark.circle", tint: .teal)
         case .done: StateLook(label: "Done", symbol: "checkmark.seal", tint: .green)
         case .dropped: StateLook(label: "Dropped", symbol: "minus.circle", tint: .gray)
         case .abandoned: StateLook(label: "Abandoned", symbol: "xmark.octagon", tint: .brown)
         case .paused: StateLook(label: "Paused", symbol: "pause.circle", tint: .purple)
-        case .superseded: StateLook(label: "Superseded", symbol: "minus.circle.fill", tint: .gray)
+        case .superseded: StateLook(label: Words.replaced, symbol: "minus.circle.fill", tint: .gray)
         }
     }
 }

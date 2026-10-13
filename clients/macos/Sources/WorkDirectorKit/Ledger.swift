@@ -322,6 +322,8 @@ public struct Gate: Codable, Sendable, Hashable {
     public let work: String
     public let gate: String
     public let title: String?
+    /// The button's words, in plain language, once wd serves them.
+    public let label: String?
     public let argv: [String]
     public let why: String?
 }

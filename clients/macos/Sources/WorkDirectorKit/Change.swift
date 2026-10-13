@@ -61,7 +61,7 @@ public struct PendingChange: Codable, Sendable, Hashable {
 
     static func finish(_ line: String?) -> String {
         guard let line, !line.isEmpty else { return "Not decided" }
-        return line.prefix(1).uppercased() + line.dropFirst()
+        return Words.finishLine(line)
     }
 }
 
@@ -98,7 +98,7 @@ public struct SubGoalFate: Codable, Sendable, Hashable {
     public var badge: GoalBadge {
         switch status {
         case .new: GoalBadge("New", .live)
-        case .superseded: GoalBadge("Superseded", .waiting)
+        case .superseded: GoalBadge(Words.replaced, .waiting)
         case .kept:
             switch state {
             case .done, .softDone: GoalBadge("Kept · done", .settled)
@@ -128,7 +128,7 @@ public enum FinishMeaning {
         case "discovery": ("Discovery: the cause found and explained", "A findings report with its proof. No code changes.")
         case "research": ("Research complete: a written comparison and a pick", "Trade-offs and a recommendation with its reasons. No code changes.")
         case "local build": ("A local build you can try", "The work on a branch, with how to run it.")
-        case "complete pr": ("A complete PR", "The change with its tests, ready to merge.")
+        case "complete pr": (Words.finishLine("complete PR"), "The change with its tests, ready to merge.")
         case "merged": ("Merged", "The pull request merged into the main branch.")
         case "released": ("Released", "Merged and published as a release.")
         default: nil

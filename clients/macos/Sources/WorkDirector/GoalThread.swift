@@ -144,10 +144,10 @@ struct GoalThread: View {
         if goal.finishes(e) { return "\(who) · done" }
         switch e.kind {
         case "decision": return "Decided: \(firstLine(e.body))"
-        case "judged": return "\(who) · judged \(e.body.components(separatedBy: ": ").first ?? e.body)"
+        case "judged": return "\(who) · " + Words.checked(e.body.components(separatedBy: ": ").first ?? e.body)
         case "verify": return "\(who) \(e.body.hasPrefix("pass") ? "passed its checks" : "failed its checks")"
-        case "pr": return "\(who) landed"
-        case "state": return "\(who) is now \(e.body)"
+        case "pr": return "\(who) delivered"
+        case "state": return "\(who) · " + Words.eventBody(kind: e.kind, body: e.body)
         default: return "\(who): \(firstLine(e.body))"
         }
     }

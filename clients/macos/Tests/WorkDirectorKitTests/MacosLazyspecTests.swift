@@ -768,7 +768,9 @@ struct SeededTree {
         try home.wd("report", id, "DONE\nSTATUS: DONE")
         let verify = try #require(Plan.passing(try await store.gate(of: id)))
         #expect(verify.argv == ["verify", id])
-        #expect(verify.title == "Verify")
+        #expect(verify.title == "Check it", "named in plain words")
+        let served = try JSONDecoder().decode(Gate.self, from: Data(#"{"work":"w","gate":"land","title":"Land","label":"Ship it","argv":["pr","w"]}"#.utf8))
+        #expect(Plan.passing(served)?.title == "Ship it", "the words wd serves win")
     }
 
     @Test("A Notification Says What Happened And Where")
@@ -1054,7 +1056,7 @@ struct SeededTree {
         let store = await Store(channel: try t.home.channel())
         let goal = try await store.goal(t.top)
         #expect(goal.titleBadge == GoalBadge("Needs you", .attention), "a question below the goal shows on its title")
-        #expect(goal.finishWords?.line == "A complete PR")
+        #expect(goal.finishWords?.line == "A complete pull request")
         #expect(goal.finishWords?.source == "From your taste.")
         #expect(goal.course?.badge == GoalBadge("On course", .settled))
         #expect(goal.progressLine == "1 of 4 done")
@@ -1069,12 +1071,12 @@ struct SeededTree {
         let tagged = try #require(rows[t.tagged]), guide = try #require(rows[t.guide])
         let note = try #require(rows[t.note]), agent = try #require(rows[t.agent])
         #expect(tagged.mark == .done && tagged.badge == GoalBadge("Done", .settled))
-        #expect(tagged.meta() == "Done when Every release is tagged is checked · claude · 2 steps · judged met")
+        #expect(tagged.meta() == "Done when Every release is tagged is checked · claude · 2 steps · Checked: done")
         #expect(guide.mark == .needsYou && guide.badge == GoalBadge("1 needs you", .attention))
-        #expect(guide.meta() == "Planned into 1 sub-goal · 0 of 1 done · 1 superseded", "superseded ones are counted apart")
+        #expect(guide.meta() == "1 sub-goal · 0 of 1 done · 1 replaced", "replaced ones are counted apart")
         #expect(guide.opensAsGoal && !guide.folds, "a goal row opens its page")
         #expect(note.mark == .working && note.badge == GoalBadge("Working · 1 of 3", .live), "dropped steps are not counted")
-        #expect(note.meta() == "claude · now: Write the template")
+        #expect(note.meta() == "claude · Now: Write the template")
         #expect(note.folds, "a task row folds its steps")
         #expect(agent.mark == .waiting && agent.badge == GoalBadge("Waiting", .waiting))
         #expect(agent.meta() == "Waits on: Whoever deploys gets a guide")
@@ -1083,10 +1085,10 @@ struct SeededTree {
         let nested = try await store.goal(t.guide)
         let wiki = try #require(nested.tree.first { $0.id == t.wiki })
         #expect(wiki.mark == .superseded)
-        #expect(wiki.meta(superseded: nested.superseded) == "Superseded: guides live with each release · its work stays readable")
+        #expect(wiki.meta(superseded: nested.superseded) == "Replaced by a change of plan: guides live with each release")
         let rollback = try #require(nested.tree.first { $0.id == t.rollback })
         #expect(rollback.meta() == "codex · waits for you")
-        #expect(nested.progressLine == "0 of 1 done · 1 superseded")
+        #expect(nested.progressLine == "0 of 1 done · 1 replaced")
         #expect(goal.notDoneBecause.count == 3, "open sub-goals, the done-when and the finish line")
 
         #expect(goal.askedAt(ask.question) == "2026-10-13T12:14:00Z")
@@ -1098,7 +1100,7 @@ struct SeededTree {
 
         let here = try await store.record(t.guide)
         #expect(here.entries.contains { $0.kind == "chore" && $0.by == "director" }, "a nested page's record holds what the director did there")
-        #expect(here.entries.first { $0.kind == "chore" }?.sentence == "Chore: refreshed dependencies")
+        #expect(here.entries.first { $0.kind == "chore" }?.sentence == "Housekeeping: refreshed dependencies")
         #expect(try await store.record(t.top).entries.first { $0.kind == "course" }?.text == "The tag format suits the rest", "ledger text in a sentence's place starts with a capital")
     }
 
@@ -1111,13 +1113,13 @@ struct SeededTree {
         let record = try await store.record(t.top)
         let cards = record.summary.cards
         #expect(cards.count == 5)
-        #expect(cards[1].number == 1 && cards[1].label == "course check · 0 corrections")
-        #expect(cards[3].label == "chore the director ran")
-        #expect(cards[4].label == "report judged")
+        #expect(cards[1].number == 1 && cards[1].label == "direction check · 0 corrections")
+        #expect(cards[3].label == "housekeeping task the director ran")
+        #expect(cards[4].label == "report checked")
 
-        #expect(RecordKind.allCases.map(\.label) == ["Everything", "Decisions", "Course", "Questions", "Reports", "Chores", "Delivery"])
+        #expect(RecordKind.allCases.map(\.label) == ["Everything", "Decisions", "Direction checks", "Questions", "Reports", "Housekeeping", "Delivery"])
         #expect(record.entries(.everything) == record.entries, "everything, newest first, as served")
-        #expect(record.entries(.course).map(\.kind) == ["course", "superseded"], "a superseded branch is a course change")
+        #expect(record.entries(.course).map(\.kind) == ["course", "superseded"], "a replaced branch is a direction check")
         #expect(record.entries(.questions).map(\.kind) == ["question"])
         #expect(record.entries(.chores).map(\.text) == ["refreshed dependencies"])
         #expect(record.entries(.decisions).contains { $0.what == "Notes are written in English only" && $0.by == "you" })
@@ -1127,7 +1129,7 @@ struct SeededTree {
         let guide = record.entries(.everything, under: "Whoever deploys gets a guide")
         #expect(Set(guide.map(\.kind)).isSuperset(of: ["question", "chore", "superseded"]), "a sub-goal holds what happened under it")
         #expect(guide.allSatisfy { $0.where.hasPrefix("Whoever deploys gets a guide") })
-        #expect(record.entries(.everything, under: "Every release is tagged").map(\.badge) .contains(GoalBadge("Judged met", .settled)))
+        #expect(record.entries(.everything, under: "Every release is tagged").map(\.badge) .contains(GoalBadge("Checked: done", .settled)))
 
         var gmt = Calendar(identifier: .gregorian)
         gmt.timeZone = TimeZone(identifier: "UTC")!
@@ -1251,7 +1253,7 @@ struct SeededTree {
         #expect(course.heading == "Course change on the top goal · always yours to decide")
         #expect(course.table.map(\.label) == ["Goal", "Done when", "Finishes at"])
         #expect(course.table[0].now == "Why does sync drop events?" && course.table[0].proposed == "Sync never drops events")
-        #expect(course.table[2].now == "Discovery" && course.table[2].proposed == "Complete PR")
+        #expect(course.table[2].now == "Discovery" && course.table[2].proposed == "A complete pull request")
         #expect(course.why == "knowing is done and the fix is one retry policy")
         let item = try #require(pivot.needsYou.first { $0.work == why }?.question.items.first)
         #expect(item.head == "The cause is found and the fix is small. Turn this into fixing it?", "the card asks only the question; the table says the rest")
@@ -1261,7 +1263,7 @@ struct SeededTree {
         #expect(FinishMeaning.of("research")?.title == "Research complete: a written comparison and a pick")
         #expect(pivot.needsYou.first { $0.work == found }?.question.items.first?.asksFinish == true, "a finish-line question is known by what it asks, wherever it shows")
         #expect(pivot.needsYou.first { $0.work == why }?.question.items.first?.asksFinish == false)
-        #expect(FinishMeaning.of("complete PR")?.title == "A complete PR")
+        #expect(FinishMeaning.of("complete PR")?.title == "A complete pull request")
         #expect(["discovery", "research", "local build", "complete PR", "merged", "released"].allSatisfy { FinishMeaning.of($0) != nil })
         #expect(try Plan.answer(found, try #require(pivot.needsYou.first { $0.work == found }?.question), answers: ["research"]).argv == ["answer", found, "research"],
                 "answering goes through the question's own answer path")
@@ -1336,8 +1338,8 @@ struct SeededTree {
         #expect(try await store.run(plan).code == 0)
         let goal = try await store.goal(top)
         #expect(goal.finish?.line == "complete PR")
-        #expect(goal.finishWords?.line == "A complete PR")
-        #expect(ControlName.finishMenu(goal.finishWords?.line) == "Finishes at: A complete PR", "announced by the line it shows")
+        #expect(goal.finishWords?.line == "A complete pull request")
+        #expect(ControlName.finishMenu(goal.finishWords?.line) == "Finishes at: A complete pull request", "announced by the line it shows")
         #expect(ControlName.finishMenu(nil) == "Finishes at: Not decided yet")
         #expect(try await store.goal(under).chain.count > 1, "a sub-goal's page offers none")
         #expect(try await store.run(Plan.finish(under, "research")).code != 0)
@@ -1377,7 +1379,7 @@ struct SeededTree {
         let fates = try #require(change.subGoals)
         #expect(fates.map(\.title) == ["The cause is found and explained", "We know which tenants lost events",
                                        "Compare other sync vendors", "A rejected batch is retried until delivered"])
-        #expect(fates.map(\.badge.text) == ["Kept · done", "Kept · working", "Superseded", "New"])
+        #expect(fates.map(\.badge.text) == ["Kept · done", "Kept · working", "Replaced", "New"])
         #expect(fates[2].why == "no longer needed: the vendor is fine once retried")
         let choices = try #require(ask.question.changeChoices)
         #expect(choices.change == "Change course" && choices.keep == "Keep it a discovery", "each button answers with its choice, labelled with it")
@@ -1593,5 +1595,44 @@ struct SeededTree {
         }
         #expect(alone == ["/x/1-alone.txt"], "a file no message carries shows on its own; one a message carries does not")
     }
-}
 
+    @Test("The App Speaks The Product's Language, Not wd's")
+    func speaksTheProductsLanguage() async throws {
+        #expect(!Words.plain("Superseded") && !Words.plain("judged met") && !Words.plain("A complete PR") && !Words.plain("Landed"),
+                "the check catches each internal term")
+
+        let t = try SeededTree()
+        let store = await Store(channel: try t.home.channel())
+        let goal = try await store.goal(t.top)
+        let record = try await store.record(t.top)
+        let entry = { (kind: String, what: String) in RecordEntry(event: 1, at: "2026-10-13T11:00:00Z", kind: kind, what: what, where: "w", by: "director") }
+        let kinds = ["decision", "finish", "asked", "course", "question", "answer", "report", "delivery", "chore", "superseded"]
+        let fates = [SubGoalFate.Status.kept, .new, .superseded].flatMap { status in
+            ([nil] + WorkState.allCases).map { SubGoalFate(work: nil, title: "x", status: status, state: $0, why: nil).badge.text }
+        }
+        var shown: [String] = []
+        shown += WorkState.allCases.flatMap { [$0.look.label, $0.badge.text] }
+        shown += [StateMark.done, .needsYou, .working, .waiting, .superseded].map(\.label)
+        shown += Band.allCases.map(\.label)
+        shown += RecordKind.allCases.map(\.label) + record.summary.cards.map(\.label)
+        shown += (kinds.map { entry($0, "on course: x") } + [entry("judged", "met: x"), entry("judged", "missed: x")]).flatMap { [$0.badge.text, $0.sentence] }
+        shown += record.entries.map(\.sentence)
+        shown += fates
+        shown += goal.nodes.flatMap { [$0.badge.text, $0.meta(superseded: goal.superseded), $0.mark.label] } + [goal.progressLine]
+        shown += ["verify", "land", "soft-done", "done"].map(Words.gate)
+        shown += [Plan.verify("w"), Plan.softDone("w"), Plan.done("w")].map(\.title)
+        shown += FinishMeaning.lines.compactMap { FinishMeaning.of($0) }.flatMap { [$0.title, $0.meaning] }
+        shown += FinishMeaning.lines.map(Words.finishLine) + [goal.finishWords?.line ?? ""]
+        shown += ["state", "report", "verify", "pr", "note", "sent", "spawn", "attach", "question", "answer", "decision",
+                  "abandon", "look", "supervised", "course", "judged", "attachment"].map(Words.event)
+        shown += WorkState.allCases.map { Words.eventBody(kind: "state", body: $0.rawValue) }
+        #expect(shown.filter { !Words.plain($0) } == [], "no shown label uses wd's own terms")
+
+        #expect(WorkState.briefed.look.label == "Ready to start" && WorkState.needsInput.look.label == "Needs you")
+        #expect(WorkState.review.look.label == "To review" && WorkState.softDone.look.label == "Waiting to be confirmed")
+        #expect(WorkState.superseded.badge.text == "Replaced")
+        #expect(WorkState.allCases.allSatisfy { $0.badge.text == $0.look.label }, "a row's badge and its icon say the same")
+        #expect(entry("judged", "met: x").badge.text == "Checked: done" && entry("judged", "missed: x").badge.text == "Checked: not done yet")
+        #expect(Words.replaced(why: "guides live with each release") == "Replaced by a change of plan: guides live with each release")
+    }
+}

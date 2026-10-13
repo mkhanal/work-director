@@ -141,6 +141,7 @@ hold only that product's work; with none, every product's.
 ## The Next Gate Is One Button
 - A work page offers the gate `wd` serves for it as one button, which runs the gate's argv.
 - Work waiting on no gate has no such button.
+- The button says what it does: Check it, Deliver it, Confirm it's finished or Mark it done, or the words `wd` serves for the gate.
 
 ## A Notification Says What Happened And Where
 - Its title says what happened: Question for you, Approve the plan, Change of course proposed, Choose where it finishes, Plan change to approve, Blocked, Finished or Ready for review.
@@ -172,15 +173,15 @@ hold only that product's work; with none, every product's.
 - The done-when and the course's why start with a capital letter.
 - Every question below the goal is answered in place, headed by its place in the tree, each level that is a goal a way to its page.
 - Sub-goals are listed as served, each with its state, its line and its badge; a question below a row marks it as needing the person.
-- A sub-goal that is a goal says how many sub-goals it holds and how many are done, with the superseded ones counted apart.
+- A sub-goal that is a goal says how many sub-goals it holds and how many are done, with the replaced ones counted apart.
 - A goal row opens its own page; a task row folds its steps open and closed, all closed but the first working row's.
 - Adding a sub-goal runs `wd goal add <id> "<outcome>" --done-when "<done when>"`; both are required.
 - What holds the goal from done is listed as served.
 - A sub-goal's page lists what the director did there, from its record.
 
 ## The Record Lists What Was Decided And Done, Filtered By Kind And Sub-Goal
-- The record opens with five counts: decisions and how many were yours, course checks and corrections, questions and how many the director answered, chores the director ran, and reports judged.
-- Kind chips narrow it to decisions, course, questions, reports, chores or delivery; a superseded branch counts as course.
+- The record opens with five counts: decisions and how many were yours, direction checks and corrections, questions and how many the director answered, housekeeping tasks the director ran, and reports checked.
+- Kind chips narrow it to Decisions, Direction checks, Questions, Reports, Housekeeping or Delivery; a replaced branch counts as a direction check.
 - A sub-goal picker narrows it to what happened at or under one of the goal's sub-goals.
 - Each row reads its time, its kind as a badge, what it says, where in the tree and by whom, newest first, grouped by day.
 - Ledger text set where a sentence starts begins with a capital letter.
@@ -220,7 +221,7 @@ hold only that product's work; with none, every product's.
 
 ## A Course Change Shows What Was Found And What Happens To Each Sub-Goal
 - What was found and why change course show side by side.
-- Each sub-goal after the change is a row badged Kept · done, Kept · working, Kept · not started, New, or Superseded with why.
+- Each sub-goal after the change is a row badged Kept · done, Kept · working, Kept · not started, New, or Replaced with why.
 - Keep answers with the keep choice and is labelled with it; Change course answers with the first choice.
 - Editing the change answers with the first choice, then runs `wd goal edit <goal>` for a title or done-when and `wd goal finish <goal> "<line>"` for a finish line the person changed from the proposal; what they left is not written.
 - Its buttons are announced by their words: the keep choice, Edit the change… and the first choice with · Recommended.
@@ -257,3 +258,8 @@ hold only that product's work; with none, every product's.
 - Sending passes each file as `--attach <path>` to the command it runs: `wd send`, `wd goal start`, `wd goal continue` or `wd answer`; files alone can be sent, except to continue a goal.
 - A file shows on the message it was sent with: the one on the same work at the same moment; a file no message carries shows on its own, once per moment.
 
+## The App Speaks The Product's Language, Not wd's
+- No label the app shows says superseded, judged, soft-done, briefed, needs-input, verify, land or claim, nor PR for a pull request.
+- A state reads the same on a row's badge and its icon: Ready to start, Needs you, To review, Waiting to be confirmed and Replaced among them.
+- A check of a sub-goal's done-when reads Checked: done or Checked: not done yet.
+- A branch a change of plan let go of reads Replaced by a change of plan, with why.

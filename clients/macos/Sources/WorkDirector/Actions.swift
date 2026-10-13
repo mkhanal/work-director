@@ -54,11 +54,11 @@ struct WorkMenu: View {
         Button("Rename…") { ask(Ask(kind: .rename, work: work)) }
         Button("Record a Decision…") { ask(Ask(kind: .decide, work: work)) }
         if work.state == .review {
-            Button("Verify") { run(.verify(work.id)) }
-            Button("Soft-Done") { run(.softDone(work.id)) }
+            Button(Words.gate("verify")) { run(.verify(work.id)) }
+            Button(Words.gate("soft-done")) { run(.softDone(work.id)) }
         }
         if work.state == .softDone {
-            Button("Done") { run(.done(work.id)) }
+            Button(Words.gate("done")) { run(.done(work.id)) }
         }
         if work.state == .done {
             Button("Reopen…") { ask(Ask(kind: .reopen, work: work)) }

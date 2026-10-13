@@ -4,7 +4,13 @@ import Foundation
 public enum RecordKind: String, CaseIterable, Sendable {
     case everything, decisions, course, questions, reports, chores, delivery
 
-    public var label: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+    public var label: String {
+        switch self {
+        case .course: "Direction checks"
+        case .chores: "Housekeeping"
+        default: rawValue.prefix(1).uppercased() + rawValue.dropFirst()
+        }
+    }
 
     /// Whether an entry of `kind`, as `wd` names it, is of this kind.
     public func holds(_ kind: String) -> Bool {
@@ -34,10 +40,10 @@ extension RecordSummary {
     public var cards: [(number: Int, label: String)] {
         [
             (decisions, plural(decisions, "decision", "decisions") + " · \(yours) yours"),
-            (course, plural(course, "course check", "course checks") + " · \(corrections) " + plural(corrections, "correction", "corrections")),
+            (course, plural(course, "direction check", "direction checks") + " · \(corrections) " + plural(corrections, "correction", "corrections")),
             (questions, plural(questions, "question", "questions") + " · \(answeredByDirector) answered by the director"),
-            (chores, plural(chores, "chore", "chores") + " the director ran"),
-            (judged, plural(judged, "report", "reports") + " judged"),
+            (chores, plural(chores, "housekeeping task", "housekeeping tasks") + " the director ran"),
+            (judged, plural(judged, "report", "reports") + " checked"),
         ]
     }
 }

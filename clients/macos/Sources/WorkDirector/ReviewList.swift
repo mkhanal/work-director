@@ -42,7 +42,7 @@ struct ReviewList: View {
                             }
                         }
                         if !pass.landed.isEmpty {
-                            Section("Landed (\(pass.landed.count))") {
+                            Section("Delivered (\(pass.landed.count))") {
                                 ForEach(pass.landed, id: \.url) { landed in
                                     LandingRow(landed: landed).tag(Row.landed(url: landed.url, work: landed.work?.id))
                                 }

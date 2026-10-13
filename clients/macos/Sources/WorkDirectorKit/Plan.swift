@@ -125,9 +125,9 @@ public struct Plan: Hashable, Sendable, Identifiable {
     /// they have not read; the work keeps its state.
     public static func stop(_ id: String) -> Plan { Plan(title: "Stop", argv: ["stop", id, "--json"]) }
 
-    /// The write that passes a gate, exactly as wd served it.
+    /// The write that passes a gate, exactly as wd served it, named in plain words.
     public static func passing(_ gate: Gate) -> Plan? {
-        gate.argv.isEmpty ? nil : Plan(title: gate.title ?? gate.gate, argv: gate.argv)
+        gate.argv.isEmpty ? nil : Plan(title: gate.label ?? Words.gate(gate.gate), argv: gate.argv)
     }
 
     /// Keeps something said to work as feedback, the evidence rules are
@@ -188,9 +188,9 @@ public struct Plan: Hashable, Sendable, Identifiable {
     }
 
     public static func drive(_ id: String) -> Plan { Plan(title: "Drive", argv: ["drive", id]) }
-    public static func softDone(_ id: String) -> Plan { Plan(title: "Soft-done", argv: ["soft-done", id]) }
-    public static func done(_ id: String) -> Plan { Plan(title: "Done", argv: ["done", id]) }
-    public static func verify(_ id: String) -> Plan { Plan(title: "Verify", argv: ["verify", id]) }
+    public static func softDone(_ id: String) -> Plan { Plan(title: Words.gate("soft-done"), argv: ["soft-done", id]) }
+    public static func done(_ id: String) -> Plan { Plan(title: Words.gate("done"), argv: ["done", id]) }
+    public static func verify(_ id: String) -> Plan { Plan(title: Words.gate("verify"), argv: ["verify", id]) }
     public static func acknowledge(project: String) -> Plan {
         Plan(title: "Acknowledge review", argv: ["review", "--ack", "--project", project])
     }

@@ -37,20 +37,20 @@ extension TreeNode {
         return work.state.badge
     }
 
-    /// The line under its title: who has it and what holds it, or what it
-    /// was planned into.
+    /// The line under its title: who has it and what holds it, or how many
+    /// sub-goals it holds.
     public func meta(superseded: [SupersededWork] = []) -> String {
         if work.state == .superseded {
             let why = superseded.first { $0.work == work.id }?.why
                 ?? whyNotMoving.map { $0.hasPrefix(supersededPrefix) ? String($0.dropFirst(supersededPrefix.count)) : $0 }
-            return ["Superseded" + (why.map { ": " + $0 } ?? ""), "its work stays readable"].joined(separator: " · ")
+            return Words.replaced(why: why)
         }
         var parts: [String] = []
         if let plannedInto, work.kind.isGoal || group {
             let total = progress?.total ?? plannedInto
-            parts.append("Planned into \(total) sub-goal\(total == 1 ? "" : "s")")
+            parts.append(Words.subGoals(total))
             if let progress, progress.total > 0 { parts.append("\(progress.done) of \(progress.total) done") }
-            if let progress, progress.superseded > 0 { parts.append("\(progress.superseded) superseded") }
+            if let progress, progress.superseded > 0 { parts.append(Words.replaced(count: progress.superseded)) }
         } else {
             if work.state == .done, let doneWhen { parts.append("Done when " + doneWhen) }
             if let owner { parts.append(owner.agent ?? owner.runner) }
@@ -59,11 +59,11 @@ extension TreeNode {
             } else if work.state == .needsInput, let whyNotMoving {
                 parts.append(whyNotMoving)
             } else if let doing {
-                parts.append("now: " + doing)
+                parts.append(Words.now(doing))
             } else if !steps.isEmpty {
                 parts.append("\(steps.count) step\(steps.count == 1 ? "" : "s")")
             }
-            if let judged { parts.append("judged " + judged.verdict) }
+            if let judged { parts.append(Words.checked(judged.verdict)) }
         }
         return parts.joined(separator: " · ")
     }
@@ -90,7 +90,7 @@ extension GoalDetail {
     /// The counts beside the Sub-goals header.
     public var progressLine: String {
         var line = "\(progress.done) of \(progress.total) done"
-        if progress.superseded > 0 { line += " · \(progress.superseded) superseded" }
+        if progress.superseded > 0 { line += " · " + Words.replaced(count: progress.superseded) }
         return line
     }
 
@@ -107,11 +107,11 @@ extension GoalDetail {
         return branch.map { ($0.work.title, $0.opensAsGoal ? $0.work.id : nil) }
     }
 
-    /// The finish line as a page says it: "A complete PR", with where it was
+    /// The finish line as a page says it: "A complete pull request", with where it was
     /// decided.
     public var finishWords: (line: String, source: String)? {
         guard let finish else { return nil }
-        let line = finish.line.hasPrefix("complete") || finish.line.hasPrefix("local") ? "A " + finish.line : finish.line.prefix(1).uppercased() + finish.line.dropFirst()
+        let line = Words.finishLine(finish.line)
         let source: String = switch finish.source {
         case "goal": "From what the goal asks."
         case "repo": "From the repo: its mode, its workflows and where its past goals finished."
@@ -124,7 +124,7 @@ extension GoalDetail {
 }
 
 extension RecordEntry {
-    /// Its kind as a badge: the verdict for a course check or a judgement.
+    /// Its kind as a badge: the verdict for a direction check or a check of done-when.
     public var badge: GoalBadge {
         let verdict = what.components(separatedBy: ": ").first ?? ""
         switch kind {
@@ -134,11 +134,11 @@ extension RecordEntry {
         case "course": return Course(verdict: verdict, why: "", at: at).badge
         case "question": return GoalBadge("Question", .attention)
         case "answer": return GoalBadge("Answered", .settled)
-        case "judged": return verdict == "met" ? GoalBadge("Judged met", .settled) : GoalBadge("Judged \(verdict)", .attention)
+        case "judged": return GoalBadge(Words.checked(verdict), verdict == "met" ? .settled : .attention)
         case "report": return GoalBadge("Report", .live)
         case "delivery": return GoalBadge("Delivered", .settled)
-        case "chore": return GoalBadge("Chore", .waiting)
-        case "superseded": return GoalBadge("Superseded", .waiting)
+        case "chore": return GoalBadge("Housekeeping", .waiting)
+        case "superseded": return GoalBadge(Words.replaced, .waiting)
         default: return GoalBadge(kind.prefix(1).uppercased() + kind.dropFirst(), .waiting)
         }
     }
@@ -150,7 +150,7 @@ extension RecordEntry {
     }
 
     /// One line for a list of what happened: its kind, then what it says.
-    public var sentence: String { "\(badge.text): \(text)" }
+    public var sentence: String { badge.text + (badge.text.contains(":") ? " — " : ": ") + text }
 }
 
 extension String {

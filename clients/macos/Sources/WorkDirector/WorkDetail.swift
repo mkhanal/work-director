@@ -675,8 +675,8 @@ struct EventsSection: View {
                         Text(e.at.prefix(19).replacingOccurrences(of: "T", with: " "))
                             .font(TypeScale.caption.monospaced()).foregroundStyle(.secondary)
                             .frame(width: 140, alignment: .leading)
-                        Text(e.kind).font(TypeScale.caption.weight(.medium)).frame(width: 70, alignment: .leading)
-                        Text(e.body).font(TypeScale.callout).textSelection(.enabled)
+                        Text(Words.event(e.kind)).font(TypeScale.caption.weight(.medium)).frame(width: 70, alignment: .leading)
+                        Text(Words.eventBody(kind: e.kind, body: e.body)).font(TypeScale.callout).textSelection(.enabled)
                     }
                 }
             }
