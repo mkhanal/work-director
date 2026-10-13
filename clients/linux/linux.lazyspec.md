@@ -136,10 +136,12 @@ hold only that product's work; with none, every product's.
 - A drag writes only the waits that change, from the top, each as `wd goal after <id> <id|none>`.
 - Merging two cards runs `wd goal merge <earlier> <later>`: the earlier card is kept.
 - Re-planning with a note runs `wd decide <goal> "<note>"`, then `wd goal plan <goal>`; an empty note is not sent.
+- Each card's Edit, Split, Merge and Drop is announced to assistive technology with the card's number and title.
 
 ## A Person Changes Where A Top Goal Finishes
 - The proposal's and the Overview's Finishes at offer the six finish lines, named as a finish-line question names them.
 - Choosing one runs `wd goal finish <goal> "<line>"`.
+- The menu is announced as Finishes at and the line it shows, not by the lines it offers.
 - A sub-goal's page offers none.
 
 ## A Course Change Shows What Was Found And What Happens To Each Sub-Goal

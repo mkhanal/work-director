@@ -125,6 +125,11 @@ impl FinishLine {
         FinishLine::Released,
     ];
 
+    /// What the menu that picks a goal's finish line is announced as.
+    pub fn menu_name(current: Option<FinishLine>) -> String {
+        format!("Finishes at: {}", current.map_or("Not decided yet", FinishLine::title))
+    }
+
     /// The finish line as wd reads and writes it.
     pub fn wire(self) -> &'static str {
         match self {

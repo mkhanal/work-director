@@ -63,6 +63,7 @@ impl Sidebar {
         let main =
             gtk::MenuButton::builder().icon_name("open-menu-symbolic").menu_model(&menu).tooltip_text("Menu").build();
         main.add_css_class("flat");
+        ui::announce(&main, "Menu");
         main.set_primary(true);
         let header = adw::HeaderBar::new();
         header.set_show_title(false);

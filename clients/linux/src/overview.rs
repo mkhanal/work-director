@@ -203,6 +203,12 @@ pub struct ProposedCard {
 }
 
 impl ProposedCard {
+    /// What one of its actions is announced as: the action and the card it
+    /// acts on, since every card has one.
+    pub fn announced(&self, action: &str, then: &str) -> String {
+        format!("{action} {} · {}{then}", self.number, self.title)
+    }
+
     /// Folds two cards into one: the earlier is kept.
     pub fn merge(&self, other: &ProposedCard) -> Plan {
         let (keep, gone) = if self.number < other.number { (self, other) } else { (other, self) };

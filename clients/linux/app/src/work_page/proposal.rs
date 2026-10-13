@@ -219,9 +219,8 @@ fn proposed_card(
 }
 
 /// A card's action announced with the card it acts on: there is one per card.
-fn named(control: &impl IsA<gtk::Accessible>, action: &str, card: &ProposedCard, then: &str) {
-    let said = format!("{action} {} · {}{then}", card.number, card.title);
-    control.update_property(&[gtk::accessible::Property::Label(&said)]);
+fn named(control: &impl IsA<gtk::Widget>, action: &str, card: &ProposedCard, then: &str) {
+    ui::announce(control, &card.announced(action, then));
 }
 
 /// Asks a proposed sub-goal's new title and done-when; only what changed is sent.

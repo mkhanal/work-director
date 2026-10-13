@@ -458,6 +458,21 @@ pub fn choice(
     button
 }
 
+/// Names a control for assistive technology by `said` alone: not by the label
+/// it holds, nor, for a menu button, by the text of its popover.
+pub fn announce(control: &impl IsA<gtk::Widget>, said: &str) {
+    let control = control.upcast_ref::<gtk::Widget>();
+    let mut named = vec![control.clone()];
+    if control.is::<gtk::MenuButton>() {
+        // A menu button is pressed through the toggle it holds; that is what is announced.
+        named.extend(control.first_child().filter(|c| c.is::<gtk::ToggleButton>()));
+    }
+    for widget in named {
+        widget.reset_relation(gtk::AccessibleRelation::LabelledBy);
+        widget.update_property(&[gtk::accessible::Property::Label(said)]);
+    }
+}
+
 /// A small link inside a line of text.
 pub fn inline_link(text: &str) -> gtk::Button {
     let button = gtk::Button::with_label(text);

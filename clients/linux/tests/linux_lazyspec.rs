@@ -1251,6 +1251,11 @@ fn a_proposal_is_reordered_merged_and_planned_again_from_its_cards() {
     );
 
     let cards = g.proposal().expect("a proposal");
+    assert_eq!(
+        (cards[3].announced("Drop", ""), cards[3].announced("Merge", " with 3")),
+        (format!("Drop 4 · {}", cards[3].title), format!("Merge 4 · {} with 3", cards[3].title)),
+        "a card's action is announced with the card it acts on"
+    );
     let merge = cards[3].merge(&cards[2]);
     assert_eq!(merge.argv, strings(&["goal", "merge", &a, &b]), "the earlier card is kept");
     home.wd(&merge.argv.iter().map(String::as_str).collect::<Vec<_>>());
@@ -1302,6 +1307,8 @@ fn a_person_changes_where_a_top_goal_finishes() {
     let g = run.wait(store.goal(&top)).expect("the goal");
     assert_eq!(g.finish, Some(Finish { line: FinishLine::CompletePr, source: FinishSource::Person }));
     assert_eq!(g.finish_pick(), Some(Some(FinishLine::CompletePr)));
+    assert_eq!(FinishLine::menu_name(Some(FinishLine::CompletePr)), "Finishes at: A complete PR");
+    assert_eq!(FinishLine::menu_name(None), "Finishes at: Not decided yet");
     let nested = run.wait(store.goal(&under)).expect("the sub-goal");
     assert_eq!(nested.finish_pick(), None, "a sub-goal's page offers none");
     store.stop();

@@ -1044,6 +1044,7 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
     agents_toggle.add_css_class("wd-button");
     let actions = gtk::MenuButton::builder().label("Actions").build();
     actions.add_css_class("wd-button");
+    ui::announce(&actions, "Actions");
     let pause = ui::button("Pause", false);
     pause.set_visible(false);
     let yours_list = gtk::ListBox::new();
@@ -1055,6 +1056,7 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
         .popover(&yours_popover)
         .build();
     yours.add_css_class("wd-button");
+    ui::announce(&yours, "Your messages");
     let gate = ui::button("", true);
     gate.set_visible(false);
     bar.pack_end(&agents_toggle);
