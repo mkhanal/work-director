@@ -326,8 +326,8 @@ type AddOptions struct {
 }
 
 // The two levels that organise work: a roadmap holds items, a goal holds
-// tasks. Anything else refuses a parent, so the shape of the ledger cannot
-// drift into something no reader could draw.
+// goals and tasks. Anything else refuses a parent, so the shape of the ledger
+// cannot drift into something no reader could draw.
 func childKind(parentKind, childKind core.WorkKind) error {
 	switch {
 	case parentKind == core.WorkRoadmap:
@@ -336,8 +336,8 @@ func childKind(parentKind, childKind core.WorkKind) error {
 		}
 		return nil
 	case core.IsGoal(parentKind):
-		if childKind != core.WorkTask {
-			return fmt.Errorf("a goal holds tasks, not %s", childKind)
+		if childKind != core.WorkTask && !core.IsGoal(childKind) {
+			return fmt.Errorf("a goal holds goals and tasks, not %s", childKind)
 		}
 		return nil
 	default:
@@ -358,11 +358,11 @@ func (l *Ledger) Add(project, title string, opts AddOptions) (core.Work, error) 
 	var parent *string
 	if opts.Parent != nil {
 		p := *opts.Parent
-		// A goal or a roadmap is a level, not a child: checked before the
-		// parent's own rule so the refusal says what is wrong rather than what
-		// the parent happened to hold.
-		if kind == core.WorkRoadmap || core.IsGoal(kind) {
-			return core.Work{}, fmt.Errorf("a goal or roadmap cannot sit under another work item")
+		// A roadmap is the top level, not a child: checked before the parent's
+		// own rule so the refusal says what is wrong rather than what the parent
+		// happened to hold.
+		if kind == core.WorkRoadmap {
+			return core.Work{}, fmt.Errorf("a roadmap cannot sit under another work item")
 		}
 		pw, err := l.Get(p)
 		if err != nil {
@@ -472,18 +472,31 @@ func (l *Ledger) List(filter ListFilter) ([]core.Work, error) {
 	return out, rows.Err()
 }
 
-// Children of a goal, oldest first.
+// Tasks are every task under a goal at any depth, oldest first: the work its
+// agents run, however deep its sub-goals nest.
 func (l *Ledger) Tasks(goalID string) ([]core.Work, error) {
-	return l.children(goalID)
+	tree, err := l.Under(goalID)
+	if err != nil {
+		return nil, err
+	}
+	out := []core.Work{}
+	for _, w := range tree[1:] {
+		if w.Kind == core.WorkTask {
+			out = append(out, w)
+		}
+	}
+	slices.SortStableFunc(out, func(a, b core.Work) int { return strings.Compare(a.Created, b.Created) })
+	return out, nil
 }
 
 // RoadmapItems of a roadmap, oldest first: the items still waiting, and the
 // goals already translated out of them, in the order they were filed.
 func (l *Ledger) Items(roadmapID string) ([]core.Work, error) {
-	return l.children(roadmapID)
+	return l.Children(roadmapID)
 }
 
-func (l *Ledger) children(parentID string) ([]core.Work, error) {
+// Children are the work directly under parentID, oldest first.
+func (l *Ledger) Children(parentID string) ([]core.Work, error) {
 	rows, err := l.db.Query(`SELECT `+workColumns+` FROM work WHERE parent = ? ORDER BY created`, parentID)
 	if err != nil {
 		return nil, err

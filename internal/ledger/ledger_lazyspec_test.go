@@ -352,34 +352,62 @@ func TestLedger(t *testing.T) {
 		}
 	})
 
-	t.Run("A Roadmap Holds Items And A Goal Holds Tasks", func(t *testing.T) {
+	t.Run("A Roadmap Holds Items And A Goal Holds Sub-Goals And Tasks", func(t *testing.T) {
 		l := newTestLedger(t)
 		roadmap := add(t, l, "p", "R", AddOptions{Kind: core.WorkRoadmap})
 		item := add(t, l, "p", "I", AddOptions{Kind: core.WorkItem, Parent: &roadmap.ID})
-		if is := allTasks(t, l, roadmap.ID); len(is) != 1 || is[0].ID != item.ID {
-			t.Fatalf("items = %v, want [%s]", is, item.ID)
+		if is, err := l.Items(roadmap.ID); err != nil || len(is) != 1 || is[0].ID != item.ID {
+			t.Fatalf("items = %v (%v), want [%s]", is, err, item.ID)
 		}
 		goal := add(t, l, "p", "G", AddOptions{Kind: core.WorkGoal})
 		task := add(t, l, "p", "T", AddOptions{Parent: &goal.ID})
 		if ts := allTasks(t, l, goal.ID); len(ts) != 1 || ts[0].ID != task.ID {
 			t.Fatalf("tasks = %v, want [%s]", ts, task.ID)
 		}
-		// The two levels do not cross, and the refusal says which.
-		_, err := l.Add("p", "T2", AddOptions{Parent: &roadmap.ID})
+		// A goal holds goals, and a task under a nested goal is one of the top
+		// goal's tasks but only the nested goal's child.
+		nested := add(t, l, "p", "N", AddOptions{Kind: core.WorkGoal, Parent: &goal.ID})
+		deep := add(t, l, "p", "D", AddOptions{Parent: &nested.ID})
+		ids := func(ws []core.Work) []string {
+			out := []string{}
+			for _, w := range ws {
+				out = append(out, w.ID)
+			}
+			return out
+		}
+		if got := ids(allTasks(t, l, goal.ID)); !slices.Equal(got, []string{task.ID, deep.ID}) {
+			t.Fatalf("tasks of top = %v, want [%s %s]", got, task.ID, deep.ID)
+		}
+		children, err := l.Children(nested.ID)
+		wantNoErr(t, err)
+		if got := ids(children); !slices.Equal(got, []string{deep.ID}) {
+			t.Fatalf("children of nested = %v, want [%s]", got, deep.ID)
+		}
+		children, err = l.Children(goal.ID)
+		wantNoErr(t, err)
+		if got := ids(children); !slices.Equal(got, []string{task.ID, nested.ID}) {
+			t.Fatalf("children of top = %v, want [%s %s]", got, task.ID, nested.ID)
+		}
+		// The levels do not cross, and the refusal says which.
+		_, err = l.Add("p", "T2", AddOptions{Parent: &roadmap.ID})
 		wantErr(t, err, "under "+roadmap.ID+": a roadmap holds items, not task")
 		_, err = l.Add("p", "I2", AddOptions{Kind: core.WorkItem, Parent: &goal.ID})
-		wantErr(t, err, "under "+goal.ID+": a goal holds tasks, not item")
-		// A goal or a roadmap cannot sit under anything.
+		wantErr(t, err, "under "+goal.ID+": a goal holds goals and tasks, not item")
 		_, err = l.Add("p", "G2", AddOptions{Kind: core.WorkGoal, Parent: &roadmap.ID})
-		wantErr(t, err, "a goal or roadmap cannot sit under another work item")
+		wantErr(t, err, "under "+roadmap.ID+": a roadmap holds items, not goal")
+		// A roadmap cannot sit under anything.
 		_, err = l.Add("p", "R2", AddOptions{Kind: core.WorkRoadmap, Parent: &roadmap.ID})
-		wantErr(t, err, "a goal or roadmap cannot sit under another work item")
+		wantErr(t, err, "a roadmap cannot sit under another work item")
+		_, err = l.Add("p", "R3", AddOptions{Kind: core.WorkRoadmap, Parent: &goal.ID})
+		wantErr(t, err, "a roadmap cannot sit under another work item")
 		// An item with no roadmap has nowhere to live.
 		_, err = l.Add("p", "I3", AddOptions{Kind: core.WorkItem})
 		wantErr(t, err, "a roadmap item belongs to a roadmap")
 		// Nothing but the two levels holds children.
 		plain := add(t, l, "p", "P", AddOptions{})
 		_, err = l.Add("p", "T3", AddOptions{Parent: &plain.ID})
+		wantErr(t, err, "under "+plain.ID+": work of kind task holds no children")
+		_, err = l.Add("p", "G3", AddOptions{Kind: core.WorkGoal, Parent: &plain.ID})
 		wantErr(t, err, "under "+plain.ID+": work of kind task holds no children")
 		_, err = l.Add("p", "T4", AddOptions{Parent: strPtr("nope")})
 		wantErr(t, err, "no work nope; wd status for known work items")

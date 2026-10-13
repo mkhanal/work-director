@@ -68,11 +68,12 @@ With `codeChanged` true, `SoftDone` also requires a `pr` event.
 `Distill` returns groups keyed by card, else project, else global, only where
 two or more feedback entries share the key.
 
-## A Roadmap Holds Items And A Goal Holds Tasks
-- `Add` with a parent requires the parent to exist and to hold this kind: a roadmap holds items, a goal holds tasks.
+## A Roadmap Holds Items And A Goal Holds Sub-Goals And Tasks
+- `Add` with a parent requires the parent to exist and to hold this kind: a roadmap holds items, a goal holds goals and tasks.
 - Anything else is refused naming what the parent holds.
-- A goal or roadmap cannot sit under another work item.
+- A roadmap cannot sit under another work item, and a goal can sit only under a goal.
 - An item with no roadmap is refused.
+- `Tasks(goal)` returns every task under the goal at any depth, oldest first; `Children(id)` returns its direct children.
 
 ## A Roadmap Item Becomes A Goal Without Changing Its Id
 - `Promote` changes an item's kind to goal on the same row and records an event.
