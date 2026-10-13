@@ -97,6 +97,9 @@ const (
 	// EventSupervised is a supervisor's reply carried out: what it said, what
 	// was done and what was refused.
 	EventSupervised EventKind = "supervised"
+	// EventCourse is a supervisor's verdict on whether its goal is on course:
+	// "<verdict>: <why>", or "unstated" when its reply gave none.
+	EventCourse EventKind = "course"
 )
 
 type FeedbackSource string
@@ -537,7 +540,7 @@ const (
 
 var (
 	WorkKinds       = []WorkKind{WorkTask, WorkEvolution, WorkWorkflow, WorkGoal, WorkRoadmap, WorkItem}
-	EventKinds      = []EventKind{EventState, EventReport, EventVerify, EventPr, EventNote, EventSent, EventSpawn, EventAttach, EventQuestion, EventAnswer, EventDecision, EventAbandon, EventLook, EventSupervised}
+	EventKinds      = []EventKind{EventState, EventReport, EventVerify, EventPr, EventNote, EventSent, EventSpawn, EventAttach, EventQuestion, EventAnswer, EventDecision, EventAbandon, EventLook, EventSupervised, EventCourse}
 	FeedbackSources = []FeedbackSource{FeedbackDirector, FeedbackNote, FeedbackAttached}
 	LandingKinds    = []LandingKind{LandingCommit, LandingPullRequest}
 	WorktreeKinds   = []WorktreeKind{WorktreeShared, WorktreePrivate}

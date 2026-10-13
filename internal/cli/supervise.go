@@ -310,7 +310,7 @@ func (c *Cli) sinceLook(goal core.Work, tasks []core.Work) ([]string, bool, int,
 
 // picture is the goal as its supervisor is shown it.
 func (c *Cli) picture(goal core.Work, p *project.Project) (coordinator.Picture, error) {
-	pic := coordinator.Picture{Goal: goal, Decisions: []string{}, Tasks: []coordinator.TaskPicture{}, Concerns: []core.Concern{}}
+	pic := coordinator.Picture{Goal: goal, Decisions: []string{}, Subs: []coordinator.SubPicture{}, Superseded: []coordinator.SubPicture{}, Concerns: []core.Concern{}}
 	kit, err := project.ReadToolkit(p.Path)
 	if err != nil {
 		return pic, err
@@ -330,27 +330,15 @@ func (c *Cli) picture(goal core.Work, p *project.Project) (coordinator.Picture, 
 			pic.Decisions = append(pic.Decisions, e.Body)
 		}
 	}
-	tasks, err := c.Ledger.Tasks(goal.ID)
+	if pic.Subs, err = c.subPictures(goal.ID, &pic.Superseded); err != nil {
+		return pic, err
+	}
+	tree, err := c.Ledger.Under(goal.ID)
 	if err != nil {
 		return pic, err
 	}
-	ids := []string{goal.ID}
-	for _, t := range tasks {
-		ids = append(ids, t.ID)
-		evs, err := c.Ledger.Events(t.ID, nil)
-		if err != nil {
-			return pic, err
-		}
-		tp := coordinator.TaskPicture{Work: t, Stopped: coordinator.StoppedSaying(evs)}
-		for _, e := range evs {
-			if e.Kind == core.EventReport {
-				tp.Report = e.Body
-			}
-		}
-		pic.Tasks = append(pic.Tasks, tp)
-	}
-	for _, id := range ids {
-		concerns, err := c.Ledger.Concerns(&id)
+	for _, w := range tree {
+		concerns, err := c.Ledger.Concerns(&w.ID)
 		if err != nil {
 			return pic, err
 		}
@@ -362,6 +350,49 @@ func (c *Cli) picture(goal core.Work, p *project.Project) (coordinator.Picture, 
 	}
 	return pic, nil
 }
+
+// subPictures are the sub-goals under parent as a tree; one a course change
+// superseded goes to superseded instead, once, with why.
+func (c *Cli) subPictures(parent string, superseded *[]coordinator.SubPicture) ([]coordinator.SubPicture, error) {
+	subs, err := c.Ledger.Children(parent)
+	if err != nil {
+		return nil, err
+	}
+	out := []coordinator.SubPicture{}
+	for _, w := range subs {
+		evs, err := c.Ledger.Events(w.ID, nil)
+		if err != nil {
+			return nil, err
+		}
+		sp := coordinator.SubPicture{Work: w, Stopped: coordinator.StoppedSaying(evs)}
+		for _, e := range evs {
+			switch {
+			case e.Kind == core.EventReport:
+				sp.Report = e.Body
+			case e.Kind == core.EventNote && strings.HasPrefix(e.Body, supersededPrefix):
+				sp.Superseded = strings.TrimPrefix(e.Body, supersededPrefix)
+			}
+		}
+		if w.State == core.StateSuperseded {
+			*superseded = append(*superseded, sp)
+			continue
+		}
+		if sp.After, err = c.Ledger.After(w.ID); err != nil {
+			return nil, err
+		}
+		if sp.Steps, err = c.Ledger.Steps(w.ID); err != nil {
+			return nil, err
+		}
+		if sp.Children, err = c.subPictures(w.ID, superseded); err != nil {
+			return nil, err
+		}
+		out = append(out, sp)
+	}
+	return out, nil
+}
+
+// supersededPrefix opens the note Supersede files with why.
+const supersededPrefix = "superseded: "
 
 // carryOut does what the supervisor's reply says, each action on its own, and
 // files the reply with what was done and refused as one supervised event.
@@ -466,6 +497,9 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 			out.Refused = append(out.Refused, done.Line()+" — "+open)
 			done = nil
 		}
+	}
+	if err := coordinator.FileCourse(c.Ledger, goal.ID, reply); err != nil {
+		return out, err
 	}
 	body := coordinator.Said(reply)
 	if len(out.Actions) > 0 {

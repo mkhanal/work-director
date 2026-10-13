@@ -13,26 +13,35 @@ import (
 )
 
 // Picture is what a goal's supervisor is shown at each look: the goal, what was
-// decided on it, where each task stands and what is still unsettled.
+// decided on it, its sub-goals as a tree, those a course change superseded,
+// and what is still unsettled.
 type Picture struct {
-	Goal      core.Work
-	Decisions []string
-	Tasks     []TaskPicture
-	Concerns  []core.Concern
-	Checks    []string
-	Worktree  string
+	Goal       core.Work
+	Decisions  []string
+	Subs       []SubPicture
+	Superseded []SubPicture
+	Concerns   []core.Concern
+	Checks     []string
+	Worktree   string
 }
 
-// TaskPicture is one task as its supervisor sees it: its row, its latest
-// report, and, when its session stopped without reporting, what it last said.
-type TaskPicture struct {
-	Work    core.Work
-	Report  string
-	Stopped string
+// SubPicture is one sub-goal as its supervisor sees it: its row, what it waits
+// on, its agent's steps, its latest report, and, when its session stopped
+// without reporting, what it last said; Superseded is why a course change
+// abandoned it. Children are the sub-goals under it.
+type SubPicture struct {
+	Work       core.Work
+	After      []string
+	Steps      []core.Step
+	Report     string
+	Stopped    string
+	Superseded string
+	Children   []SubPicture
 }
 
-// reportClip bounds each report in the brief: the supervisor reads every task
-// at every look, and a long report says what it has to in its first lines.
+// reportClip bounds each report in the brief: the supervisor reads every
+// sub-goal at every look, and a long report says what it has to in its first
+// lines.
 const reportClip = 1500
 
 func clip(s string, n int) string {
@@ -43,6 +52,52 @@ func clip(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
+// writeSubs lists subs and their children, each level indented two more.
+func writeSubs(b *strings.Builder, subs []SubPicture, indent string) {
+	more := indent + "  "
+	nl := "\n" + more + "  "
+	for _, s := range subs {
+		fmt.Fprintf(b, "%s- %s [%s] %s\n", indent, s.Work.ID, s.Work.State, s.Work.Title)
+		fmt.Fprintf(b, "%sdone when: %s\n", more, textOr(s.Work.DoneWhen, "not set"))
+		if len(s.After) > 0 {
+			fmt.Fprintf(b, "%swaits on: %s\n", more, strings.Join(s.After, ", "))
+		}
+		if len(s.Steps) > 0 {
+			done, total, doing := 0, 0, ""
+			for _, st := range s.Steps {
+				if st.State == core.StepDropped {
+					continue
+				}
+				total++
+				if st.State == core.StepDone {
+					done++
+				}
+				if st.State == core.StepDoing && doing == "" {
+					doing = st.Text
+				}
+			}
+			if doing == "" {
+				doing = "no step in hand"
+			}
+			fmt.Fprintf(b, "%sdoing: %s (%d/%d steps done)\n", more, doing, done, total)
+		}
+		if s.Report != "" {
+			fmt.Fprintf(b, "%slatest report: %s\n", more, strings.ReplaceAll(clip(s.Report, reportClip), "\n", nl))
+		}
+		if s.Stopped != "" {
+			fmt.Fprintf(b, "%sstopped without a report; it last said: %s\n", more, strings.ReplaceAll(clip(s.Stopped, reportClip), "\n", nl))
+		}
+		writeSubs(b, s.Children, more)
+	}
+}
+
+func textOr(s *string, empty string) string {
+	if s == nil || strings.TrimSpace(*s) == "" {
+		return empty
+	}
+	return *s
+}
+
 // SupervisionBrief is what the goal's supervisor is given at each look.
 func SupervisionBrief(p Picture) string {
 	var b strings.Builder
@@ -51,6 +106,11 @@ func SupervisionBrief(p Picture) string {
 	if g.Detail != "" && g.Detail != g.Title {
 		fmt.Fprintf(&b, "%s\n", g.Detail)
 	}
+	finish := "not decided"
+	if g.FinishLine != nil {
+		finish = string(*g.FinishLine)
+	}
+	fmt.Fprintf(&b, "\nDone when: %s\nFinishes at: %s\n", textOr(g.DoneWhen, "not set"), finish)
 	if len(p.Decisions) > 0 {
 		b.WriteString("\nDecided since, newest last:\n")
 		for _, d := range p.Decisions {
@@ -61,14 +121,12 @@ func SupervisionBrief(p Picture) string {
 	if p.Worktree != "" {
 		where = p.Worktree
 	}
-	fmt.Fprintf(&b, "\nTasks, each its own agent session working in %s:\n", where)
-	for _, t := range p.Tasks {
-		fmt.Fprintf(&b, "- %s [%s] %s\n", t.Work.ID, t.Work.State, t.Work.Title)
-		if t.Report != "" {
-			fmt.Fprintf(&b, "  latest report: %s\n", strings.ReplaceAll(clip(t.Report, reportClip), "\n", "\n  "))
-		}
-		if t.Stopped != "" {
-			fmt.Fprintf(&b, "  stopped without a report; it last said: %s\n", strings.ReplaceAll(clip(t.Stopped, reportClip), "\n", "\n  "))
+	fmt.Fprintf(&b, "\nSub-goals; each leaf is its own agent session working in %s:\n", where)
+	writeSubs(&b, p.Subs, "")
+	if len(p.Superseded) > 0 {
+		b.WriteString("\nSuperseded by a course change, with why; do not propose them again:\n")
+		for _, s := range p.Superseded {
+			fmt.Fprintf(&b, "- %s %s: %s\n", s.Work.ID, s.Work.Title, s.Superseded)
 		}
 	}
 	if len(p.Concerns) > 0 {
@@ -82,21 +140,66 @@ func SupervisionBrief(p Picture) string {
 		checks = "`" + strings.Join(p.Checks, "`, `") + "`"
 	}
 	fmt.Fprintf(&b, `
-Your job is the goal as the person asked it, not each task on its own. Read the reports, and read the work itself in the worktree (git status, git diff) to check it; do not edit, create or delete files. Each task's agent keeps to its own files and leaves work between tasks to you: a missing wire-up, a gap no task owns, a concern one task raised about another. Settle concerns yourself unless only the person can: a business fact, or something irreversible or seen outside the repository, such as pushing a tag. Prefer telling an existing task over adding one. The director runs the checks itself (%s), and landing (commits, pull requests, tags, pushes) waits for the person.
+Your first duty is the top goal's done-when: at every look, judge whether the open sub-goals still lead to it. Your job is the goal as the person asked it, not each sub-goal on its own. Read the reports, and read the work itself in the worktree (git status, git diff) to check it; do not edit, create or delete files. Each agent keeps to its own sub-goal and leaves work between sub-goals to you: a missing wire-up, a gap no sub-goal owns, a concern one raised about another. Settle concerns yourself unless only the person can: a business fact, or something irreversible or seen outside the repository, such as pushing a tag. Prefer telling an existing agent over adding a sub-goal. The director runs the checks itself (%s), and landing (commits, pull requests, tags, pushes) waits for the person.
 
-End every reply with a line ACTIONS: and then one action per line:
-SEND <task>: <what to do next>
+End every reply with one line
+COURSE: on course | correct | pivot — <why>
+then a line ACTIONS: and then one action per line:
+%s`, checks, actionList)
+	return b.String()
+}
+
+// actionList is every action a supervisor may take, one per line, as the
+// brief teaches them.
+const actionList = `SEND <id>: <what to do next>
 TASK: <title of a new task, started at once>
-START <task>  (a task filed and never started)
-DROP <task>: <why it is not needed>  (a task filed and never started)
+START <id>  (a sub-goal filed and never started)
+DROP <id>: <why it is not needed>  (a task filed and never started)
 RESOLVE <concern number>: <decision>
 ASK: <a question only the person can answer>
 - <a choice, your recommendation first, marked (recommended)>
 - <another choice>  (offer choices whenever the answer is one of a few; the person can always answer in words)
 DONE: <one line: every part of the goal is built, checked and fits together>
-WAIT  (nothing to do until a task reports)
-`, checks)
-	return b.String()
+WAIT  (nothing to do until a sub-goal reports)
+`
+
+// CourseVerdict is a supervisor's judgement of where its goal stands.
+type CourseVerdict string
+
+const (
+	CourseOn      CourseVerdict = "on course"
+	CourseCorrect CourseVerdict = "correct"
+	CoursePivot   CourseVerdict = "pivot"
+)
+
+// Course is a reply's COURSE line: its verdict and why.
+type Course struct {
+	Verdict CourseVerdict
+	Why     string
+}
+
+var courseRe = regexp.MustCompile(`(?i)^\s*\**COURSE:\**\s*(on course|correct|pivot)\s*(?:—|–|-{1,2}|:)\s*(\S.*)$`)
+
+// ParseCourse reads the last COURSE line of a reply.
+func ParseCourse(texts []string) (Course, bool) {
+	lines := strings.Split(strings.Join(texts, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if m := courseRe.FindStringSubmatch(lines[i]); m != nil {
+			return Course{Verdict: CourseVerdict(strings.ToLower(m[1])), Why: strings.TrimSpace(m[2])}, true
+		}
+	}
+	return Course{}, false
+}
+
+// FileCourse files a reply's course on goal as one course event, "unstated"
+// when the reply gave none.
+func FileCourse(l *ledger.Ledger, goal string, texts []string) error {
+	body := "unstated"
+	if c, ok := ParseCourse(texts); ok {
+		body = string(c.Verdict) + ": " + c.Why
+	}
+	_, err := l.AddEvent(goal, core.EventCourse, body)
+	return err
 }
 
 // ActionKind is one thing a supervisor can decide.
@@ -181,7 +284,7 @@ func ParseSupervision(texts []string) (actions []Action, refused []string) {
 	}
 	for _, raw := range lines[start:] {
 		l := strings.TrimSpace(raw)
-		if l == "" || strings.HasPrefix(l, "```") {
+		if l == "" || strings.HasPrefix(l, "```") || courseRe.MatchString(l) {
 			continue
 		}
 		listed := listRe.MatchString(l)

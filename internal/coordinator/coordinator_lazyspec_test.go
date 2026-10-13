@@ -209,33 +209,80 @@ func TestCoordinator(t *testing.T) {
 	})
 
 	t.Run("The Supervision Brief Gives A Goal's Supervisor The Whole Picture", func(t *testing.T) {
+		finish := core.FinishPR
 		pic := Picture{
-			Goal:      core.Work{ID: "g1", Title: "Release notes", Detail: "for engineers and customers", Kind: core.WorkGoal},
+			Goal:      core.Work{ID: "g1", Title: "Release notes", Detail: "for engineers and customers", Kind: core.WorkGoal, DoneWhen: ptrTo("every release lists its changes"), FinishLine: &finish},
 			Decisions: []string{"keep the js bump script"},
-			Tasks: []TaskPicture{
-				{Work: core.Work{ID: "t1", Title: "Collector", State: core.StateReview}, Report: "STATUS: DONE\nFILES: collect.ts"},
-				{Work: core.Work{ID: "t2", Title: "Impacts", State: core.StateRunning}, Stopped: "wiring it in belongs to the collector task"},
+			Subs: []SubPicture{
+				{Work: core.Work{ID: "t1", Title: "Collector", State: core.StateReview, DoneWhen: ptrTo("changes are grouped by type")}, Report: "STATUS: DONE\nFILES: collect.ts"},
+				{Work: core.Work{ID: "s2", Title: "Impacts", State: core.StateRunning, Kind: core.WorkGoal}, After: []string{"t1"}, Children: []SubPicture{
+					{Work: core.Work{ID: "t2", Title: "Detect impacts", State: core.StateRunning}, Stopped: "wiring it in belongs to the collector task",
+						Steps: []core.Step{{N: 1, Text: "read the config", State: core.StepDone}, {N: 2, Text: "check the fields", State: core.StepDoing}, {N: 3, Text: "refuse a bad one", State: core.StepTodo}}},
+				}},
 			},
-			Concerns: []core.Concern{{ID: 18, Work: "t2", Text: "the collector never calls the detector"}},
-			Checks:   []string{"npm run lint"},
-			Worktree: "/wt/g1",
+			Superseded: []SubPicture{{Work: core.Work{ID: "t9", Title: "Port the bump script", State: core.StateSuperseded}, Superseded: "the js script stays"}},
+			Concerns:   []core.Concern{{ID: 18, Work: "t2", Text: "the collector never calls the detector"}},
+			Checks:     []string{"npm run lint"},
+			Worktree:   "/wt/g1",
 		}
 		brief := SupervisionBrief(pic)
 		for _, want := range []string{
-			"g1", "Release notes", "for engineers and customers", "keep the js bump script",
-			"t1 [review] Collector", "STATUS: DONE", "t2 [running] Impacts",
+			"g1", "Release notes", "for engineers and customers", "Done when: every release lists its changes", "Finishes at: complete PR",
+			"keep the js bump script",
+			"- t1 [review] Collector", "  done when: changes are grouped by type", "STATUS: DONE",
+			"- s2 [running] Impacts", "  waits on: t1",
+			"  - t2 [running] Detect impacts", "    doing: check the fields (1/3 steps done)",
 			"stopped without a report; it last said: wiring it in belongs to the collector task",
+			"- t9 Port the bump script: the js script stays",
 			"18 (on t2): the collector never calls the detector", "`npm run lint`",
-			"do not edit, create or delete files", "landing (commits, pull requests, tags, pushes) waits for the person",
+			"first duty is the top goal's done-when",
+			"COURSE: on course | correct | pivot — <why>",
 			"offer choices whenever the answer is one of a few",
-			"ACTIONS:", "SEND <task>", "TASK: <", "START <task>", "RESOLVE <", "ASK: <", "DONE: <", "WAIT",
+			"ACTIONS:", "SEND <", "START <", "RESOLVE <", "ASK: <", "DONE: <", "WAIT",
 		} {
 			if !strings.Contains(brief, want) {
 				t.Fatalf("brief missing %q:\n%s", want, brief)
 			}
 		}
-		if bare := SupervisionBrief(Picture{Goal: pic.Goal}); !strings.Contains(bare, "none: the repository defines no checks") {
-			t.Fatalf("brief with no checks does not say so:\n%s", bare)
+		if strings.Index(brief, "COURSE:") > strings.LastIndex(brief, "ACTIONS:") {
+			t.Fatalf("the brief asks for ACTIONS before COURSE:\n%s", brief)
+		}
+		if bare := SupervisionBrief(Picture{Goal: core.Work{ID: "g2", Title: "x"}}); !strings.Contains(bare, "none: the repository defines no checks") || !strings.Contains(bare, "Done when: not set") {
+			t.Fatalf("brief with no checks or done-when does not say so:\n%s", bare)
+		}
+	})
+
+	t.Run("Every Supervision Reply Says Whether The Goal Is On Course", func(t *testing.T) {
+		for in, want := range map[string]Course{
+			"COURSE: on course — the collector and detector fit":   {Verdict: CourseOn, Why: "the collector and detector fit"},
+			"**COURSE:** correct - a guide sub-goal is missing":    {Verdict: CourseCorrect, Why: "a guide sub-goal is missing"},
+			"COURSE: Pivot — tags already exist, so build on them": {Verdict: CoursePivot, Why: "tags already exist, so build on them"},
+		} {
+			got, ok := ParseCourse([]string{"I looked.", in, "ACTIONS:", "WAIT"})
+			if !ok || got != want {
+				t.Fatalf("ParseCourse(%q) = %+v, %v; want %+v", in, got, ok, want)
+			}
+		}
+		for _, bad := range []string{"COURSE: sideways — hmm", "COURSE: on course", "nothing here"} {
+			if got, ok := ParseCourse([]string{bad}); ok {
+				t.Fatalf("ParseCourse(%q) = %+v, want none", bad, got)
+			}
+		}
+		l := newTestLedger(t)
+		goal := add(t, l, "p", "Release notes", ledger.AddOptions{Kind: core.WorkGoal})
+		if err := FileCourse(l, goal.ID, []string{"COURSE: correct — a guide is missing", "ACTIONS:", "WAIT"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := FileCourse(l, goal.ID, []string{"ACTIONS:", "WAIT"}); err != nil {
+			t.Fatal(err)
+		}
+		kind := core.EventCourse
+		evs, err := l.Events(goal.ID, &kind)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(evs) != 2 || evs[0].Body != "correct: a guide is missing" || evs[1].Body != "unstated" {
+			t.Fatalf("course events = %+v, want the verdict and then unstated", evs)
 		}
 	})
 

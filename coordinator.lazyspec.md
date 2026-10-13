@@ -118,13 +118,14 @@ and directory still follow its goal.
 - A needs-input child that was sent a message returns to running.
 
 ## The Supervision Brief Gives A Goal's Supervisor The Whole Picture
-- `SupervisionBrief(picture)` carries the goal's id, title and detail, every decision on it, and the project's checks or that there are none.
-- It lists each task with its id, state and title, and its latest report.
-- A task whose session stopped without a report is listed with what it last said.
-- It lists each open concern under the goal with its number and the work it was raised on.
-- It forbids editing files, and says landing waits for the person.
-- It asks for choices under an `ASK` whenever the answer is one of a few.
-- It asks for a reply ending in an `ACTIONS:` line followed by one `SEND`, `TASK`, `START`, `DROP`, `RESOLVE`, `ASK`, `DONE` or `WAIT` line each.
+- It carries the top goal's title, detail, done-when and finish line, and the decisions recorded on it.
+- It lists the goal's sub-goals as a tree, each with its state, done-when, what it waits on, its current step, and its latest report or what it last said; superseded ones with why.
+- It lists open concerns with their numbers and the checks the director runs.
+- It asks for a COURSE line and then an ACTIONS list, naming every action.
+
+## Every Supervision Reply Says Whether The Goal Is On Course
+- `ParseCourse` reads `COURSE: <on course | correct | pivot> — <why>`.
+- Carrying out a reply files its course as a course event; a reply without one files `unstated`.
 
 ## A Question The Director Files Keeps Its Choices
 - `QuestionBody(asks)` writes each question on its own line, its choices under it as `- ` lines.
