@@ -46,6 +46,18 @@ close
 check "change course renames the goal" "SELECT title FROM work WHERE id = '$pivot'" "Sync never drops events"
 check "change course sets its finish line" "SELECT finish_line FROM work WHERE id = '$pivot'" "complete PR"
 
+# The proposal: merging two cards supersedes the second.
+open "$proposal" overview
+python3 -c "import sys; sys.path.insert(0, '/repo/scripts/ui/linux'); from a11y import *; dump()" > /shots/proposal-tree.txt 2>&1 || true
+act "press('toggle button', 'Merge 3 ·')"
+python3 -c "import sys; sys.path.insert(0, '/repo/scripts/ui/linux'); from a11y import *; dump()" > /shots/merge-tree.txt 2>&1 || true
+xdotool key Down Return
+sleep 3
+import -window "$win" /shots/act-merge.png
+close
+check "merging supersedes one proposed sub-goal" "SELECT count(*) FROM work WHERE parent = '$proposal' AND state = 'superseded'" "1"
+
+
 # The proposal: Approve and start approves the breakdown.
 open "$proposal" overview
 act "press('push button', 'Approve and start')"
@@ -61,6 +73,16 @@ import -window "$win" /shots/act-finish.png
 close
 check "the finish choice is stored" "SELECT finish_line FROM work WHERE id = '$finish'" "research"
 if grep -q '^finish: research' "$WD_HOME/projects/metariki-eqms.md"; then echo "PASS the finish choice became the product's setting"; else echo "FAIL the product's finish setting: $(grep '^finish' "$WD_HOME/projects/metariki-eqms.md")"; fail=1; fi
+
+# The Overview's finish line: chosen from its card's menu.
+open "$goal" overview
+python3 -c "import sys; sys.path.insert(0, '/repo/scripts/ui/linux'); from a11y import *; dump()" > /shots/main-tree.txt 2>&1 || true
+act "press('toggle button', 'A complete PR')"
+python3 -c "import sys; sys.path.insert(0, '/repo/scripts/ui/linux'); from a11y import *; dump()" > /shots/menu-tree.txt 2>&1 || true
+act "press('push button', 'Merged', exact=True)"
+import -window "$win" /shots/act-finish-menu.png
+close
+check "the finish line changes from the overview" "SELECT finish_line FROM work WHERE id = '$goal'" "merged"
 
 cp "$db" /shots/ledger.db; cp /tmp/app.log /shots/app.log
 exit $fail
