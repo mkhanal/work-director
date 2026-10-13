@@ -6,6 +6,20 @@ import Foundation
 
 private let supersededPrefix = "superseded: "
 
+/// The views a goal is read in: where it stands and its sub-goals, what was
+/// said, and what was decided and done.
+public enum GoalView: String, CaseIterable, Sendable {
+    case overview, conversation, record
+
+    public var label: String {
+        switch self {
+        case .overview: "Overview"
+        case .conversation: "Conversation"
+        case .record: "Record"
+        }
+    }
+}
+
 extension TreeNode {
     /// Its icon: a question below it marks it as needing the person.
     public var mark: StateMark { needsYou > 0 ? .needsYou : work.state.mark }

@@ -215,12 +215,6 @@ public enum ThreadItem: Sendable, Hashable, Identifiable {
     }
 }
 
-/// How far a goal's tasks have come, by where each stands.
-public struct TaskProgress: Sendable, Hashable {
-    public var done = 0, working = 0, review = 0, blocked = 0, waiting = 0, dropped = 0
-    public var total: Int { done + working + review + blocked + waiting + dropped }
-}
-
 extension GoalDetail {
     /// The conversation narrowed to one kind of turn. Everything folds each
     /// run of two or more updates — looks, state changes, checks, landings,
@@ -263,41 +257,6 @@ extension GoalDetail {
         case .event(let e): ["state", "verify", "pr", "sent"].contains(e.kind)
         default: false
         }
-    }
-
-    /// Where the goal's tasks stand.
-    public var taskProgress: TaskProgress {
-        var p = TaskProgress()
-        for t in tasks {
-            switch t.state {
-            case .done, .softDone: p.done += 1
-            case .running, .needsInput: p.working += 1
-            case .review: p.review += 1
-            case .blocked: p.blocked += 1
-            case .dropped, .abandoned, .superseded: p.dropped += 1
-            case .queued, .briefed, .paused: p.waiting += 1
-            }
-        }
-        return p
-    }
-
-    /// The supervisor's latest reply, the freshest word on where the goal is.
-    public var latestSupervision: (event: Event, reply: SupervisorReply)? {
-        for step in thread.reversed() {
-            if case .supervisor(let e, let r) = step { return (e, r) }
-        }
-        return nil
-    }
-
-    /// The tasks whose sessions are running now.
-    public var working: [Work] {
-        tasks.filter { activity[$0.id]?.status == .running }
-    }
-
-    /// What waits on the person: the goal's own question, each task's session
-    /// question, and each task waiting on them some other way.
-    public var waitingOnYou: Int {
-        (asking == nil ? 0 : 1) + tasks.filter { activity[$0.id]?.asking != nil }.count + waitingTasks.count
     }
 
     /// Tasks waiting on the person with no question open in their session,

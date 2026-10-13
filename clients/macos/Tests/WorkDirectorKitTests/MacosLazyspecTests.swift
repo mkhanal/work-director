@@ -818,7 +818,7 @@ struct SeededTree {
         #expect(try await store.work(goal).title == "Config fixes")
     }
 
-    @Test("A Goal Is Read As Its Overview, Its Conversation, Its Tasks Or Its Record")
+    @Test("A Goal Is Read As Its Overview, Its Conversation Or Its Record")
     func goalViews() throws {
         func event(_ id: Int, _ work: String, _ kind: String, _ body: String, decision: String = "null") -> String {
             let quoted = String(data: try! JSONEncoder().encode(body), encoding: .utf8)!
@@ -848,10 +848,7 @@ struct SeededTree {
          "asking":\(asking),"reports":{"5":\(report)},"waiting":[],\(treeless)}
         """
         let goal = try JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
-        let p = goal.taskProgress
-        let counts: [Int] = [p.done, p.working, p.review, p.blocked, p.waiting, p.dropped]
-        #expect(counts == [1, 1, 1, 1, 1, 1])
-        #expect(goal.waitingOnYou == 2, "the goal's own question and task c's")
+        #expect(GoalView.allCases.map(\.label) == ["Overview", "Conversation", "Record"])
 
         let all = goal.items(.all)
         #expect(all.map(\.id) == [1, 2, 5, 6, 7, 9], "updates 2–4 fold into one row; a lone update stays a step")

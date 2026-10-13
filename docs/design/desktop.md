@@ -257,30 +257,30 @@ At the top of the conversation, `space.7` above:
 
 ### Goal page
 
-A fixed top (name, meta line, tabs) over one scrolling view, so the name and
-the way between views never scroll away. Tabs: **Overview**, **Conversation**,
-**Tasks** (with count), **Record** (with count); Overview carries an orange dot
-while something waits on you. The last tab chosen is remembered.
+As the canvas (`goal-tree/main`, `subgoal`, `conversation`, `record`). A
+fixed top over one scrolling view: padding 20 / 32; breadcrumb (product ›
+each goal down to this one, ancestors as links); title in `type.display` with
+a badge (Needs you while a question waits below it, else its state); tabs
+**Overview**, **Conversation**, **Record**; a hairline under it. The body has
+padding 20 / 32 and 20 between sections.
 
-- **Overview** answers "where does this stand" without scrolling, in this
-  order, each under a `type.micro` section title with `space.6` between:
-  Needs you (every question waiting on you, answered in place: the goal's,
-  each task's session question, and each task in needs-input with what it
-  asked or reported); Next step (the next gate as one prominent button with
-  why); Progress (done of total in `type.title`, one 8 px bar segmented by
-  state — done green, working accent, review purple, blocked red, waiting
-  grey, dropped faint — and a legend with counts); Working now (an agent chip
-  per running session); Latest from the supervisor; What you decided; What you
-  asked.
-- **Conversation** opens with filter chips — Everything, You, Supervisor,
-  Reports, Questions — each with its count. Everything folds each run of two
-  or more updates (looks, state changes, checks, landings, messages told to a
-  task) into one "N updates" line that opens; a day line ("Today",
-  "Yesterday", "Monday, Oct 12") starts each day.
-- **Tasks** is a table: state and title, what its agent is doing now, its
-  last report's verdict, when it last moved, tokens; sortable by plan order,
-  state (needs input and blocked first) or recency; a row opens the task.
-- **Record** is the raw event log, newest first.
+- **Overview**: cards side by side — Done when · Finishes at (the line, and
+  who decided it) · Course (verdict badge, how long ago, why); a sub-goal's
+  page leaves out Finishes at. Then every question below the goal as a
+  question card headed "Needs you · in <path>" (each level that is a goal a
+  link), options with Recommended, "Let the director decide" and Answer.
+  Then **Sub-goals** (16 semibold) with the progress bar on a top goal, "1 of
+  4 done · 1 superseded" and "+ Add sub-goal"; one card of rows (state icon,
+  title, line, trailing badge): a goal row opens its page (title ends "›"), a
+  task row folds its steps (closed but the first working row's), superseded
+  rows struck through with why. Then "Not done yet, because" with what `wd`
+  serves; on a sub-goal's page, "What the director did here" from its record.
+- **Conversation**: filter chips (Everything, You and the director, one per
+  sub-goal); each agent turn tagged with its sub-goal path; a sub-goal
+  finishing is an event line; the composer can address one sub-goal.
+- **Record**: five summary cards; kind chips (Everything, Decisions, Course,
+  Questions, Reports, Chores, Delivery) and a sub-goal picker; a table of
+  time · kind badge · what · where · by, grouped by day.
 
 ### Reports
 

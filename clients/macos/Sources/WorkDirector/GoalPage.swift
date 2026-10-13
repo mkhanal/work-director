@@ -1,29 +1,7 @@
 import SwiftUI
 import WorkDirectorKit
 
-/// The views a goal is read in, each answering one question fast: where it
-/// stands, what was said, what each task is doing, and the full record.
-enum GoalView: String, CaseIterable {
-    case overview, conversation, tasks, record
 
-    var label: String {
-        switch self {
-        case .overview: "Overview"
-        case .conversation: "Conversation"
-        case .tasks: "Tasks"
-        case .record: "Record"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .overview: "square.grid.2x2"
-        case .conversation: "bubble.left.and.bubble.right"
-        case .tasks: "checklist"
-        case .record: "list.bullet.rectangle"
-        }
-    }
-}
 
 /// A row of tabs under a page's header, the chosen one filled.
 struct PageTabs<Tab: Hashable>: View {
@@ -136,104 +114,6 @@ struct UpdatesRow: View {
                 ForEach(run, id: \.id) { step in line(step) }
             }
         }
-    }
-}
-
-/// Every task of a goal in one table: where it stands, what its agent is
-/// doing, its last verdict, when it last moved and what it spent.
-struct GoalTasks: View {
-    let goal: GoalDetail
-    let focus: (String) -> Void
-    @State private var sort: Sort = .plan
-
-    enum Sort: String, CaseIterable { case plan = "Plan order", state = "State", recent = "Recent" }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Space.s3) {
-            HStack {
-                Text("\(goal.tasks.count) tasks").font(TypeScale.meta).foregroundStyle(.secondary)
-                Spacer()
-                Picker("Sort", selection: $sort) {
-                    ForEach(Sort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .fixedSize()
-                .labelsHidden()
-            }
-            VStack(spacing: 0) {
-                header
-                ForEach(rows) { task in
-                    Divider()
-                    TaskRow(task: task, activity: goal.activity[task.id], verdict: verdict(of: task.id))
-                        .contentShape(Rectangle())
-                        .onTapGesture { focus(task.id) }
-                        .help("Show this task's conversation")
-                }
-            }
-            .background(Palette.raised, in: RoundedRectangle(cornerRadius: Radius.card))
-            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.separator))
-        }
-    }
-
-    private var header: some View {
-        HStack(spacing: Space.s3) {
-            Text("Task").frame(maxWidth: .infinity, alignment: .leading)
-            Text("Now").frame(width: 240, alignment: .leading)
-            Text("Report").frame(width: 76, alignment: .leading)
-            Text("Moved").frame(width: 64, alignment: .trailing)
-            Text("Tokens").frame(width: 64, alignment: .trailing)
-        }
-        .font(TypeScale.micro)
-        .foregroundStyle(.tertiary)
-        .padding(.horizontal, Space.s4)
-        .padding(.vertical, Space.s2)
-    }
-
-    private var rows: [Work] {
-        switch sort {
-        case .plan: goal.tasks
-        case .state: goal.tasks.sorted { rank($0.state) < rank($1.state) }
-        case .recent: goal.tasks.sorted { $0.updated > $1.updated }
-        }
-    }
-
-    private func rank(_ s: WorkState) -> Int {
-        [.needsInput, .blocked, .running, .review, .queued, .briefed, .paused, .softDone, .done, .dropped, .abandoned].firstIndex(of: s) ?? 99
-    }
-
-    private func verdict(of id: String) -> String? {
-        goal.events.last { $0.work == id && $0.kind == "report" }.flatMap { goal.reports[String($0.id)]?.verdict }
-    }
-}
-
-struct TaskRow: View {
-    let task: Work
-    let activity: Activity?
-    let verdict: String?
-
-    var body: some View {
-        HStack(spacing: Space.s3) {
-            HStack(spacing: Space.s2) {
-                StateSymbol(state: task.state)
-                Text(task.title).font(TypeScale.callout).lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Text(activity?.error ?? activity?.now ?? "—")
-                .font(TypeScale.callout)
-                .foregroundStyle(activity?.asking != nil ? Palette.attention : .secondary)
-                .lineLimit(1)
-                .frame(width: 240, alignment: .leading)
-            Group {
-                if let verdict, !verdict.isEmpty { VerdictPill(verdict: verdict) } else { Text("—").foregroundStyle(.tertiary) }
-            }
-            .frame(width: 76, alignment: .leading)
-            Text(ago(task.updated)).font(TypeScale.meta.monospacedDigit()).foregroundStyle(.secondary)
-                .frame(width: 64, alignment: .trailing)
-            Text(activity?.usage.map { tokenCount($0.tokens) } ?? "—").font(TypeScale.meta.monospacedDigit()).foregroundStyle(.secondary)
-                .frame(width: 64, alignment: .trailing)
-        }
-        .padding(.horizontal, Space.s4)
-        .padding(.vertical, Space.s2 + 2)
     }
 }
 

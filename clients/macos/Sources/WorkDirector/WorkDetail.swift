@@ -203,8 +203,6 @@ struct WorkDetail: View {
                              answered: { Task { await load() } }, run: { plan = $0 })
             case .conversation:
                 GoalThread(store: store, goal: goal, focus: focusTask, answered: { Task { await load() } }, filter: $filter)
-            case .tasks:
-                GoalTasks(goal: goal, focus: focusTask)
             case .record:
                 EventsSection(events: goal.events, expanded: true)
             }
