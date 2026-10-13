@@ -512,6 +512,9 @@ pub struct Gate {
     pub work: String,
     pub gate: String,
     pub title: Option<String>,
+    /// The button's words, in plain language, when wd serves them.
+    #[serde(default)]
+    pub label: Option<String>,
     pub argv: Vec<String>,
     pub why: Option<String>,
 }

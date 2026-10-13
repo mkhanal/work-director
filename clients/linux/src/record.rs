@@ -97,10 +97,10 @@ impl RecordFilter {
         match self {
             RecordFilter::Everything => "Everything",
             RecordFilter::Decisions => "Decisions",
-            RecordFilter::Course => "Course",
+            RecordFilter::Course => "Direction checks",
             RecordFilter::Questions => "Questions",
             RecordFilter::Reports => "Reports",
-            RecordFilter::Chores => "Chores",
+            RecordFilter::Chores => "Housekeeping",
             RecordFilter::Delivery => "Delivery",
         }
     }
@@ -138,13 +138,13 @@ impl RecordEntry {
                 "pivot" => ("Pivot", Tone::Attention),
                 _ => ("Course", Tone::Waiting),
             },
-            RecordKind::Superseded => ("Superseded", Tone::Waiting),
+            RecordKind::Superseded => (crate::words::REPLACED, Tone::Waiting),
             RecordKind::Question => ("Question", Tone::Attention),
             RecordKind::Answer => ("Answered", Tone::Settled),
-            RecordKind::Judged if verdict == "met" => ("Judged met", Tone::Settled),
-            RecordKind::Judged => ("Judged missed", Tone::Attention),
+            RecordKind::Judged if verdict == "met" => (crate::words::checked(verdict), Tone::Settled),
+            RecordKind::Judged => (crate::words::checked(verdict), Tone::Attention),
             RecordKind::Report => ("Report", Tone::Live),
-            RecordKind::Chore => ("Chore", Tone::Waiting),
+            RecordKind::Chore => ("Housekeeping", Tone::Waiting),
             RecordKind::Delivery => ("Delivered", Tone::Settled),
         };
         (text.to_string(), tone)
@@ -169,7 +169,7 @@ impl RecordSummary {
                 self.course,
                 format!(
                     "{} · {} {}",
-                    plural(self.course, "course check", "course checks"),
+                    plural(self.course, "direction check", "direction checks"),
                     self.corrections,
                     plural(self.corrections, "correction", "corrections")
                 ),
@@ -182,8 +182,11 @@ impl RecordSummary {
                     self.answered_by_director
                 ),
             ),
-            (self.chores, format!("{} the director ran", plural(self.chores, "chore", "chores"))),
-            (self.judged, plural(self.judged, "report judged", "reports judged")),
+            (
+                self.chores,
+                format!("{} the director ran", plural(self.chores, "housekeeping task", "housekeeping tasks")),
+            ),
+            (self.judged, plural(self.judged, "report checked", "reports checked")),
         ]
     }
 }

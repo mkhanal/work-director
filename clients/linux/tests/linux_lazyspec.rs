@@ -953,27 +953,27 @@ fn a_goal_page_shows_what_done_means_what_needs_you_and_its_sub_goals() {
     assert_eq!(
         goal.finish_card(),
         Some((
-            "A complete PR".to_string(),
-            "From your taste: a PR open with checks green and the done-when met.".to_string()
+            "A complete pull request".to_string(),
+            "From your taste: a pull request open with checks green and the done-when met.".to_string()
         ))
     );
     assert_eq!(goal.course.as_ref().map(Course::badge), Some(("On course".to_string(), Tone::Settled)));
-    assert_eq!(goal.progress_line(), "1 of 4 done · 1 superseded");
+    assert_eq!(goal.progress_line(), "1 of 4 done · 1 replaced");
 
     let rows = goal.sub_goal_rows();
     let row = |id: &str| rows.iter().find(|r| r.id == id).expect("a row").clone();
-    assert_eq!(row("t").meta, "Done when each release has a tag · claude · 2 steps · judged met");
+    assert_eq!(row("t").meta, "Done when each release has a tag · claude · 2 steps · Checked: done");
     assert_eq!(row("t").badge, ("Done".to_string(), Tone::Settled));
-    assert_eq!(row("d").meta, "Planned into 3 sub-goals · 1 of 3 done");
+    assert_eq!(row("d").meta, "3 sub-goals · 1 of 3 done");
     assert_eq!(row("d").badge, ("1 needs you".to_string(), Tone::Attention));
     assert_eq!(row("d").opens.as_deref(), Some("d"), "a sub-goal that is a goal opens its page");
-    assert_eq!(row("c").meta, "claude · now: Writing the template");
+    assert_eq!(row("c").meta, "claude · Now: Writing the template");
     assert_eq!(row("c").badge, ("Working · 1 of 3".to_string(), Tone::Live), "a dropped step is not counted");
     assert!(row("c").open && !row("x").open, "only the first working task starts with its steps shown");
     assert_eq!((row("c").opens, row("c").mark), (None, Mark::Working));
     assert_eq!(row("a").meta, "Waits on Title d, Title c");
     assert_eq!(row("a").badge, ("Waiting".to_string(), Tone::Waiting));
-    assert_eq!(row("w").meta, "Superseded: guides live with each release");
+    assert_eq!(row("w").meta, "Replaced by a change of plan: guides live with each release");
     assert!(row("w").struck);
 
     let mut nested = goal.clone();
@@ -1045,7 +1045,7 @@ fn the_conversation_tags_each_turn_with_its_sub_goal_and_filters_by_it() {
     assert_eq!(ids(ThreadFilter::SubGoal("d".into())), vec![4], "a sub-goal keeps what happened under it");
     assert_eq!(ids(ThreadFilter::SubGoal("t".into())), vec![2, 3]);
     let done = goal.events.iter().find(|e| e.id == 3).expect("the done event");
-    assert_eq!(goal.finished_line(done).as_deref(), Some("Tagged · done · judged met"));
+    assert_eq!(goal.finished_line(done).as_deref(), Some("Tagged · done · Checked: done"));
     assert_eq!(goal.finished_line(&goal.events[0]), None);
     assert_eq!(
         goal.addressees(),
@@ -1083,10 +1083,10 @@ fn the_record_lists_what_was_decided_and_done_filtered_by_kind_and_sub_goal() {
         record.summary.cards().map(|(n, what)| format!("{n} {what}")),
         [
             "2 decisions · 1 yours",
-            "2 course checks · 1 correction",
+            "2 direction checks · 1 correction",
             "1 question · 1 answered by the director",
-            "1 chore the director ran",
-            "1 report judged",
+            "1 housekeeping task the director ran",
+            "1 report checked",
         ]
         .map(String::from)
     );
@@ -1107,7 +1107,7 @@ fn the_record_lists_what_was_decided_and_done_filtered_by_kind_and_sub_goal() {
     let badge = |event: i64| record.entries.iter().find(|e| e.event == event).map(RecordEntry::badge);
     assert_eq!(badge(8), Some(("On course".to_string(), Tone::Settled)));
     assert_eq!(badge(5), Some(("Corrected".to_string(), Tone::Live)));
-    assert_eq!(badge(7), Some(("Judged met".to_string(), Tone::Settled)));
+    assert_eq!(badge(7), Some(("Checked: done".to_string(), Tone::Settled)));
     assert_eq!(badge(3), Some(("Decision".to_string(), Tone::Decision)));
     assert_eq!(record.entries[1].by, RecordBy::Director);
     assert_eq!(record.entries[6].place, "Release notes (top)");
@@ -1185,7 +1185,7 @@ fn a_change_waiting_for_the_person_shows_what_would_change() {
         vec![
             ("Goal", "Why does sync drop events?".to_string(), "Sync never drops events".to_string()),
             ("Done when", "The cause is found".to_string(), "A 429 batch is retried".to_string()),
-            ("Finishes at", "Discovery".to_string(), "A complete PR".to_string()),
+            ("Finishes at", "Discovery".to_string(), "A complete pull request".to_string()),
         ]
     );
     let change = course.change.as_ref().expect("a change");
@@ -1351,7 +1351,7 @@ fn a_person_changes_where_a_top_goal_finishes() {
             "Discovery: the cause found and explained",
             "Research complete: a written comparison and a pick",
             "A local build you can try",
-            "A complete PR",
+            "A complete pull request",
             "Merged",
             "Released"
         ],
@@ -1365,7 +1365,7 @@ fn a_person_changes_where_a_top_goal_finishes() {
     let g = run.wait(store.goal(&top)).expect("the goal");
     assert_eq!(g.finish, Some(Finish { line: FinishLine::CompletePr, source: FinishSource::Person }));
     assert_eq!(g.finish_pick(), Some(Some(FinishLine::CompletePr)));
-    assert_eq!(FinishLine::menu_name(Some(FinishLine::CompletePr)), "Finishes at: A complete PR");
+    assert_eq!(FinishLine::menu_name(Some(FinishLine::CompletePr)), "Finishes at: A complete pull request");
     assert_eq!(FinishLine::menu_name(None), "Finishes at: Not decided yet");
     let nested = run.wait(store.goal(&under)).expect("the sub-goal");
     assert_eq!(nested.finish_pick(), None, "a sub-goal's page offers none");
@@ -1400,7 +1400,7 @@ fn a_course_change_shows_what_was_found_and_what_happens_to_each_sub_goal() {
             (("Kept · working".to_string(), Tone::Live), false),
             (("Kept · not started".to_string(), Tone::Waiting), false),
             (("New".to_string(), Tone::Live), false),
-            (("Superseded".to_string(), Tone::Waiting), true),
+            ((kit::words::REPLACED.to_string(), Tone::Waiting), true),
         ]
     );
     assert_eq!(need.keep_label().as_deref(), Some("Keep the goal as it is"), "keep is labelled with the keep choice");
@@ -1736,7 +1736,21 @@ fn the_next_gate_is_one_button() {
     home.wd(&["report", &id, "DONE\nSTATUS: DONE"]);
     let verify = Plan::passing(&run.wait(store.gate(&id)).expect("gate")).expect("a gate to pass");
     assert_eq!(verify.argv, strings(&["verify", &id]));
-    assert_eq!(verify.title, "Verify");
+    assert_eq!(verify.title, "Check it", "the button says what it does");
+    let served = |label: Option<&str>| Gate {
+        work: "w".into(),
+        gate: "land".into(),
+        title: Some("Land".into()),
+        label: label.map(str::to_string),
+        argv: strings(&["pr", "w"]),
+        why: None,
+    };
+    assert_eq!(
+        Plan::passing(&served(Some("Ship it"))).map(|p| p.title),
+        Some("Ship it".to_string()),
+        "the words wd serves win"
+    );
+    assert_eq!(Plan::passing(&served(None)).map(|p| p.title), Some("Deliver it".to_string()));
     store.stop();
 }
 
@@ -2162,6 +2176,143 @@ fn files_and_images_go_with_what_the_person_sends() {
         vec!["one.txt", "two.txt"]
     );
     store.stop();
+}
+
+/// The App Speaks The Product's Language, Not wd's
+#[test]
+fn the_app_speaks_the_products_language_not_wds() {
+    use kit::words;
+    assert!(
+        !words::plain("Superseded")
+            && !words::plain("judged met")
+            && !words::plain("A complete PR")
+            && !words::plain("Landed"),
+        "the check catches each internal term"
+    );
+
+    let entry = |kind: &str, what: &str| -> RecordEntry {
+        serde_json::from_value(json!({"event": 1, "at": "2026-10-13T11:00:00Z", "kind": kind, "what": what,
+            "where": "w", "by": "director"}))
+        .expect("an entry")
+    };
+    let kinds =
+        ["decision", "finish", "asked", "course", "question", "answer", "report", "delivery", "chore", "superseded"];
+    let fates: Vec<String> = [Fate::Kept, Fate::New, Fate::Superseded]
+        .into_iter()
+        .flat_map(|status| {
+            std::iter::once(None)
+                .chain(WorkState::ALL.into_iter().map(Some))
+                .map(move |state| SubGoalFate { work: None, title: "x".into(), status, state, why: None }.badge().0)
+        })
+        .collect();
+    let goal = goal_view(json!({
+        "goal": work_json("g", "running"), "tasks": [], "rollup": {"counts": {}, "done": 0, "total": 3},
+        "events": [], "claims": [], "landings": [], "delivery": null, "activity": {}, "reports": {}, "asking": null,
+        "finish": {"line": "complete PR", "source": "taste"},
+        "progress": {"done": 1, "total": 3, "superseded": 1},
+        "tree": [
+            node_json("t", "task", "done", json!({"done_when": "tagged", "judged": {"verdict": "met", "why": "ok"}})),
+            node_json("m", "task", "review", json!({"judged": {"verdict": "missed", "why": "no"}})),
+            node_json("d", "goal", "running", json!({"planned_into": 2, "progress": {"done": 0, "total": 2, "superseded": 1}})),
+            node_json("w", "task", "superseded", json!({"why_not_moving": "superseded: guides live with each release"})),
+        ],
+    }));
+    let summary = RecordSummary {
+        decisions: 1,
+        yours: 1,
+        course: 2,
+        corrections: 1,
+        questions: 1,
+        answered_by_director: 1,
+        chores: 2,
+        judged: 1,
+    };
+
+    let mut shown: Vec<String> = Vec::new();
+    for s in WorkState::ALL {
+        shown.extend([s.look().label.to_string(), s.badge().0.to_string(), s.mark().label().to_string()]);
+    }
+    for wire in [
+        "queued",
+        "briefed",
+        "running",
+        "needs-input",
+        "review",
+        "soft-done",
+        "done",
+        "blocked",
+        "dropped",
+        "abandoned",
+        "paused",
+        "superseded",
+    ] {
+        shown.push(words::event_body("state", wire));
+    }
+    shown.extend(Band::ALL.map(|b| b.label().to_string()));
+    shown.extend(RecordFilter::ALL.map(|f| f.label().to_string()));
+    shown.extend(summary.cards().map(|c| c.1));
+    shown.extend(kinds.iter().map(|k| entry(k, "on course: x").badge().0));
+    shown.extend([entry("judged", "met: x").badge().0, entry("judged", "missed: x").badge().0]);
+    shown.extend(fates);
+    shown.extend(goal.sub_goal_rows().into_iter().flat_map(|r| [r.meta, r.badge.0]));
+    shown.push(goal.progress_line());
+    shown.extend(goal.finish_card().map(|(a, b)| [a, b]).into_iter().flatten());
+    shown.extend(["verify", "land", "soft-done", "done"].map(words::gate));
+    shown.extend([Plan::verify("w"), Plan::soft_done("w"), Plan::done("w")].map(|p| p.title));
+    for line in FinishLine::ALL {
+        let (title, means) = line.choice();
+        shown.extend([line.title(), line.name(), line.means(), title, means].map(str::to_string));
+        shown.push(FinishLine::menu_name(Some(line)));
+    }
+    shown.extend(
+        [
+            "state",
+            "report",
+            "verify",
+            "pr",
+            "note",
+            "sent",
+            "spawn",
+            "attach",
+            "question",
+            "answer",
+            "decision",
+            "abandon",
+            "look",
+            "supervised",
+            "course",
+            "judged",
+            "attachment",
+        ]
+        .map(words::event),
+    );
+    assert_eq!(
+        shown.iter().filter(|l| !words::plain(l)).collect::<Vec<_>>(),
+        Vec::<&String>::new(),
+        "no shown label uses wd's own terms"
+    );
+
+    assert!(WorkState::Briefed.look().label == "Ready to start" && WorkState::NeedsInput.look().label == "Needs you");
+    assert!(
+        WorkState::Review.look().label == "To review" && WorkState::SoftDone.look().label == "Waiting to be confirmed"
+    );
+    assert_eq!(WorkState::Superseded.badge().0, "Replaced");
+    assert!(WorkState::ALL.iter().all(|s| s.badge().0 == s.look().label), "a row's badge and its icon say the same");
+    assert_eq!(WorkState::Dropped.mark().label(), "Set aside");
+    assert_eq!(words::event_body("state", "soft-done"), "Waiting to be confirmed");
+    assert!(
+        entry("judged", "met: x").badge().0 == "Checked: done"
+            && entry("judged", "missed: x").badge().0 == "Checked: not done yet"
+    );
+    assert_eq!(
+        words::replaced_because(Some("guides live with each release")),
+        "Replaced by a change of plan: guides live with each release"
+    );
+    assert_eq!(
+        FinishLine::from_label("complete PR"),
+        Some(FinishLine::CompletePr),
+        "wd's own name for a finish line still reads"
+    );
 }
 
 /// The Agents Panel Sits Beside The Page, Never Over It

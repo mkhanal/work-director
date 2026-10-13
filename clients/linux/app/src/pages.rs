@@ -210,7 +210,7 @@ pub fn review(app: &App, project: &str) -> Shown {
                     fill.push(group);
                 }
                 if !pass.landed.is_empty() {
-                    let group = adw::PreferencesGroup::builder().title("Landed").build();
+                    let group = adw::PreferencesGroup::builder().title("Delivered").build();
                     for l in &pass.landed {
                         let title = l.work.as_ref().map(|w| w.title.clone()).unwrap_or_default();
                         group.add(&row(&title, &l.url));

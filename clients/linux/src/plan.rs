@@ -310,7 +310,8 @@ impl Plan {
         if gate.argv.is_empty() {
             return None;
         }
-        Some(Plan { title: gate.title.clone().unwrap_or_else(|| gate.gate.clone()), argv: gate.argv.clone() })
+        let title = gate.label.clone().filter(|l| !l.is_empty()).unwrap_or_else(|| crate::words::gate(&gate.gate));
+        Some(Plan { title, argv: gate.argv.clone() })
     }
 
     /// Keeps something said to work as feedback, the evidence rules are
@@ -389,15 +390,15 @@ impl Plan {
     }
 
     pub fn soft_done(id: &str) -> Plan {
-        plan("Soft-done", words(&["soft-done", id]))
+        plan(&crate::words::gate("soft-done"), words(&["soft-done", id]))
     }
 
     pub fn done(id: &str) -> Plan {
-        plan("Done", words(&["done", id]))
+        plan(&crate::words::gate("done"), words(&["done", id]))
     }
 
     pub fn verify(id: &str) -> Plan {
-        plan("Verify", words(&["verify", id]))
+        plan(&crate::words::gate("verify"), words(&["verify", id]))
     }
 
     pub fn acknowledge(project: &str) -> Plan {

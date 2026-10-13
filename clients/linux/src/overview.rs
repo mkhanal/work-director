@@ -59,16 +59,13 @@ impl Node {
         if state == WorkState::Superseded {
             let why = self.why_not_moving.as_deref().map(|w| w.strip_prefix("superseded: ").unwrap_or(w));
             let why = why.filter(|w| *w != "superseded");
-            return why.map_or_else(|| "Superseded".to_string(), |w| format!("Superseded: {w}"));
+            return crate::words::replaced_because(why);
         }
         if self.opens().is_some() || self.group {
             let p = self.progress.unwrap_or_default();
-            let mut parts = vec![
-                format!("Planned into {}", plural(p.total, "sub-goal", "sub-goals")),
-                format!("{} of {} done", p.done, p.total),
-            ];
+            let mut parts = vec![crate::words::sub_goals(p.total), format!("{} of {} done", p.done, p.total)];
             if p.superseded > 0 {
-                parts.push(format!("{} superseded", p.superseded));
+                parts.push(crate::words::replaced_count(p.superseded));
             }
             return parts.join(" · ");
         }
@@ -86,7 +83,7 @@ impl Node {
             Mark::Working => {
                 parts.extend(self.owner.iter().map(|o| o.runner.clone()));
                 if let Some(doing) = &self.doing {
-                    parts.push(format!("now: {doing}"));
+                    parts.push(crate::words::now(doing));
                 }
             }
             _ => {
@@ -99,7 +96,7 @@ impl Node {
             }
         }
         if let Some(j) = &self.judged {
-            parts.push(format!("judged {}", j.verdict));
+            parts.push(crate::words::checked(&j.verdict).to_string());
         }
         parts.join(" · ")
     }
@@ -160,12 +157,12 @@ impl GoalDetail {
         rows
     }
 
-    /// Done of total, and how many were superseded.
+    /// Done of total, and how many were replaced.
     pub fn progress_line(&self) -> String {
         let p = self.progress;
         let mut line = format!("{} of {} done", p.done, p.total);
         if p.superseded > 0 {
-            line.push_str(&format!(" · {} superseded", p.superseded));
+            line.push_str(&format!(" · {}", crate::words::replaced_count(p.superseded)));
         }
         line
     }

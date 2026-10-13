@@ -556,22 +556,26 @@ pub(super) fn event_turn(
             let passed = e.body.starts_with("pass");
             let text = format!(
                 "{}{} · {}",
-                if passed { "Verified" } else { "Verify failed" },
+                if passed { "Checks passed" } else { "Checks failed" },
                 on.map(|t| format!(" · {t}")).unwrap_or_default(),
                 kit::time::when(&e.at)
             );
             let classes: &[&str] = if passed { &[] } else { &["failure"] };
             ui::event_line(&text, classes).upcast()
         }
-        "pr" => ui::event_line(&format!("Landed · {} · {}", e.body, kit::time::when(&e.at)), &[]).upcast(),
+        "pr" => ui::event_line(&format!("Delivered · {} · {}", e.body, kit::time::when(&e.at)), &[]).upcast(),
         "state" => {
             let who = on.unwrap_or_else(|| "The goal".to_string());
             let failed = matches!(e.body.as_str(), "blocked" | "abandoned");
             let classes: &[&str] = if failed { &["failure"] } else { &[] };
-            ui::event_line(&format!("{who} {} · {}", e.body, kit::time::when(&e.at)), classes).upcast()
+            ui::event_line(
+                &format!("{who}: {} · {}", kit::words::event_body("state", &e.body), kit::time::when(&e.at)),
+                classes,
+            )
+            .upcast()
         }
         _ => {
-            let meta = ui::meta(&ui::speaker(&e.kind), Some(e.at.as_str()), on.as_deref());
+            let meta = ui::meta(&ui::speaker(&kit::words::event(&e.kind)), Some(e.at.as_str()), on.as_deref());
             ui::turn(None, Some(&meta), &ui::folded(&e.body, 6, &["body"])).upcast()
         }
     }

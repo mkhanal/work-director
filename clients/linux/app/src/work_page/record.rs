@@ -172,8 +172,8 @@ pub(super) fn record_turns(events: &[Event]) -> Vec<Turn> {
             let e = e.clone();
             Turn::key(format!("r{}", e.id), &e).with(move || {
                 let column = ui::vbox(SPACE_1);
-                column.append(&ui::meta(&ui::speaker(&e.kind), Some(e.at.as_str()), None));
-                column.append(&ui::folded(&e.body, 6, &["callout"]));
+                column.append(&ui::meta(&ui::speaker(&kit::words::event(&e.kind)), Some(e.at.as_str()), None));
+                column.append(&ui::folded(&kit::words::event_body(&e.kind, &e.body), 6, &["callout"]));
                 column.upcast()
             })
         })

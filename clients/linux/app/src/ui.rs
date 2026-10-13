@@ -397,7 +397,7 @@ pub fn mark(mark: Mark, size: i32, name: &str) -> gtk::DrawingArea {
 
 /// A state's drawn icon, named by its label.
 pub fn state_mark(state: WorkState, size: i32) -> gtk::DrawingArea {
-    mark(state.mark(), size, state.look().label)
+    mark(state.mark(), size, state.mark().label())
 }
 
 /// A bordered card in the canvas's shape.

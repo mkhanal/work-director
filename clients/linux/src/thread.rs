@@ -422,7 +422,7 @@ impl GoalDetail {
         let path = self.tag(&e.work)?;
         let mut parts = vec![path.to_string(), "done".to_string()];
         if let Some(j) = self.node(&e.work).and_then(|n| n.judged.as_ref()) {
-            parts.push(format!("judged {}", j.verdict));
+            parts.push(crate::words::checked(&j.verdict).to_string());
         }
         Some(parts.join(" · "))
     }

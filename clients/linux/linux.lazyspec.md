@@ -109,7 +109,7 @@ hold only that product's work; with none, every product's.
 ## A Goal Page Shows What Done Means, What Needs You And Its Sub-Goals
 - A top goal's page shows its done-when, where it finishes and where that came from, and its course; a sub-goal's page shows its done-when and its course.
 - Each question waiting on the person anywhere under the goal is answered in place, or left to the director.
-- Each sub-goal reads its state, then what makes it done, what it is doing, or what it waits on, and a badge; a superseded one is struck through with why.
+- Each sub-goal reads its state, then what makes it done, what it is doing, or what it waits on, and a badge; a replaced one is struck through with why.
 - A sub-goal that is a goal opens its own page; a task's steps fold open and closed, closed except the first working task's.
 - A sub-goal is added with its outcome and what makes it done.
 - What holds the goal back from done is listed, and a sub-goal's page lists what the director did under it.
@@ -117,13 +117,13 @@ hold only that product's work; with none, every product's.
 ## The Conversation Tags Each Turn With Its Sub-Goal And Filters By It
 - Every turn on work under the goal is tagged with that work's path through the tree.
 - It narrows to everything, to the person and the director, or to one sub-goal and everything under it, each choice with how many turns it keeps.
-- A sub-goal finishing reads as one line, with how it was judged; the tree being reshaped is left to the record.
+- A sub-goal finishing reads as one line, with how it was checked; the tree being reshaped is left to the record.
 - A message goes to the whole goal or to any sub-goal chosen, as `wd send` to it.
 
 ## The Record Lists What Was Decided And Done, Filtered By Kind And Sub-Goal
-- It counts decisions and how many were the person's, course checks and how many corrected course, questions and how many the director answered, chores the director ran, and reports judged.
+- It counts decisions and how many were the person's, direction checks and how many corrected course, questions and how many the director answered, housekeeping tasks the director ran, and reports checked.
 - Each entry reads its time, its kind, what it says, where in the tree it was recorded and who made it, newest first, under the day it fell on.
-- Kind filters keep decisions, course, questions, reports, chores or delivery; a sub-goal filter keeps what was recorded on that sub-goal or under it.
+- Kind filters keep Decisions, Direction checks, Questions, Reports, Housekeeping or Delivery; a sub-goal filter keeps what was recorded on that sub-goal or under it.
 
 ## A Change Waiting For The Person Shows What Would Change
 - A proposed breakdown shows each sub-goal numbered, with what makes it done, when it starts and whether one agent does it; each can be edited, split or dropped.
@@ -152,7 +152,7 @@ hold only that product's work; with none, every product's.
 
 ## A Course Change Shows What Was Found And What Happens To Each Sub-Goal
 - What was found and why change course show side by side.
-- Each sub-goal after the change is a row badged Kept · done, Kept · working, Kept · not started, New, or Superseded with why.
+- Each sub-goal after the change is a row badged Kept · done, Kept · working, Kept · not started, New, or Replaced with why.
 - Keep answers with the keep choice and is labelled with it; Change course answers with the first choice.
 - Editing the change answers with the first choice, then runs `wd goal edit <goal>` for a title or done-when and `wd goal finish <goal> "<line>"` for a finish line the person changed from the proposal; what they left is not written.
 
@@ -195,6 +195,7 @@ hold only that product's work; with none, every product's.
 ## The Next Gate Is One Button
 - A work page offers the gate `wd` serves for it as one button, which runs the gate's argv.
 - Work waiting on no gate has no such button.
+- The button says what it does: Check it, Deliver it, Confirm it's finished or Mark it done, or the words `wd` serves for the gate.
 
 ## A Notification Says What Happened And Where
 - Its title says what happened: Question for you, Approve the plan, Change of course proposed, Choose where it finishes, Plan change to approve, Blocked, Finished or Ready for review.
@@ -232,6 +233,12 @@ hold only that product's work; with none, every product's.
 - Sending passes each file as `--attach <path>` to the command it runs: `wd send`, `wd goal start` or `wd goal continue`; files alone can be sent, except to continue a goal.
 - A file shows on the message it was sent with: the one on the same work at the same moment; a file no message carries shows on its own, once per moment.
 - An image opens in the person's default app; any other file opens the folder it is kept in.
+
+## The App Speaks The Product's Language, Not wd's
+- No label the app shows says superseded, judged, soft-done, briefed, needs-input, verify, land or claim, nor PR for a pull request.
+- A state reads the same on a row's badge and its icon: Ready to start, Needs you, To review, Waiting to be confirmed and Replaced among them; dropped, abandoned and replaced work is announced as Set aside.
+- A check of a sub-goal's done-when reads Checked: done or Checked: not done yet.
+- A branch a change of plan let go of reads Replaced by a change of plan, with why.
 
 ## The Agents Panel Sits Beside The Page, Never Over It
 - The panel sits beside the page, which narrows to make room for it.

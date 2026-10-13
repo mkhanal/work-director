@@ -25,6 +25,7 @@ pub mod store;
 pub mod thread;
 pub mod time;
 pub mod tree;
+pub mod words;
 pub mod working;
 
 pub use agents::{span, token_count, AgentCard, AgentRoster, Phase};

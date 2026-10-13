@@ -77,7 +77,7 @@ if grep -q '^finish: research' "$WD_HOME/projects/metariki-eqms.md"; then echo "
 # The Overview's finish line: chosen from its card's menu.
 open "$goal" overview
 python3 -c "import sys; sys.path.insert(0, '/repo/scripts/ui/linux'); from a11y import *; dump()" > /shots/main-tree.txt 2>&1 || true
-act "press('toggle button', 'A complete PR')"
+act "press('toggle button', 'A complete pull request')"
 python3 -c "import sys; sys.path.insert(0, '/repo/scripts/ui/linux'); from a11y import *; dump()" > /shots/menu-tree.txt 2>&1 || true
 act "press('push button', 'Merged', exact=True)"
 import -window "$win" /shots/act-finish-menu.png

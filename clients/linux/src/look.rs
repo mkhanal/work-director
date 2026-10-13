@@ -1,5 +1,5 @@
 //! How a state reads on screen. Each state has its own icon and label, so
-//! needs-input (a question waiting) is never mistaken for blocked (a stop).
+//! a question waiting is never mistaken for blocked (a stop).
 
 use crate::ledger::{Band, WorkState};
 
@@ -45,17 +45,17 @@ impl WorkState {
     pub fn look(self) -> StateLook {
         let (label, icon, tint) = match self {
             WorkState::Queued => ("Waiting", "document-open-recent-symbolic", Tint::Gray),
-            WorkState::Briefed => ("Briefed", "text-x-generic-symbolic", Tint::Gray),
+            WorkState::Briefed => ("Ready to start", "text-x-generic-symbolic", Tint::Gray),
             WorkState::Running => ("Working", "media-playback-start-symbolic", Tint::Blue),
             WorkState::NeedsInput => ("Needs you", "dialog-question-symbolic", Tint::Orange),
             WorkState::Blocked => ("Blocked", "action-unavailable-symbolic", Tint::Red),
-            WorkState::Review => ("In review", "edit-find-symbolic", Tint::Indigo),
-            WorkState::SoftDone => ("Ready to close", "object-select-symbolic", Tint::Teal),
+            WorkState::Review => ("To review", "edit-find-symbolic", Tint::Indigo),
+            WorkState::SoftDone => ("Waiting to be confirmed", "object-select-symbolic", Tint::Teal),
             WorkState::Done => ("Done", "emblem-ok-symbolic", Tint::Green),
             WorkState::Dropped => ("Dropped", "list-remove-symbolic", Tint::Gray),
             WorkState::Abandoned => ("Abandoned", "process-stop-symbolic", Tint::Brown),
             WorkState::Paused => ("Paused", "media-playback-pause-symbolic", Tint::Purple),
-            WorkState::Superseded => ("Superseded", "edit-redo-symbolic", Tint::Gray),
+            WorkState::Superseded => (crate::words::REPLACED, "edit-redo-symbolic", Tint::Gray),
         };
         StateLook { label, icon, tint }
     }
@@ -126,6 +126,18 @@ pub enum Mark {
 }
 
 impl Mark {
+    /// What the icon is announced as: dropped, abandoned and replaced work alike is set aside.
+    pub fn label(self) -> &'static str {
+        match self {
+            Mark::Done => "Done",
+            Mark::NeedsYou => "Needs you",
+            Mark::Working => "Working",
+            Mark::Waiting => "Waiting",
+            Mark::Superseded => "Set aside",
+            Mark::Blocked => "Blocked",
+        }
+    }
+
     pub fn css_class(self) -> &'static str {
         match self {
             Mark::Done => "mark-done",

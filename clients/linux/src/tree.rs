@@ -148,15 +148,18 @@ impl FinishLine {
             FinishLine::Discovery => "Discovery",
             FinishLine::Research => "Research",
             FinishLine::LocalBuild => "A local build",
-            FinishLine::CompletePr => "A complete PR",
+            FinishLine::CompletePr => "A complete pull request",
             FinishLine::Merged => "Merged",
             FinishLine::Released => "Released",
         }
     }
 
-    /// The finish line a choice's words name.
+    /// The finish line a choice's words name: as wd writes it, or as the app names it.
     pub fn from_label(label: &str) -> Option<FinishLine> {
-        FinishLine::ALL.into_iter().find(|f| f.name().eq_ignore_ascii_case(label.trim()))
+        let label = label.trim();
+        FinishLine::ALL
+            .into_iter()
+            .find(|f| f.wire().eq_ignore_ascii_case(label) || f.name().eq_ignore_ascii_case(label))
     }
 
     /// The finish line as a choice reads it: its title and what it hands back.
@@ -170,7 +173,7 @@ impl FinishLine {
                 "Trade-offs and a recommendation with its reasons. No code changes.",
             ),
             FinishLine::LocalBuild => ("A local build you can try", "The work on a branch, with how to run it."),
-            FinishLine::CompletePr => ("A complete PR", "The change with its tests, ready to merge."),
+            FinishLine::CompletePr => ("A complete pull request", "The change with its tests, ready to merge."),
             FinishLine::Merged => ("Merged", "The pull request merged into the main branch."),
             FinishLine::Released => ("Released", "Merged and published as a release."),
         }
@@ -182,7 +185,7 @@ impl FinishLine {
             FinishLine::Discovery => "Discovery",
             FinishLine::Research => "Research",
             FinishLine::LocalBuild => "Local build",
-            FinishLine::CompletePr => "Complete PR",
+            FinishLine::CompletePr => "Complete pull request",
             FinishLine::Merged => "Merged",
             FinishLine::Released => "Released",
         }
@@ -194,8 +197,8 @@ impl FinishLine {
             FinishLine::Discovery => "a findings report, no code changes",
             FinishLine::Research => "a written comparison and a pick, no code changes",
             FinishLine::LocalBuild => "built and runnable, with how to run it",
-            FinishLine::CompletePr => "a PR open with checks green and the done-when met",
-            FinishLine::Merged => "the PR merged",
+            FinishLine::CompletePr => "a pull request open with checks green and the done-when met",
+            FinishLine::Merged => "the pull request merged",
             FinishLine::Released => "released",
         }
     }
@@ -317,7 +320,7 @@ impl SubGoalFate {
     pub fn badge(&self) -> (String, Tone) {
         match (self.status, self.state) {
             (Fate::New, _) => ("New".to_string(), Tone::Live),
-            (Fate::Superseded, _) => ("Superseded".to_string(), Tone::Waiting),
+            (Fate::Superseded, _) => (crate::words::REPLACED.to_string(), Tone::Waiting),
             (Fate::Kept, Some(state)) if state.mark() == Mark::Done => ("Kept · done".to_string(), Tone::Settled),
             (Fate::Kept, None | Some(WorkState::Queued)) => ("Kept · not started".to_string(), Tone::Waiting),
             (Fate::Kept, Some(_)) => ("Kept · working".to_string(), Tone::Live),
