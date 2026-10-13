@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"wd/internal/brief"
 	"wd/internal/core"
+	"wd/internal/judge"
 	"wd/internal/ledger"
 	"wd/internal/project"
 	"wd/internal/runner"
@@ -167,6 +169,59 @@ func TestCoordinator(t *testing.T) {
 		}
 		if _, err := GoalPlanBrief(goal, Chain{}, &project.Project{Name: "wd", Verify: []string{"pnpm lint"}}, kit, nil); err == nil {
 			t.Fatalf("a pnpm check in an npm repository was planned with")
+		}
+	})
+
+	t.Run("Every Brief Asks For Text A Person Can Follow Without The Code", func(t *testing.T) {
+		for _, want := range []string{"owns the goal", "product", "plain words", "acronym", "what each choice changes", "FILES and VERIFY"} {
+			if !strings.Contains(brief.ForThePerson, want) {
+				t.Fatalf("the writing rule does not ask for %q:\n%s", want, brief.ForThePerson)
+			}
+		}
+		finish := core.FinishPR
+		p := &project.Project{Name: "wd", Path: "/repo", Mode: project.ModeAuto, InstructionsFile: "AGENTS.md"}
+		goal := core.Work{ID: "g1", Title: "Release notes", Kind: core.WorkGoal, DoneWhen: ptrTo("every release lists its changes"), FinishLine: &finish}
+		task := core.Work{ID: "t1", Title: "Collector", Kind: core.WorkTask, Parent: ptrTo("g1")}
+		plan, err := GoalPlanBrief(goal, Chain{}, p, project.Toolkit{}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		standalone, err := brief.Compose(task, p, nil, brief.Context{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		slice, err := brief.ComposeSlice(task, goal, nil, p, nil, brief.Context{Above: []core.Work{goal}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		spawn, err := brief.ComposeGoal(goal, "- none", p, nil, brief.Context{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, b := range map[string]struct {
+			text  string
+			reads []string
+		}{
+			"plan":        {plan, []string{"NAME", "outcome title", "done-when", "WHY", "LEFT OUT", "JUDGE BY", "SOURCES", "ASK"}},
+			"supervision": {SupervisionBrief(Picture{Goal: goal}), []string{"COURSE", "PROPOSE", "ASK", "DONE", "GOAL", "EDIT", "SUPERSEDE"}},
+			"standalone":  {standalone, []string{"NEEDS-INPUT", "BLOCKED", "question"}},
+			"slice":       {slice, []string{"NEEDS-INPUT", "BLOCKED", "question", "STEPS"}},
+			"spawn":       {spawn, []string{"NEEDS-INPUT", "BLOCKED", "question"}},
+			"decides":     {judge.QuestionBrief(task, goal, p, "Which format?", []string{"A", "B"}, nil), []string{"WHY"}},
+		} {
+			if !strings.Contains(b.text, brief.ForThePerson) {
+				t.Fatalf("the %s brief does not carry the writing rule:\n%s", name, b.text)
+			}
+			_, reads, ok := strings.Cut(b.text, "The person reads ")
+			if !ok {
+				t.Fatalf("the %s brief does not name what the person reads:\n%s", name, b.text)
+			}
+			reads, _, _ = strings.Cut(reads, "\n")
+			for _, want := range b.reads {
+				if !strings.Contains(reads, want) {
+					t.Fatalf("the %s brief does not say the person reads %s: %q", name, want, reads)
+				}
+			}
 		}
 	})
 

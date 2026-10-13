@@ -14,6 +14,11 @@ import (
 	"wd/internal/taste"
 )
 
+// ForThePerson is the writing rule every brief carries for the lines of its
+// reply a person reads: the person knows the product and its purpose, not
+// necessarily its code or the director's own terms.
+const ForThePerson = `Write every line the person reads for the person who owns the goal: they know what the product does and why, not necessarily its code or the director's own terms. Lead with what changes for the product or its users. Name a file, function, command, field or internal term only when it helps them act, and then say in plain words what it is. Prefer the product's own words to the code's. No unexplained acronyms. A question says what each choice changes for them, not how it would be built. Keep the technical detail for the agents and for a report's FILES and VERIFY lines.`
+
 // ReportFormat is the report format every brief ends with.
 const ReportFormat = `## Report format (last message, exactly)
 STATUS: DONE | BLOCKED | NEEDS-INPUT
@@ -211,6 +216,7 @@ func shared(p *project.Project, ctx Context) string {
 - Cost is agent minutes; never justify a shortcut with a human-hour estimate.
 - Facts you can look up, you look up. NEEDS-INPUT is for value judgments only, and carries your proposed answer.
 - Every message to the director is ≤10 lines. No narration, no restating the brief.
+- The person reads your questions, the reason after STATUS: NEEDS-INPUT or BLOCKED, and your STEPS. ` + ForThePerson + `
 `
 }
 

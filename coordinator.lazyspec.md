@@ -18,6 +18,12 @@ are specified in `ledger.lazyspec.md`.
 - A sub-goal's brief carries its top goal with its done-when and finish line, each ancestor, and its siblings with their states.
 - A top goal's brief asks for a FINISH line and gives the repository's finish setting and its past goals' finish lines.
 
+## Every Brief Asks For Text A Person Can Follow Without The Code
+- The goal plan brief, the supervision brief, every executor brief and the brief that decides a question in the person's place each carry `brief.ForThePerson`, and name the lines of their reply a person reads.
+- It asks for those lines to be written for the person who owns the goal: what changes for the product or its users first, in the product's own words, with no unexplained acronyms.
+- A file, function, command, field or internal term appears only where it helps the person act, with what it is said in plain words.
+- A question says what each choice changes for the person, not how it is built; technical detail stays with the agents and a report's FILES and VERIFY lines.
+
 ## A Plan Reply Names Its Goal
 - `PlanName(texts)` returns the name of a `NAME:` line in the planner's reply, without surrounding quotes, cut at a word to at most 72 characters.
 - A reply with no `NAME:` line has no name.

@@ -21,6 +21,11 @@ and confirms writes.
    for failure.
 5. **Nothing moves under the reader.** The conversation follows new content
    while you are at the bottom and holds still while you read.
+6. **Written for someone who knows the product, not its code.** Every label,
+   line and question the app writes says what changes for the product or its
+   users, in plain words: no file, function, field or wd term (verify,
+   soft-done, supersede, claim) unless it helps the person act, and then
+   explained.
 
 ## Tokens
 

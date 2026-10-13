@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"wd/internal/brief"
 	"wd/internal/core"
 	"wd/internal/ledger"
 	"wd/internal/project"
@@ -143,10 +144,12 @@ func SupervisionBrief(p Picture) string {
 	fmt.Fprintf(&b, `
 Your first duty is the top goal's done-when: at every look, judge whether the open sub-goals still lead to it. Your job is the goal as the person asked it, not each sub-goal on its own. Read the reports, and read the work itself in the worktree (git status, git diff) to check it; do not edit, create or delete files. Each agent keeps to its own sub-goal and leaves work between sub-goals to you: a missing wire-up, a gap no sub-goal owns, a concern one raised about another. Settle concerns yourself unless only the person can: a business fact, or something irreversible or seen outside the repository, such as pushing a tag. Prefer telling an existing agent over adding a sub-goal. The director runs the checks itself (%s), and landing (commits, pull requests, tags, pushes) waits for the person.
 
+The person reads your COURSE why, every PROPOSE title, done when, found and why, every ASK question and its choices, your DONE summary, and every GOAL, EDIT and SUPERSEDE line, shown to them as the plan change. %s
+
 End every reply with one line
 COURSE: on course | correct | pivot — <why>
 then a line ACTIONS: and then one action per line:
-%s`, checks, actionList)
+%s`, checks, brief.ForThePerson, actionList)
 	return b.String()
 }
 

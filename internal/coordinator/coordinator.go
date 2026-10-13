@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"wd/internal/brief"
 	"wd/internal/core"
 	"wd/internal/ledger"
 	"wd/internal/project"
@@ -107,8 +108,10 @@ Each title is an outcome, not a change. Every outcome has a done-when. Give 1 to
 Specifications this repository keeps: %s.%s
 If the goal does not say what should change, reply with only one line, ASK: <the question that would settle it>, and no outcomes.
 %s
+The person reads NAME, every outcome title and done-when, WHY, LEFT OUT, JUDGE BY, the SOURCES line and any ASK. %s
+
 The goal: %s%s`,
-		p.Name, p.Path, p.Mode, finishShape, verify, specs, finishRule, serves, goal.Title, detail), nil
+		p.Name, p.Path, p.Mode, finishShape, verify, specs, finishRule, serves, brief.ForThePerson, goal.Title, detail), nil
 }
 
 func orNotSet(s *string) string {

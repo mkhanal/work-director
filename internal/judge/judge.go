@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 
+	"wd/internal/brief"
 	"wd/internal/core"
 	"wd/internal/project"
 	"wd/internal/taste"
@@ -162,8 +163,10 @@ WHY: <one sentence on why, for the person to read>
 DECLINE: <one clause on why the goal and the settled position do not settle this>
 TOKENS: <the tokens you spent, if you can count them>
 
-Exactly one of ANSWER or DECLINE.`,
-		p.Name, about, strings.Join(settled, "\n"), oneline(question, 2000), pick, answer)
+Exactly one of ANSWER or DECLINE.
+
+The person reads your WHY. %s`,
+		p.Name, about, strings.Join(settled, "\n"), oneline(question, 2000), pick, answer, brief.ForThePerson)
 }
 
 func orNotSet(s *string) string {
