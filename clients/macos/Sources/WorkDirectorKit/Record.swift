@@ -72,9 +72,7 @@ extension GoalRecord {
     }
 
     static func day(_ stamp: String, now: Date, calendar: Calendar) -> String {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let d = f.date(from: stamp) ?? ISO8601DateFormatter().date(from: stamp) else { return "Earlier" }
+        guard let d = instant(stamp) else { return "Earlier" }
         if calendar.isDate(d, inSameDayAs: now) { return "Today" }
         if let y = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(d, inSameDayAs: y) { return "Yesterday" }
         return d.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(Locale(identifier: "en_US_POSIX")))

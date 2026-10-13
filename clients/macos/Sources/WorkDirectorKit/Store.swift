@@ -23,6 +23,11 @@ public final class Store {
     /// The person's writes that came back, with when, kept while they quiet notices.
     private var ended: [(plan: Plan, at: Date)] = []
 
+    /// Each goal and gate as last read, by id: a page opened again shows them
+    /// at once while it is read again. Not observed; a page asks for them.
+    @ObservationIgnored private var goalViews: [String: GoalDetail] = [:]
+    @ObservationIgnored private var gates: [String: Gate] = [:]
+
     private let channel: Channel
     private var following: Task<Void, Never>?
     private var refreshing = false
@@ -78,8 +83,13 @@ public final class Store {
     }
 
     public func goal(_ id: String) async throws -> GoalDetail {
-        try await channel.goal(id)
+        let goal = try await channel.goal(id)
+        goalViews[id] = goal
+        return goal
     }
+
+    /// The goal as it was last read, or nil before it has been.
+    public func lastRead(goal id: String) -> GoalDetail? { goalViews[id] }
 
     public func work(_ id: String) async throws -> Work {
         try await channel.work(id)
@@ -95,8 +105,13 @@ public final class Store {
 
     /// The next gate on the work's way to done.
     public func gate(of id: String) async throws -> Gate {
-        try await channel.gate(of: id)
+        let gate = try await channel.gate(of: id)
+        gates[id] = gate
+        return gate
     }
+
+    /// The gate as it was last read, or nil before it has been.
+    public func lastRead(gate id: String) -> Gate? { gates[id] }
 
     public func conversation(_ id: String, from: Int, agent: String? = nil) async throws -> ConversationPage {
         try await channel.conversation(id, from: from, agent: agent)
@@ -221,7 +236,7 @@ public final class Store {
         let (read, kept) = Sighting.reads(for: board, after: sighting, touched: touched)
         var goals = kept
         for id in read {
-            goals[id] = try? await channel.goal(id)
+            goals[id] = try? await goal(id)
         }
         let now = Sighting(board: board, goals: goals)
         let at = Date()

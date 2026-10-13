@@ -367,6 +367,27 @@ struct SeededTree {
         await store.stop()
     }
 
+    @Test("A Goal Opened Again Shows As Last Read While It Is Read Again")
+    func goalOpenedAgainShowsAsLastRead() async throws {
+        let home = try Home()
+        let goal = try home.goal("demo", "Ship the export")
+        let store = await Store(channel: try home.channel())
+        #expect(await store.lastRead(goal: goal) == nil, "nothing is shown as read before the goal has been")
+        #expect(await store.lastRead(gate: goal) == nil)
+
+        let first = try await store.goal(goal)
+        let gate = try await store.gate(of: goal)
+        #expect(await store.lastRead(goal: goal) == first)
+        #expect(await store.lastRead(gate: goal) == gate)
+
+        try home.wd("rename", goal, "Ship the CSV export")
+        #expect(await store.lastRead(goal: goal)?.goal.title == "Ship the export", "until it is read again, it shows as it was")
+        let again = try await store.goal(goal)
+        #expect(again.goal.title == "Ship the CSV export")
+        #expect(await store.lastRead(goal: goal) == again, "each read replaces the one kept")
+        await store.stop()
+    }
+
     @Test("A Product Scope Shows Only That Product's Work")
     func productScope() async throws {
         let home = try Home()

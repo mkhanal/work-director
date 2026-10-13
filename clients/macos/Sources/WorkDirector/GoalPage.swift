@@ -68,9 +68,7 @@ struct DayLine: View {
         case .step(let s): s.event.at
         case .updates(let run): run[0].event.at
         }
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return parser.date(from: at) ?? ISO8601DateFormatter().date(from: at)
+        return instant(at)
     }
 }
 
@@ -108,9 +106,7 @@ struct UpdatesRow: View {
 
 /// How long ago an ISO time was, in the fewest characters.
 func ago(_ stamp: String) -> String {
-    let f = ISO8601DateFormatter()
-    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    guard let d = f.date(from: stamp) ?? ISO8601DateFormatter().date(from: stamp) else { return "" }
+    guard let d = instant(stamp) else { return "" }
     let s = Int(Date().timeIntervalSince(d))
     switch s {
     case ..<60: return "now"
@@ -122,9 +118,7 @@ func ago(_ stamp: String) -> String {
 
 /// How long ago an ISO time was, in words: "4 min ago", "2h ago".
 func agoWords(_ stamp: String) -> String {
-    let f = ISO8601DateFormatter()
-    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    guard let d = f.date(from: stamp) ?? ISO8601DateFormatter().date(from: stamp) else { return "" }
+    guard let d = instant(stamp) else { return "" }
     let s = Int(Date().timeIntervalSince(d))
     switch s {
     case ..<60: return "just now"
@@ -137,9 +131,7 @@ func agoWords(_ stamp: String) -> String {
 
 /// An ISO time as the hour and minute it was, for a record row.
 func clock(_ stamp: String) -> String {
-    let f = ISO8601DateFormatter()
-    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    guard let d = f.date(from: stamp) ?? ISO8601DateFormatter().date(from: stamp) else { return "" }
+    guard let d = instant(stamp) else { return "" }
     return d.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
 }
 

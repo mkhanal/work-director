@@ -32,13 +32,7 @@ public struct AgentCard: Sendable, Hashable, Identifiable {
         return max(0, end.timeIntervalSince(started))
     }
 
-    static func instant(_ s: String) -> Date? {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f.date(from: s) { return d }
-        f.formatOptions = [.withInternetDateTime]
-        return f.date(from: s)
-    }
+    static func instant(_ s: String) -> Date? { WorkDirectorKit.instant(s) }
 }
 
 /// The agents panel: every task of a goal with a session, each with the

@@ -47,6 +47,11 @@ Every state has a symbol and a label of its own; no two states share either.
 When any `wd` process records an event, the app's board is read again within
 two seconds.
 
+## A Goal Opened Again Shows As Last Read While It Is Read Again
+- Every read of a goal, and of its next gate, is kept; opening that goal again shows it at once as last read.
+- The page is then read again, and changes only where the new read differs.
+- A read that comes back after the person has moved to other work changes nothing on screen.
+
 ## The App Opens On A New Goal <!-- no-test: a window's first selection is not observable outside SwiftUI; checked by launching the app -->
 The app opens on the new-goal page of the product in scope, laid out like a
 goal page and typed into the same bar as a running goal.

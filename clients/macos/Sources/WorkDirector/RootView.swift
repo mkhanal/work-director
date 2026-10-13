@@ -46,8 +46,7 @@ struct RootView: View {
                 NewGoalPage(store: store, scope: scope) { id in place = .work(id) }
                     .id(scopeName)
             case .work(let id):
-                WorkDetail(store: store, id: id, plan: $plan, chained: { chain = $0 }) { place = .work($0) }
-                    .id(id)
+                WorkDetail(store: store, id: id, plan: $plan, chained: { if chain != $0 { chain = $0 } }) { place = .work($0) }
             case .archived:
                 ArchivedList(store: store, scope: scope, selected: opened, plan: $plan)
             case .taste:
@@ -78,6 +77,7 @@ struct RootView: View {
             if !lastWork.isEmpty { place = .work(lastWork) }
         }
         .onChange(of: place) {
+            if case .work(let id) = place { SwitchClock.start(id) }
             if case .work = place {} else { chain = [] }
             if case .work(let id) = place { lastWork = id } else if place == .newGoal { lastWork = "" }
         }

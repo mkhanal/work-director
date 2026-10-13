@@ -80,42 +80,42 @@ public actor Channel {
         try input.close()
     }
 
-    public func board() async throws -> Board {
+    public nonisolated func board() async throws -> Board {
         try await request("board", .none)
     }
 
-    public func goal(_ id: String) async throws -> GoalDetail {
+    public nonisolated func goal(_ id: String) async throws -> GoalDetail {
         try await request("goal", .id(id))
     }
 
-    public func work(_ id: String) async throws -> Work {
+    public nonisolated func work(_ id: String) async throws -> Work {
         try await request("work", .id(id))
     }
 
-    public func events(of id: String) async throws -> [Event] {
+    public nonisolated func events(of id: String) async throws -> [Event] {
         try await request("events", .id(id))
     }
 
-    public func gate(of id: String) async throws -> Gate {
+    public nonisolated func gate(of id: String) async throws -> Gate {
         try await request("gate", .id(id))
     }
 
     /// A goal's record, read from the events at every depth under it.
-    public func record(_ id: String) async throws -> GoalRecord {
+    public nonisolated func record(_ id: String) async throws -> GoalRecord {
         try await request("record", .id(id))
     }
 
     /// The work's session steps from index `from` on.
-    public func conversation(_ id: String, from: Int, agent: String? = nil) async throws -> ConversationPage {
+    public nonisolated func conversation(_ id: String, from: Int, agent: String? = nil) async throws -> ConversationPage {
         try await request("conversation", .conversation(id, from: from, agent: agent))
     }
 
     /// Runs `wd` with argv, exactly as given.
-    public func action(_ argv: [String]) async throws -> ActionResult {
+    public nonisolated func action(_ argv: [String]) async throws -> ActionResult {
         try await request("action", .argv(argv))
     }
 
-    private enum Params: Encodable {
+    private enum Params: Encodable, Sendable {
         case none
         case id(String)
         case argv([String])
@@ -162,21 +162,10 @@ public actor Channel {
         let data: Event
     }
 
-    private func request<T: Decodable>(_ method: String, _ params: Params) async throws -> T {
-        if let exitStatus { throw ChannelError.exited(status: exitStatus) }
-        let id = nextID
-        nextID += 1
-        var line = try JSONEncoder().encode(Request(id: id, method: method, params: params))
-        line.append(0x0A)
-        let data = try await withCheckedThrowingContinuation { (c: CheckedContinuation<Data, any Error>) in
-            waiting[id] = c
-            do {
-                try input.write(contentsOf: line)
-            } catch {
-                waiting[id] = nil
-                c.resume(throwing: error)
-            }
-        }
+    /// Sends one request and decodes its reply off the actor: a large view
+    /// decoding never holds up the replies and events behind it.
+    private nonisolated func request<T: Decodable>(_ method: String, _ params: Params) async throws -> T {
+        let data = try await send(method, params)
         let reply: Reply<T>
         do {
             reply = try JSONDecoder().decode(Reply<T>.self, from: data)
@@ -190,6 +179,24 @@ public actor Channel {
             throw ChannelError.unreadable("\(method): a reply with neither result nor error")
         }
         return result
+    }
+
+    /// Writes one request and waits for the line that answers it.
+    private func send(_ method: String, _ params: Params) async throws -> Data {
+        if let exitStatus { throw ChannelError.exited(status: exitStatus) }
+        let id = nextID
+        nextID += 1
+        var line = try JSONEncoder().encode(Request(id: id, method: method, params: params))
+        line.append(0x0A)
+        return try await withCheckedThrowingContinuation { (c: CheckedContinuation<Data, any Error>) in
+            waiting[id] = c
+            do {
+                try input.write(contentsOf: line)
+            } catch {
+                waiting[id] = nil
+                c.resume(throwing: error)
+            }
+        }
     }
 
     private func receive(_ line: Data) {

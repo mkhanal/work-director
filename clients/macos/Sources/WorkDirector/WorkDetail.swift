@@ -14,25 +14,12 @@ struct WorkDetail: View {
     /// Opens another work item in this pane: a goal's task, a task's goal.
     let open: (String) -> Void
 
-    @State private var loaded: Loaded?
-    @State private var failure: String?
-    @State private var asking: Ask?
-    /// A task's own session, as its page reads it.
-    @State private var feed: Feed
-    /// The agent whose conversation the centre shows instead of this page's
-    /// own: a goal's task, or a subagent.
-    @State private var focus: AgentCard?
-    @State private var focusFeed: Feed?
-    /// The gate this work waits on next, if any.
-    @State private var gate: Gate?
+    /// What the page holds for the work it shows. The page itself stays as
+    /// the person moves between work, so its toolbar and frame are not built
+    /// again; what it holds starts afresh for each work.
+    @State private var page: Page
     @AppStorage("detail.tab") private var tab: Tab = .conversation
     @AppStorage("goal.view") private var goalView: GoalView = .overview
-    @State private var filter: ThreadFilter = .all
-    /// Who a message from a goal's page goes to: the goal, or one sub-goal.
-    @State private var sendTo: String?
-    /// Whether the reader is at the bottom of the conversation, where it
-    /// follows what comes in.
-    @State private var atBottom = true
     private static let bottom = "bottom"
     @AppStorage("detail.agents") private var showAgents = true
     @AppStorage("detail.agentsWidth") private var agentsWidth = PanelWidth.standard
@@ -43,14 +30,93 @@ struct WorkDetail: View {
         _plan = plan
         self.chained = chained
         self.open = open
-        _feed = State(initialValue: Feed(store: store, id: id))
+        _page = State(initialValue: Page(opening: id, store: store))
+    }
+
+    struct Page {
+        let id: String
+        var loaded: Loaded?
+        var failure: String?
+        var asking: Ask?
+        /// A task's own session, as its page reads it.
+        var feed: Feed
+        /// The agent whose conversation the centre shows instead of this
+        /// page's own: a goal's task, or a subagent.
+        var focus: AgentCard?
+        var focusFeed: Feed?
+        /// The gate this work waits on next, if any.
+        var gate: Gate?
+        var filter: ThreadFilter = .all
+        /// Who a message from a goal's page goes to: the goal, or one sub-goal.
+        var sendTo: String?
+        /// Whether the reader is at the bottom of the conversation, where it
+        /// follows what comes in.
+        var atBottom = true
+
+        /// A page opening on work: a goal opened before shows as it was last
+        /// read while it is read again.
+        @MainActor init(opening id: String, store: Store) {
+            self.id = id
+            feed = Feed(store: store, id: id)
+            loaded = store.lastRead(goal: id).map(Loaded.goal)
+            gate = store.lastRead(gate: id)
+        }
+    }
+
+    /// The page for the work shown now: until the page held turns over to
+    /// newly chosen work, that work's opening page.
+    private var current: Page { page.id == id ? page : Page(opening: id, store: store) }
+
+    /// Changes the page held for work, unless the person has moved on from
+    /// it: a read that comes back after a switch changes nothing on screen.
+    private func edit(_ work: String, _ change: (inout Page) -> Void) {
+        guard page.id == work else { return }
+        change(&page)
+    }
+
+    private var loaded: Loaded? {
+        get { current.loaded }
+        nonmutating set { edit(id) { $0.loaded = newValue } }
+    }
+    private var failure: String? {
+        get { current.failure }
+        nonmutating set { edit(id) { $0.failure = newValue } }
+    }
+    private var asking: Ask? {
+        get { current.asking }
+        nonmutating set { edit(id) { $0.asking = newValue } }
+    }
+    private var feed: Feed { current.feed }
+    private var focus: AgentCard? {
+        get { current.focus }
+        nonmutating set { edit(id) { $0.focus = newValue } }
+    }
+    private var focusFeed: Feed? {
+        get { current.focusFeed }
+        nonmutating set { edit(id) { $0.focusFeed = newValue } }
+    }
+    private var gate: Gate? { current.gate }
+    private var filter: ThreadFilter {
+        get { current.filter }
+        nonmutating set { edit(id) { $0.filter = newValue } }
+    }
+    private var sendTo: String? {
+        get { current.sendTo }
+        nonmutating set { edit(id) { $0.sendTo = newValue } }
+    }
+    private var atBottom: Bool {
+        get { current.atBottom }
+        nonmutating set { edit(id) { $0.atBottom = newValue } }
+    }
+    private func binding<T>(_ path: WritableKeyPath<Page, T>) -> Binding<T> {
+        Binding(get: { current[keyPath: path] }, set: { value in edit(id) { $0[keyPath: path] = value } })
     }
 
     enum Tab: String {
         case conversation, record
     }
 
-    enum Loaded {
+    enum Loaded: Equatable {
         case goal(GoalDetail)
         case work(Work, [Event])
 
@@ -122,7 +188,7 @@ struct WorkDetail: View {
                 .animation(.easeOut(duration: 0.15), value: atBottom)
                 if let target = messaged(loaded), !target.atRest || (target.kind.isGoal && target.state == .done), composes(loaded) {
                     MessageBar(store: store, work: target, working: working(loaded), about: about(target, in: loaded),
-                               addressees: focus == nil ? goalDetail(loaded)?.addressees ?? [] : [], sendTo: $sendTo)
+                               addressees: focus == nil ? goalDetail(loaded)?.addressees ?? [] : [], sendTo: binding(\.sendTo))
                         .id(target.id)
                 }
                 }
@@ -138,6 +204,7 @@ struct WorkDetail: View {
                         .transition(.move(edge: .trailing))
                 }
                 }
+                .id(id)
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         if let gate, let pass = Plan.passing(gate) {
@@ -188,7 +255,19 @@ struct WorkDetail: View {
         .background(Palette.page)
         .navigationTitle(loaded?.work.title ?? id)
         .navigationSubtitle(loaded.map { "\($0.work.project) · \($0.work.state.look.label)" } ?? "")
-        .task(id: store.reads) { await load() }
+        .onAppear {
+            guard let loaded else { return }
+            if case .goal(let goal) = loaded { chained(goal.chain) }
+            let id = id
+            DispatchQueue.main.async { SwitchClock.mark(id, "shown") }
+        }
+        .onChange(of: id) {
+            if page.id != id { page = current }
+            if case .goal(let goal) = loaded { chained(goal.chain) }
+            let id = id
+            DispatchQueue.main.async { SwitchClock.mark(id, "shown") }
+        }
+        .task(id: "\(id) \(store.reads)") { await load() }
         .task(id: id) {
             // What a goal's tasks are doing lives in their sessions, which tell
             // the ledger nothing; while any task works, the goal is read again.
@@ -199,7 +278,7 @@ struct WorkDetail: View {
                 }
             }
         }
-        .sheet(item: $asking) { ask in
+        .sheet(item: binding(\.asking)) { ask in
             ReasonSheet(ask: ask) { made in
                 asking = nil
                 plan = made
@@ -299,7 +378,7 @@ struct WorkDetail: View {
             case .goal(let g):
                 PageTabs(tabs: GoalView.allCases, selection: $goalView, label: \.label)
                 if goalView == .conversation {
-                    FilterChips(filter: $filter, goal: g).padding(.top, -2)
+                    FilterChips(filter: binding(\.filter), goal: g).padding(.top, -2)
                 }
             case .work(let w, _):
                 if hasSession(w) {
@@ -409,21 +488,31 @@ struct WorkDetail: View {
         }
     }
 
+    /// Reads the work and its gate again, at once, and changes the page only
+    /// where the read differs from what it shows.
     private func load() async {
+        let work = id
         do {
-            let work = try await store.work(id)
-            gate = try await store.gate(of: id)
-            if work.kind.isGoal {
-                let goal = try await store.goal(id)
-                loaded = .goal(goal)
-                chained(goal.chain)
+            async let nextGate = store.gate(of: work)
+            let next: Loaded
+            if case .goal = loaded {
+                next = .goal(try await store.goal(work))
             } else {
-                loaded = .work(work, try await store.events(of: id))
-                chained([])
+                let read = try await store.work(work)
+                next = read.kind.isGoal ? .goal(try await store.goal(work)) : .work(read, try await store.events(of: work))
             }
-            failure = nil
+            let gate = try await nextGate
+            SwitchClock.mark(work, "replied")
+            guard page.id == work else { return }
+            edit(work) { page in
+                if page.gate != gate { page.gate = gate }
+                if page.loaded != next { page.loaded = next }
+                page.failure = nil
+            }
+            if case .goal(let goal) = next { chained(goal.chain) } else { chained([]) }
+            DispatchQueue.main.async { SwitchClock.mark(work, "fresh") }
         } catch {
-            failure = "\(error)"
+            edit(work) { $0.failure = "\(error)" }
         }
     }
 }
@@ -1032,4 +1121,5 @@ struct PanelEdge: View {
             .accessibilityHidden(true)
     }
 }
+
 
