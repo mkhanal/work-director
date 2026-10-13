@@ -416,6 +416,14 @@ could not with their work, the bound that ran out, and the work still open.
 - Work in needs-input on a question the director filed takes one answer per question it asks, or words.
 - The answer is recorded on the work as an `answer` event with the question it answers, as answered by the person, and reaches the session as `wd send` does.
 
+## The Director Can Decide A Question Put To The Person
+- `wd answer <id> --director` puts each item of the question the work waits on to the judgement model, with its top goal's title, done-when and finish line and the project's settled work.
+- An item with choices is decided only by one of them; any other answer is a decline.
+- When every item is decided, the answers flow as a person's would, carrying out what the question changes; the answer is recorded as by the director, and each item as a decision by the director with its reason.
+- When any item is declined, nothing is answered, the question stays open, each decline is noted, and the command says why.
+- `--json` prints `answered`, `decided` `[{question, answer, why}]` and `declined` `[{question, why}]` beside `told`, `answer` and `applied`.
+- With no judgement runner available it fails, and nothing is answered.
+
 ## Wd Send To A Goal Keeps It As A Decision For The Goal's Supervisor
 - `wd send <goal> "<text>"` files the text as a decision on the goal and has the goal's supervisor look at once, as `wd goal supervise` does, even while tasks are working.
 - No task is sent the text; a task not yet started reads it in its brief.

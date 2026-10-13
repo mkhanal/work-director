@@ -5066,6 +5066,110 @@ func TestAChangeToTheTopGoalAlwaysWaitsForThePerson(t *testing.T) {
 	}
 }
 
+func TestTheDirectorCanDecideAQuestionPutToThePerson(t *testing.T) {
+	f := newCLIFixture(t)
+	driveProject(t, f)
+	state := filepath.Join(f.dir, "fake-state")
+	unsure := func(title string) string {
+		t.Helper()
+		goal := jsonString(t, f.runOK(t, "goal", "add", "driven", title, "--json"), "id")
+		f.planReply(t, "NAME: "+title+"\nFINISH: ?\n- research (recommended)\n- complete PR\n- The options are compared\n  done when: a report names the pick and why\n")
+		f.runOK(t, "goal", "plan", goal, "--runner", "planner")
+		return goal
+	}
+	type result struct {
+		Answered bool    `json:"answered"`
+		Answer   *string `json:"answer"`
+		Decided  []struct {
+			Question, Answer, Why string
+		} `json:"decided"`
+		Declined []struct {
+			Question, Why string
+		} `json:"declined"`
+	}
+
+	// With no judgement runner available it fails, and nothing is answered.
+	goal := unsure("Compare and pick one")
+	code, _, errStr := f.runEnv(t, f.envWithPath(t, f.pathWith(t, "planner")), "answer", goal, "--director")
+	if code == 0 || !strings.Contains(errStr, "driven") {
+		t.Fatalf("--director with no judge runner exited %d: %q, want it to fail naming the runner", code, errStr)
+	}
+	if n := f.eventsOf(t, goal, core.EventAnswer); n != 0 {
+		t.Fatalf("answers = %d after a failed --director, want none", n)
+	}
+
+	// Decided: the answer flows as a person's would, recorded as by the director.
+	if err := os.WriteFile(filepath.Join(state, "judge-reply"), []byte("ANSWER: research\nWHY: comparing options hands back research, not code\nTOKENS: 40\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var got result
+	if err := json.Unmarshal([]byte(f.runOK(t, "answer", goal, "--director", "--json")), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Answered || got.Answer == nil || len(got.Decided) != 1 || got.Decided[0].Answer != "research (recommended)" ||
+		got.Decided[0].Why != "comparing options hands back research, not code" || got.Decided[0].Question != "Where does this goal finish?" || len(got.Declined) != 0 {
+		t.Fatalf("director answer = %+v, want the finish line decided with its reason", got)
+	}
+	if g := f.workRow(t, goal); g.FinishLine == nil || *g.FinishLine != core.FinishResearch {
+		t.Errorf("goal finish = %v, want the director's choice stored", g.FinishLine)
+	}
+	var answers, decisions []core.Event
+	for _, e := range f.ledgerEvents(t, goal) {
+		switch {
+		case e.Kind == core.EventAnswer:
+			answers = append(answers, e)
+		case e.Kind == core.EventDecision && e.Decision != nil && e.Decision.Source == core.AnsweredByDirector:
+			decisions = append(decisions, e)
+		}
+	}
+	if len(answers) != 1 || answers[0].Decision == nil || answers[0].Decision.Source != core.AnsweredByDirector || answers[0].Decision.Runner != "driven" {
+		t.Errorf("answers = %+v, want one by the director, judged on the project's runner", answers)
+	}
+	if len(decisions) != 1 || !strings.Contains(decisions[0].Body, "because comparing options hands back research, not code") {
+		t.Errorf("director decisions = %+v, want the choice with its reason", decisions)
+	}
+	briefs, err := filepath.Glob(filepath.Join(state, "judge-brief-*"))
+	if err != nil || len(briefs) == 0 {
+		t.Fatalf("judge briefs = %v (%v)", briefs, err)
+	}
+	brief := readFile(t, briefs[len(briefs)-1])
+	for _, want := range []string{"Compare and pick one", "Finishes at: not decided", "Where does this goal finish?", "- research (recommended)\n- complete PR", "WHY: <"} {
+		if !strings.Contains(brief, want) {
+			t.Errorf("judge brief missing %q:\n%s", want, brief)
+		}
+	}
+
+	// An answer outside the choices is a decline: nothing is answered and the command says why.
+	declined := unsure("Compare and pick another")
+	if err := os.WriteFile(filepath.Join(state, "judge-reply"), []byte("ANSWER: whatever ships first\nTOKENS: 10\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got = result{}
+	if err := json.Unmarshal([]byte(f.runOK(t, "answer", declined, "--director", "--json")), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Answered || got.Answer != nil || len(got.Declined) != 1 || !strings.Contains(got.Declined[0].Why, "none of the choices") {
+		t.Fatalf("director decline = %+v, want it declined saying why", got)
+	}
+	if s := f.stateOf(t, declined); s != core.StateNeedsInput || f.eventsOf(t, declined, core.EventAnswer) != 0 {
+		t.Errorf("after a decline the goal is %s with %d answers, want it still waiting on the person", s, f.eventsOf(t, declined, core.EventAnswer))
+	}
+	if notes := f.bodies(t, declined, core.EventNote); !slices.ContainsFunc(notes, func(n string) bool { return strings.HasPrefix(n, "the director declined") }) {
+		t.Errorf("notes = %q, want the decline noted", notes)
+	}
+	if err := os.Remove(filepath.Join(state, "judge-reply")); err != nil {
+		t.Fatal(err)
+	}
+	judgeAnswer(t, f, false)
+	if out := f.runOK(t, "answer", declined, "--director"); !strings.Contains(out, "the settled position does not say") {
+		t.Errorf("a model's decline = %q, want its why", out)
+	}
+	f.runOK(t, "answer", declined, "complete PR")
+	if g := f.workRow(t, declined); g.FinishLine == nil || *g.FinishLine != core.FinishPR {
+		t.Errorf("after the director declined, the person's answer still settles it: %v", g.FinishLine)
+	}
+}
+
 func TestWdSendToAGoalKeepsItAsADecisionForTheGoalsSupervisor(t *testing.T) {
 	f := newCLIFixture(t)
 	o := overseenGoal(t, f)

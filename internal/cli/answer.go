@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"wd/internal/coordinator"
 	"wd/internal/core"
+	"wd/internal/judge"
 	"wd/internal/project"
 	"wd/internal/runner"
 )
@@ -15,14 +17,42 @@ import (
 // answer replies to the question work's session is waiting on. A question with
 // options takes one answer per item, in the order asked; a question asked in
 // words takes the words. The answer is recorded on the work and reaches the
-// session the way any message does.
+// session the way any message does. --director has the judgement model decide
+// every item in the person's place instead.
 func (c *Cli) answer(rest []string) error {
-	if len(rest) < 2 {
+	director := flag(c.Args, "director")
+	if director && len(rest) != 1 {
+		return fail("usage: wd answer <id> --director; the director decides every item of the question")
+	}
+	if !director && len(rest) < 2 {
 		return fail("usage: wd answer <id> <answer> [<answer>...], one answer per question asked, in order")
 	}
 	w, err := c.Ledger.Get(rest[0])
 	if err != nil {
 		return err
+	}
+	answers := rest[1:]
+	by := core.Decision{Source: core.AnsweredByPerson}
+	var decided []directorChoice
+	if director {
+		q, ok, err := c.openQuestion(w)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fail("%s is not waiting on a question the director can decide", w.ID)
+		}
+		var declined []directorChoice
+		if decided, declined, by, err = c.directorDecides(w, q); err != nil {
+			return err
+		}
+		if len(declined) > 0 {
+			return c.directorDeclined(w, decided, declined)
+		}
+		answers = make([]string, len(decided))
+		for i, d := range decided {
+			answers[i] = d.Answer
+		}
 	}
 	h, err := c.handle(w.ID)
 	if err != nil {
@@ -39,12 +69,12 @@ func (c *Cli) answer(rest []string) error {
 	var text, asked string
 	var filed *core.Event
 	if q, ok := runner.Asking(entries); ok {
-		if text, err = runner.AnswerText(*q, rest[1:]); err != nil {
+		if text, err = runner.AnswerText(*q, answers); err != nil {
 			return fail("%s: %v", w.ID, err)
 		}
 		asked = q.Text()
 	} else if w.State == core.StateNeedsInput {
-		text = strings.Join(rest[1:], "\n")
+		text = strings.Join(answers, "\n")
 		events, err := c.Ledger.Events(w.ID, nil)
 		if err != nil {
 			return err
@@ -53,8 +83,8 @@ func (c *Cli) answer(rest []string) error {
 		if e, ok := coordinator.OpenQuestion(events, w.ID); ok {
 			filed = &e
 			asked = e.Body
-			if q := coordinator.AskedQuestion(e); len(rest) > 2 || len(q.Items) == 1 {
-				if text, err = runner.AnswerText(q, rest[1:]); err != nil {
+			if q := coordinator.AskedQuestion(e); len(answers) > 1 || len(q.Items) == 1 {
+				if text, err = runner.AnswerText(q, answers); err != nil {
 					return fail("%s: %v", w.ID, err)
 				}
 			}
@@ -64,16 +94,23 @@ func (c *Cli) answer(rest []string) error {
 	}
 	var setting *finishSetting
 	if flag(c.Args, "remember") {
-		if setting, err = c.finishToRemember(w, filed, rest[1:]); err != nil {
+		if setting, err = c.finishToRemember(w, filed, answers); err != nil {
 			return err
 		}
 	}
-	if _, err := c.Ledger.Answer(w.ID, core.Decision{Question: asked, Answer: text, Source: core.AnsweredByPerson}); err != nil {
+	by.Question, by.Answer = asked, text
+	if _, err := c.Ledger.Answer(w.ID, by); err != nil {
 		return err
+	}
+	for _, d := range decided {
+		said := fmt.Sprintf("the director decided %q: %s, because %s", d.Question, d.Answer, d.Why)
+		if _, err := c.Ledger.Decide(w.ID, said, core.Decision{Question: d.Question, Answer: d.Answer, Source: core.AnsweredByDirector, Runner: by.Runner, Model: by.Model}, nil); err != nil {
+			return err
+		}
 	}
 	applied := []string{}
 	if filed != nil {
-		if applied, err = c.answered(w, *filed, rest[1:]); err != nil {
+		if applied, err = c.answered(w, *filed, answers); err != nil {
 			return err
 		}
 		if setting != nil {
@@ -102,7 +139,138 @@ func (c *Cli) answer(rest []string) error {
 	if len(applied) > 0 {
 		human += "\n" + strings.Join(applied, "\n")
 	}
-	return c.out(map[string]any{"ok": true, "told": where, "answer": text, "applied": applied}, human)
+	out := map[string]any{"ok": true, "told": where, "answer": text, "applied": applied}
+	if director {
+		out["answered"], out["decided"], out["declined"] = true, decided, []directorChoice{}
+		for _, d := range decided {
+			human = fmt.Sprintf("the director decided %q: %s, because %s\n", d.Question, d.Answer, d.Why) + human
+		}
+	}
+	return c.out(out, human)
+}
+
+// directorChoice is the director's judgement on one item of a question: its
+// answer and why, or why it declined.
+type directorChoice struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer,omitempty"`
+	Why      string `json:"why"`
+}
+
+// openQuestion is the question w waits on: its session's, or one the director
+// filed on it while it needs input.
+func (c *Cli) openQuestion(w core.Work) (runner.Question, bool, error) {
+	h, err := c.handle(w.ID)
+	if err != nil {
+		return runner.Question{}, false, err
+	}
+	r, err := runner.RunnerNamed(h.Runner)
+	if err != nil {
+		return runner.Question{}, false, err
+	}
+	entries, err := r.Conversation(h)
+	if err != nil {
+		return runner.Question{}, false, err
+	}
+	if q, asking := runner.Asking(entries); asking {
+		return *q, true, nil
+	}
+	if w.State != core.StateNeedsInput {
+		return runner.Question{}, false, nil
+	}
+	events, err := c.Ledger.Events(w.ID, nil)
+	if err != nil {
+		return runner.Question{}, false, err
+	}
+	e, ok := coordinator.OpenQuestion(events, w.ID)
+	if !ok {
+		return runner.Question{}, false, nil
+	}
+	return coordinator.AskedQuestion(e), true, nil
+}
+
+// whyRe reads the reason a judgement reply gives for its answer.
+var whyRe = regexp.MustCompile(`^\s*WHY:\s*(\S.*)$`)
+
+// directorDecides puts each item of q to the judgement model with w's goal
+// as context. An answer to an item with choices must be one of them; any
+// other is a decline. It returns the decided and declined items, and the
+// decision an answer is recorded with: the director, the model and what it
+// cost.
+func (c *Cli) directorDecides(w core.Work, q runner.Question) ([]directorChoice, []directorChoice, core.Decision, error) {
+	by := core.Decision{Source: core.AnsweredByDirector}
+	p, err := c.project(w.Project)
+	if err != nil {
+		return nil, nil, by, err
+	}
+	goal, err := c.topGoal(w)
+	if err != nil {
+		return nil, nil, by, err
+	}
+	known, err := coordinator.Known(c.Ledger, w)
+	if err != nil {
+		return nil, nil, by, err
+	}
+	decided, declined := []directorChoice{}, []directorChoice{}
+	for _, it := range q.Items {
+		head, _, _ := strings.Cut(it.Question, "\n")
+		choices := make([]string, len(it.Options))
+		for i, o := range it.Options {
+			choices[i] = o.Label
+		}
+		v, reply, err := c.judgeBrief(goal, p, judge.QuestionBrief(w, goal, p, it.Question, choices, known))
+		if err != nil {
+			return nil, nil, by, err
+		}
+		by.Runner, by.Model, by.Tokens = v.Runner, v.Model, by.Tokens+v.Tokens
+		why := ""
+		for _, text := range reply {
+			for _, line := range strings.Split(text, "\n") {
+				if m := whyRe.FindStringSubmatch(strings.Trim(strings.TrimSpace(line), "`")); m != nil {
+					why = strings.TrimSpace(m[1])
+				}
+			}
+		}
+		answer := v.Answer
+		if v.Answer != "" && v.Decline == "" && len(choices) > 0 {
+			answer = ""
+			for _, ch := range choices {
+				if pickedFirst(v.Answer, ch) {
+					answer = ch
+				}
+			}
+			if answer == "" {
+				v.Decline = fmt.Sprintf("answered %q, which is none of the choices", v.Answer)
+			}
+		}
+		switch {
+		case v.Decline != "":
+			declined = append(declined, directorChoice{Question: head, Why: v.Decline})
+		case answer == "":
+			declined = append(declined, directorChoice{Question: head, Why: "the judgement model gave no answer"})
+		default:
+			decided = append(decided, directorChoice{Question: head, Answer: answer, Why: why})
+		}
+	}
+	return decided, declined, by, nil
+}
+
+// directorDeclined leaves w's question open when the director declined any of
+// it, recording each decline and saying why.
+func (c *Cli) directorDeclined(w core.Work, decided, declined []directorChoice) error {
+	lines := []string{}
+	for _, d := range declined {
+		said := fmt.Sprintf("the director declined %q: %s", d.Question, d.Why)
+		if _, err := c.Ledger.AddEvent(w.ID, core.EventNote, said); err != nil {
+			return err
+		}
+		lines = append(lines, said)
+	}
+	for _, d := range decided {
+		lines = append(lines, fmt.Sprintf("the director would answer %q: %s, because %s", d.Question, d.Answer, d.Why))
+	}
+	lines = append(lines, "the question stays open for you: wd answer "+w.ID+" <answer>...")
+	return c.out(map[string]any{"ok": true, "answered": false, "told": nil, "answer": nil, "applied": []string{}, "decided": decided, "declined": declined}, strings.Join(lines, "\n"))
 }
 
 // finishSetting is a project file rewritten to finish its goals at line.

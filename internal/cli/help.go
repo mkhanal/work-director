@@ -30,7 +30,7 @@ var help = map[string]commandHelp{
 	"roadmap":    {"wd roadmap (add <project> <title> | item <roadmap> <title> | plan <roadmap> | show <id> | status)", "Keep a project's roadmap and turn its items into goals."},
 	"drive":      {"wd drive <goal> [--budget …]", "Run a goal's loop until it lands or needs a person."},
 	"send":       {"wd send <id> \"<text>\"", "Tell running work something; a goal keeps it as a decision and its supervisor routes it."},
-	"answer":     {"wd answer <id> <answer>... [--remember]", "Answer the question a session is waiting on, one answer per item; --remember keeps a finish-line choice as the project's setting."},
+	"answer":     {"wd answer <id> (<answer>... [--remember] | --director)", "Answer the question work is waiting on, one answer per item; --remember keeps a finish-line choice as the project's setting; --director lets the director decide it."},
 	"attach":     {"wd attach <id> <session> [--runner r] [--ref ref] [--cwd dir]", "Bind a conversation started elsewhere to work."},
 	"report":     {"wd report <id> [\"<text>\"]", "File work's STATUS report, read from its session or given."},
 	"verify":     {"wd verify <id>", "Run the project's checks in the work's own directory."},

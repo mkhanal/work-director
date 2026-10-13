@@ -186,7 +186,7 @@ func (c *Cli) tasteJudgeOnce(p *project.Project) driver.Judge {
 		if err != nil {
 			return driver.Verdict{}, err
 		}
-		v := awaitJudgement(rn, h)
+		v, _ := awaitJudgement(rn, h)
 		if err := runner.Dismiss(rn, h); err != nil {
 			return driver.Verdict{}, err
 		}
@@ -613,69 +613,75 @@ func openQuestion(l *ledger.Ledger, id string) (string, error) {
 // the question is about.
 func (c *Cli) judgeOnce(goal core.Work, p *project.Project) driver.Judge {
 	return func(question string, settled []core.Work) (driver.Verdict, error) {
-		brief := judge.Brief(goal, p, question, settled)
-		runnerName, cwd, err := coordinator.Where(c.Ledger, goal, p)
-		if err != nil {
-			return driver.Verdict{}, err
-		}
-		rn, err := detectedRunner(runnerName)
-		if err != nil {
-			return driver.Verdict{}, err
-		}
-		// The runner and the model are both the project's to constrain, and the
-		// project's runner list wins over the project's single runner: a
-		// residency promise is about providers, and pinning one runner in the
-		// project file would otherwise be a way around it.
-		if err := c.restrictToProject(rn.Name(), p, runner.RoleInterpret); err != nil {
-			return driver.Verdict{}, err
-		}
-		model, err := c.judgementModel(p, runner.RoleInterpret, mustPolicy(c.Home))
-		if err != nil {
-			return driver.Verdict{}, err
-		}
-		h, err := rn.Spawn(runner.SpawnOptions{
-			Cwd:   cwd,
-			Name:  fmt.Sprintf("%s judge", goal.ID),
-			Brief: brief,
-			Model: optionalModel(model),
-		})
-		if err != nil {
-			return driver.Verdict{}, err
-		}
-		v := awaitJudgement(rn, h)
-		if err := runner.Dismiss(rn, h); err != nil {
-			return driver.Verdict{}, err
-		}
-		return driver.Verdict{
-			Answer:  v.Answer,
-			Decline: v.Decline,
-			Tokens:  v.Tokens,
-			Runner:  rn.Name(),
-			Model:   model,
-		}, nil
+		v, _, err := c.judgeBrief(goal, p, judge.Brief(goal, p, question, settled))
+		return v, err
 	}
+}
+
+// judgeBrief puts brief to the judgement model, returning its verdict and the
+// reply it came from.
+func (c *Cli) judgeBrief(goal core.Work, p *project.Project, brief string) (driver.Verdict, []string, error) {
+	runnerName, cwd, err := coordinator.Where(c.Ledger, goal, p)
+	if err != nil {
+		return driver.Verdict{}, nil, err
+	}
+	rn, err := detectedRunner(runnerName)
+	if err != nil {
+		return driver.Verdict{}, nil, err
+	}
+	// The runner and the model are both the project's to constrain, and the
+	// project's runner list wins over the project's single runner: a
+	// residency promise is about providers, and pinning one runner in the
+	// project file would otherwise be a way around it.
+	if err := c.restrictToProject(rn.Name(), p, runner.RoleInterpret); err != nil {
+		return driver.Verdict{}, nil, err
+	}
+	model, err := c.judgementModel(p, runner.RoleInterpret, mustPolicy(c.Home))
+	if err != nil {
+		return driver.Verdict{}, nil, err
+	}
+	h, err := rn.Spawn(runner.SpawnOptions{
+		Cwd:   cwd,
+		Name:  fmt.Sprintf("%s judge", goal.ID),
+		Brief: brief,
+		Model: optionalModel(model),
+	})
+	if err != nil {
+		return driver.Verdict{}, nil, err
+	}
+	v, reply := awaitJudgement(rn, h)
+	if err := runner.Dismiss(rn, h); err != nil {
+		return driver.Verdict{}, nil, err
+	}
+	return driver.Verdict{
+		Answer:  v.Answer,
+		Decline: v.Decline,
+		Tokens:  v.Tokens,
+		Runner:  rn.Name(),
+		Model:   model,
+	}, reply, nil
 }
 
 // awaitJudgement polls until the reply carries a verdict or the session is
 // plainly finished without one, which is a decline rather than a slow answer.
-func awaitJudgement(rn runner.Runner, h runner.Handle) judge.Verdict {
+func awaitJudgement(rn runner.Runner, h runner.Handle) (judge.Verdict, []string) {
 	deadline := time.Now().Add(judgeTimeout)
 	for time.Now().Before(deadline) {
 		out, err := runner.Transcript(rn, h)
 		if err != nil {
-			return judge.Verdict{}
+			return judge.Verdict{}, nil
 		}
 		if v := judge.Parse(out); v.Decided() || v.Decline != "" {
-			return v
+			return v, out
 		}
 		if len(out) > 0 {
 			if st, err := rn.Status(h); err == nil && st != runner.StatusRunning && st != runner.StatusWaiting {
-				return judge.Parse(out)
+				return judge.Parse(out), out
 			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return judge.Verdict{}
+	return judge.Verdict{}, nil
 }
 
 // spendJudgement records what the model said, with what it cost and who said
