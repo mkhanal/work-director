@@ -427,6 +427,31 @@ fn a_change_made_elsewhere_reaches_the_board() {
     store.stop();
 }
 
+/// A Goal Opened Again Shows As Last Read While It Is Read Again
+#[test]
+fn a_goal_opened_again_shows_as_last_read_while_it_is_read_again() {
+    let home = Home::new();
+    let goal = home.goal("demo", "Ship the export");
+    let run = Run::new();
+    let store = run.store(home.channel());
+    assert!(store.last_read_goal(&goal).is_none(), "nothing is shown as read before the goal has been");
+    assert!(store.last_read_gate(&goal).is_none());
+
+    let first = run.wait(store.goal(&goal)).expect("goal");
+    let record = run.wait(store.record(&goal)).expect("record");
+    let gate = run.wait(store.gate(&goal)).expect("gate");
+    assert_eq!(store.last_read_goal(&goal), Some((first, record)));
+    assert_eq!(store.last_read_gate(&goal), Some(gate));
+
+    home.wd(&["rename", &goal, "Ship the CSV export"]);
+    let kept = store.last_read_goal(&goal).expect("kept");
+    assert_eq!(kept.0.goal.title, "Ship the export", "until it is read again, it shows as it was");
+    let again = run.wait(store.goal(&goal)).expect("goal");
+    assert_eq!(again.goal.title, "Ship the CSV export");
+    assert_eq!(store.last_read_goal(&goal).map(|(g, _)| g), Some(again), "each read replaces the one kept");
+    store.stop();
+}
+
 /// A Product Scope Shows Only That Product's Work
 #[test]
 fn a_product_scope_shows_only_that_products_work() {

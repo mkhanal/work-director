@@ -47,6 +47,10 @@ Every state has an icon and a label of its own; no two states share either.
 When any `wd` process records an event, the app's board is read again within
 two seconds.
 
+## A Goal Opened Again Shows As Last Read While It Is Read Again
+- Every read of a goal, its record and its next gate is kept; opening that goal again shows it at once as last read.
+- The page is then read again, and is drawn again only when the new read differs.
+
 ## The App Opens On A New Goal <!-- no-test: a window's first page is not observable outside GTK; checked by launching the app -->
 The app opens on the new-goal page of the product in scope, laid out like a
 goal page and typed into the same composer as a running goal.

@@ -1038,6 +1038,7 @@ name = "work-director"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "futures",
  "gtk4",
  "libadwaita",
  "work-director-kit",

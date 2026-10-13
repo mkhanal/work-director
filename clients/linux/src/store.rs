@@ -5,7 +5,7 @@
 //! executor); `Spawner` is how the store starts work that outlives a call.
 
 use std::cell::{Cell, Ref, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
 
 use chrono::{DateTime, Utc};
@@ -73,6 +73,11 @@ pub struct Store {
     writing: RefCell<Vec<(u64, Plan)>>,
     /// The person's writes that came back, with when, kept while they quiet notices.
     ended: RefCell<Vec<(Plan, DateTime<Utc>)>>,
+    /// Each goal, record and gate as last read, by id: a page opened again
+    /// shows them at once while it is read again.
+    last_goals: RefCell<HashMap<String, GoalDetail>>,
+    last_records: RefCell<HashMap<String, RecordView>>,
+    last_gates: RefCell<HashMap<String, Gate>>,
 }
 
 /// A view's subscription to the store; dropping it ends the subscription.
@@ -129,6 +134,9 @@ impl Store {
             touched: RefCell::new(HashSet::new()),
             writing: RefCell::new(Vec::new()),
             ended: RefCell::new(Vec::new()),
+            last_goals: RefCell::new(HashMap::new()),
+            last_records: RefCell::new(HashMap::new()),
+            last_gates: RefCell::new(HashMap::new()),
         })
     }
 
@@ -245,11 +253,27 @@ impl Store {
     }
 
     pub async fn goal(&self, id: &str) -> Result<GoalDetail, ChannelError> {
-        self.channel.goal(id).await
+        let goal = self.channel.goal(id).await?;
+        self.last_goals.borrow_mut().insert(id.to_string(), goal.clone());
+        Ok(goal)
     }
 
     pub async fn record(&self, id: &str) -> Result<RecordView, ChannelError> {
-        self.channel.record(id).await
+        let record = self.channel.record(id).await?;
+        self.last_records.borrow_mut().insert(id.to_string(), record.clone());
+        Ok(record)
+    }
+
+    /// The goal and its record as last read, or none before both have been.
+    pub fn last_read_goal(&self, id: &str) -> Option<(GoalDetail, RecordView)> {
+        let goal = self.last_goals.borrow().get(id).cloned()?;
+        let record = self.last_records.borrow().get(id).cloned()?;
+        Some((goal, record))
+    }
+
+    /// The gate as last read, or none before it has been.
+    pub fn last_read_gate(&self, id: &str) -> Option<Gate> {
+        self.last_gates.borrow().get(id).cloned()
     }
 
     pub async fn work(&self, id: &str) -> Result<Work, ChannelError> {
@@ -262,7 +286,9 @@ impl Store {
 
     /// The next gate on the work's way to done.
     pub async fn gate(&self, id: &str) -> Result<Gate, ChannelError> {
-        self.channel.gate(id).await
+        let gate = self.channel.gate(id).await?;
+        self.last_gates.borrow_mut().insert(id.to_string(), gate.clone());
+        Ok(gate)
     }
 
     pub async fn conversation(
@@ -352,7 +378,7 @@ impl Store {
         let reads = Sighting::reads(&board, self.sighting.borrow().as_ref(), &touched);
         let mut goals = reads.kept;
         for id in reads.read {
-            if let Ok(detail) = self.channel.goal(&id).await {
+            if let Ok(detail) = self.goal(&id).await {
                 goals.insert(id, detail);
             }
         }

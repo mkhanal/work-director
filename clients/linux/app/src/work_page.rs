@@ -35,6 +35,7 @@ use crate::ui::{self, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6};
 /// Consecutive turns by one speaker within this many seconds read as one.
 const MERGE_SECONDS: i64 = 120;
 
+#[derive(PartialEq)]
 enum Loaded {
     Goal(Box<GoalDetail>, Box<RecordView>),
     Work(Box<Work>, Vec<Event>),
@@ -156,6 +157,17 @@ impl WorkPage {
     pub fn new(app: &App, id: &str) -> Rc<WorkPage> {
         let page = Rc::new_cyclic(|me: &Weak<WorkPage>| build(app, id, me.clone()));
         page.wire();
+        // A goal opened before shows as it was last read while it is read again.
+        if let Some((goal, record)) = page.app.store.last_read_goal(id) {
+            let chain = goal.chain.clone();
+            {
+                let mut state = page.state.borrow_mut();
+                state.loaded = Some(Loaded::Goal(Box::new(goal), Box::new(record)));
+                state.gate = page.app.store.last_read_gate(id);
+            }
+            page.render();
+            page.app.show_path(&chain);
+        }
         page.app.spawn(Rc::clone(&page).load());
         let weak = Rc::downgrade(&page);
         page.app.spawn(async move {
@@ -365,6 +377,8 @@ impl WorkPage {
         loop {
             self.stale.set(false);
             let read = self.read().await;
+            // A read that finds what the page shows already changes nothing on it.
+            let mut changed = false;
             {
                 let mut state = self.state.borrow_mut();
                 match read {
@@ -373,11 +387,20 @@ impl WorkPage {
                         if !work.kind.is_goal() && work.has_session() && state.feed.is_none() {
                             state.feed = Some(Rc::new(Feed::new(Rc::clone(&self.app.store), &self.id, None)));
                         }
-                        state.loaded = Some(loaded);
-                        state.gate = Some(gate);
-                        state.failure = None;
+                        if state.loaded.as_ref() != Some(&loaded) {
+                            state.loaded = Some(loaded);
+                            changed = true;
+                        }
+                        if state.gate.as_ref() != Some(&gate) {
+                            state.gate = Some(gate);
+                            changed = true;
+                        }
+                        changed |= state.failure.take().is_some();
                     }
-                    Err(e) => state.failure = Some(e.to_string()),
+                    Err(e) => {
+                        state.failure = Some(e.to_string());
+                        changed = true;
+                    }
                 }
             }
             let fresh_feed = {
@@ -386,8 +409,11 @@ impl WorkPage {
             };
             if let Some(feed) = fresh_feed {
                 feed.read().await;
+                changed = true;
             }
-            self.render();
+            if changed {
+                self.render();
+            }
             let chain = match &self.state.borrow().loaded {
                 Some(Loaded::Goal(g, _)) => g.chain.clone(),
                 _ => Vec::new(),
@@ -400,16 +426,26 @@ impl WorkPage {
         self.loading.set(false);
     }
 
+    /// Reads the work, its views and its gate, all at once.
     async fn read(&self) -> Result<(Loaded, Gate), ChannelError> {
         let store = &self.app.store;
-        let work = store.work(&self.id).await?;
-        let gate = store.gate(&self.id).await?;
-        let loaded = if work.kind.is_goal() {
-            Loaded::Goal(Box::new(store.goal(&self.id).await?), Box::new(store.record(&self.id).await?))
-        } else {
-            Loaded::Work(Box::new(work), store.events_of(&self.id).await?)
+        let known_goal = matches!(self.state.borrow().loaded, Some(Loaded::Goal(..)));
+        let views = async {
+            let goal = || async {
+                let (goal, record) = futures::try_join!(store.goal(&self.id), store.record(&self.id))?;
+                Ok::<_, ChannelError>(Loaded::Goal(Box::new(goal), Box::new(record)))
+            };
+            if known_goal {
+                return goal().await;
+            }
+            let work = store.work(&self.id).await?;
+            if work.kind.is_goal() {
+                goal().await
+            } else {
+                Ok(Loaded::Work(Box::new(work), store.events_of(&self.id).await?))
+            }
         };
-        Ok((loaded, gate))
+        futures::try_join!(views, store.gate(&self.id))
     }
 
     /// One beat: a session in view is read often while it works and seldom
