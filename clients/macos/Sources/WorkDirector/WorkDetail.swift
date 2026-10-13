@@ -163,7 +163,7 @@ struct WorkDetail: View {
                         if let target = openTarget(loaded) {
                             Button { plan = Plan.open(target) } label: { Label("Open in Editor", systemImage: "arrow.up.forward.app") }
                                 .labelStyle(.titleAndIcon)
-                                .help("Open where this work is done in your editor: wd open \(target) .")
+                                .help("Open where this work is done in your editor")
                         }
                     }
                     GroupGap()

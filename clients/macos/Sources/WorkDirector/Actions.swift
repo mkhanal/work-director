@@ -106,11 +106,11 @@ struct Actions: ToolbarContent {
             if work.state == .paused || work.state == .dropped {
                 Button { run(.resume(work.id, note: "")) } label: { Label("Resume", systemImage: "play.fill") }
                     .labelStyle(.titleAndIcon)
-                    .help("Carry on where it left off: wd resume \(work.id)")
+                    .help("Carry on where it left off")
             } else if work.live {
                 Button { run(.pause(work.id)) } label: { Label("Pause", systemImage: "pause.fill") }
                     .labelStyle(.titleAndIcon)
-                    .help("Stop the running sessions and keep their conversations: wd pause \(work.id)")
+                    .help("Stop the work for now and keep its conversations")
             }
             Menu {
                 WorkMenu(work: work, run: run, ask: ask)
