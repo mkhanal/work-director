@@ -375,6 +375,8 @@ type Change struct {
 	Title    string     `json:"title,omitempty"`
 	DoneWhen string     `json:"done_when,omitempty"`
 	Finish   FinishLine `json:"finish,omitempty"`
+	// Found is what was found that calls for a proposed top-goal change.
+	Found string `json:"found,omitempty"`
 	// Sources is what each source of a finish line said, on the question a
 	// planner unsure where a goal finishes leaves.
 	Sources *FinishSaid `json:"sources,omitempty"`

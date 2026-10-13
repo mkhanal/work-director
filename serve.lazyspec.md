@@ -119,6 +119,11 @@ JSON message per line to stdout:
 - The finish-line question serves `kind` `finish` and the `choices` offered, in order.
 - It serves `sources` `{goal, repo, taste}`, what each said, a source that said nothing null; `sources` is null when the planner gave none.
 
+## A Course Change Serves What Was Found And What Happens To Each Sub-Goal
+- A `course` or `plan` change serves `found`, what was found that calls for it, or null.
+- It serves `sub_goals`, each `{work, title, status, state, why}`: the goal's open sub-goals in tree order, `superseded` with why when the change supersedes one, else `kept` with its state.
+- Then each sub-goal the change adds, `new`, with null `work`, `state` and `why`.
+
 ## A Goal Serves Its Record
 - `GET /api/record/<goal>` and the `record` method return a summary of counts and one entry per decision, finish choice, course check, question, answer, judgement, chore, report, delivery and supersession under the goal, newest first, ending with what the person first asked.
 - Each entry says when, what, where in the tree, and whether the person or the director made it.

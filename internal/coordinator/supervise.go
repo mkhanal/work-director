@@ -161,7 +161,7 @@ AFTER <id>: <id>,<id> | none
 MET <id>: <why its done-when holds>  (closes a sub-goal in review; nothing closes on its report alone)
 MISSED <id>: <what is missing>  (sends it back to its agent)
 CHORE: <what the director needs done that is no sub-goal, run as a session on the goal>
-PROPOSE: <title> | done when: <done when> | finish: <discovery, research, local build, complete PR, merged or released> — <why>  (a change to the top goal; it waits for the person)
+PROPOSE: <title> | done when: <done when> | finish: <discovery, research, local build, complete PR, merged or released> [| found: <what was found that calls for it>] — <why>  (a change to the top goal; it waits for the person)
 RESOLVE <concern number>: <decision>
 ASK: <a question only the person can answer>
 - <a choice, your recommendation first, marked (recommended)>
@@ -241,12 +241,13 @@ type Action struct {
 	// Title and DoneWhen are what a GOAL files, an EDIT changes (empty is
 	// unchanged) and a PROPOSE proposes; After is what a GOAL or AFTER waits
 	// on; Split files a GOAL to be planned further; Finish is a PROPOSE's
-	// finish line.
+	// finish line, and Found what was found that calls for it.
 	Title    string          `json:"title,omitempty"`
 	DoneWhen string          `json:"done_when,omitempty"`
 	After    []string        `json:"after,omitempty"`
 	Split    bool            `json:"split,omitempty"`
 	Finish   core.FinishLine `json:"finish,omitempty"`
+	Found    string          `json:"found,omitempty"`
 }
 
 // Line is the action as the supervisor wrote it.
@@ -289,7 +290,11 @@ func (a Action) Line() string {
 	case ActChore:
 		return "CHORE: " + a.Text
 	case ActPropose:
-		return fmt.Sprintf("PROPOSE: %s | done when: %s | finish: %s — %s", a.Title, a.DoneWhen, a.Finish, a.Text)
+		found := ""
+		if a.Found != "" {
+			found = " | found: " + a.Found
+		}
+		return fmt.Sprintf("PROPOSE: %s | done when: %s | finish: %s%s — %s", a.Title, a.DoneWhen, a.Finish, found, a.Text)
 	case ActResolve:
 		return fmt.Sprintf("RESOLVE %d: %s", a.Concern, a.Text)
 	case ActAsk:
@@ -457,7 +462,7 @@ func action(l string) (Action, bool) {
 	}
 	if m := proposeActRe.FindStringSubmatch(l); m != nil {
 		parts := strings.Split(m[1], "|")
-		f, ok := fields(parts[1:], "done when", "finish")
+		f, ok := fields(parts[1:], "done when", "finish", "found")
 		title := strings.TrimSpace(parts[0])
 		if !ok || title == "" || f["done when"] == "" {
 			return Action{}, false
@@ -466,7 +471,7 @@ func action(l string) (Action, bool) {
 		if err != nil {
 			return Action{}, false
 		}
-		return Action{Kind: ActPropose, Title: title, DoneWhen: f["done when"], Finish: finish, Text: strings.TrimSpace(m[2])}, true
+		return Action{Kind: ActPropose, Title: title, DoneWhen: f["done when"], Finish: finish, Found: f["found"], Text: strings.TrimSpace(m[2])}, true
 	}
 	if m := resolveRe.FindStringSubmatch(l); m != nil {
 		n, err := strconv.Atoi(m[1])

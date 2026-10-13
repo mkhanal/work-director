@@ -443,13 +443,17 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 			Options: []string{applyChoice, keepPlanChoice}}}, asked...)
 	}
 	if proposed != nil {
-		change.Title, change.DoneWhen, change.Finish = proposed.Title, proposed.DoneWhen, proposed.Finish
+		change.Title, change.DoneWhen, change.Finish, change.Found = proposed.Title, proposed.DoneWhen, proposed.Finish, proposed.Found
 		finish := "not decided"
 		if goal.FinishLine != nil {
 			finish = string(*goal.FinishLine)
 		}
-		text := fmt.Sprintf("%s\nNow: %s | done when: %s | finish: %s\nProposed: %s | done when: %s | finish: %s\nWhy: %s",
-			courseQuestion, goal.Title, textOr(goal.DoneWhen, "not set"), finish, proposed.Title, proposed.DoneWhen, proposed.Finish, proposed.Text)
+		found := ""
+		if proposed.Found != "" {
+			found = "\nFound: " + proposed.Found
+		}
+		text := fmt.Sprintf("%s\nNow: %s | done when: %s | finish: %s\nProposed: %s | done when: %s | finish: %s%s\nWhy: %s",
+			courseQuestion, goal.Title, textOr(goal.DoneWhen, "not set"), finish, proposed.Title, proposed.DoneWhen, proposed.Finish, found, proposed.Text)
 		asked = append([]coordinator.Action{{Kind: coordinator.ActAsk, Text: text, Options: []string{changeCourseChoice, keepGoalChoice}}}, asked...)
 	}
 	if done != nil {

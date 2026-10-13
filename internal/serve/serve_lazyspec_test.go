@@ -54,6 +54,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Proposed Breakdown Is Served As Proposed", aProposedBreakdownIsServedAsProposed)
 	t.Run("A Goal Serves Why It Was Broken Down So", aGoalServesWhyItWasBrokenDownSo)
 	t.Run("A Change Waiting For The Person Is Served With What Would Change", aChangeWaitingForThePersonIsServedWithWhatWouldChange)
+	t.Run("A Course Change Serves What Was Found And What Happens To Each Sub-Goal", aCourseChangeServesWhatWasFoundAndWhatHappensToEachSubGoal)
 	t.Run("A Goal Serves Its Record", aGoalServesItsRecord)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("A Running Session's Report Moves Its Work On", aRunningSessionsReportMovesItsWorkOn)
@@ -2192,7 +2193,7 @@ func aChangeWaitingForThePersonIsServedWithWhatWouldChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	ch := changeOn(course.ID, course.ID)
-	same("course change", ch, `{"kind":"course","now":{"done_when":"engineers read what changed","finish":"complete PR","title":"Release notes for engineers"},"proposed":{"done_when":"customers read it too","finish":"merged","title":"Release notes for everyone"},"why":"customers ask for it"}`)
+	same("course change", ch, `{"found":null,"kind":"course","now":{"done_when":"engineers read what changed","finish":"complete PR","title":"Release notes for engineers"},"proposed":{"done_when":"customers read it too","finish":"merged","title":"Release notes for everyone"},"sub_goals":[],"why":"customers ask for it"}`)
 
 	// A top-goal change asked together with a plan change carries both.
 	both := add("Release notes for operators", ledger.AddOptions{Kind: core.WorkGoal})
@@ -2260,6 +2261,68 @@ func aGoalServesWhyItWasBrokenDownSo(t *testing.T) {
 	event(t, l, goal.ID, core.EventNote, "plan: 2 sub-goals")
 	if got := reasoning(); got != "null" {
 		t.Errorf("reasoning after a planning that gave none = %s, want null", got)
+	}
+}
+
+func aCourseChangeServesWhatWasFoundAndWhatHappensToEachSubGoal(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	add := func(title string, o ledger.AddOptions) core.Work {
+		t.Helper()
+		w, err := l.Add("p", title, o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return w
+	}
+	top := add("Events reach the warehouse", ledger.AddOptions{Kind: core.WorkGoal})
+	done := add("Events are batched", ledger.AddOptions{Parent: &top.ID})
+	walk(t, l, done.ID, core.StateDone)
+	working := add("Batches are retried", ledger.AddOptions{Parent: &top.ID})
+	walk(t, l, working.ID, core.StateRunning)
+	gone := add("An old route", ledger.AddOptions{Parent: &top.ID})
+	if _, err := l.Supersede(gone.ID, "replaced earlier"); err != nil {
+		t.Fatal(err)
+	}
+	dropped := add("Retries are tuned by hand", ledger.AddOptions{Parent: &top.ID})
+	actions := []string{
+		coordinator.Action{Kind: coordinator.ActSupersede, Work: dropped.ID, Text: "the SDK fix makes it moot"}.Line(),
+		coordinator.Action{Kind: coordinator.ActGoal, Work: top.ID, Title: "The SDK retries a throttled batch", DoneWhen: "no batch is dropped on 429"}.Line(),
+	}
+	found := "The vendor SDK drops a batch when the API answers 429 and never retries it."
+	walk(t, l, top.ID, core.StateRunning, core.StateNeedsInput)
+	asks := []coordinator.Action{
+		{Kind: coordinator.ActAsk, Text: "Change course?\nNow: Events reach the warehouse | done when: not set | finish: not decided\nProposed: No event is lost | done when: every event lands | finish: complete PR\nFound: " + found + "\nWhy: losing events is the real problem", Options: []string{"Change course (recommended)", "Keep the goal as it is"}},
+		{Kind: coordinator.ActAsk, Text: "Change the plan?\n" + strings.Join(actions, "\n"), Options: []string{"Apply these changes (recommended)", "Keep the plan as it is"}},
+	}
+	if _, err := l.Ask(top.ID, coordinator.QuestionBody(asks), core.Change{Actions: actions, Title: "No event is lost", DoneWhen: "every event lands", Finish: core.FinishPR, Found: found}); err != nil {
+		t.Fatal(err)
+	}
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	var v struct {
+		NeedsYou []struct {
+			Change struct {
+				Kind     string          `json:"kind"`
+				Found    *string         `json:"found"`
+				SubGoals json.RawMessage `json:"sub_goals"`
+			} `json:"change"`
+		} `json:"needs_you"`
+	}
+	getJSON(t, api.URL+"/api/goal/"+top.ID, http.StatusOK, &v)
+	if len(v.NeedsYou) != 1 {
+		t.Fatalf("needs_you = %+v, want the one change", v.NeedsYou)
+	}
+	ch := v.NeedsYou[0].Change
+	if ch.Kind != "course" || ch.Found == nil || *ch.Found != found {
+		t.Fatalf("change = %s found %v, want a course change with what was found", ch.Kind, ch.Found)
+	}
+	want := fmt.Sprintf(`[{"work":%q,"title":"Events are batched","status":"kept","state":"done","why":null},`+
+		`{"work":%q,"title":"Batches are retried","status":"kept","state":"running","why":null},`+
+		`{"work":%q,"title":"Retries are tuned by hand","status":"superseded","state":"queued","why":"the SDK fix makes it moot"},`+
+		`{"work":null,"title":"The SDK retries a throttled batch","status":"new","state":null,"why":null}]`, done.ID, working.ID, dropped.ID)
+	if string(ch.SubGoals) != want {
+		t.Errorf("sub_goals = %s\nwant %s", ch.SubGoals, want)
 	}
 }
 

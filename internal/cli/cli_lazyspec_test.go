@@ -5031,10 +5031,15 @@ func TestAChangeToTheTopGoalAlwaysWaitsForThePerson(t *testing.T) {
 	superviseOnce(t, f, o.goal)
 	propose := func() {
 		o.say(t, supervisor, "COURSE: pivot — tags already exist", "ACTIONS:",
-			"PROPOSE: Ship tagged releases | done when: every release is tagged | finish: merged — tags already exist")
+			"PROPOSE: Ship tagged releases | done when: every release is tagged | finish: merged | found: every release since v1 is already tagged — tags already exist")
 		superviseOnce(t, f, o.goal)
 	}
 	propose()
+	for _, e := range f.ledgerEvents(t, o.goal) {
+		if e.Kind == core.EventQuestion && (e.Change == nil || e.Change.Found != "every release since v1 is already tagged" || !strings.Contains(e.Body, "Found: every release since v1 is already tagged\n")) {
+			t.Fatalf("question = %q with change %+v, want what was found kept and said", e.Body, e.Change)
+		}
+	}
 	if got := stateOf(t, f, o.goal); got != core.StateNeedsInput {
 		t.Fatalf("goal = %s, want it waiting on the person in auto mode too", got)
 	}

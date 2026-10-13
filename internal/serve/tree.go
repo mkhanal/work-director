@@ -421,18 +421,84 @@ type change struct {
 	// Sources is what each source of a finish line said, served on a
 	// finish-line question and null there when the planner gave none.
 	Sources *core.FinishSaid `json:"-"`
+	// Found is what was found that calls for a plan or course change, and
+	// SubGoals what the change does to each sub-goal; both served on those
+	// kinds only.
+	Found    *string       `json:"-"`
+	SubGoals []subGoalFate `json:"-"`
+}
+
+// Fates of a sub-goal under a change.
+const (
+	fateKept       = "kept"
+	fateNew        = "new"
+	fateSuperseded = "superseded"
+)
+
+// subGoalFate is one sub-goal as a change would leave it: an existing one
+// kept or superseded with its state, or a new one with no work yet.
+type subGoalFate struct {
+	Work   *string     `json:"work"`
+	Title  string      `json:"title"`
+	Status string      `json:"status"`
+	State  *core.State `json:"state"`
+	Why    *string     `json:"why"`
 }
 
 // MarshalJSON serves the fields a kind always carries, null when unknown.
 func (c change) MarshalJSON() ([]byte, error) {
 	type fields change
-	if c.Kind == changeFinish {
+	switch c.Kind {
+	case changeFinish:
 		return json.Marshal(struct {
 			fields
 			Sources *core.FinishSaid `json:"sources"`
 		}{fields(c), c.Sources})
+	case changePlan, changeCourse:
+		return json.Marshal(struct {
+			fields
+			Found    *string       `json:"found"`
+			SubGoals []subGoalFate `json:"sub_goals"`
+		}{fields(c), c.Found, c.SubGoals})
 	}
 	return json.Marshal(fields(c))
+}
+
+// subGoalFates is what actions do to w's sub-goals: each open one, in tree
+// order, superseded with why when an action supersedes it and kept with its
+// state otherwise; then each sub-goal an action adds, as new.
+func subGoalFates(t tree, w core.Work, actions []string) []subGoalFate {
+	acts := []coordinator.Action{}
+	for _, line := range actions {
+		if parsed, _ := coordinator.ParseSupervision([]string{"ACTIONS:", line}); len(parsed) == 1 {
+			acts = append(acts, parsed[0])
+		}
+	}
+	out := []subGoalFate{}
+	for _, k := range t.kids[w.ID] {
+		var why *string
+		for _, a := range acts {
+			if a.Kind == coordinator.ActSupersede && a.Work == k.ID {
+				text := a.Text
+				why = &text
+			}
+		}
+		if why == nil && (k.State == core.StateSuperseded || k.State == core.StateDropped) {
+			continue
+		}
+		id, state := k.ID, k.State
+		fate := subGoalFate{Work: &id, Title: k.Title, Status: fateKept, State: &state}
+		if why != nil {
+			fate.Status, fate.Why = fateSuperseded, why
+		}
+		out = append(out, fate)
+	}
+	for _, a := range acts {
+		if a.Kind == coordinator.ActGoal {
+			out = append(out, subGoalFate{Title: a.Title, Status: fateNew})
+		}
+	}
+	return out
 }
 
 // changeOf is what answering q, the question w waits on, would change, or
@@ -440,7 +506,11 @@ func (c change) MarshalJSON() ([]byte, error) {
 func (s *Server) changeOf(t tree, w core.Work, q runner.Question) (*change, error) {
 	e, ok := t.asked[w.ID]
 	if ok && e.Change != nil && (e.Change.Title != "" || len(e.Change.Actions) > 0) {
-		ch := &change{Kind: changePlan}
+		ch := &change{Kind: changePlan, SubGoals: subGoalFates(t, w, e.Change.Actions)}
+		if e.Change.Found != "" {
+			found := e.Change.Found
+			ch.Found = &found
+		}
 		if len(e.Change.Actions) > 0 {
 			ch.Actions = e.Change.Actions
 			lines, err := s.planLines(t, e.Change.Actions)

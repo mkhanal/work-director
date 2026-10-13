@@ -488,6 +488,7 @@ could not with their work, the bound that ran out, and the work still open.
 
 ## A Change To The Top Goal Always Waits For The Person
 - PROPOSE files a question with the goal now and as proposed, whatever the mode, and the goal waits on it.
+- A PROPOSE that says what was found keeps it with the question, whose body says `Found: …`.
 - Answering Change course sets the title, done-when and finish line as proposed, from the person; any other answer changes nothing.
 
 ## A Goal Is Declared Done Only When Every Part Of Done Holds
