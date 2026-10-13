@@ -6,13 +6,30 @@ import WorkDirectorKit
 /// drag, Select All and Copy as anywhere on the Mac, its steps folded and
 /// unfolded by their chevrons. Grows to its text's height inside the page's
 /// scroll view. Reading the conversation again edits only from the first item
-/// that changed, so a selection before it, or one being dragged, holds.
-struct TranscriptText: NSViewRepresentable {
+/// that changed, so a selection before it, or one being dragged, holds. A long
+/// transcript is set and laid out off the main thread, so showing one never
+/// holds up the window.
+struct TranscriptText: View {
     let transcript: Transcript
     /// Keeps the laid-out text for this key, so coming back to a long
     /// conversation shows it at once.
     var key: String? = nil
     var toggle: (String) -> Void = { _ in }
+    /// Counts layouts finished off the main thread, so the page measures the
+    /// text again when one lands.
+    @State private var laidOut = 0
+
+    var body: some View {
+        TranscriptRepresentable(transcript: transcript, key: key, toggle: toggle, laidOut: laidOut) { laidOut += 1 }
+    }
+}
+
+private struct TranscriptRepresentable: NSViewRepresentable {
+    let transcript: Transcript
+    let key: String?
+    let toggle: (String) -> Void
+    let laidOut: Int
+    let landed: () -> Void
 
     func makeNSView(context: Context) -> TranscriptTextView {
         let view = key.flatMap { TranscriptTextView.kept[$0] }.flatMap { $0.superview == nil ? $0 : nil } ?? TranscriptTextView()
@@ -22,6 +39,7 @@ struct TranscriptText: NSViewRepresentable {
 
     func updateNSView(_ view: TranscriptTextView, context: Context) {
         view.toggle = toggle
+        view.landed = landed
         view.show(transcript)
     }
 
@@ -32,12 +50,34 @@ struct TranscriptText: NSViewRepresentable {
     }
 }
 
+/// A text stack laid out off the main thread, handed to the main thread whole.
+private struct Laid: @unchecked Sendable {
+    /// Owns the stack: a layout manager and a container only point back at it.
+    let storage: NSTextStorage
+    let container: NSTextContainer
+    let height: CGFloat
+}
+
 final class TranscriptTextView: NSTextView {
     private(set) var shown = Transcript(items: [])
+    /// What is being set off the main thread, and for which width.
+    private var setting: (transcript: Transcript, width: CGFloat)?
+    private var generation = 0
     private var waiting: Transcript?
     private var dragging = false
-    private var measured: (width: CGFloat, height: CGFloat)?
+    /// The width the text is laid out for, and its height there.
+    private var laid: (width: CGFloat, height: CGFloat)? {
+        didSet { if let laid { lastHeight = laid.height } }
+    }
+    private var lastHeight: CGFloat?
+    private var appearanceName: NSAppearance.Name?
+    /// The text this view shows; it owns the layout manager and container.
+    private var owner: NSTextStorage
     var toggle: (String) -> Void = { _ in }
+    var landed: () -> Void = {}
+
+    /// Past this many characters a change is set and laid out off the main thread.
+    static let long = 20_000
 
     /// Laid-out conversations by key, the most recent last.
     @MainActor static var kept: [String: TranscriptTextView] = [:]
@@ -51,13 +91,8 @@ final class TranscriptTextView: NSTextView {
     }
 
     init() {
-        let storage = NSTextStorage()
-        let layout = NSLayoutManager()
-        storage.addLayoutManager(layout)
-        let container = NSTextContainer(size: NSSize(width: 600, height: CGFloat.greatestFiniteMagnitude))
-        container.lineFragmentPadding = 0
-        container.widthTracksTextView = true
-        layout.addTextContainer(container)
+        let (storage, container) = Self.stack(NSAttributedString(), width: 600)
+        owner = storage
         super.init(frame: NSRect(x: 0, y: 0, width: 600, height: 10), textContainer: container)
         isEditable = false
         isSelectable = true
@@ -73,10 +108,32 @@ final class TranscriptTextView: NSTextView {
     }
 
     override init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
+        owner = container?.layoutManager?.textStorage ?? NSTextStorage()
         super.init(frame: frameRect, textContainer: container)
     }
 
     required init?(coder: NSCoder) { nil }
+
+    /// A text stack of its own; the text keeps the width it is given, so
+    /// only this view decides when it is laid out again.
+    nonisolated private static func stack(_ text: NSAttributedString, width: CGFloat) -> (NSTextStorage, NSTextContainer) {
+        let storage = NSTextStorage(attributedString: text)
+        let layout = NSLayoutManager()
+        storage.addLayoutManager(layout)
+        let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        container.widthTracksTextView = false
+        layout.addTextContainer(container)
+        return (storage, container)
+    }
+
+    nonisolated private static func measure(_ container: NSTextContainer) -> CGFloat {
+        guard let layout = container.layoutManager else { return 0 }
+        layout.ensureLayout(for: container)
+        var height = layout.usedRect(for: container).height
+        if layout.extraLineFragmentTextContainer != nil { height -= layout.extraLineFragmentRect.height }
+        return ceil(max(height, 0))
+    }
 
     // MARK: text
 
@@ -85,47 +142,122 @@ final class TranscriptTextView: NSTextView {
             waiting = next
             return
         }
-        guard let storage = textStorage, let from = Transcript.firstChange(from: shown, to: next) else { return }
+        if let setting, setting.transcript == next { return }
+        guard let storage = textStorage, let from = Transcript.firstChange(from: shown, to: next) else {
+            if setting != nil { generation += 1; setting = nil }
+            return
+        }
         let start = from < shown.items.count ? shown.starts[from] : shown.length
+        if next.length - start > Self.long {
+            setLater(next, width: laid?.width ?? frame.width)
+            return
+        }
+        generation += 1
+        setting = nil
         let tail = TranscriptSetter.text(next.items[from...])
         let selection = selectedRanges.map(\.rangeValue)
         storage.beginEditing()
         storage.replaceCharacters(in: NSRange(location: start, length: storage.length - start), with: tail)
         storage.endEditing()
-        let length = storage.length
+        restore(selection)
+        shown = next
+        laid = nil
+    }
+
+    /// Sets and lays out a transcript off the main thread, then shows it
+    /// whole; meanwhile what was there stays. Without a width yet, it waits
+    /// for the page to give the view one.
+    private func setLater(_ next: Transcript, width: CGFloat) {
+        generation += 1
+        let mine = generation
+        setting = (next, width)
+        guard width > 0 else { return }
+        Task.detached(priority: .userInitiated) {
+            let (storage, container) = Self.stack(TranscriptSetter.text(next.items[...]), width: width)
+            let laid = Laid(storage: storage, container: container, height: Self.measure(container))
+            await MainActor.run { self.install(laid, next, width: width, generation: mine) }
+        }
+    }
+
+    private func install(_ made: Laid, _ next: Transcript, width: CGFloat, generation mine: Int) {
+        guard mine == generation else { return }
+        let selection = selectedRanges.map(\.rangeValue)
+        // The whole stack moves in: replaceTextContainer would keep the old
+        // text and lay it out again here.
+        textContainer?.textView = nil
+        made.container.textView = self
+        owner = made.storage
+        needsDisplay = true
+        restore(selection)
+        shown = next
+        setting = nil
+        laid = (width, made.height)
+        landed()
+    }
+
+    private func restore(_ selection: [NSRange]) {
+        let length = textStorage?.length ?? 0
         let kept = selection.map { r in
             let lo = min(r.location, length)
             return NSValue(range: NSRange(location: lo, length: min(r.length, length - lo)))
         }
         if !kept.isEmpty { setSelectedRanges(kept, affinity: .downstream, stillSelecting: false) }
-        shown = next
-        measured = nil
-        invalidateIntrinsicContentSize()
     }
 
+    /// The text's height at a width. A long text is laid out again only for
+    /// the width it is given, off the main thread; asked about another width
+    /// meanwhile, its height is scaled from the width it has.
     func height(for width: CGFloat) -> CGFloat {
-        if let measured, measured.width == width { return measured.height }
-        guard let layout = layoutManager, let container = textContainer else { return 0 }
+        if let laid, laid.width == width, setting == nil { return laid.height }
+        guard let container = textContainer else { return 0 }
+        let current = container.containerSize.width
+        if setting != nil || (shown.length > Self.long && width != current) { return estimate(width) }
         container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
-        layout.ensureLayout(for: container)
-        var height = layout.usedRect(for: container).height
-        if layout.extraLineFragmentTextContainer != nil { height -= layout.extraLineFragmentRect.height }
-        height = ceil(max(height, 0))
+        let height = Self.measure(container)
         // Measuring another width leaves the text laid out for its own.
-        if bounds.width > 0, bounds.width != width {
-            container.containerSize = NSSize(width: bounds.width, height: .greatestFiniteMagnitude)
+        if frame.width > 0, frame.width != width {
+            container.containerSize = NSSize(width: frame.width, height: .greatestFiniteMagnitude)
             return height
         }
-        measured = (width, height)
+        laid = (width, height)
         return height
     }
 
+    override func setFrameSize(_ size: NSSize) {
+        super.setFrameSize(size)
+        guard size.width > 0, let container = textContainer, size.width != (setting?.width ?? container.containerSize.width) else { return }
+        // While the window is dragged, a long text keeps its width; it is
+        // laid out for the new one when the drag ends.
+        if inLiveResize, setting == nil, shown.length > Self.long { return }
+        if let setting {
+            setLater(setting.transcript, width: size.width)
+        } else if shown.length > Self.long {
+            setLater(shown, width: size.width)
+        } else {
+            container.containerSize = NSSize(width: size.width, height: .greatestFiniteMagnitude)
+            laid = nil
+        }
+    }
+
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        setFrameSize(frame.size)
+    }
+
+    private func estimate(_ width: CGFloat) -> CGFloat {
+        guard let laid, laid.width > 0 else { return lastHeight ?? CGFloat(max(shown.items.count, setting?.transcript.items.count ?? 0)) * 24 }
+        return ceil(laid.height * max(1, laid.width / width))
+    }
+
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: height(for: bounds.width > 0 ? bounds.width : 600))
+        NSSize(width: NSView.noIntrinsicMetric, height: laid?.height ?? NSView.noIntrinsicMetric)
     }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        let name = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])
+        defer { appearanceName = name }
+        guard let was = appearanceName, was != name else { return }
         // Marks are drawn in the colours of the appearance they were set in.
         let all = shown
         shown = Transcript(items: [])

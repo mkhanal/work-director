@@ -4,7 +4,9 @@
 //   swift text.swift <pid> count                 how many text areas, and each one's length
 //   swift text.swift <pid> value <n>             the nth text area's text
 //   swift text.swift <pid> select <n> <at> <len> selects in the nth, prints what is selected
-//   swift text.swift <pid> link <text>           presses the first link holding the text
+//   swift text.swift <pid> selected <n>          what is selected in the nth
+//   swift text.swift <pid> role <role>           every element of a role, by its words
+//   swift text.swift <pid> link <text>          presses the first link holding the text
 //   swift text.swift <pid> show <n>             scrolls the nth text area into view
 //   swift text.swift <pid> scroll <fraction>     scrolls the window's first scroll area (0 top, 1 bottom)
 import ApplicationServices
@@ -48,6 +50,9 @@ case "select":
     let set = AXUIElementSetAttributeValue(areas[n], kAXSelectedTextRangeAttribute as CFString, value)
     guard set == .success else { print("refused \(set.rawValue)"); exit(1) }
     print(attr(areas[n], kAXSelectedTextAttribute) as? String ?? "")
+case "selected":
+    guard args.count == 4, let n = Int(args[3]), areas.indices.contains(n) else { exit(1) }
+    print(attr(areas[n], kAXSelectedTextAttribute) as? String ?? "")
 case "show":
     guard args.count == 4, let n = Int(args[3]), areas.indices.contains(n) else { exit(1) }
     print(AXUIElementPerformAction(areas[n], "AXScrollToVisible" as CFString) == .success ? "shown" : "refused")
@@ -60,6 +65,11 @@ case "link":
         exit(1)
     }
     print(AXUIElementPerformAction(hit, kAXPressAction as CFString) == .success ? "pressed" : "refused")
+case "role":
+    guard args.count == 4 else { exit(1) }
+    for e in found(args[3]) {
+        print([kAXTitleAttribute, kAXValueAttribute, kAXDescriptionAttribute].map { attr(e, $0) as? String ?? "" }.joined(separator: " | "))
+    }
 case "scroll":
     let areas = found(kAXScrollAreaRole)
     guard args.count == 4, let f = Double(args[3]),

@@ -16,6 +16,12 @@ struct ConversationView: View {
     var directorAnswers: [String] = []
     /// Steps the person folded or unfolded.
     @State private var toggled: Set<String> = []
+    /// The conversation laid out as pieces, off the main thread on each read.
+    @State private var built: [TranscriptPiece]?
+
+    /// What each conversation was last laid out as, so coming back to one
+    /// shows it before it is read again.
+    @MainActor private static var recent = BoundedCache<String, [TranscriptPiece]>(limit: 24)
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s4) {
@@ -33,10 +39,10 @@ struct ConversationView: View {
             }
             // Everything said is one text to select across; only a question
             // waiting on the person breaks it.
-            ForEach(pieces) { piece in
+            ForEach(built ?? Self.recent[place] ?? []) { piece in
                 switch piece {
                 case .text(let transcript):
-                    TranscriptText(transcript: transcript, key: "\(work.id)/\(feed.agent ?? "")/\(piece.id)") { id in
+                    TranscriptText(transcript: transcript, key: place + piece.id) { id in
                         toggled.formSymmetricDifference([id])
                     }
                 case .asking(_, let question):
@@ -54,18 +60,37 @@ struct ConversationView: View {
                 .padding(.leading, Space.turnIndent)
         }
         .task(id: ObjectIdentifier(feed)) { await feed.follow() }
+        .task(id: Reading(steps: feed.steps, toggled: toggled, running: feed.status == .running, answers: directorAnswers, speaker: speaker)) {
+            guard feed.loaded else { return }
+            let reading = Reading(steps: feed.steps, toggled: toggled, running: feed.status == .running, answers: directorAnswers, speaker: speaker)
+            let pieces = await Task.detached(priority: .userInitiated) { reading.pieces }.value
+            guard !Task.isCancelled else { return }
+            built = pieces
+            Self.recent[place] = pieces
+        }
     }
 
-    private var pieces: [TranscriptPiece] {
-        let answered = Set(feed.steps.indices.filter { i in
-            feed.steps[i].kind == .prompt && directorAnswers.contains { (feed.steps[i].text ?? "").contains($0) }
-        })
-        return Transcript.pieces(feed.steps, speaker: speaker, running: feed.status == .running, directorAnswered: answered,
-                                 toggled: toggled, time: when)
-    }
+    /// Which conversation this is: the work, and the subagent when it is one.
+    private var place: String { "\(work.id)/\(feed.agent ?? "")/" }
 
     private var speaker: String {
         feed.agent.map { "Subagent \($0)" } ?? work.runner.map { $0.capitalized } ?? "Agent"
+    }
+}
+
+/// One reading of a conversation: everything its pieces are laid out from.
+private struct Reading: Equatable, Sendable {
+    let steps: [Step]
+    let toggled: Set<String>
+    let running: Bool
+    let answers: [String]
+    let speaker: String
+
+    var pieces: [TranscriptPiece] {
+        let answered = Set(steps.indices.filter { i in
+            steps[i].kind == .prompt && answers.contains { (steps[i].text ?? "").contains($0) }
+        })
+        return Transcript.pieces(steps, speaker: speaker, running: running, directorAnswered: answered, toggled: toggled, time: when)
     }
 }
 
@@ -714,4 +739,21 @@ func when(_ iso: String) -> String {
     return Calendar.current.isDateInToday(date)
         ? date.formatted(date: .omitted, time: .shortened)
         : date.formatted(date: .abbreviated, time: .shortened)
+}
+
+/// A dictionary that forgets everything once it holds limit entries; enough for
+/// a cache whose entries are cheap to make again.
+struct BoundedCache<Key: Hashable, Value> {
+    let limit: Int
+    private var store: [Key: Value] = [:]
+
+    init(limit: Int) { self.limit = limit }
+
+    subscript(key: Key) -> Value? {
+        get { store[key] }
+        set {
+            if store.count >= limit { store.removeAll(keepingCapacity: true) }
+            store[key] = newValue
+        }
+    }
 }

@@ -80,6 +80,7 @@ if long_run:
         rows += turn(k)
         rows.append(user(f"Carry on with release {k}."))
         k += 1
+    rows.append(user("That is the last release."))
 rows += turn(99)
 rows.append(assistant({"type": "tool_use", "id": "q2", "name": "AskUserQuestion", "input": {"questions": [{"header": "Sample", "question": "Generate the sample for v1.0.0 or for the latest release?", "multiSelect": False,
                                                                                                              "options": [{"label": "v1.0.0 (recommended)", "description": "The release the goal names"}, {"label": "Latest", "description": "The newest tag"}]}]}}))

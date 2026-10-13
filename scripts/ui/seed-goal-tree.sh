@@ -175,4 +175,4 @@ q "UPDATE work SET finish_line = 'complete PR', finish_source = 'taste' WHERE id
 event "$P" pr "pull-request https://github.com/metariki/metariki-eqms/pull/512" 130
 state "$P" done 120
 
-echo "home=$WD_HOME/home long=$L goal=$G subgoal=$S2 working=$S3 question=$S2c pivot=$D proposal=$A finish=$F"
+echo "home=$WD_HOME/home issues=$W long=$L goal=$G subgoal=$S2 working=$S3 question=$S2c pivot=$D proposal=$A finish=$F"
