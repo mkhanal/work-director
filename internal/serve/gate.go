@@ -6,12 +6,13 @@ import (
 	"wd/internal/core"
 )
 
-// gateView is the next gate on work's way to done: its name, the argv that
-// passes it, and why it is next. Gate is empty when the work waits on none.
+// gateView is the next gate on work's way to done: its name, what a person
+// reads for it, the argv that passes it, and why it is next. Gate is empty when the work waits on none.
 type gateView struct {
 	Work  string   `json:"work"`
 	Gate  string   `json:"gate"`
 	Title string   `json:"title,omitempty"`
+	Label string   `json:"label"`
 	Argv  []string `json:"argv"`
 	Why   string   `json:"why,omitempty"`
 }
@@ -27,7 +28,7 @@ func (s *Server) gate(id string) (gateView, error) {
 	view := gateView{Work: w.ID, Argv: []string{}}
 	switch w.State {
 	case core.StateSoftDone:
-		view.Gate, view.Title, view.Argv, view.Why = "done", "Done", []string{"done", w.ID}, "its checks passed and it is delivered; marking it done closes it"
+		view.Gate, view.Title, view.Label, view.Argv, view.Why = "done", "Done", "Mark it done", []string{"done", w.ID}, "its checks passed and it is delivered; marking it done closes it"
 		return view, nil
 	case core.StateReview:
 	default:
@@ -50,11 +51,11 @@ func (s *Server) gate(id string) (gateView, error) {
 	}
 	switch {
 	case !verified:
-		view.Gate, view.Title, view.Argv, view.Why = "verify", "Verify", []string{"verify", w.ID}, "its checks haven't passed since it was reported finished"
+		view.Gate, view.Title, view.Label, view.Argv, view.Why = "verify", "Verify", "Check it", []string{"verify", w.ID}, "its checks haven't passed since it was reported finished"
 	case !landed:
-		view.Gate, view.Title, view.Argv, view.Why = "land", "Land", []string{"pr", w.ID}, "its checks passed, and it isn't delivered as a pull request or a commit yet"
+		view.Gate, view.Title, view.Label, view.Argv, view.Why = "land", "Land", "Deliver it", []string{"pr", w.ID}, "its checks passed, and it isn't delivered as a pull request or a commit yet"
 	default:
-		view.Gate, view.Title, view.Argv, view.Why = "soft-done", "Soft-Done", []string{"soft-done", w.ID}, "its checks passed and it is delivered; next, confirm it is finished"
+		view.Gate, view.Title, view.Label, view.Argv, view.Why = "soft-done", "Soft-Done", "Confirm it's finished", []string{"soft-done", w.ID}, "its checks passed and it is delivered; next, confirm it is finished"
 	}
 	return view, nil
 }

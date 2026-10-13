@@ -1534,12 +1534,13 @@ func aWorkItemServesTheNextGateItWaitsOn(t *testing.T) {
 	}
 	ts := httptest.NewServer(s.routes())
 	defer ts.Close()
+	labels := map[string]string{"": "", "verify": "Check it", "land": "Deliver it", "soft-done": "Confirm it's finished", "done": "Mark it done"}
 	gate := func(want string, argv ...string) {
 		t.Helper()
 		var g gateView
 		getJSON(t, ts.URL+"/api/work/"+w.ID+"/gate", http.StatusOK, &g)
-		if g.Gate != want || !slices.Equal(g.Argv, argv) || (want != "" && g.Why == "") {
-			t.Fatalf("gate = %+v, want %q %v with a reason", g, want, argv)
+		if g.Gate != want || !slices.Equal(g.Argv, argv) || (want != "" && g.Why == "") || g.Label != labels[want] {
+			t.Fatalf("gate = %+v, want %q %v labelled %q with a reason", g, want, argv, labels[want])
 		}
 	}
 	event := func(kind core.EventKind, body string) {

@@ -164,6 +164,7 @@ the events for one work item.
 - Verified and not landed, it waits on `land` (`pr <id>`); landed, on `soft-done`.
 - Soft-done work waits on `done`.
 - Work in any other state waits on no gate: `gate` is empty and `argv` is `[]`.
+- Each gate serves `label` for the person: `verify` reads `Check it`, `land` `Deliver it`, `soft-done` `Confirm it's finished`, `done` `Mark it done`; no gate, an empty `label`.
 
 ## Actions Dispatch To The CLI
 `POST /api/action` with `{"argv": [...]}` runs the wd CLI with those
