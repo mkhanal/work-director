@@ -5610,6 +5610,37 @@ func TestAFinishChoiceCanBecomeTheProductsSetting(t *testing.T) {
 	}
 }
 
+func TestAPersonSetsWhereAGoalFinishes(t *testing.T) {
+	f := newCLIFixture(t)
+	f.planReply(t, releasePlan)
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Release notes", "--json"), "id")
+	f.runOK(t, "goal", "plan", goal, "--runner", "planner")
+	f.runOK(t, "goal", "finish", goal, "Local build")
+	g := f.workRow(t, goal)
+	if g.FinishLine == nil || *g.FinishLine != core.FinishLocalBuild || g.FinishSource == nil || *g.FinishSource != core.FinishFromPerson {
+		t.Fatalf("goal = %v from %v, want local build from the person", g.FinishLine, g.FinishSource)
+	}
+	if ds := f.bodies(t, goal, core.EventDecision); !slices.Contains(ds, "finishes at: local build (from person)") {
+		t.Errorf("decisions = %q, want the person's finish line recorded", ds)
+	}
+	kids, _ := f.tree(t, goal)
+	var sub string
+	for _, k := range kids {
+		if k.Kind == core.WorkGoal {
+			sub = k.ID
+		}
+	}
+	if errStr := f.runFail(t, "goal", "finish", sub, "merged"); !strings.Contains(errStr, "top goal "+goal) {
+		t.Errorf("finishing a sub-goal = %q, want it refused naming %s", errStr, goal)
+	}
+	if errStr := f.runFail(t, "goal", "finish", goal, "shipped"); !strings.Contains(errStr, "discovery, research, local build, complete PR, merged, released") {
+		t.Errorf("an unknown line = %q, want it refused naming the set", errStr)
+	}
+	if g := f.workRow(t, goal); *g.FinishLine != core.FinishLocalBuild {
+		t.Errorf("a refused finish changed the goal to %s", *g.FinishLine)
+	}
+}
+
 func TestASubGoalStartsOnlyOnceWhatItWaitsOnIsSettled(t *testing.T) {
 	f := newCLIFixture(t)
 	f.planReply(t, "NAME: Release notes\nFINISH: complete PR | from: taste\n- Every release is tagged\n  done when: each release has a tag\n- Customers read what changed\n  done when: the changelog lists it\n  after: 1\n")

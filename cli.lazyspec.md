@@ -136,6 +136,11 @@ verify event.
 - It records the decision `finish setting: <line>` on the goal, by the person.
 - `--remember` on work not asking where it finishes, or with an answer that is not a finish line, is refused and nothing is answered.
 
+## A Person Sets Where A Goal Finishes
+- `wd goal finish <goal> "<line>"` sets a top goal's finish line, from the person, recording the decision `finishes at: <line> (from person)`.
+- A goal under a goal is refused naming its top goal.
+- A line outside the set is refused naming the set.
+
 ## A Sub-Goal Starts Only Once What It Waits On Is Settled
 - Starting a sub-goal that waits on an unsettled sibling is refused naming the sibling.
 - Starting every open sub-goal of a goal starts only those with nothing left to wait on.

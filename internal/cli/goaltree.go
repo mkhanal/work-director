@@ -35,8 +35,47 @@ func (c *Cli) goalTree(sub string, rest []string) (bool, error) {
 		return true, c.goalAfter(rest)
 	case "approve":
 		return true, c.goalApprove(rest)
+	case "finish":
+		return true, c.goalFinish(rest)
 	}
 	return false, nil
+}
+
+// goalFinish is `wd goal finish <goal> "<line>"`: the person sets where a top
+// goal finishes.
+func (c *Cli) goalFinish(rest []string) error {
+	if len(rest) != 3 {
+		return fail("usage: wd goal finish <goal> \"<finish line>\"")
+	}
+	goal, err := c.Ledger.Get(rest[1])
+	if err != nil {
+		return err
+	}
+	if !core.IsGoal(goal.Kind) {
+		return fail("%s is a %s; only a goal has a finish line", goal.ID, goal.Kind)
+	}
+	top, err := c.topGoal(goal)
+	if err != nil {
+		return err
+	}
+	if top.ID != goal.ID {
+		return fail("%s finishes where its top goal %s does; set it there: wd goal finish %s \"<line>\"", goal.ID, top.ID, top.ID)
+	}
+	line, err := core.ParseFinishLine(rest[2])
+	if err != nil {
+		names := make([]string, len(core.FinishLines))
+		for i, f := range core.FinishLines {
+			names[i] = string(f)
+		}
+		return fail("%q is not a finish line; one of: %s", rest[2], strings.Join(names, ", "))
+	}
+	if err := c.Ledger.SetFinish(goal.ID, line, core.FinishFromPerson); err != nil {
+		return err
+	}
+	if goal, err = c.Ledger.Get(goal.ID); err != nil {
+		return err
+	}
+	return c.out(map[string]any{"work": goal, "finish": line, "source": core.FinishFromPerson}, fmt.Sprintf("%s finishes at: %s", goal.ID, line))
 }
 
 // reshaped records text as a decision made by by on the goal w sits under, or
