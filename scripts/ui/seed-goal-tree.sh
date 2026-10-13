@@ -23,6 +23,9 @@ ago() { python3 -c "import datetime,sys; print((datetime.datetime.now(datetime.t
 event() { # work kind body minutes-ago
   q "INSERT INTO event (work, kind, body, at) VALUES ('$1', '$2', '$(printf %s "$3" | sed "s/'/''/g")', '$(ago "$4")')"
 }
+payload() { # work kind body payload minutes-ago
+  q "INSERT INTO event (work, kind, body, at, payload) VALUES ('$1', '$2', '$(printf %s "$3" | sed "s/'/''/g")', '$(ago "$5")', '$(printf %s "$4" | sed "s/'/''/g")')"
+}
 state() { q "UPDATE work SET state = '$2' WHERE id = '$1'"; event "$1" state "$2" "${3:-30}"; }
 
 # The goal on the main screen.
@@ -80,13 +83,15 @@ event "$D1" judged "met: the report names the SDK's dropped 429 batches, with lo
 q "UPDATE work SET runner = 'claude', session = 'seed-d2' WHERE id = '$D2'"
 state "$D2" running 50
 state "$D" needs-input 6
-change=$(python3 -c 'import json,sys; d3=sys.argv[1]; g=sys.argv[2]; print(json.dumps({"actions":["GOAL "+g+": A rejected batch is retried until delivered | done when: a 429 batch is retried until delivered","GOAL "+g+": Events lost since March are replayed, once each | done when: every lost event is replayed exactly once","SUPERSEDE "+d3+": no longer needed: the vendor is fine once retried"],"title":"Sync never drops events","done_when":"A 429 batch is retried until delivered, and events lost since March are replayed","finish":"complete PR"}))' "$D3" "$D")
-q "INSERT INTO event (work, kind, body, at, payload) VALUES ('$D', 'question', 'Change course?
+found='The vendor SDK drops a batch when the API answers 429 and never retries it. About 0.4% of events since the March upgrade, all on large tenants.'
+change=$(python3 -c 'import json,sys; d3=sys.argv[1]; g=sys.argv[2]; print(json.dumps({"actions":["GOAL "+g+": A rejected batch is retried until delivered | done when: a 429 batch is retried until delivered","GOAL "+g+": Events lost since March are replayed, once each | done when: every lost event is replayed exactly once","SUPERSEDE "+d3+": no longer needed: the vendor is fine once retried"],"title":"Sync never drops events","done_when":"A 429 batch is retried until delivered, and events lost since March are replayed","finish":"complete PR","found":sys.argv[3]}))' "$D3" "$D" "$found")
+payload "$D" question "Change course?
   Now: Why does sync drop events? | done when: The cause is found and explained, with proof | finish: discovery
   Proposed: Sync never drops events | done when: A 429 batch is retried until delivered, and events lost since March are replayed | finish: complete PR
+  Found: $found
   Why: The cause is found and the fix is small: one retry policy plus a replay of what was lost. A separate goal would repeat this context.
 - Change course (recommended)
-- Keep the goal as it is', '$(ago 6)', '$(printf %s "$change" | sed "s/'/''/g")')"
+- Keep the goal as it is" "$change" 6
 
 # A breakdown proposed in ask mode (screen: proposal).
 A=$("$WD" goal add metariki-eqms "An inspector can get a full audit trail" --json | id)
@@ -96,15 +101,23 @@ A2=$(sub "$A" "An admin can export the trail for a date range" --done-when "the 
 A3=$(sub "$A" "The trail cannot be edited or deleted" --done-when "no role, API or migration can change or remove a stored entry, and a test proves it" --after "$A1")
 A4=$(sub "$A" "An inspector's checklist maps to the export" --done-when "each audit-trail clause points to where the export satisfies it" --after "$A2,$A3")
 event "$A" note "proposed: 4 sub-goals" 2
+why='An inspector checks three things: that every change is captured, that it can be produced on demand, and that nobody can alter it. Each is its own sub-goal, so each is judged on its own.
+
+Number 1 is large, so it will be planned into its own sub-goals when it starts, once the modules it touches are known.'
+left_out="Electronic signatures: they already exist and the goal doesn't ask to change them."
+judge_by="Exporting last month's trail for one org and handing it to an inspector with the checklist."
+reasoning=$(python3 -c 'import json,sys; print(json.dumps({"why":sys.argv[1],"left_out":sys.argv[2],"judge_by":sys.argv[3]}))' "$why" "$left_out" "$judge_by")
+payload "$A" note "reasoning: why: $why | left out: $left_out | judge by: $judge_by" "$reasoning" 2
 
 # Where a goal finishes, asked before planning (screen: finishline).
 F=$("$WD" goal add metariki-eqms "Pick a queue library for the event bus" --json | id)
 q "UPDATE work SET detail = 'Compare NATS, Redis Streams and Kafka for the event bus and pick one. We push about 2k events a second at peak.' WHERE id = '$F'"
 state "$F" needs-input 1
-event "$F" question "Where does this goal finish?
+sources='{"sources":{"goal":"\"Compare and pick one\" reads as research","repo":"No finished goals yet to learn from","taste":"In auto mode, a complete PR is done"}}'
+payload "$F" question "Where does this goal finish?
 - research (recommended)
 - local build
-- complete PR" 1
+- complete PR" "$sources" 1
 P=$("$WD" goal add metariki-eqms "Printed forms keep every signature" --json | id)
 q "UPDATE work SET finish_line = 'complete PR', finish_source = 'taste' WHERE id = '$P'"
 event "$P" pr "pull-request https://github.com/metariki/metariki-eqms/pull/512" 130
