@@ -43,6 +43,7 @@ type boardGoal struct {
 	Finish   *finish `json:"finish"`
 	// Finished is where a done goal finished, null before.
 	Finished *string `json:"finished"`
+	Proposed bool    `json:"proposed"`
 }
 
 type boardItem struct {

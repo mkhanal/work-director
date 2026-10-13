@@ -44,7 +44,7 @@ never binds to 0.0.0.0 or a public interface.
 
 ## The Board Places Every Item In One Band
 Every goal and standalone item on the board carries `band`:
-- `needs-you` — the item is needs-input or blocked, or is a goal with a task that is.
+- `needs-you` — the item is needs-input or blocked, or is a goal with a task that is, or whose breakdown is proposed.
 - `in-flight` — queued, briefed or running.
 - `paused` — paused by a person.
 - `ready-to-push` — in review with no landing since its last reopening.
@@ -105,7 +105,8 @@ JSON message per line to stdout:
 ## A Proposed Breakdown Is Served As Proposed
 - A goal serves `proposed`: true while its latest breakdown waits for `wd goal approve`, else false.
 - Each queued sub-goal of a proposed goal serves `why_not_moving` `proposed — needs approval`.
-- Once approved, neither holds.
+- Its board entry serves `proposed` the same way, and sits in `needs-you`.
+- Once approved, none of these holds.
 
 ## A Change Waiting For The Person Is Served With What Would Change
 - Each `needs_you` item serves `change`, null when answering it changes nothing by itself.

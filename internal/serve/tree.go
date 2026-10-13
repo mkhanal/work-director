@@ -615,7 +615,12 @@ func (s *Server) boardGoal(goal core.Work) (boardGoal, error) {
 	if err != nil {
 		return boardGoal{}, err
 	}
-	g := boardGoal{Work: goal, Rollup: goalRollup(tasks), Band: band, Progress: progressOf(t.kids[goal.ID]), NeedsYou: len(t.question), Finish: finishOf(goal)}
+	g := boardGoal{Work: goal, Rollup: goalRollup(tasks), Band: band, Progress: progressOf(t.kids[goal.ID]), NeedsYou: len(t.question), Finish: finishOf(goal),
+		Proposed: core.Proposed(goal.ID, events)}
+	// A breakdown waiting for approval waits on the person.
+	if g.Proposed {
+		g.Band = BandNeedsYou
+	}
 	if goal.State == core.StateDone && goal.FinishLine != nil {
 		run, err := s.ledger.CurrentRun(goal.ID)
 		if err != nil {

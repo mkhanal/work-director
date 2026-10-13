@@ -2052,8 +2052,33 @@ func aProposedBreakdownIsServedAsProposed(t *testing.T) {
 		}
 	}
 
+	type entry struct {
+		Work     core.Work `json:"work"`
+		Proposed bool      `json:"proposed"`
+		Band     Band      `json:"band"`
+	}
+	onBoard := func() entry {
+		var b struct {
+			Goals []entry `json:"goals"`
+		}
+		getJSON(t, api.URL+"/api/board", http.StatusOK, &b)
+		for _, g := range b.Goals {
+			if g.Work.ID == goal.ID {
+				return g
+			}
+		}
+		t.Fatalf("goal %s not on the board", goal.ID)
+		return entry{}
+	}
+	if e := onBoard(); !e.Proposed || e.Band != BandNeedsYou {
+		t.Fatalf("board entry = %+v, want proposed in needs-you", e)
+	}
+
 	event(t, l, goal.ID, core.EventDecision, core.ApprovedPrefix+"2 sub-goals")
 	walk(t, l, subs[0], core.StateRunning)
+	if e := onBoard(); e.Proposed || e.Band == BandNeedsYou {
+		t.Fatalf("board entry after approval = %+v, want neither proposed nor needs-you", e)
+	}
 	v = view{}
 	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &v)
 	if v.Proposed {
