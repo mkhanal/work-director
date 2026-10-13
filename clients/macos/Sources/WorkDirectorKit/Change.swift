@@ -114,6 +114,11 @@ public enum FinishMeaning {
     /// Every finish line, in the order a person climbs them.
     public static let lines = ["discovery", "research", "local build", "complete PR", "merged", "released"]
 
+    /// The offer to keep a finish-line choice as the product's setting.
+    public static func remember(in product: String) -> String {
+        "Finish goals in \(product) this way from now on"
+    }
+
     /// How the director asks where a goal finishes.
     public static let question = "Where does this goal finish?"
 

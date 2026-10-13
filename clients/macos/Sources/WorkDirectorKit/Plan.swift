@@ -107,11 +107,18 @@ public struct Plan: Hashable, Sendable, Identifiable {
     }
 
     /// The answers to the question a session is waiting on, one per item in
-    /// the order asked.
-    public static func answer(_ id: String, _ question: Question, answers: [String]) throws -> Plan {
+    /// the order asked. Remembered, a finish-line choice also becomes the
+    /// product's setting.
+    public static func answer(_ id: String, _ question: Question, answers: [String], remember: Bool = false) throws -> Plan {
         let answers = answers.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         guard answers.count == question.items.count, !answers.contains(where: \.isEmpty) else { throw PlanError.empty }
-        return Plan(title: "Answer", argv: ["answer", id] + answers)
+        return Plan(title: "Answer", argv: ["answer", id] + answers + (remember ? ["--remember"] : []))
+    }
+
+    /// Leaves the question to the director's judgement: it answers every item
+    /// or none, saying why for each.
+    public static func directorDecides(_ id: String) -> Plan {
+        Plan(title: "Let the director decide", argv: ["answer", id, "--director", "--json"])
     }
 
     /// Interrupts what work's sessions are doing and takes back the messages

@@ -1270,4 +1270,36 @@ struct SeededTree {
         #expect(after.finish?.line == "merged")
         #expect(after.needsYou.isEmpty)
     }
+
+    @Test("A Finish-Line Question Says Why It Asks And Can Be Remembered")
+    func finishRemembered() async throws {
+        let home = try Home()
+        try fakeRunner(home)
+        let store = await Store(channel: try home.channel())
+        func asking(_ title: String, sources: String) throws -> String {
+            let goal = try home.goal("demo", title)
+            try home.sql("""
+            UPDATE work SET state='needs-input', runner='fake', session='s-plan' WHERE id='\(goal)';
+            INSERT INTO event (work,kind,body,at,payload) VALUES ('\(goal)','question','Where does this goal finish?
+            - research (recommended)
+            - complete PR','2026-10-13T14:02:00Z','\(sources)');
+            """)
+            return goal
+        }
+        let pick = try asking("Pick a queue library", sources: #"{"sources":{"goal":"\"compare and pick one\" reads as research","repo":null,"taste":"In auto mode, a complete PR is done"}}"#)
+        let ask = try #require(try await store.goal(pick).needsYou.first)
+        let sources = try #require(ask.change?.sources)
+        #expect(sources.rows.map(\.label) == ["The goal", "Your taste"], "only the sources that said something, in the canvas's order")
+        #expect(sources.rows.map(\.said) == ["\"compare and pick one\" reads as research", "In auto mode, a complete PR is done"])
+        #expect(FinishMeaning.remember(in: "demo") == "Finish goals in demo this way from now on")
+
+        let remembered = try Plan.answer(pick, ask.question, answers: ["research"], remember: true)
+        #expect(remembered.argv == ["answer", pick, "research", "--remember"])
+        #expect(try Plan.answer(pick, ask.question, answers: ["research"]).argv == ["answer", pick, "research"], "unchecked, nothing is remembered")
+        let r = try await store.run(remembered)
+        #expect(r.code == 0, "\(r.stderr)")
+        let file = try String(contentsOf: home.dir.appendingPathComponent("projects/demo.md"), encoding: .utf8)
+        #expect(file.contains("finish: research"))
+        #expect(try await store.goal(pick).finish?.line == "research")
+    }
 }

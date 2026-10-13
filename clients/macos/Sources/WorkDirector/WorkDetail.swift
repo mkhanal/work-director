@@ -556,11 +556,11 @@ struct Waiting: View {
         if let question = goal.asking {
             QuestionCard(store: store, workID: goal.goal.id, question: question,
                          title: goal.supervised ? "The supervisor asks you" : "Waiting on you",
-                         change: change(question), answered: answered)
+                         change: change(question), product: goal.goal.project, answered: answered)
         }
         ForEach(goal.waitingTasks, id: \.question.id) { task, question in
             QuestionCard(store: store, workID: task.id, question: question, title: "asks you", asker: task.title,
-                         change: change(question), answered: answered)
+                         change: change(question), product: goal.goal.project, answered: answered)
         }
         if !asking.isEmpty {
             VStack(alignment: .leading, spacing: Space.s3) {
@@ -571,7 +571,7 @@ struct Waiting: View {
                         }
                         .buttonStyle(.link)
                         .font(TypeScale.caption)
-                        QuestionCard(store: store, workID: task.id, question: question, change: change(question), answered: answered)
+                        QuestionCard(store: store, workID: task.id, question: question, change: change(question), product: goal.goal.project, answered: answered)
                     }
                 }
             }

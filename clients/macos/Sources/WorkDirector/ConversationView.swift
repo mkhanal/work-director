@@ -123,7 +123,7 @@ struct StepView: View {
             if let tool = step.tool { ToolRow(call: tool, working: latest) }
         case .question:
             if let q = step.question {
-                QuestionCard(store: store, workID: work.id, question: q, answered: answered)
+                QuestionCard(store: store, workID: work.id, question: q, product: work.project, answered: answered)
             }
         }
     }
@@ -435,6 +435,8 @@ struct QuestionCard: View {
     var at: String? = nil
     /// What answering it with its first choice would change.
     var change: PendingChange? = nil
+    /// The product the work is in, named where a finish choice can be remembered.
+    var product: String? = nil
     let answered: () -> Void
 
     @State private var draft: AnswerDraft
@@ -442,9 +444,10 @@ struct QuestionCard: View {
     @State private var sending = false
     @State private var failure: String?
     @State private var editing = false
+    @State private var remember = false
 
     init(store: Store, workID: String, question: Question, title: String? = nil, asker: String? = nil,
-         path: [PathPart] = [], at: String? = nil, change: PendingChange? = nil, answered: @escaping () -> Void) {
+         path: [PathPart] = [], at: String? = nil, change: PendingChange? = nil, product: String? = nil, answered: @escaping () -> Void) {
         self.store = store
         self.workID = workID
         self.question = question
@@ -453,6 +456,7 @@ struct QuestionCard: View {
         self.path = path
         self.at = at
         self.change = change
+        self.product = product
         self.answered = answered
         _draft = State(initialValue: AnswerDraft(question))
     }
@@ -557,7 +561,25 @@ struct QuestionCard: View {
                     }
                 }
             }
+            if i == 0, question.pending, let rows = change?.sources?.rows, !rows.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Rectangle().fill(Palette.questionBorder).frame(height: 1).padding(.vertical, 6)
+                    CardLabel("Why I'm asking: these disagree", color: Palette.text2)
+                    ForEach(rows, id: \.label) { row in
+                        HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
+                            Text(row.label).foregroundStyle(Palette.text3).frame(width: 108, alignment: .leading)
+                            Text(row.said).foregroundStyle(Palette.text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                        }
+                        .font(TypeScale.caption)
+                    }
+                }
+            }
         }
+    }
+
+    /// A pending finish-line question of one part can keep its choice as the product's setting.
+    private var remembers: Bool {
+        question.pending && question.items.count == 1 && (change?.kind == .finish || question.items[0].asksFinish)
     }
 
     /// A pending course change is answered by its three buttons, not by picking.
@@ -603,7 +625,7 @@ struct QuestionCard: View {
     }
 
     private var plan: Plan? {
-        draft.answers.flatMap { try? Plan.answer(workID, question, answers: $0) }
+        draft.answers.flatMap { try? Plan.answer(workID, question, answers: $0, remember: remembers && remember) }
     }
 
     /// Whether the part on screen has an answer, so Next can move on.
@@ -644,6 +666,12 @@ struct QuestionCard: View {
                     if many {
                         Button("Back") { page -= 1 }.buttonStyle(.canvas).disabled(page == 0)
                         Button("Next") { page += 1 }.buttonStyle(.canvas).disabled(page == question.items.count - 1)
+                    }
+                    if remembers {
+                        Toggle(FinishMeaning.remember(in: product ?? "this product"), isOn: $remember)
+                            .toggleStyle(.checkbox)
+                            .font(TypeScale.callout)
+                            .foregroundStyle(Palette.text)
                     }
                     Spacer(minLength: Space.s2)
                     Button("Let the director decide") {
