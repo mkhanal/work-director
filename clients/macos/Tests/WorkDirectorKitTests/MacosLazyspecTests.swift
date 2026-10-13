@@ -626,6 +626,16 @@ struct SeededTree {
         #expect(reply.said == "The collector never calls the detector.", "the action lines are not said twice")
         #expect(reply.actions.map(\.task) == ["a", "n", nil], "each action names the task it told or filed")
         #expect(reply.refused == ["START b — b is review, already under way"])
+
+        let open = event(13, "b", "question", "which bucket?", "11:00")
+        let waiting = #"[{"task":"b","question":{"id":"event-13","items":[{"header":"","question":"which bucket?","multi":false,"options":[]}],"answers":null,"reply":null}}]"#
+        let pending = try JSONDecoder().decode(GoalDetail.self, from: Data(json
+            .replacingOccurrences(of: "\(events)]", with: "\(events),\(open)]")
+            .replacingOccurrences(of: #""waiting":[]"#, with: #""waiting":\#(waiting)"#).utf8))
+        guard case .exchange(let question, nil) = pending.thread.last else { Issue.record("the open question is the last step"); return }
+        #expect(pending.answeredInCard(question), "an open question a card answers is not shown as a turn too")
+        #expect(!goal.answeredInCard(question), "with no card for it, it shows as a turn")
+        #expect(pending.waitingTasks.map { $0.task.title } == ["Collector"], "its card names who asks")
     }
 
     @Test("The Agents Panel Shows Each Task And The Subagents It Started")
@@ -652,6 +662,12 @@ struct SeededTree {
         #expect(roster.cards[0].subagents.map(\.phase) == [.settled, .working])
         #expect(roster.settled == 2)
         #expect(roster.tokens == 1122)
+        #expect(roster.finished == "2 of 5 finished", "subagents count among the cards")
+        #expect(roster.spent == "1k tokens")
+        #expect(roster.cards[0].spent == "m · 100 tokens · 1 tool call")
+        #expect(roster.cards[0].tag == nil && roster.cards[0].subagents[0].tag == "fork", "only a subagent is tagged, with its type")
+        let idle = AgentRoster(tasks: [a], activity: ["a": try activity("running", usage: #"{"model":null,"tokens":0,"tools":0,"started":null,"last":null}"#)])
+        #expect(idle.cards[0].spent == nil && idle.spent == nil, "nothing spent shows nothing")
         let now = AgentCard.instant("2026-10-11T10:10:00Z")!
         #expect(roster.cards[0].elapsed(now: now) == 600, "a working card runs to now")
         #expect(roster.cards[2].elapsed(now: now) == 1800, "a settled card stops at its last record")

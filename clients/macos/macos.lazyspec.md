@@ -107,7 +107,9 @@ hold only that product's work; with none, every product's.
 - The goal's own session is the first card while it has one: titled Supervisor once the goal is supervised, else Plan.
 - A card is asking when its session waits on a question, working while its session runs, resting while it is up with nothing to do, and settled otherwise; a subagent works until its last reply ends its turn.
 - A card's time runs from its first record to now while it works, and to its last record once it does not.
-- The panel counts settled cards and adds every card's tokens, subagents included.
+- The panel counts how many of all its cards, subagents included, have finished, and adds every card's tokens.
+- A card shows what it spent, as tokens and tool calls, only once it has spent any; the total, only once there are tokens.
+- Only a subagent's card carries a tag: its type.
 - Choosing a subagent shows its own conversation.
 
 ## A Goal Reads As One Conversation With Its Supervisor And Its Agents
@@ -117,6 +119,7 @@ hold only that product's work; with none, every product's.
 - A task that stopped without a report shows as such, with what it last said.
 - A question reads with its answer, and the answer says whether the director gave it or the person did; the answer's message to the session is not shown again.
 - The question a goal waits on the person for is answered in place, one answer per question, its choices offered as a session's are.
+- A question still open shows once, as the card that answers it, titled with who asks; once answered it reads as a turn with its answer.
 
 ## A Goal Is Read As Its Overview, Its Conversation Or Its Record
 - A goal page's tabs are Overview, Conversation and Record.

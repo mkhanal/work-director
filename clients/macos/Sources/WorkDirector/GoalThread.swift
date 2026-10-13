@@ -82,8 +82,8 @@ struct GoalThread: View {
         case .event(let event):
             EventLine(text: line(event), at: event.at, tint: tint(event))
         case .exchange(let question, let answer):
-            // The question waiting on you is answered below, in place.
-            if answer != nil || goal.asking?.id != "event-\(question.id)" {
+            // A question still open shows once: as the card below that answers it.
+            if answer != nil || !goal.answeredInCard(question) {
                 if let answer, answer.answeredByDirector, question.work != goal.goal.id {
                     Turn(speaker: speaker(of: question.work), at: question.at, open: opener(question.work), tag: goal.tag(of: question.work)) {
                         AskedTheDirector(question: question, answer: answer)

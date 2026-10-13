@@ -104,6 +104,30 @@ public struct AgentRoster: Sendable, Hashable {
     public var tokens: Int { all.compactMap(\.usage?.tokens).reduce(0, +) }
 }
 
+extension AgentCard {
+    /// What it has spent, in words; nil until it has spent anything.
+    public var spent: String? {
+        guard let u = usage, u.tokens > 0 || u.tools > 0 else { return nil }
+        var parts: [String] = []
+        if let m = u.model, !m.isEmpty { parts.append(m.replacingOccurrences(of: "claude-", with: "")) }
+        parts.append("\(tokenCount(u.tokens)) tokens")
+        parts.append("\(u.tools) tool call\(u.tools == 1 ? "" : "s")")
+        return parts.joined(separator: " · ")
+    }
+
+    /// The tag beside its title: a subagent's type. A task's or the goal's
+    /// own session has none; its title says what it works on.
+    public var tag: String? { agent == nil ? nil : kind }
+}
+
+extension AgentRoster {
+    /// How many cards, subagents included, have finished, of how many.
+    public var finished: String { "\(settled) of \(all.count) finished" }
+
+    /// What every card spent; nil until any has spent tokens.
+    public var spent: String? { tokens > 0 ? "\(tokenCount(tokens)) tokens" : nil }
+}
+
 /// A count of tokens as a person reads it: 950, 12k, 1.1M.
 public func tokenCount(_ n: Int) -> String {
     switch n {

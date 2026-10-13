@@ -574,19 +574,14 @@ struct Waiting: View {
             QuestionCard(store: store, workID: task.id, question: question, title: "asks you", asker: task.title,
                          change: change(question), product: goal.goal.project, answered: answered)
         }
-        if !asking.isEmpty {
-            VStack(alignment: .leading, spacing: Space.s3) {
-                ForEach(asking, id: \.1.id) { task, question in
-                    VStack(alignment: .leading, spacing: Space.s1) {
-                        Button { open(task.id) } label: {
-                            Label(task.title, systemImage: "arrow.up.forward.square")
-                        }
-                        .buttonStyle(.link)
-                        .font(TypeScale.caption)
-                        QuestionCard(store: store, workID: task.id, question: question, change: change(question), product: goal.goal.project, answered: answered)
-                    }
-                }
-            }
+        ForEach(asking, id: \.1.id) { task, question in
+            QuestionCard(store: store, workID: task.id, question: question, title: "asks you", asker: task.title,
+                         change: change(question), product: goal.goal.project, answered: answered)
+        }
+        ForEach(goal.otherNeeds) { need in
+            QuestionCard(store: store, workID: need.work, question: need.question, title: "asks you",
+                         asker: goal.nodes.first { $0.id == need.work }?.work.title ?? need.path,
+                         change: need.change, product: goal.goal.project, answered: answered)
         }
     }
 }

@@ -35,9 +35,9 @@ struct AgentsPanel: View {
             }
             Divider()
             HStack {
-                Text("\(roster.settled) of \(roster.cards.count) settled")
+                Text(roster.finished)
                 Spacer()
-                Text("\(tokenCount(roster.tokens)) tokens")
+                if let spent = roster.spent { Text(spent) }
             }
             .font(TypeScale.meta.monospacedDigit())
             .foregroundStyle(.secondary)
@@ -52,7 +52,7 @@ struct AgentsPanel: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(card.title), \(card.kind)")
+        .accessibilityLabel([card.title, card.tag].compactMap { $0 }.joined(separator: ", "))
         .padding(.leading, CGFloat(depth) * 16)
         .contextMenu {
                 Button("Show Conversation") { choose(card) }
@@ -77,12 +77,14 @@ struct AgentRow: View {
             VStack(alignment: .leading, spacing: Space.s1) {
                 HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
                     Text(card.title).font(TypeScale.calloutStrong).lineLimit(1)
-                    Text(card.kind)
-                        .font(TypeScale.tag)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Palette.sunken, in: RoundedRectangle(cornerRadius: 4))
-                        .foregroundStyle(.secondary)
+                    if let tag = card.tag {
+                        Text(tag)
+                            .font(TypeScale.tag)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Palette.sunken, in: RoundedRectangle(cornerRadius: 4))
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer(minLength: Space.s1)
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         if let t = card.elapsed(now: context.date) {
@@ -96,8 +98,8 @@ struct AgentRow: View {
                 if let line = card.line, !line.isEmpty {
                     Text(line).font(TypeScale.callout).foregroundStyle(card.phase == .asking ? Palette.attention : .secondary).lineLimit(1)
                 }
-                if let u = card.usage {
-                    Text(meta(u)).font(TypeScale.small.monospacedDigit()).foregroundStyle(.tertiary)
+                if let spent = card.spent {
+                    Text(spent).font(TypeScale.small.monospacedDigit()).foregroundStyle(.tertiary)
                 }
             }
             if let stop, hovering {
@@ -113,14 +115,6 @@ struct AgentRow: View {
                     in: RoundedRectangle(cornerRadius: Radius.card))
         .padding(.horizontal, Space.s2)
         .onHover { hovering = $0 }
-    }
-
-    private func meta(_ u: Usage) -> String {
-        var parts: [String] = []
-        if let m = u.model, !m.isEmpty { parts.append(m.replacingOccurrences(of: "claude-", with: "")) }
-        parts.append("\(tokenCount(u.tokens)) tok")
-        parts.append("\(u.tools) tools")
-        return parts.joined(separator: " · ")
     }
 }
 

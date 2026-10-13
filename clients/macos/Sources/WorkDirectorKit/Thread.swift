@@ -309,6 +309,24 @@ extension GoalDetail {
         e.kind == "state" && e.body == "done" && e.work != goal.id
     }
 
+    /// Whether a question still open is answered in a card at the end of the
+    /// conversation, where it shows instead of as a turn.
+    public func answeredInCard(_ question: Event) -> Bool {
+        asking?.id == "event-\(question.id)"
+            || waiting.contains { $0.task == question.work }
+            || activity[question.work]?.asking != nil
+            || needsYou.contains { $0.work == question.work }
+    }
+
+    /// Open questions under the goal that no other card shows: those on
+    /// sub-goals further down the tree.
+    public var otherNeeds: [NeedYou] {
+        let shown = Set([asking?.id].compactMap { $0 } + waiting.map(\.question.id)
+            + tasks.compactMap { activity[$0.id]?.asking?.id })
+        let byWork = Set(waiting.map(\.task) + tasks.filter { activity[$0.id]?.asking != nil }.map(\.id) + (asking == nil ? [] : [goal.id]))
+        return needsYou.filter { !shown.contains($0.question.id) && !byWork.contains($0.work) }
+    }
+
     /// Tasks waiting on the person with no question open in their session,
     /// each with what it waits on.
     public var waitingTasks: [(task: Work, question: Question)] {
