@@ -48,7 +48,7 @@ only): a sub-goal waiting on another is shown as *waiting on X*, not "queued".
 - Dependency fixes, landing, tagging and nudges are events on the goal they serve.
 - A chore that needs its own session hangs off that goal as a session, not as a child.
 
-**Kind `task`** stops being a planning unit. Existing rows read as leaf goals (see Migration).
+**Kind `task`** stops being a planning unit: it is how a leaf sub-goal is stored (see Storage and migration).
 
 ## Planning
 
@@ -224,17 +224,17 @@ cards, question card, filter chips and record table. Where the canvas and
 **Tabs:** Overview (sub-goals), Conversation and Record. The current Tasks tab is replaced by
 the sub-goal list on Overview.
 
-## Migration
+## Storage and migration
 
-Existing ledgers open unchanged, through Go-side reading plus additive columns and tables, as
-with the epic → goal rename:
-
-- A `task` row reads as a leaf goal.
-- Tasks sharing a `heading` under a goal are grouped under a parent sub-goal named by that
-  heading, with an empty done-when. The parent is created once, by an idempotent migration
-  step.
-- A task with no heading stays a leaf under its goal.
-- An empty done-when shows as "not set", never invented.
+- A sub-goal that is planned further is a `goal` row whose parent is a goal.
+- A leaf sub-goal, one agent's handover, is stored as a `task` row: the existing spawn,
+  report and verify machinery drives it unchanged. Views call both "sub-goals".
+- `Tasks(goal)` returns every task under a goal at any depth, so callers that drive a goal's
+  agents keep working however deep it nests.
+- Existing ledgers open unchanged and no stored value is rewritten (the ledger's "Migration Is
+  Additive Only"). Tasks sharing a `heading` under a goal are grouped into a sub-goal **at read
+  time** in the views, with done-when "not set", the way `epic` reads as `goal`. New plans write
+  real sub-goal rows.
 
 ## Requirements
 
