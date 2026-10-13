@@ -229,3 +229,21 @@ hold only that product's work; with none, every product's.
 - Letting the director decide runs `wd answer <id> --director --json`.
 - An answer the director gave reads as its turn, each part with its answer and why.
 - When it declines any part nothing is answered: a note says why for each part, and the question stays open.
+
+## Work Under Way Shows What It Is Doing And For How Long
+- While a session under the open goal runs, the goal's own included, the end of the conversation shows a row for it: who works (its sub-goal, or Director for the goal's own session), what it is doing now and how long since it started.
+- A session waiting on a question, resting or stopped has no row.
+- What it is doing reads as a person says it: Thinking, Running `<command>`, Reading, Editing or Searching what it acts on; any other tool by its name.
+- A write the app runs on the goal or a sub-goal shows a row while in flight: a message, an answer, letting the director decide, a decision, re-planning, continuing, approving.
+- Rows are newest first; past three, the rest are counted.
+- A sidebar goal shows working while it runs with nothing waiting on the person; a sub-goal while a session in it or under it runs.
+
+## Any Text The App Shows Can Be Copied
+- Text the app shows can be selected and copied; where a click opens something, its menu has Copy.
+- A turn is copied as plain text, or as the markdown it was written in.
+- A goal selected in the sidebar is copied as its title and id.
+
+## The Agents Panel Sits Beside The Page, Never Over It
+- The panel takes its own width beside the page; the page narrows to fit and nothing is hidden under it.
+- It is 320 points wide at first, dragged wider or narrower within 260 to 480, and keeps its width and whether it shows between launches.
+

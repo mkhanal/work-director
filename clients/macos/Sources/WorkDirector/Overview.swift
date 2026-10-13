@@ -118,9 +118,10 @@ struct GoalOverview: View {
             VStack(alignment: .leading, spacing: 4) {
                 CardLabel("Course")
                 if let course = goal.course {
-                    HStack(spacing: 6) {
-                        Badge(course.badge)
-                        Text("checked \(agoWords(course.at))").font(TypeScale.caption).foregroundStyle(Palette.text3)
+                    let checked = Text("checked \(agoWords(course.at))").font(TypeScale.caption).foregroundStyle(Palette.text3)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) { Badge(course.badge); checked.fixedSize() }
+                        VStack(alignment: .leading, spacing: 4) { Badge(course.badge); checked }
                     }
                     if !course.why.isEmpty {
                         Text(course.why.sentence).font(TypeScale.caption).foregroundStyle(Palette.text3).padding(.top, 2)
@@ -157,7 +158,8 @@ struct GoalOverview: View {
                 VStack(spacing: 0) {
                     ForEach(Array(goal.tree.enumerated()), id: \.element.id) { i, node in
                         if i > 0 { Rectangle().fill(Palette.inner).frame(height: 1) }
-                        SubGoalRow(node: node, depth: 0, superseded: goal.superseded, opened: openedRows, toggle: toggle, open: open, focus: focus)
+                        SubGoalRow(node: node, depth: 0, superseded: goal.superseded, working: Set(goal.nodes.map(\.id).filter(goal.isWorking)),
+                                   opened: openedRows, toggle: toggle, open: open, focus: focus)
                     }
                 }
                 .background(Palette.page, in: RoundedRectangle(cornerRadius: Radius.card))
@@ -182,6 +184,8 @@ struct SubGoalRow: View {
     let node: TreeNode
     let depth: Int
     let superseded: [SupersededWork]
+    /// The sub-goals a session runs in or under.
+    let working: Set<String>
     let opened: Set<String>
     let toggle: (String) -> Void
     let open: (String) -> Void
@@ -212,11 +216,18 @@ struct SubGoalRow: View {
                     .lineLimit(2)
                 }
                 Spacer(minLength: Space.s2)
+                if working.contains(node.id) { WorkingMark(size: 4).padding(.top, 6) }
                 Badge(node.badge)
             }
             .padding(EdgeInsets(top: 14, leading: 16 + CGFloat(depth) * 32, bottom: 14, trailing: 16))
             .contentShape(Rectangle())
+            .textSelection(.disabled)
             .onTapGesture { choose() }
+            .contextMenu {
+                CopyItems(text: node.work.title)
+                Button("Copy Title and ID") { copyText(Clip.work(node.work)) }
+                if let doneWhen = node.doneWhen { Button("Copy Done When") { copyText(doneWhen) } }
+            }
             .help(node.opensAsGoal ? "Open this sub-goal" : node.folds || node.group ? (isOpen ? "Hide" : "Show") : "Show this agent's conversation")
             if isOpen && node.folds {
                 VStack(alignment: .leading, spacing: 2) {
@@ -232,7 +243,7 @@ struct SubGoalRow: View {
             if isOpen && node.group {
                 ForEach(node.children) { child in
                     Rectangle().fill(Palette.inner).frame(height: 1)
-                    SubGoalRow(node: child, depth: depth + 1, superseded: superseded, opened: opened, toggle: toggle, open: open, focus: focus)
+                    SubGoalRow(node: child, depth: depth + 1, superseded: superseded, working: working, opened: opened, toggle: toggle, open: open, focus: focus)
                 }
             }
         }
@@ -256,6 +267,8 @@ struct StepLine: View {
         }
         .font(step.state == .doing ? TypeScale.calloutStrong : TypeScale.callout)
         .lineSpacing(TypeScale.calloutLeading)
+        .textSelection(.enabled)
+        .copyable(step.text)
     }
 
     private var glyph: String {

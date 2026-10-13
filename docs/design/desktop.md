@@ -233,8 +233,10 @@ jumps to the bottom.
 
 ### Window
 
-Three panes: sidebar (280, 240–380), conversation, agents inspector (340,
-260–480, toggled). Title bar is unified with the toolbar; no title text in the
+Three panes: sidebar (280, 240–380), conversation, agents inspector (320,
+260–480, dragged by its edge, toggled with ⌥⌘0; width and visibility remembered).
+The inspector is a column of its own: the conversation narrows beside it and
+never runs under it. Title bar is unified with the toolbar; no title text in the
 toolbar; the conversation's own header carries the name.
 
 ### Sidebar
@@ -337,7 +339,7 @@ one of `type.callout` text2, at most one button.
 
 | Design | macOS (SwiftUI) | Linux (GTK4 + libadwaita) |
 |---|---|---|
-| Window, three panes | `NavigationSplitView` + `.inspector` | `AdwOverlaySplitView` (sidebar); in its content an `AdwToolbarView` whose page and inspector share a row with a draggable edge (over the page only while the sidebar is folded) |
+| Window, three panes | `NavigationSplitView`; the inspector a column of its own beside the detail with a draggable edge (a floating `.inspector` covers content on macOS 26) | `AdwOverlaySplitView` (sidebar); in its content an `AdwToolbarView` whose page and inspector share a row with a draggable edge (over the page only while the sidebar is folded) |
 | Sidebar list | `List(.sidebar)` | `GtkListBox` with `.navigation-sidebar` |
 | Conversation | `ScrollView` + `LazyVStack` | `GtkScrolledWindow` + `GtkListView` (factory per turn kind) |
 | Bubble, cards | shapes with fills | `GtkBox` with CSS classes (`.bubble-you`, `.card`, `.attention`, `.settled`) |

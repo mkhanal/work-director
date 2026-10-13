@@ -1386,4 +1386,76 @@ struct SeededTree {
         #expect(!steps.contains { if case .event(let e) = $0 { e.kind == "decision" } else { false } }, "its decisions read with its answer, not apart")
         #expect(steps.contains { if case .declined(_, let c) = $0 { c == DirectorChoice(question: "Which vendor?", answer: nil, why: "only you know the contract terms") } else { false } })
     }
+
+    @Test("Work Under Way Shows What It Is Doing And For How Long")
+    func workUnderWay() throws {
+        func work(_ id: String, _ title: String, _ state: String = "running") throws -> Work {
+            try JSONDecoder().decode(Work.self, from: Data(workJSON(state: state)
+                .replacingOccurrences(of: #""id":"w1""#, with: #""id":"\#(id)""#)
+                .replacingOccurrences(of: #""title":"T""#, with: #""title":"\#(title)""#).utf8))
+        }
+        func activity(_ status: String, kind: String, now: String, started: String, asking: Bool = false) throws -> Activity {
+            let q = asking ? #"{"id":"q1","items":[],"answers":null,"reply":null}"# : "null"
+            return try JSONDecoder().decode(Activity.self, from: Data("""
+            {"now":"\(now)","kind":"\(kind)","at":"\(started)","asking":\(q),"error":null,"status":"\(status)",
+             "usage":{"model":"m","tokens":1,"tools":1,"started":"\(started)","last":"\(started)"},"subagents":[]}
+            """.utf8))
+        }
+        let goal = try work("g", "Release notes")
+        let a = try work("a", "Customers get a note"), b = try work("b", "A guide"), c = try work("c", "Tagged"), d = try work("d", "Asks")
+        let rows = WorkingRows(goal: goal, tasks: [a, b, c, d], activity: [
+            "g": try activity("running", kind: "thinking", now: "weighing it", started: "2026-10-13T10:00:00Z"),
+            "a": try activity("running", kind: "tool", now: "Bash · go test ./...", started: "2026-10-13T10:05:00Z"),
+            "b": try activity("idle", kind: "text", now: "done for now", started: "2026-10-13T10:06:00Z"),
+            "d": try activity("running", kind: "question", now: "Which?", started: "2026-10-13T10:07:00Z", asking: true),
+        ], inFlight: [])
+        #expect(rows.shown.map(\.who) == ["Customers get a note", "Director"], "only running sessions not waiting on a person, newest first")
+        #expect(rows.shown.map(\.doing) == ["Running `go test ./...`", "Thinking"])
+        #expect(rows.shown[0].since == AgentCard.instant("2026-10-13T10:05:00Z"))
+
+        #expect(Working.doing(kind: .tool, now: "Read · internal/serve/tree.go") == "Reading internal/serve/tree.go")
+        #expect(Working.doing(kind: .tool, now: "Edit · a.go") == "Editing a.go")
+        #expect(Working.doing(kind: .tool, now: "Grep · TODO") == "Searching TODO")
+        #expect(Working.doing(kind: .tool, now: "Frobnicate · x") == "Using Frobnicate · x")
+        #expect(Working.doing(kind: .prompt, now: "the brief") == "Thinking")
+
+        let sent = Date(timeIntervalSince1970: 1_800_000_000)
+        let writes = [InFlight(plan: try Plan.send("c", text: "hi"), at: sent),
+                      InFlight(plan: Plan.directorDecides("g"), at: sent.addingTimeInterval(1)),
+                      InFlight(plan: Plan(title: "Re-plan", argv: ["goal", "plan", "g"]), at: sent.addingTimeInterval(2)),
+                      InFlight(plan: Plan.pause("g"), at: sent.addingTimeInterval(3)),
+                      InFlight(plan: try Plan.send("elsewhere", text: "hi"), at: sent.addingTimeInterval(4))]
+        let busy = WorkingRows(goal: goal, tasks: [a, b, c, d], activity: [:], inFlight: writes)
+        #expect(busy.shown.map(\.doing) == ["Re-planning", "Deciding in your place", "Sending your message"], "only writes a person waits on, on this goal")
+        #expect(busy.shown.map(\.who) == ["Director", "Director", "Tagged"])
+
+        let many = WorkingRows((0..<5).map { WorkingRow(id: "\($0)", who: "w", doing: "Thinking", since: Date(timeIntervalSince1970: Double($0))) })
+        #expect(many.shown.map(\.id) == ["4", "3", "2"] && many.more == 2, "three shown, the rest counted")
+
+        let tool = try JSONDecoder().decode(Step.self, from: Data(#"{"kind":"tool","at":"2026-10-13T10:00:00Z","text":null,"tool":{"id":"t","name":"Bash","summary":"make","input":"","result":null,"failed":false},"question":null}"#.utf8))
+        let own = WorkingRows(task: a, status: .running, asking: false, last: tool, usage: nil, inFlight: [])
+        #expect(own.shown.map(\.doing) == ["Running `make`"])
+        #expect(WorkingRows(task: a, status: .idle, asking: false, last: tool, usage: nil, inFlight: []).isEmpty)
+
+        let row = { (state: String, needsYou: Int) in SidebarRow(work: try work("s", "S", state), band: .inFlight, progress: nil, needsYou: needsYou, finish: nil, finished: nil, proposed: false) }
+        #expect(try row("running", 0).working)
+        #expect(try !row("running", 1).working, "a goal waiting on the person is not shown working")
+        #expect(try !row("queued", 0).working)
+    }
+
+    @Test("Any Text The App Shows Can Be Copied")
+    func copied() throws {
+        let said = "## Plan\nRun **the** `tests` and [read](https://x.y) it.\n- first\n```\ncode\n```"
+        #expect(Clip.plain(markdown: said) == "Plan\nRun the tests and read it.\n- first\ncode")
+        let w = try JSONDecoder().decode(Work.self, from: Data(workJSON(state: "running").utf8))
+        #expect(Clip.work(w) == "T (w1)")
+    }
+
+    @Test("The Agents Panel Sits Beside The Page, Never Over It")
+    func panelBeside() {
+        #expect(PanelWidth.standard == 320)
+        #expect(PanelWidth.clamped(100) == 260)
+        #expect(PanelWidth.clamped(900) == 480)
+        #expect(PanelWidth.clamped(333) == 333)
+    }
 }

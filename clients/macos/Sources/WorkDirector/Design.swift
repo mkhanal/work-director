@@ -398,3 +398,34 @@ struct GroupGap: ToolbarContent {
     }
     #endif
 }
+
+/// Puts words on the general pasteboard.
+func copyText(_ text: String) {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(text, forType: .string)
+}
+
+/// A context menu's Copy, and Copy as Markdown when the words were written in it.
+struct CopyItems: View {
+    let text: String
+    var markdown: String? = nil
+    var label = "Copy"
+
+    var body: some View {
+        Button(label) { copyText(markdown.map { Clip.plain(markdown: $0) } ?? text) }
+        if let markdown { Button("Copy as Markdown") { copyText(markdown) } }
+    }
+}
+
+extension View {
+    /// Copy in this view's context menu, for words a click cannot select.
+    func copyable(_ text: String) -> some View {
+        contextMenu { CopyItems(text: text) }
+    }
+
+    /// Copy of markdown, as plain words or as written.
+    func copyable(markdown: String) -> some View {
+        contextMenu { CopyItems(text: markdown, markdown: markdown) }
+    }
+}
+

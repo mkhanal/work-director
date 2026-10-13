@@ -279,6 +279,8 @@ struct ProposedCard: View {
         }
         .canvasCard()
         .contentShape(Rectangle())
+        .textSelection(.enabled)
+        .copyable([row.node.work.title, row.node.doneWhen.map { "Done when " + $0 }].compactMap { $0 }.joined(separator: "\n"))
     }
 }
 

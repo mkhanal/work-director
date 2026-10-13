@@ -126,7 +126,7 @@ public final class Store {
 
     /// Runs a start or continue plan and reads back the goal and its tasks.
     public func start(_ plan: Plan) async throws -> Started {
-        let started = try decode(Started.self, try await channel.action(plan.argv))
+        let started = try decode(Started.self, try await run(plan))
         await refresh()
         return started
     }
@@ -142,8 +142,14 @@ public final class Store {
 
     /// Runs a confirmed plan: the argv the confirmation showed, unchanged.
     public func run(_ plan: Plan) async throws -> ActionResult {
-        try await channel.action(plan.argv)
+        let flight = InFlight(plan: plan, at: Date())
+        inFlight.append(flight)
+        defer { inFlight.removeAll { $0.id == flight.id } }
+        return try await channel.action(plan.argv)
     }
+
+    /// Writes started here that have not come back, oldest first.
+    public private(set) var inFlight: [InFlight] = []
 
     /// Messages sent to work, oldest first, from the moment they are sent.
     public private(set) var outbox: [Outgoing] = []

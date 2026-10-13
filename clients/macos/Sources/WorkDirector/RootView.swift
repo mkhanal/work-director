@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import WorkDirectorKit
 
@@ -132,6 +133,7 @@ struct ThreadSidebar: View {
     let chain: [ChainLink]
     @AppStorage("sidebar.letGo") private var showLetGo = false
     @State private var search = ""
+    @State private var copying = SidebarCopy()
 
     private var scope: String? { scopeName.isEmpty ? nil : scopeName }
 
@@ -184,6 +186,11 @@ struct ThreadSidebar: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Palette.sidebar)
         .overlay(alignment: .trailing) { Rectangle().fill(Palette.hairline).frame(width: 1) }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { copying.width = $0 }
+        .onChange(of: (bands.needsYou + bands.working + bands.completed + bands.letGo).first { $0.id == selected }.map { Clip.work($0.work) },
+                  initial: true) { _, clip in copying.text = clip }
+        .onAppear { copying.watch() }
+        .onDisappear { copying.unwatch() }
     }
 
     /// The product switcher, New Goal and the search field.
@@ -233,7 +240,11 @@ struct ThreadSidebar: View {
 
     private func row(_ r: SidebarRow) -> some View {
         SidebarRowView(row: r, selected: selected == r.id, path: r.openPath(chain), open: { place = .work($0) })
-            .contextMenu { WorkMenu(work: r.work, run: { plan = $0 }, ask: { asking = $0 }) }
+            .contextMenu {
+                Button("Copy Title and ID") { copyText(Clip.work(r.work)) }
+                Divider()
+                WorkMenu(work: r.work, run: { plan = $0 }, ask: { asking = $0 })
+            }
     }
 
     private func more(_ title: String, _ symbol: String, _ to: Place) -> some View {
@@ -270,6 +281,7 @@ struct SidebarRowView: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                 HStack(spacing: 6) {
+                    if row.working { WorkingMark(size: 4) }
                     if let proposed = row.proposedBadge { Badge(proposed, .attention) }
                     Text(row.meta + (row.needsYouBadge == nil ? "" : " ·"))
                         .font(TypeScale.caption)
@@ -391,3 +403,42 @@ extension Tint {
         }
     }
 }
+
+/// Cmd-C after a click in the sidebar copies the selected goal's title and id;
+/// after a click anywhere else it is the window's own copy.
+@MainActor
+final class SidebarCopy {
+    var width: CGFloat = 0
+    var text: String?
+    private var clickedHere = false
+    private var monitor: Any?
+
+    func watch() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self] event in
+            guard let self else { return event }
+            if event.type != .keyDown {
+                clickedHere = event.locationInWindow.x < width
+                return event
+            }
+            guard clickedHere, let text, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.charactersIgnoringModifiers == "c",
+                  !Self.typedSelection(in: event.window) else { return event }
+            copyText(text)
+            return nil
+        }
+    }
+
+    /// Whether the focus is a field the person types in with words selected:
+    /// that copy is the field's own.
+    private static func typedSelection(in window: NSWindow?) -> Bool {
+        guard let text = window?.firstResponder as? NSTextView else { return false }
+        return text.isEditable && text.selectedRange().length > 0
+    }
+
+    func unwatch() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+}
+

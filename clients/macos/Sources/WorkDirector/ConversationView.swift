@@ -49,15 +49,9 @@ struct ConversationView: View {
                     OutgoingBubble(store: store, message: message, waiting: feed.status == .running ? "queued: read once it is ready" : "sent")
                 }
             }
-            if feed.status == .running {
-                HStack(spacing: Space.s2) {
-                    ProgressView().controlSize(.small)
-                    Text("Working…")
-                }
-                .font(TypeScale.callout)
-                .foregroundStyle(.secondary)
+            WorkingIndicator(rows: WorkingRows(task: work, status: feed.status, asking: feed.asking != nil, last: feed.steps.last,
+                                               usage: feed.usage, inFlight: feed.agent == nil ? store.inFlight : []))
                 .padding(.leading, Space.turnIndent)
-            }
         }
         .task(id: ObjectIdentifier(feed)) { await feed.follow() }
     }
@@ -110,6 +104,7 @@ struct StepView: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .card(Palette.settled, padding: Space.s3)
+                    .copyable(step.text ?? "")
             }
         case .prompt:
             PromptRow(text: step.text ?? "", brief: first, at: step.at)
@@ -117,6 +112,7 @@ struct StepView: View {
             MarkdownText(step.text ?? "")
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .copyable(markdown: step.text ?? "")
         case .thinking:
             ThinkingRow(text: step.text ?? "", open: latest)
         case .tool:
@@ -163,6 +159,7 @@ struct PromptRow: View {
             }
             .card(padding: Space.s3)
         }
+        .copyable(text)
     }
 
     private var folds: Bool { text.count > 400 || text.split(separator: "\n").count > (brief ? 3 : 6) }
@@ -179,7 +176,9 @@ struct YouBubble<Status: View>: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            Spacer(minLength: 0)
+            // A gap on the left keeps it on the right; it wraps within the
+            // column it is given, never past it.
+            Spacer(minLength: 96)
             VStack(alignment: .trailing, spacing: Space.s1) {
                 HStack(spacing: Space.s1 + 2) {
                     status
@@ -196,13 +195,13 @@ struct YouBubble<Status: View>: View {
                     .padding(.vertical, 10)
                     .background(Palette.bubbleFill, in: RoundedRectangle(cornerRadius: Radius.bubble))
                     .overlay(RoundedRectangle(cornerRadius: Radius.bubble).strokeBorder(Palette.bubbleBorder))
+                    .copyable(text)
                 if folds {
                     Button(expanded ? "Show less" : "Show all") { expanded.toggle() }
                         .buttonStyle(.link)
                         .font(TypeScale.meta)
                 }
             }
-            .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in width * 0.7 }
         }
     }
 
@@ -282,6 +281,7 @@ struct ThinkingRow: View {
             .font(TypeScale.callout)
             .foregroundStyle(.secondary)
         }
+        .copyable(text)
     }
 
     private var firstLine: String {
@@ -321,6 +321,11 @@ struct ToolRow: View {
                 }
             }
             .font(TypeScale.callout)
+        }
+        .contextMenu {
+            Button("Copy") { copyText([call.name, call.summary].filter { !$0.isEmpty }.joined(separator: " ")) }
+            if !call.input.isEmpty { Button("Copy Input") { copyText(call.input) } }
+            if let result = call.result, !result.isEmpty { Button("Copy Result") { copyText(result) } }
         }
     }
 
@@ -481,6 +486,7 @@ struct QuestionCard: View {
                 footer
             }
             .questionFrame()
+            .copyable(question.items.map(\.question).joined(separator: "\n\n"))
         } else {
             VStack(alignment: .leading, spacing: Space.s3) {
                 header
@@ -495,6 +501,7 @@ struct QuestionCard: View {
                 }
             }
             .canvasCard(fill: Palette.plainCard)
+            .copyable(question.items.map(\.question).joined(separator: "\n\n"))
         }
     }
 

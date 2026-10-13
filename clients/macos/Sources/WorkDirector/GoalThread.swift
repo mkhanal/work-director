@@ -38,6 +38,7 @@ struct GoalThread: View {
                     OutgoingBubble(store: store, message: message)
                 }
                 Waiting(store: store, goal: goal, open: focus, answered: answered)
+                WorkingIndicator(rows: WorkingRows(goal: goal.goal, tasks: goal.tasks, activity: goal.activity, inFlight: store.inFlight))
             }
         }
     }
@@ -280,7 +281,7 @@ struct AskedBody: View {
         VStack(alignment: .leading, spacing: Space.s3) {
             ForEach(Array(question.askedItems.enumerated()), id: \.offset) { _, item in
                 VStack(alignment: .leading, spacing: Space.s2) {
-                    Text(item.question).readable().textSelection(.enabled)
+                    Text(item.question).readable().textSelection(.enabled).copyable(item.question)
                     if !item.choices.isEmpty {
                         ChoiceChips(choices: item.choices, finish: item.question == FinishMeaning.question)
                     }
@@ -444,6 +445,7 @@ struct ReportCard: View {
             }
         }
         .card()
+        .copyable(markdown: text)
     }
 
     private func shownSections(_ r: Report) -> [ReportSection] {

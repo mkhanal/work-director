@@ -35,6 +35,7 @@ struct WorkDetail: View {
     @State private var atBottom = true
     private static let bottom = "bottom"
     @AppStorage("detail.agents") private var showAgents = true
+    @AppStorage("detail.agentsWidth") private var agentsWidth = PanelWidth.standard
 
     init(store: Store, id: String, plan: Binding<Plan?>, chained: @escaping ([ChainLink]) -> Void = { _ in }, open: @escaping (String) -> Void) {
         self.store = store
@@ -65,6 +66,9 @@ struct WorkDetail: View {
         Group {
             if let loaded {
                 ScrollViewReader { proxy in
+                // The agents panel is a column of its own: the page narrows
+                // beside it rather than running under it.
+                HStack(spacing: 0) {
                 // The bar sits under the scroll view, not over it: whatever is
                 // last in the conversation ends above the bar however tall the
                 // bar grows.
@@ -81,6 +85,7 @@ struct WorkDetail: View {
                             page(loaded)
                         }
                     }
+                    .textSelection(.enabled)
                     .readingColumn()
                     Color.clear.frame(height: 1).id(Self.bottom)
                 }
@@ -121,6 +126,18 @@ struct WorkDetail: View {
                         .id(target.id)
                 }
                 }
+                .frame(minWidth: 360)
+                if showAgents {
+                    PanelEdge(width: $agentsWidth)
+                    AgentsPanel(roster: roster(loaded), focused: focus?.id ?? (loaded.work.kind.isGoal ? nil : loaded.work.id),
+                                choose: { choose($0, in: loaded) }, stop: { plan = Plan.stop($0) },
+                                menu: { card in AnyView(cardMenu(card, in: loaded)) })
+                        .frame(width: PanelWidth.clamped(agentsWidth))
+                        .frame(maxHeight: .infinity)
+                        .background(Palette.sidebar)
+                        .transition(.move(edge: .trailing))
+                }
+                }
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         if let gate, let pass = Plan.passing(gate) {
@@ -154,16 +171,11 @@ struct WorkDetail: View {
                         Button { NotificationCenter.default.post(name: .openCommandBar, object: nil) } label: { Label("Command", systemImage: "command") }
                             .labelStyle(.iconOnly)
                             .help("Run any wd command (⌘K)")
-                        Button { showAgents.toggle() } label: { Label("Agents", systemImage: "sidebar.right") }
+                        Button { withAnimation(.easeOut(duration: 0.2)) { showAgents.toggle() } } label: { Label("Agents", systemImage: "sidebar.right") }
                             .labelStyle(.iconOnly)
-                            .help(showAgents ? "Hide the agents" : "Show the agents")
+                            .keyboardShortcut("0", modifiers: [.command, .option])
+                            .help(showAgents ? "Hide the agents (⌥⌘0)" : "Show the agents (⌥⌘0)")
                     }
-                }
-                .inspector(isPresented: $showAgents) {
-                    AgentsPanel(roster: roster(loaded), focused: focus?.id ?? (loaded.work.kind.isGoal ? nil : loaded.work.id),
-                                choose: { choose($0, in: loaded) }, stop: { plan = Plan.stop($0) },
-                                menu: { card in AnyView(cardMenu(card, in: loaded)) })
-                        .inspectorColumnWidth(min: 260, ideal: 340, max: 480)
                 }
                 }
             } else if let failure {
@@ -708,6 +720,7 @@ struct MessageBar: View {
                 : work.kind.isGoal ? "Message the director about this goal…" : "Message this task… it reads it when it is ready",
             command: plan?.commandLine,
             busy: sending,
+            sendingNow: store.outbox.contains { $0.work == work.id && $0.state == .sending },
             note: outcome,
             noteIsError: failed,
             stop: working && !continuing ? Plan.stop(work.id) : nil,
@@ -777,6 +790,8 @@ struct InputBar: View {
     let placeholder: String
     let command: String?
     let busy: Bool
+    /// A message from here is on its way; the field stays free.
+    var sendingNow = false
     var note: String? = nil
     var noteIsError = false
     /// What stopping runs, while there is something to stop.
@@ -861,6 +876,9 @@ struct InputBar: View {
                             }
                             .buttonStyle(.plain)
                             .help("Stop (Esc Esc): \(stop.commandLine)\nWhat it has not read yet comes back here to edit")
+                        }
+                        if sendingNow {
+                            ProgressView().controlSize(.mini).help("Sending…")
                         }
                         Button(action: submit) {
                             Image(systemName: "arrow.up")
@@ -969,3 +987,33 @@ struct YoursMenu: View {
         .help("Jump to something you said on this goal")
     }
 }
+
+/// The agents panel's leading edge: a hairline that is dragged to resize it.
+struct PanelEdge: View {
+    @Binding var width: Double
+    @State private var start: Double?
+
+    var body: some View {
+        Rectangle()
+            .fill(Palette.hairline)
+            .frame(width: 1)
+            .frame(maxHeight: .infinity)
+            .overlay {
+                Color.clear
+                    .frame(width: 9)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                        .onChanged { drag in
+                            let from = start ?? width
+                            start = from
+                            width = PanelWidth.clamped(from - drag.translation.width)
+                        }
+                        .onEnded { _ in start = nil })
+            }
+            .accessibilityHidden(true)
+    }
+}
+

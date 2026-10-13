@@ -77,6 +77,7 @@ struct GoalRecordView: View {
                               place: Text(e.where).font(TypeScale.caption).foregroundStyle(Palette.text2),
                               by: Text(e.by).font(TypeScale.caption).foregroundStyle(Palette.text3))
                         .padding(.vertical, 9)
+                        .copyable(e.text)
                     if i < day.entries.count - 1 { Rectangle().fill(Palette.rowSeparator).frame(height: 1) }
                 }
             }

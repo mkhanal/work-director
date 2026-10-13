@@ -44,7 +44,6 @@ struct AgentsPanel: View {
             .padding(.horizontal, Space.s4)
             .padding(.vertical, Space.s3)
         }
-        .frame(minWidth: 280)
     }
 
     private func row(_ card: AgentCard, depth: Int) -> some View {
@@ -57,6 +56,7 @@ struct AgentsPanel: View {
         .padding(.leading, CGFloat(depth) * 16)
         .contextMenu {
                 Button("Show Conversation") { choose(card) }
+                CopyItems(text: [card.title, card.line].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n"))
                 if card.agent == nil && card.phase != .settled {
                     Button("Stop") { stop(card.task) }
                 }
