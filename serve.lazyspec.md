@@ -107,6 +107,12 @@ JSON message per line to stdout:
 - Each queued sub-goal of a proposed goal serves `why_not_moving` `proposed — needs approval`.
 - Once approved, neither holds.
 
+## A Change Waiting For The Person Is Served With What Would Change
+- Each `needs_you` item serves `change`, null when answering it changes nothing by itself.
+- A plan change serves `kind` `plan`, its `actions` as written and `lines`, each action as a sentence naming work by its title.
+- A top-goal change serves `kind` `course`, `now` and `proposed` each with `title`, `done_when` and `finish`, and `why`; asked together with a plan change, it also serves that change's `actions` and `lines`.
+- The finish-line question serves `kind` `finish` and the `choices` offered, in order.
+
 ## A Goal Serves Its Record
 - `GET /api/record/<goal>` and the `record` method return a summary of counts and one entry per decision, finish choice, course check, question, answer, judgement, chore, report, delivery and supersession under the goal, newest first, ending with what the person first asked.
 - Each entry says when, what, where in the tree, and whether the person or the director made it.

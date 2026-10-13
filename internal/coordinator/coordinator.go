@@ -221,6 +221,10 @@ func FinishChoice(text string) (core.FinishLine, bool) {
 	return f, err == nil
 }
 
+// FinishQuestion opens the question a planner unsure where a goal finishes
+// leaves on it.
+const FinishQuestion = "Where does this goal finish?"
+
 // PlanFinish is where the planner says a top goal finishes.
 type PlanFinish struct {
 	Line   core.FinishLine

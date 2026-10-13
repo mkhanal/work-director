@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"wd/internal/coordinator"
 	"wd/internal/core"
 	"wd/internal/runner"
 )
@@ -62,8 +63,9 @@ const pathSep = " › "
 const noHeading = "(no heading)"
 
 // tree is a goal's whole subtree read once: every work under it by id and
-// by parent, the events filed at any depth under it, and the question each
-// work in needs-input waits on.
+// by parent, the events filed at any depth under it, the question each work
+// in needs-input waits on, and the question event behind it when one was
+// filed.
 type tree struct {
 	root     core.Work
 	byID     map[string]core.Work
@@ -71,6 +73,7 @@ type tree struct {
 	order    []core.Work
 	events   []core.Event
 	question map[string]runner.Question
+	asked    map[string]core.Event
 }
 
 // readTree reads goal's subtree with the events under it.
@@ -79,16 +82,22 @@ func (s *Server) readTree(goal core.Work, events []core.Event) (tree, error) {
 	if err != nil {
 		return tree{}, err
 	}
-	t := tree{root: goal, byID: map[string]core.Work{}, kids: map[string][]core.Work{}, order: all, events: events, question: map[string]runner.Question{}}
+	t := tree{root: goal, byID: map[string]core.Work{}, kids: map[string][]core.Work{}, order: all, events: events, question: map[string]runner.Question{}, asked: map[string]core.Event{}}
 	for _, w := range all {
 		t.byID[w.ID] = w
 		if w.Parent != nil && w.ID != goal.ID {
 			t.kids[*w.Parent] = append(t.kids[*w.Parent], w)
 		}
-		if w.State == core.StateNeedsInput {
-			if q, ok := waitingOn(events, w.ID); ok {
-				t.question[w.ID] = q
-			}
+		if w.State != core.StateNeedsInput {
+			continue
+		}
+		q, ok := waitingOn(events, w.ID)
+		if !ok {
+			continue
+		}
+		t.question[w.ID] = q
+		if e, ok := coordinator.OpenQuestion(events, w.ID); ok && coordinator.AskedQuestion(e).ID == q.ID {
+			t.asked[w.ID] = e
 		}
 	}
 	return t, nil
@@ -351,16 +360,18 @@ func (s *Server) notDoneBecause(t tree, top bool) ([]string, error) {
 	return out, nil
 }
 
-// needYou is a question on work in the tree that waits on the person.
+// needYou is a question on work in the tree that waits on the person, and
+// what answering it with its first choice would change.
 type needYou struct {
 	Work     string          `json:"work"`
 	Path     string          `json:"path"`
 	Question runner.Question `json:"question"`
+	Change   *change         `json:"change"`
 }
 
 // needsYou lists every open question in the tree, in tree order; the root's
 // own path is its title.
-func (t tree) needsYou(paths map[string]string) []needYou {
+func (s *Server) needsYou(t tree, paths map[string]string) ([]needYou, error) {
 	out := []needYou{}
 	for _, w := range t.order {
 		q, ok := t.question[w.ID]
@@ -371,9 +382,175 @@ func (t tree) needsYou(paths map[string]string) []needYou {
 		if !ok {
 			path = w.Title
 		}
-		out = append(out, needYou{Work: w.ID, Path: path, Question: q})
+		ch, err := s.changeOf(t, w, q)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, needYou{Work: w.ID, Path: path, Question: q, Change: ch})
 	}
-	return out
+	return out, nil
+}
+
+// Kinds of change a question waiting on the person carries.
+const (
+	changePlan   = "plan"
+	changeCourse = "course"
+	changeFinish = "finish"
+)
+
+// shape is a goal's title, done-when and finish line.
+type shape struct {
+	Title    string           `json:"title"`
+	DoneWhen *string          `json:"done_when"`
+	Finish   *core.FinishLine `json:"finish"`
+}
+
+// change is what a question would change: a plan change's actions and the
+// same in sentences; a top goal now and as proposed, and why; or the finish
+// lines offered. A question carrying both a course and a plan change is a
+// course change with the plan's actions and lines.
+type change struct {
+	Kind     string   `json:"kind"`
+	Actions  []string `json:"actions,omitempty"`
+	Lines    []string `json:"lines,omitempty"`
+	Now      *shape   `json:"now,omitempty"`
+	Proposed *shape   `json:"proposed,omitempty"`
+	Why      string   `json:"why,omitempty"`
+	Choices  []string `json:"choices,omitempty"`
+}
+
+// changeOf is what answering q, the question w waits on, would change, or
+// nil when it changes nothing by itself.
+func (s *Server) changeOf(t tree, w core.Work, q runner.Question) (*change, error) {
+	e, ok := t.asked[w.ID]
+	if ok && e.Change != nil && (e.Change.Title != "" || len(e.Change.Actions) > 0) {
+		ch := &change{Kind: changePlan}
+		if len(e.Change.Actions) > 0 {
+			ch.Actions = e.Change.Actions
+			lines, err := s.planLines(t, e.Change.Actions)
+			if err != nil {
+				return nil, err
+			}
+			ch.Lines = lines
+		}
+		if e.Change.Title != "" {
+			ch.Kind = changeCourse
+			ch.Now = &shape{Title: w.Title, DoneWhen: w.DoneWhen, Finish: w.FinishLine}
+			proposed := shape{Title: e.Change.Title, DoneWhen: &e.Change.DoneWhen}
+			if e.Change.Finish != "" {
+				proposed.Finish = &e.Change.Finish
+			}
+			ch.Proposed = &proposed
+			ch.Why = proposedWhyOf(q)
+		}
+		return ch, nil
+	}
+	for _, it := range q.Items {
+		head, _, _ := strings.Cut(it.Question, "\n")
+		if head != coordinator.FinishQuestion {
+			continue
+		}
+		ch := &change{Kind: changeFinish, Choices: []string{}}
+		for _, o := range it.Options {
+			ch.Choices = append(ch.Choices, o.Label)
+		}
+		return ch, nil
+	}
+	return nil, nil
+}
+
+// proposedWhyOf is the reason a top-goal change gives, from the "Why:" line
+// of the question item that proposes it.
+func proposedWhyOf(q runner.Question) string {
+	for _, it := range q.Items {
+		if !strings.Contains(it.Question, "\nProposed: ") {
+			continue
+		}
+		for _, line := range strings.Split(it.Question, "\n") {
+			if why, ok := strings.CutPrefix(strings.TrimSpace(line), "Why: "); ok {
+				return why
+			}
+		}
+	}
+	return ""
+}
+
+// planLines says each of a supervisor's plan actions as a sentence, naming
+// work by its title.
+func (s *Server) planLines(t tree, actions []string) ([]string, error) {
+	title := func(id string) (string, error) {
+		if w, ok := t.byID[id]; ok {
+			return w.Title, nil
+		}
+		known, err := s.ledger.Has(id)
+		if err != nil || !known {
+			return id, err
+		}
+		w, err := s.ledger.Get(id)
+		return w.Title, err
+	}
+	titles := func(ids []string) (string, error) {
+		out := make([]string, 0, len(ids))
+		for _, id := range ids {
+			t, err := title(id)
+			if err != nil {
+				return "", err
+			}
+			out = append(out, t)
+		}
+		return strings.Join(out, ", "), nil
+	}
+	out := make([]string, 0, len(actions))
+	for _, line := range actions {
+		acts, _ := coordinator.ParseSupervision([]string{"ACTIONS:", line})
+		if len(acts) != 1 {
+			out = append(out, line)
+			continue
+		}
+		a := acts[0]
+		name, err := title(a.Work)
+		if err != nil {
+			return nil, err
+		}
+		var said string
+		switch a.Kind {
+		case coordinator.ActGoal:
+			said = fmt.Sprintf("Add “%s” under %s, done when %s", a.Title, name, a.DoneWhen)
+			if len(a.After) > 0 {
+				after, err := titles(a.After)
+				if err != nil {
+					return nil, err
+				}
+				said += ", after " + after
+			}
+		case coordinator.ActStart:
+			said = "Start " + name
+		case coordinator.ActSupersede:
+			said = fmt.Sprintf("Drop %s: %s", name, a.Text)
+		case coordinator.ActEdit:
+			var parts []string
+			if a.Title != "" {
+				parts = append(parts, fmt.Sprintf("call it “%s”", a.Title))
+			}
+			if a.DoneWhen != "" {
+				parts = append(parts, "done when "+a.DoneWhen)
+			}
+			said = fmt.Sprintf("Change %s: %s", name, strings.Join(parts, "; "))
+		case coordinator.ActAfter:
+			after, err := titles(a.After)
+			if err != nil {
+				return nil, err
+			}
+			said = name + " waits on " + after
+			if after == "" {
+				said = name + " waits on nothing"
+			}
+		default:
+			said = line
+		}
+		out = append(out, said)
+	}
+	return out, nil
 }
 
 // course is a supervisor's latest verdict on whether its goal is on course.

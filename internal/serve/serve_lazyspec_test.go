@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"wd/internal/coordinator"
 	"wd/internal/core"
 	"wd/internal/ledger"
 	"wd/internal/runner"
@@ -51,6 +52,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Goal Serves Everything Below It That Needs The Person", aGoalServesEverythingBelowItThatNeedsThePerson)
 	t.Run("A Goal Serves Its Course", aGoalServesItsCourse)
 	t.Run("A Proposed Breakdown Is Served As Proposed", aProposedBreakdownIsServedAsProposed)
+	t.Run("A Change Waiting For The Person Is Served With What Would Change", aChangeWaitingForThePersonIsServedWithWhatWouldChange)
 	t.Run("A Goal Serves Its Record", aGoalServesItsRecord)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("A Running Session's Report Moves Its Work On", aRunningSessionsReportMovesItsWorkOn)
@@ -2063,6 +2065,133 @@ func aProposedBreakdownIsServedAsProposed(t *testing.T) {
 	if n := v.Tree[1]; n.WhyNotMoving == nil || *n.WhyNotMoving != "waits on Every release is tagged" {
 		t.Fatalf("a waiting sub-goal's why_not_moving = %v, want it waiting on its sibling", n.WhyNotMoving)
 	}
+}
+
+func aChangeWaitingForThePersonIsServedWithWhatWouldChange(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	add := func(title string, o ledger.AddOptions) core.Work {
+		t.Helper()
+		w, err := l.Add("p", title, o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return w
+	}
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	type served struct {
+		NeedsYou []struct {
+			Work   string          `json:"work"`
+			Change json.RawMessage `json:"change"`
+		} `json:"needs_you"`
+	}
+	changeOn := func(goal, work string) map[string]any {
+		t.Helper()
+		var v served
+		getJSON(t, api.URL+"/api/goal/"+goal, http.StatusOK, &v)
+		for _, n := range v.NeedsYou {
+			if n.Work != work {
+				continue
+			}
+			var ch map[string]any
+			if err := json.Unmarshal(n.Change, &ch); err != nil {
+				t.Fatalf("change on %s = %s: %v", work, n.Change, err)
+			}
+			return ch
+		}
+		t.Fatalf("no needs_you on %s in %+v", work, v.NeedsYou)
+		return nil
+	}
+	same := func(what string, got any, want string) {
+		t.Helper()
+		raw, err := json.Marshal(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(raw) != want {
+			t.Errorf("%s = %s, want %s", what, raw, want)
+		}
+	}
+
+	// A plan change in ask mode, beside a plain question under the goal.
+	top := add("Release notes", ledger.AddOptions{Kind: core.WorkGoal})
+	collector := add("Collector", ledger.AddOptions{Parent: &top.ID})
+	old := add("Old route", ledger.AddOptions{Parent: &top.ID})
+	note := add("Customer note", ledger.AddOptions{Parent: &top.ID})
+	walk(t, l, note.ID, core.StateRunning, core.StateNeedsInput)
+	event(t, l, note.ID, core.EventQuestion, "Which tone?\n- formal\n- casual")
+	actions := []string{
+		coordinator.Action{Kind: coordinator.ActGoal, Work: top.ID, Title: "Rollback guide", DoneWhen: "rollback is covered", After: []string{collector.ID}}.Line(),
+		coordinator.Action{Kind: coordinator.ActSupersede, Work: old.ID, Text: "the guide covers it"}.Line(),
+	}
+	walk(t, l, top.ID, core.StateRunning, core.StateNeedsInput)
+	ask := coordinator.Action{Kind: coordinator.ActAsk, Text: "Change the plan?\n" + strings.Join(actions, "\n"), Options: []string{"Apply these changes (recommended)", "Keep the plan as it is"}}
+	if _, err := l.Ask(top.ID, coordinator.QuestionBody([]coordinator.Action{ask}), core.Change{Actions: actions}); err != nil {
+		t.Fatal(err)
+	}
+	plan := changeOn(top.ID, top.ID)
+	same("plan change kind", plan["kind"], `"plan"`)
+	wantActions, err := json.Marshal(actions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same("plan change actions", plan["actions"], string(wantActions))
+	same("plan change lines", plan["lines"], `["Add “Rollback guide” under Release notes, done when rollback is covered, after Collector","Drop Old route: the guide covers it"]`)
+	if raw := func() string {
+		var v served
+		getJSON(t, api.URL+"/api/goal/"+top.ID, http.StatusOK, &v)
+		for _, n := range v.NeedsYou {
+			if n.Work == note.ID {
+				return string(n.Change)
+			}
+		}
+		return "missing"
+	}(); raw != "null" {
+		t.Errorf("a plain question's change = %s, want null", raw)
+	}
+
+	// A top-goal change, whatever the mode.
+	course := add("Release notes for engineers", ledger.AddOptions{Kind: core.WorkGoal})
+	if err := l.SetDoneWhen(course.ID, "engineers read what changed", core.AnsweredByDirector); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetFinish(course.ID, core.FinishPR, core.FinishFromTaste); err != nil {
+		t.Fatal(err)
+	}
+	walk(t, l, course.ID, core.StateRunning, core.StateNeedsInput)
+	text := "Change course?\nNow: Release notes for engineers | done when: engineers read what changed | finish: complete PR\nProposed: Release notes for everyone | done when: customers read it too | finish: merged\nWhy: customers ask for it"
+	ask = coordinator.Action{Kind: coordinator.ActAsk, Text: text, Options: []string{"Change course (recommended)", "Keep the goal as it is"}}
+	if _, err := l.Ask(course.ID, coordinator.QuestionBody([]coordinator.Action{ask}), core.Change{Title: "Release notes for everyone", DoneWhen: "customers read it too", Finish: core.FinishMerged}); err != nil {
+		t.Fatal(err)
+	}
+	ch := changeOn(course.ID, course.ID)
+	same("course change", ch, `{"kind":"course","now":{"done_when":"engineers read what changed","finish":"complete PR","title":"Release notes for engineers"},"proposed":{"done_when":"customers read it too","finish":"merged","title":"Release notes for everyone"},"why":"customers ask for it"}`)
+
+	// A top-goal change asked together with a plan change carries both.
+	both := add("Release notes for operators", ledger.AddOptions{Kind: core.WorkGoal})
+	stale := add("Stale route", ledger.AddOptions{Parent: &both.ID})
+	walk(t, l, both.ID, core.StateRunning, core.StateNeedsInput)
+	dropStale := coordinator.Action{Kind: coordinator.ActSupersede, Work: stale.ID, Text: "nobody reads it"}.Line()
+	asks := []coordinator.Action{
+		{Kind: coordinator.ActAsk, Text: "Change course?\nNow: Release notes for operators | done when: not set | finish: not decided\nProposed: Runbooks for operators | done when: each release has a runbook | finish: merged\nWhy: operators read runbooks", Options: []string{"Change course (recommended)", "Keep the goal as it is"}},
+		{Kind: coordinator.ActAsk, Text: "Change the plan?\n" + dropStale, Options: []string{"Apply these changes (recommended)", "Keep the plan as it is"}},
+	}
+	if _, err := l.Ask(both.ID, coordinator.QuestionBody(asks), core.Change{Actions: []string{dropStale}, Title: "Runbooks for operators", DoneWhen: "each release has a runbook", Finish: core.FinishMerged}); err != nil {
+		t.Fatal(err)
+	}
+	ch = changeOn(both.ID, both.ID)
+	same("combined change kind", ch["kind"], `"course"`)
+	same("combined change why", ch["why"], `"operators read runbooks"`)
+	same("combined change now", ch["now"], `{"done_when":null,"finish":null,"title":"Release notes for operators"}`)
+	same("combined change lines", ch["lines"], `["Drop Stale route: nobody reads it"]`)
+
+	// The finish-line question a planner unsure where a goal finishes leaves.
+	finish := add("Find why the cache misses", ledger.AddOptions{Kind: core.WorkGoal})
+	walk(t, l, finish.ID, core.StateRunning, core.StateNeedsInput)
+	ask = coordinator.Action{Kind: coordinator.ActAsk, Text: coordinator.FinishQuestion, Options: []string{"research (recommended)", "complete PR"}}
+	event(t, l, finish.ID, core.EventQuestion, coordinator.QuestionBody([]coordinator.Action{ask}))
+	same("finish change", changeOn(finish.ID, finish.ID), `{"choices":["research (recommended)","complete PR"],"kind":"finish"}`)
 }
 
 func aGoalServesItsRecord(t *testing.T) {

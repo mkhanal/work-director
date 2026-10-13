@@ -1141,10 +1141,6 @@ func (c *Cli) pastFinishes(name string) ([]core.FinishLine, error) {
 	return out, nil
 }
 
-// finishQuestion opens the question a planner unsure where a goal finishes
-// leaves on it.
-const finishQuestion = "Where does this goal finish?"
-
 // planGoal asks the project's runner, or --runner, for the goal's outcomes,
 // files each under the goal as a sub-goal with its done-when and order, and
 // returns them. A top goal's finish line is stored, or asked when the planner
@@ -1265,7 +1261,7 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project, propose bool) ([]core
 	}
 	switch {
 	case finish.Unsure:
-		asked := coordinator.Action{Kind: coordinator.ActAsk, Text: finishQuestion, Options: finish.Choices}
+		asked := coordinator.Action{Kind: coordinator.ActAsk, Text: coordinator.FinishQuestion, Options: finish.Choices}
 		if _, err := c.Ledger.AddEvent(goal.ID, core.EventQuestion, coordinator.QuestionBody([]coordinator.Action{asked})); err != nil {
 			return nil, err
 		}

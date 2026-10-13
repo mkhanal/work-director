@@ -260,7 +260,9 @@ func (s *Server) goal(id string) (goalView, error) {
 	if view.NotDoneBecause, err = s.notDoneBecause(t, len(chain) == 1); err != nil {
 		return goalView{}, err
 	}
-	view.NeedsYou = t.needsYou(view.Paths)
+	if view.NeedsYou, err = s.needsYou(t, view.Paths); err != nil {
+		return goalView{}, err
+	}
 	view.Superseded = t.superseded()
 	view.Proposed = core.Proposed(goal.ID, events)
 	courses := events
