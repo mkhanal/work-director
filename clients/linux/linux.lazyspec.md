@@ -196,10 +196,12 @@ hold only that product's work; with none, every product's.
 - A work page offers the gate `wd` serves for it as one button, which runs the gate's argv.
 - Work waiting on no gate has no such button.
 
-## Work That Comes To Wait On You Is Announced Once
-- Work that has moved into Needs You, Ready to Push or Ready to Close since the board was last read is announced, once.
-- Nothing is announced from the first read.
-- Work that stays in its band, or moves into any other, is not announced.
+## A Notification Says What Happened And Where
+- Its title says what happened: Question for you, Approve the plan, Change of course proposed, Choose where it finishes, Plan change to approve, Blocked, Finished or Ready for review.
+- Its body names the goal, then what about it: a question's first line and how many more came with it, how many sub-goals a plan has, the course's proposed title, what under it is blocked, or where it finished.
+- Ready for review is told when work reaches Ready to Push, In Review or Ready to Close.
+- Nothing is told from the first read, twice, or about work the person wrote to from the app in the last few seconds.
+- Clicking it opens its goal.
 
 ## A Product Is Added From A Folder
 - Adding a product runs `wd projects add <name> <folder> --runner <runner> --mode <mode>`, and the product is offered once it is added.

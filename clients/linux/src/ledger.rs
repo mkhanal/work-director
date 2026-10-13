@@ -268,14 +268,6 @@ fn sidebar_band(work: &Work, band: Band, needs_you: i64) -> SidebarBand {
     }
 }
 
-/// Work that has just come to wait on a person: a question or a block, or a
-/// gate only a person passes.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Arrival {
-    pub work: Work,
-    pub band: Band,
-}
-
 impl Board {
     /// Every item in one band, goals first, within one product when one is named.
     pub fn items(&self, band: Band, project: Option<&str>) -> Vec<&Work> {
@@ -349,25 +341,6 @@ impl Board {
             }
         }
         bands
-    }
-
-    /// Work that entered an announced band since `earlier`. With no earlier
-    /// board there is nothing to compare, so nothing has arrived.
-    pub fn arrivals(&self, earlier: Option<&Board>) -> Vec<Arrival> {
-        let Some(earlier) = earlier else { return Vec::new() };
-        let mut before: HashMap<&str, Band> = HashMap::new();
-        for (work, band) in earlier.listed() {
-            before.entry(work.id.as_str()).or_insert(band);
-        }
-        self.listed()
-            .filter(|(w, band)| Band::ANNOUNCED.contains(band) && before.get(w.id.as_str()) != Some(band))
-            .map(|(w, band)| Arrival { work: w.clone(), band })
-            .collect()
-    }
-
-    /// Every goal and standalone item on the board, with its band.
-    fn listed(&self) -> impl Iterator<Item = (&Work, Band)> {
-        self.goals.iter().map(|g| (&g.work, g.band)).chain(self.standalone.iter().map(|s| (&s.work, s.band)))
     }
 }
 

@@ -5,9 +5,10 @@
 //! executor); `Spawner` is how the store starts work that outlives a call.
 
 use std::cell::{Cell, Ref, RefCell};
+use std::collections::HashSet;
 use std::rc::{Rc, Weak};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use futures::future::LocalBoxFuture;
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
@@ -16,8 +17,9 @@ use serde::Deserialize;
 use crate::channel::{Channel, ChannelError};
 use crate::conversation::{ConversationPage, Question, SessionStatus, Step, Subagent, Usage};
 use crate::ledger::{
-    ActionResult, Arrival, Board, Doctor, Event, Found, Gate, GoalDetail, Project, ReviewPass, Started, Taste, Work,
+    ActionResult, Board, Doctor, Event, Found, Gate, GoalDetail, Project, ReviewPass, Started, Taste, Work,
 };
+use crate::notice::{Notice, Sighting, QUIET_SECONDS};
 use crate::outbox::{Outgoing, OutgoingState};
 use crate::plan::Plan;
 use crate::record::RecordView;
@@ -38,7 +40,7 @@ pub enum Change {
 }
 
 type Watcher = Rc<dyn Fn(Change)>;
-type Announcer = Rc<dyn Fn(&Arrival)>;
+type Teller = Rc<dyn Fn(&Notice)>;
 
 pub struct Store {
     channel: Channel,
@@ -60,7 +62,17 @@ pub struct Store {
     stale: Cell<bool>,
     watchers: RefCell<Vec<(u64, Watcher)>>,
     next_watch: Cell<u64>,
-    arrived: RefCell<Option<Announcer>>,
+    told: RefCell<Option<Teller>>,
+    /// The board and goal views the last read compared on; none before the first.
+    sighting: RefCell<Option<Sighting>>,
+    /// What has been told, so nothing is told twice.
+    told_keys: RefCell<HashSet<String>>,
+    /// Work events named since the last read.
+    touched: RefCell<HashSet<String>>,
+    /// The person's writes still running.
+    writing: RefCell<Vec<(u64, Plan)>>,
+    /// The person's writes that came back, with when, kept while they quiet notices.
+    ended: RefCell<Vec<(Plan, DateTime<Utc>)>>,
 }
 
 /// A view's subscription to the store; dropping it ends the subscription.
@@ -111,7 +123,12 @@ impl Store {
             stale: Cell::new(false),
             watchers: RefCell::new(Vec::new()),
             next_watch: Cell::new(1),
-            arrived: RefCell::new(None),
+            told: RefCell::new(None),
+            sighting: RefCell::new(None),
+            told_keys: RefCell::new(HashSet::new()),
+            touched: RefCell::new(HashSet::new()),
+            writing: RefCell::new(Vec::new()),
+            ended: RefCell::new(Vec::new()),
         })
     }
 
@@ -149,8 +166,8 @@ impl Store {
     }
 
     /// Told about each work that comes to wait on a person, once.
-    pub fn on_arrival(&self, f: impl Fn(&Arrival) + 'static) {
-        *self.arrived.borrow_mut() = Some(Rc::new(f));
+    pub fn on_notice(&self, f: impl Fn(&Notice) + 'static) {
+        *self.told.borrow_mut() = Some(Rc::new(f));
     }
 
     fn changed(&self, change: Change) {
@@ -184,8 +201,9 @@ impl Store {
         };
         let me = self.me.clone();
         self.spawn(async move {
-            while events.next().await.is_some() {
+            while let Some(event) = events.next().await {
                 let Some(store) = me.upgrade() else { return };
+                store.touched.borrow_mut().insert(event.work);
                 store.refresh().await;
             }
             if let Some(store) = me.upgrade() {
@@ -211,17 +229,11 @@ impl Store {
             self.stale.set(false);
             match self.channel.board().await {
                 Ok(now) => {
-                    let arrivals = now.arrivals(self.board.borrow().as_ref());
-                    *self.board.borrow_mut() = Some(now);
+                    *self.board.borrow_mut() = Some(now.clone());
                     self.reads.set(self.reads.get() + 1);
                     self.fail(None);
                     self.changed(Change::Board);
-                    let told = self.arrived.borrow().clone();
-                    if let Some(told) = told {
-                        for a in &arrivals {
-                            told(a);
-                        }
-                    }
+                    self.notice(now).await;
                 }
                 Err(e) => self.fail(Some(e.to_string())),
             }
@@ -312,6 +324,16 @@ impl Store {
     /// Runs a plan: its argv, unchanged. A write the person waits on is in
     /// flight until `wd` answers it.
     pub async fn run(&self, plan: &Plan) -> Result<ActionResult, ChannelError> {
+        let n = self.next_write.get();
+        self.next_write.set(n + 1);
+        self.writing.borrow_mut().push((n, plan.clone()));
+        let result = self.run_watched(plan).await;
+        self.writing.borrow_mut().retain(|(w, _)| *w != n);
+        self.ended.borrow_mut().push((plan.clone(), Utc::now()));
+        result
+    }
+
+    async fn run_watched(&self, plan: &Plan) -> Result<ActionResult, ChannelError> {
         let Some((write, work)) = Write::of(plan) else { return self.channel.action(&plan.argv).await };
         let id = self.next_write.get();
         self.next_write.set(id + 1);
@@ -321,6 +343,33 @@ impl Store {
         self.in_flight.borrow_mut().retain(|w| w.id != id);
         self.changed(Change::Writes);
         result
+    }
+
+    /// Reads the goal views a sighting of `board` needs, and tells what
+    /// happened since the last one.
+    async fn notice(&self, board: Board) {
+        let touched = std::mem::take(&mut *self.touched.borrow_mut());
+        let reads = Sighting::reads(&board, self.sighting.borrow().as_ref(), &touched);
+        let mut goals = reads.kept;
+        for id in reads.read {
+            if let Ok(detail) = self.channel.goal(&id).await {
+                goals.insert(id, detail);
+            }
+        }
+        let now = Sighting { board, goals };
+        let at = Utc::now();
+        self.ended.borrow_mut().retain(|(_, t)| (at - *t).num_seconds() < QUIET_SECONDS);
+        let running: Vec<Plan> = self.writing.borrow().iter().map(|(_, p)| p.clone()).collect();
+        let quiet = Notice::quiet(&running, &self.ended.borrow(), at);
+        let notices = Notice::between(self.sighting.borrow().as_ref(), &now, &self.told_keys.borrow(), &quiet);
+        *self.sighting.borrow_mut() = Some(now);
+        let told = self.told.borrow().clone();
+        for n in &notices {
+            self.told_keys.borrow_mut().extend(n.keys.iter().cloned());
+            if let Some(told) = &told {
+                told(n);
+            }
+        }
     }
 
     async fn run_argv(&self, argv: &[&str]) -> Result<ActionResult, ChannelError> {

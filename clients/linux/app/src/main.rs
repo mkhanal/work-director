@@ -24,7 +24,7 @@ use std::time::Duration;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-use kit::{locate_wd, login_path, Band, Channel, Spawner, Store};
+use kit::{locate_wd, login_path, Channel, Spawner, Store};
 
 use crate::app::Place;
 use crate::settings::Settings;
@@ -124,16 +124,11 @@ fn activate(application: &adw::Application, login: &Login) {
     }
 
     let told = application.clone();
-    store.on_arrival(move |arrival| {
-        let note = gio::Notification::new(&arrival.work.title);
-        let why = match arrival.band {
-            Band::NeedsYou => "needs you",
-            Band::ReadyToPush => "is ready to push",
-            _ => "is ready to close",
-        };
-        note.set_body(Some(&format!("{} {why}", arrival.work.project)));
-        note.set_default_action_and_target_value("app.open", Some(&arrival.work.id.to_variant()));
-        told.send_notification(Some(&arrival.work.id), &note);
+    store.on_notice(move |notice| {
+        let note = gio::Notification::new(&notice.title);
+        note.set_body(Some(&notice.body));
+        note.set_default_action_and_target_value("app.open", Some(&notice.work.to_variant()));
+        told.send_notification(notice.keys.first().map(String::as_str), &note);
     });
 
     let open = gio::SimpleAction::new("open", Some(glib::VariantTy::STRING));

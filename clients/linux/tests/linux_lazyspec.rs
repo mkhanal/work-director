@@ -1740,27 +1740,159 @@ fn the_next_gate_is_one_button() {
     store.stop();
 }
 
-/// Work That Comes To Wait On You Is Announced Once
+/// A Notification Says What Happened And Where
 #[test]
-fn work_that_comes_to_wait_on_you_is_announced_once() {
-    let board = |rows: &[(&str, &str, &str)]| -> Board {
-        let goals: Vec<Value> = rows.iter().map(|(id, state, band)| board_goal(work_json(id, state), band)).collect();
-        serde_json::from_value(json!({"goals": goals, "standalone": []})).expect("a board")
+fn a_notification_says_what_happened_and_where() {
+    let work = |id: &str, title: &str, state: &str, kind: &str, updated: &str| {
+        let mut w = work_json(id, state);
+        w["title"] = json!(title);
+        w["kind"] = json!(kind);
+        w["updated"] = json!(updated);
+        w
     };
-    let first =
-        board(&[("a", "running", "in-flight"), ("b", "needs-input", "needs-you"), ("c", "running", "in-flight")]);
-    assert!(first.arrivals(None).is_empty(), "nothing is announced from the first read");
-    let second = board(&[
-        ("a", "needs-input", "needs-you"),
-        ("b", "needs-input", "needs-you"),
-        ("c", "review", "ready-to-push"),
-        ("d", "paused", "paused"),
-    ]);
-    assert_eq!(
-        second.arrivals(Some(&first)).into_iter().map(|a| a.work.id).collect::<HashSet<_>>(),
-        HashSet::from(["a".to_string(), "c".to_string()])
+    let goal = |id: &str, title: &str, state: &str| work(id, title, state, "goal", "u0");
+    let row = |w: Value, band: &str, needs_you: i64, total: i64, finished: Option<&str>, proposed: bool| {
+        json!({"work": w, "rollup": {"counts": {}, "done": 0, "total": total}, "band": band,
+            "progress": {"done": 0, "total": total, "superseded": 0}, "needs_you": needs_you, "finish": null,
+            "finished": finished, "proposed": proposed})
+    };
+    let node = |w: Value, children: Vec<Value>| {
+        let mut n = node_json("x", "task", "running", json!({"children": children}));
+        n["work"] = w;
+        n
+    };
+    let ask = |id: &str, on: &str, text: &str, change: Value| {
+        json!({"work": on, "path": on, "change": change, "question": {"id": id, "items": [{"header": "", "question": text,
+            "multi": false, "options": [{"label": "Yes", "description": ""}]}], "answers": null, "reply": null}})
+    };
+    let detail = |w: Value, tree: Vec<Value>, asks: Vec<Value>| {
+        goal_view(json!({"goal": w, "tasks": [], "rollup": {"counts": {}, "done": 0, "total": 0}, "events": [],
+            "claims": [], "landings": [], "delivery": null, "activity": {}, "reports": {}, "asking": null,
+            "tree": tree, "needs_you": asks}))
+    };
+    let sighting = |goals: Vec<Value>, standalone: Vec<Value>, details: Vec<(&str, GoalDetail)>| Sighting {
+        board: serde_json::from_value(json!({"goals": goals, "standalone": standalone})).expect("a board"),
+        goals: details.into_iter().map(|(id, d)| (id.to_string(), d)).collect(),
+    };
+
+    let export = goal("g", "Ship the export", "running");
+    let audit = goal("p", "Audit trail", "running");
+    let sync = goal("d", "Fix sync", "running");
+    let search = goal("r", "Speed up search", "running");
+    let why = goal("c", "Why does sync drop events?", "running");
+    let keys = work("t", "Rotate keys", "running", "task", "u0");
+    let before = sighting(
+        vec![
+            row(export.clone(), "in-flight", 0, 0, None, false),
+            row(audit.clone(), "in-flight", 0, 3, None, false),
+            row(sync.clone(), "in-flight", 0, 0, None, false),
+            row(search.clone(), "in-flight", 0, 0, None, false),
+            row(why.clone(), "in-flight", 0, 0, None, false),
+        ],
+        vec![json!({"work": keys, "band": "in-flight"})],
+        vec![
+            ("g", detail(export, vec![node(goal("s", "Export as CSV", "running"), vec![])], vec![])),
+            ("p", detail(audit.clone(), vec![], vec![])),
+            ("d", detail(sync, vec![], vec![])),
+            ("r", detail(search, vec![], vec![])),
+            ("c", detail(why, vec![], vec![])),
+        ],
     );
-    assert!(second.arrivals(Some(&second)).is_empty(), "staying put is not news");
+
+    let export_now = work("g", "Ship the export", "needs-input", "goal", "u1");
+    let why_now = work("c", "Why does sync drop events?", "needs-input", "goal", "u1");
+    let course =
+        json!({"kind": "course", "proposed": {"title": "Sync never drops events", "done_when": null, "finish": null}});
+    let after = sighting(
+        vec![
+            row(export_now.clone(), "needs-you", 2, 0, None, false),
+            row(audit.clone(), "needs-you", 0, 3, None, true),
+            row(work("d", "Fix sync", "done", "goal", "u1"), "at-rest", 0, 0, Some("Complete PR #512"), false),
+            row(work("r", "Speed up search", "review", "goal", "u1"), "ready-to-push", 0, 0, None, false),
+            row(why_now.clone(), "needs-you", 3, 0, None, false),
+        ],
+        vec![json!({"work": work("t", "Rotate keys", "blocked", "task", "u1"), "band": "needs-you"})],
+        vec![
+            (
+                "g",
+                detail(
+                    export_now,
+                    vec![node(
+                        work("s", "Export as CSV", "needs-input", "goal", "u1"),
+                        vec![node(work("b", "Upload to S3", "blocked", "task", "u1"), vec![])],
+                    )],
+                    vec![
+                        ask("q1", "s", "Which columns go in?\nThe export has forty.", Value::Null),
+                        ask("q2", "g", "Is UTF-8 fine?", Value::Null),
+                    ],
+                ),
+            ),
+            ("p", detail(audit, vec![], vec![])),
+            ("r", detail(work("r", "Speed up search", "review", "goal", "u1"), vec![], vec![])),
+            (
+                "c",
+                detail(
+                    why_now,
+                    vec![],
+                    vec![
+                        ask("q3", "c", "Turn this into fixing it?", course),
+                        ask("q4", "f", "Where does this goal finish?", json!({"kind": "finish"})),
+                        ask("q5", "c", "Add a retry sub-goal?", json!({"kind": "plan"})),
+                    ],
+                ),
+            ),
+        ],
+    );
+
+    let none = HashSet::new();
+    assert!(Notice::between(None, &after, &none, &none).is_empty(), "nothing is told from the first read");
+    let told = Notice::between(Some(&before), &after, &none, &none);
+    let said: Vec<[&str; 3]> = told.iter().map(|n| [n.title.as_str(), n.body.as_str(), n.work.as_str()]).collect();
+    assert_eq!(
+        said,
+        vec![
+            ["Question for you", "Ship the export\nWhich columns go in?\n1 more question", "g"],
+            ["Blocked", "Ship the export — Upload to S3", "g"],
+            ["Approve the plan", "Audit trail · 3 sub-goals", "p"],
+            ["Finished", "Fix sync — Complete PR #512", "d"],
+            ["Ready for review", "Speed up search", "r"],
+            ["Change of course proposed", "Why does sync drop events? — Sync never drops events", "c"],
+            ["Choose where it finishes", "Why does sync drop events?", "c"],
+            ["Plan change to approve", "Why does sync drop events?", "c"],
+            ["Blocked", "Rotate keys", "t"],
+        ]
+    );
+    assert!(Notice::between(Some(&after), &after, &none, &none).is_empty(), "staying put is not news");
+    let keys: HashSet<String> = told.iter().flat_map(|n| n.keys.iter().cloned()).collect();
+    assert!(Notice::between(Some(&before), &after, &keys, &none).is_empty(), "nothing is told twice");
+    let quiet: HashSet<String> = HashSet::from(["g".to_string(), "q3".to_string()]);
+    assert!(
+        !Notice::between(Some(&before), &after, &none, &quiet)
+            .iter()
+            .any(|n| n.work == "g" || n.body.contains("Sync never")),
+        "what the person just did is not told back to them"
+    );
+
+    let now = chrono::Utc::now();
+    let decided = Plan::decide("g", "csv only").expect("a plan");
+    assert!(Notice::quiet(&[], &[(decided.clone(), now - chrono::Duration::seconds(2))], now).contains("g"));
+    assert!(!Notice::quiet(&[], &[(decided.clone(), now - chrono::Duration::seconds(10))], now).contains("g"));
+    assert!(Notice::quiet(std::slice::from_ref(&decided), &[], now).contains("g"));
+
+    assert!(
+        Sighting::reads(&before.board, Some(&before), &none).read.is_empty(),
+        "a goal nothing touched is not read again"
+    );
+    assert_eq!(
+        Sighting::reads(&before.board, Some(&before), &HashSet::from(["s".to_string()])).read,
+        strings(&["g"]),
+        "an event under a goal reads it again"
+    );
+    assert_eq!(
+        Sighting::reads(&after.board, Some(&before), &none).read.into_iter().collect::<HashSet<_>>(),
+        HashSet::from(["g", "p", "r", "c"].map(String::from)),
+        "a goal whose row changed is read again; one at rest with nothing asked is not read"
+    );
 }
 
 /// A Product Is Added From A Folder
