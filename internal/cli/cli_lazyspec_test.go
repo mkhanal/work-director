@@ -4673,6 +4673,7 @@ func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
 	}
 	o.say(t, supervisor,
 		"The collector never calls the detector.",
+		"COURSE: correct — the detector is not wired in",
 		"ACTIONS:",
 		"SEND "+o.a+": wire the detector into the collector",
 		fmt.Sprintf("RESOLVE %d: %s wires it in", o.concern, o.a),
@@ -4711,6 +4712,9 @@ func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
 	}
 	if s := superviseOnce(t, f, o.goal); s.Applied {
 		t.Fatalf("a reply already carried out was carried out again: %+v", s)
+	}
+	if course := f.bodies(t, o.goal, core.EventCourse); !slices.Equal(course, []string{"unstated", "correct: the detector is not wired in"}) {
+		t.Fatalf("course events = %q, want one per reply", course)
 	}
 
 	// A question goes to the person, and the answer to the supervisor.
@@ -5146,6 +5150,22 @@ FINISH: merged | from: goal
   done when: the changelog page lists the release
   after: 1
 `
+
+func TestAPlanningSessionThatFailsIsReportedAtOnceWithWhy(t *testing.T) {
+	f := newCLIFixture(t)
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Release notes", "--json"), "id")
+	start := time.Now()
+	out := f.runFail(t, "goal", "plan", goal, "--runner", "opencode", "--timeout", "60")
+	if !strings.Contains(out, "provider.quota: Insufficient account funds") {
+		t.Fatalf("plan failed with %q, want the session's error", out)
+	}
+	if waited := time.Since(start); waited > 30*time.Second {
+		t.Fatalf("plan waited %s; a failed session stops it at once", waited)
+	}
+	if kids, _ := f.tree(t, goal); len(kids) != 0 {
+		t.Fatalf("children = %+v, want none filed", kids)
+	}
+}
 
 func TestPlanningFilesSubGoalsWithTheirDoneWhenAndOrder(t *testing.T) {
 	f := newCLIFixture(t)

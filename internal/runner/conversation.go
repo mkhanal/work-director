@@ -22,6 +22,9 @@ const (
 	EntryTool EntryKind = "tool"
 	// EntryQuestion is a question the executor put to a person, with options.
 	EntryQuestion EntryKind = "question"
+	// EntryError is a reply that ended in an error instead of an answer: its
+	// type and message, as the provider gave them.
+	EntryError EntryKind = "error"
 )
 
 // Entry is one step of a session's conversation, oldest first.
@@ -109,6 +112,14 @@ func Asking(entries []Entry) (*Question, bool) {
 // conversation ending on a question with options ends on that question as an
 // `ASK:` line, the same line an executor without such a tool writes, so one
 // path files, answers and escalates both.
+// Failure is the error a conversation ends on, when its last step is one.
+func Failure(entries []Entry) (string, bool) {
+	if n := len(entries); n > 0 && entries[n-1].Kind == EntryError {
+		return entries[n-1].Text, true
+	}
+	return "", false
+}
+
 func Transcript(r Runner, h Handle) ([]string, error) {
 	entries, err := r.Conversation(h)
 	if err != nil {

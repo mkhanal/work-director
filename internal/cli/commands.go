@@ -1313,6 +1313,13 @@ func (c *Cli) awaitPerson(id string) error {
 func awaitPlan(rn runner.Runner, h runner.Handle, wait time.Duration) ([]coordinator.PlanOutcome, coordinator.PlanFinish, string, error) {
 	deadline := time.Now().Add(wait)
 	for time.Now().Before(deadline) {
+		entries, err := rn.Conversation(h)
+		if err != nil {
+			return nil, coordinator.PlanFinish{}, "", err
+		}
+		if why, failed := runner.Failure(entries); failed {
+			return nil, coordinator.PlanFinish{}, "", fail("planning session %s failed: %s", h.Session, why)
+		}
 		texts, err := runner.Transcript(rn, h)
 		if err != nil {
 			return nil, coordinator.PlanFinish{}, "", err

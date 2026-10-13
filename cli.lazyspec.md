@@ -121,6 +121,9 @@ verify event.
 - `wd stop <goal>` stops the goal's own live session as well as its tasks'.
 - The goal's own session is its latest planning or supervising session.
 
+## A Planning Session That Fails Is Reported At Once With Why
+- `wd goal plan` stops as soon as its planning session ends on an error, failing with that error, and files no sub-goals.
+
 ## Planning Files Sub-Goals With Their Done-When And Order
 - `wd goal plan` files each outcome under the goal: a task, or a goal when it is to be split, each with its done-when and what it waits on.
 - A top goal's finish line is stored with where it came from; an unsure one is asked as a question with its choices, and the goal waits on it.

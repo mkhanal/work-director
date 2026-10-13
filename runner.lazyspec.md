@@ -41,6 +41,10 @@ provider is a TOML file of commands under `~/.work-director/runners/`.
 - A claude session's `-n`, an opencode session's `--title` and a runner file's `{name}` are `wd:` followed by the label, at most 60 characters; `{name20}` is its first 20.
 - A codex session, which takes no name, has that name as the first line of its first message.
 
+## A Session That Failed Says Why
+- An opencode reply that ended in an error reads as an error step holding the error's type and message.
+- `Failure` returns that error when it is the conversation's last step.
+
 ## Sending Continues The Same Session
 - `send` addresses the runner with the handle's session id, never starting a new session.
 - claude stops a session that is idle or waiting, and resumes it once the process `claude agents` listed for it has exited.

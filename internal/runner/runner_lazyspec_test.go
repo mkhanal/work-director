@@ -73,7 +73,8 @@ func TestRunner(t *testing.T) {
 esac`)
 	writeFake(t, bin, "opencode", `case "$1" in
   run) echo '{"type":"step_start","sessionID":"ses_abc123"}'; echo '{"type":"text","sessionID":"ses_abc123","part":{"type":"text","text":"READY"}}';;
-  session) echo '{"info":{"id":"ses_abc123"},"messages":[{"type":"user"},{"type":"assistant","content":[{"type":"text","text":"READY"}]},{"type":"assistant","content":[{"type":"text","text":"PONG"}]}]}';;
+  session) [ -f `+filepath.Join(bin, "oc-failed")+` ] && { echo '{"info":{"id":"ses_abc123","outcome":"failed"},"messages":[{"type":"user","text":"go"},{"type":"assistant","content":[],"finish":"error","error":{"type":"provider.quota","message":"Upstream request failed: Insufficient account funds"}}]}'; exit 0; }
+    echo '{"info":{"id":"ses_abc123"},"messages":[{"type":"user"},{"type":"assistant","content":[{"type":"text","text":"READY"}]},{"type":"assistant","content":[{"type":"text","text":"PONG"}]}]}';;
   models) echo 'anthropic/claude-opus-5'; echo 'openai/gpt-5.2';;
 esac`)
 	writeFake(t, bin, "codex", `case "$1" in
@@ -602,6 +603,33 @@ transcript = "cat {log}"
 		}
 		if !strings.Contains(calls(t, bin), "--full-auto wd:8 t\n\nB") {
 			t.Fatalf("codex's first message does not open with wd:8 t:\n%s", calls(t, bin))
+		}
+	})
+
+	t.Run("A Session That Failed Says Why", func(t *testing.T) {
+		h := Handle{Runner: "opencode", Session: "ses_abc123", Cwd: cwd}
+		ok, err := opencode.Conversation(h)
+		if err != nil {
+			t.Fatalf("conversation: %v", err)
+		}
+		if _, failed := Failure(ok); failed {
+			t.Fatalf("a session that answered reads as failed: %+v", ok)
+		}
+		marker := filepath.Join(bin, "oc-failed")
+		if err := os.WriteFile(marker, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(marker)
+		entries, err := opencode.Conversation(h)
+		if err != nil {
+			t.Fatalf("conversation: %v", err)
+		}
+		want := "provider.quota: Upstream request failed: Insufficient account funds"
+		if n := len(entries); n == 0 || entries[n-1].Kind != EntryError || entries[n-1].Text != want {
+			t.Fatalf("entries = %+v, want an error step %q last", entries, want)
+		}
+		if why, failed := Failure(entries); !failed || why != want {
+			t.Fatalf("Failure = %q, %v; want %q", why, failed, want)
 		}
 	})
 

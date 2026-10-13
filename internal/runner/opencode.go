@@ -153,23 +153,30 @@ func (opencodeRunner) Conversation(h Handle) ([]Entry, error) {
 				Type string `json:"type"`
 				Text string `json:"text"`
 			} `json:"content"`
+			Error *struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"error"`
 		} `json:"messages"`
 	}
 	if err := json.Unmarshal([]byte(r.Stdout), &data); err != nil {
 		return nil, err
 	}
-	var out []string
+	out := []Entry{}
 	for _, m := range data.Messages {
 		if m.Type != "assistant" {
 			continue
 		}
 		for _, p := range m.Content {
 			if p.Type == "text" && p.Text != "" {
-				out = append(out, p.Text)
+				out = append(out, Entry{Kind: EntryText, Text: p.Text})
 			}
 		}
+		if m.Error != nil {
+			out = append(out, Entry{Kind: EntryError, Text: m.Error.Type + ": " + m.Error.Message})
+		}
 	}
-	return texts(out), nil
+	return out, nil
 }
 
 func (opencodeRunner) Models() ([]string, error) {

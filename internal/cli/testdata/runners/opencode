@@ -4,6 +4,9 @@ case "$1" in
     echo '{"type":"step_start","sessionID":"ses_opabc"}'
     echo '{"type":"text","sessionID":"ses_opabc","part":{"type":"text","text":"READY"}}'
     ;;
+  session)
+    echo '{"info":{"id":"ses_opabc","outcome":"failed"},"messages":[{"type":"assistant","content":[],"finish":"error","error":{"type":"provider.quota","message":"Insufficient account funds"}}]}'
+    ;;
   models)
     echo 'anthropic/claude-opus-5'
     echo 'openai/gpt-5.2'
