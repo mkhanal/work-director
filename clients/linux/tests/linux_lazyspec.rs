@@ -245,6 +245,64 @@ fn the_app_runs_the_wd_installed_beside_it() {
     assert_eq!(locate_wd(&bare.join("work-director"), Some(std::ffi::OsStr::new(""))), Err(refused));
 }
 
+/// Wd Runs With The Person's Login Shell PATH
+#[test]
+fn wd_runs_with_the_persons_login_shell_path() {
+    assert_eq!(login_path::parse("Last login: today\n__WD_PATH__/a:/b__WD_PATH__\nbye").as_deref(), Some("/a:/b"));
+    assert_eq!(login_path::parse("no markers here"), None);
+    assert_eq!(login_path::parse("__WD_PATH____WD_PATH__"), None);
+    assert_eq!(login_path::merge("/a:/b", "/b:/c::/a"), "/a:/b:/c");
+    assert_eq!(login_path::path(Some("/login:/usr/bin"), "/usr/bin:/bin", "/h", |_| true), "/login:/usr/bin:/bin");
+    let present = ["/h/.opencode/bin", "/h/.local/bin", "/usr/local/bin", "/h/.npm-global/bin"];
+    assert_eq!(
+        login_path::path(None, "/usr/bin:/bin:/usr/local/bin", "/h", |d| present.contains(&d)),
+        "/usr/bin:/bin:/usr/local/bin:/h/.local/bin:/h/.opencode/bin:/h/.npm-global/bin"
+    );
+    let with_shell: HashMap<String, String> = [("SHELL".to_string(), "/bin/fish".to_string())].into();
+    assert_eq!(login_path::shell(&with_shell, Some("/bin/zsh")), "/bin/fish");
+    assert_eq!(login_path::shell(&HashMap::new(), Some("/bin/zsh")), "/bin/zsh");
+    assert_eq!(login_path::shell(&HashMap::new(), None), "/bin/bash");
+
+    let home = Home::new();
+    let login = home.dir.join("login-bin");
+    executable(&login.join("codex"), "#!/bin/sh\n");
+    let shell = home.dir.join("shell");
+    // Answers only when run as an interactive login shell.
+    executable(
+        &shell,
+        &format!(
+            "#!/bin/sh\necho 'welcome back'\n[ \"$1 $2\" = '-l -i' ] && printf '__WD_PATH__{}:/usr/bin__WD_PATH__'\necho 'rc noise'\n",
+            login.display()
+        ),
+    );
+    let mut desktop = home.env.clone();
+    desktop.insert("PATH".into(), "/usr/bin:/bin:/usr/sbin:/sbin".into());
+    desktop.insert("SHELL".into(), shell.display().to_string());
+    let env = login_path::resolve(&desktop, Duration::from_secs(5));
+    assert_eq!(env["PATH"], format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", login.display()));
+    let others = |e: &HashMap<String, String>| {
+        e.iter().filter(|(k, _)| *k != "PATH").map(|(k, v)| (k.clone(), v.clone())).collect::<HashMap<_, _>>()
+    };
+    assert_eq!(others(&env), others(&desktop), "nothing else changes");
+    let run = Run::new();
+    let store = run.store(Channel::spawn(built_wd(), Some(&env)).expect("wd serve --stdio"));
+    let doctor = run.wait(store.doctor()).expect("doctor");
+    assert!(
+        doctor.runners.iter().any(|r| r.runner == "codex" && r.detected),
+        "wd finds a runner only the login shell's PATH has"
+    );
+    store.stop();
+
+    executable(&shell, "#!/bin/sh\nsleep 30\n");
+    let started = Instant::now();
+    let late = login_path::resolve(&desktop, Duration::from_millis(500));
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(
+        late["PATH"].starts_with("/usr/bin:/bin:/usr/sbin:/sbin"),
+        "a shell that does not answer falls back to the inherited PATH"
+    );
+}
+
 /// A Reply Reaches The Request That Carries Its Id
 #[test]
 fn a_reply_reaches_the_request_that_carries_its_id() {

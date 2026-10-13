@@ -8,6 +8,7 @@ pub mod escape;
 pub mod follow;
 pub mod ledger;
 pub mod locator;
+pub mod login_path;
 pub mod look;
 pub mod markdown;
 pub mod new_goal;

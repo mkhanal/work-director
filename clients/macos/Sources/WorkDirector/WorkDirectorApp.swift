@@ -77,7 +77,9 @@ final class Launch {
     func start() async {
         guard case .starting = state else { return }
         do {
-            let store = Store(channel: try Channel(wd: try locateWD()))
+            let wd = try locateWD()
+            let environment = await Task.detached { LoginPath.resolve() }.value
+            let store = Store(channel: try Channel(wd: wd, environment: environment))
             Notifier.shared.start()
             store.arrived = { Notifier.shared.announce($0) }
             state = .running(store)

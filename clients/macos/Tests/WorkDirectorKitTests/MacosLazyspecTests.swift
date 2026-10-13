@@ -220,6 +220,43 @@ struct SeededTree {
         #expect(throws: LocatorError.noWD) { try locateWD(bundle: plain, environment: ["PATH": onPath.path]) }
     }
 
+    @Test("Wd Runs With The Person's Login Shell PATH")
+    func wdRunsWithLoginShellPath() async throws {
+        #expect(LoginPath.parse("Last login: today\n__WD_PATH__/a:/b__WD_PATH__\nbye") == "/a:/b")
+        #expect(LoginPath.parse("no markers here") == nil)
+        #expect(LoginPath.parse("__WD_PATH____WD_PATH__") == nil)
+        #expect(LoginPath.merge("/a:/b", "/b:/c::/a") == "/a:/b:/c")
+        #expect(LoginPath.path(login: "/login:/usr/bin", inherited: "/usr/bin:/bin", home: "/h") { _ in true } == "/login:/usr/bin:/bin")
+        let present: Set = ["/h/.opencode/bin", "/h/.local/bin", "/usr/local/bin", "/h/.npm-global/bin"]
+        #expect(LoginPath.path(login: nil, inherited: "/usr/bin:/bin:/usr/local/bin", home: "/h") { present.contains($0) }
+            == "/usr/bin:/bin:/usr/local/bin:/h/.local/bin:/h/.opencode/bin:/h/.npm-global/bin")
+        #expect(LoginPath.shell(environment: ["SHELL": "/bin/fish"], account: "/bin/bash") == "/bin/fish")
+        #expect(LoginPath.shell(environment: [:], account: "/bin/bash") == "/bin/bash")
+        #expect(LoginPath.shell(environment: [:], account: nil) == "/bin/zsh")
+
+        let home = try Home()
+        let login = home.dir.appendingPathComponent("login-bin")
+        try executable(login.appendingPathComponent("codex"), "#!/bin/sh\n")
+        let shell = home.dir.appendingPathComponent("shell")
+        // Answers only when run as an interactive login shell.
+        try executable(shell, "#!/bin/sh\necho 'welcome back'\n[ \"$1 $2\" = '-l -i' ] && printf '__WD_PATH__\(login.path):/usr/bin__WD_PATH__'\necho 'rc noise'\n")
+        var finder = home.environment
+        finder["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        finder["SHELL"] = shell.path
+        let env = LoginPath.resolve(environment: finder)
+        #expect(env["PATH"] == "\(login.path):/usr/bin:/bin:/usr/sbin:/sbin")
+        #expect(env.filter { $0.key != "PATH" } == finder.filter { $0.key != "PATH" }, "nothing else changes")
+        let store = await Store(channel: try Channel(wd: builtWD, environment: env))
+        #expect(try await store.doctor().runners.contains { $0.runner == "codex" && $0.detected }, "wd finds a runner only the login shell's PATH has")
+        await store.stop()
+
+        try executable(shell, "#!/bin/sh\nsleep 30\n")
+        let started = Date()
+        let late = LoginPath.resolve(environment: finder, timeout: 0.5)
+        #expect(Date().timeIntervalSince(started) < 5)
+        #expect(late["PATH"]?.hasPrefix("/usr/bin:/bin:/usr/sbin:/sbin") == true, "a shell that does not answer falls back to the inherited PATH")
+    }
+
     @Test("A Reply Reaches The Request That Carries Its Id")
     func replyReachesItsRequest() async throws {
         // Answers the first two requests in reverse, refuses the third, and

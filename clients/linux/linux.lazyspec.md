@@ -15,6 +15,12 @@ A native GTK4 and libadwaita app that is installed with its own `wd` and holds
 - Without one there, it runs `$WD_BIN`.
 - With neither it refuses to start, naming both. It never searches `PATH`.
 
+## Wd Runs With The Person's Login Shell PATH
+- Every `wd` the app starts gets as `PATH` what the person's login shell (`$SHELL`, else their account's shell, else `/bin/bash`) prints for it, then each inherited entry it lacks. Nothing else in its environment changes.
+- The shell runs as an interactive login shell (`-l -i`), so it reads the person's profile and rc files.
+- Whatever the shell prints around its `PATH` is ignored.
+- When the shell fails or does not answer within 5 seconds, `PATH` is the inherited one plus whichever of `~/.local/bin`, `~/.opencode/bin`, `~/.cargo/bin`, `~/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.npm-global/bin` exist, in that order.
+
 ## A Reply Reaches The Request That Carries Its Id
 - Replies may arrive in any order; each completes the request with its id.
 - A request outstanding when `wd` exits fails, naming the exit.

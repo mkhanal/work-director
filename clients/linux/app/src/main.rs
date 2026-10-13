@@ -14,12 +14,15 @@ mod ui;
 mod window;
 mod work_page;
 
+use std::cell::{OnceCell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-use kit::{locate_wd, Band, Channel, Spawner, Store};
+use kit::{locate_wd, login_path, Band, Channel, Spawner, Store};
 
 use crate::app::Place;
 use crate::settings::Settings;
@@ -27,14 +30,24 @@ use crate::window::Window;
 
 const APP_ID: &str = "dev.mkhanal.WorkDirector";
 
+/// How long the login shell has to say its PATH before the usual directories stand in.
+const LOGIN_SHELL_WAIT: Duration = Duration::from_secs(5);
+
 fn main() -> glib::ExitCode {
+    // Asked while GTK starts; the first activation waits for the answer.
+    let login = Login {
+        asking: RefCell::new(Some(std::thread::spawn(|| {
+            login_path::resolve(&inherited_environment(), LOGIN_SHELL_WAIT)
+        }))),
+        environment: OnceCell::new(),
+    };
     let application = adw::Application::builder().application_id(APP_ID).build();
     application.connect_startup(|application| {
         load_css();
         application.set_accels_for_action("win.new-goal", &["<Control>n"]);
         application.set_accels_for_action("win.command", &["<Control>k"]);
     });
-    application.connect_activate(activate);
+    application.connect_activate(move |application| activate(application, &login));
     application.run()
 }
 
@@ -65,7 +78,27 @@ fn spawner() -> Spawner {
     })
 }
 
-fn activate(application: &adw::Application) {
+/// The app's environment, minus any variable that is not text.
+fn inherited_environment() -> HashMap<String, String> {
+    std::env::vars_os().filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))).collect()
+}
+
+/// The environment every wd the app starts gets, once the login shell has answered.
+struct Login {
+    asking: RefCell<Option<std::thread::JoinHandle<HashMap<String, String>>>>,
+    environment: OnceCell<HashMap<String, String>>,
+}
+
+impl Login {
+    fn environment(&self) -> &HashMap<String, String> {
+        self.environment.get_or_init(|| {
+            let asked = self.asking.borrow_mut().take().map(|asking| asking.join());
+            asked.and_then(Result::ok).unwrap_or_else(inherited_environment)
+        })
+    }
+}
+
+fn activate(application: &adw::Application, login: &Login) {
     if let Some(window) = application.active_window() {
         window.present();
         return;
@@ -76,7 +109,7 @@ fn activate(application: &adw::Application) {
     };
     let channel = locate_wd(&exe, std::env::var_os("WD_BIN").as_deref())
         .map_err(|e| e.to_string())
-        .and_then(|wd| Channel::spawn(&wd, None).map_err(|e| e.to_string()));
+        .and_then(|wd| Channel::spawn(&wd, Some(login.environment())).map_err(|e| e.to_string()));
     let channel = match channel {
         Ok(channel) => channel,
         Err(why) => return refuse(application, &why),
