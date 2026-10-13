@@ -76,19 +76,60 @@ toggles last. New Goal lives at the top of the sidebar, not in the toolbar.
 | `radius.bubble` | 14 | your messages, the composer |
 | `hairline` | 1 px, `color.separator` | borders, dividers |
 
-### Colour (semantic; each app maps to its light and dark palettes)
+### Colour and components (from `docs/design/goal-tree/`)
 
-| Token | Meaning |
+The canvas fixes every colour and component measure. Light values are the
+canvas's; dark keeps the structure and takes the platform's dark equivalent,
+badges as the same hue at 18 % over the dark page with the foreground
+lightened to 4.5:1. macOS: `clients/macos/Sources/WorkDirector/Design.swift`.
+
+| Token | Light | Dark |
+|---|---|---|
+| page | `#ffffff` | `#1e1e1e` |
+| sidebar | `#f2f2f6`, width 268, hairline right, padding 14 / 10 | `#26262a` |
+| sidebar selected row | `#dcdce3` | `#3a3a40` |
+| search field | `#e6e6ec` | `#323237` |
+| hairline | `#e3e3e8` | `#38383d` |
+| inner separator, selected tab, progress track | `#ececf1` | `#2e2e33` |
+| record row separator | `#f0f0f3` | `#2a2a2f` |
+| button border | `#d6d6dc` | `#48484e` |
+| text / text2 / text3 | `#1d1d1f` / `#55555b` / `#6c6c72` | `#f2f2f7` / `#b4b4ba` / `#8e8e95` |
+| step text | `#3a3a3f` | `#d0d0d6` |
+| accent / links | `#0a64d6` / `#0a5cc7` | `#3d8bf0` / `#5aa0ff` |
+| green (done) / orange (needs you) / grey (waiting, superseded) | `#1f9d55` / `#e8820c` / `#9a9aa0` | `#34c46e` / `#f0943a` / `#7c7c82` |
+| badge attention | `#fff1e0` / `#9a3b00` | `#42301b` / `#ffb067` |
+| badge settled | `#e6f6ec` / `#11692f` | `#1e3528` / `#6fdc95` |
+| badge live | `#e8effc` / `#0a4fb0` | `#1a2b3f` / `#8cb8ff` |
+| badge waiting | `#efeff3` / `#55555b` | `#343435` / `#c2c2c8` |
+| badge decision | `#f1ebfb` / `#5b2aa8` | `#292037` / `#c4a6ff` |
+| question card border / fill / bar | `#f3c99a` / `#fff8f0` / `#e8820c` | `#6b4a22` / `#2b231a` / `#f0943a` |
+| sub-goal row waiting on you | `#fffaf4` | `#2a2219` |
+| your bubble fill / border | `#e5effc` / `#bcd3f3` | `#1c2d45` / `#2f4a70` |
+| sub-goal tag fill | `#f2f2f6` | `#2c2c31` |
+| director answered fill / border | `#f0faf3` / `#cdebd7` | `#1b2a20` / `#2b4a35` |
+| filter chip selected fill / text | `#1d1d1f` / `#ffffff` | `#f2f2f7` / `#1d1d1f` |
+| failure | `#d70015` | `#ff6961` |
+
+| Component | Measure |
 |---|---|
-| `color.page` | window background behind the conversation |
-| `color.raised` | cards and the composer (one step above page) |
-| `color.sunken` | code blocks, tool output (one step below page) |
-| `color.separator` | hairlines |
-| `color.text`, `.text2`, `.text3` | primary, secondary, tertiary text |
-| `color.accent` | you: your bubbles (14% fill, 30% border), send, selection |
-| `color.attention` | orange: waiting on you (8% fill, 45% border, 3 px leading bar) |
-| `color.settled` | green: the director answered or a check passed (8% fill, 30% border) |
-| `color.failure` | red: refused, failed, blocked |
+| micro (section header) | 11/14, semibold, +0.4 tracking, uppercase, text3 |
+| sidebar row | padding 8 / 10, radius 10; dot 8; title 13/18 medium; meta 12/16 text3 |
+| toolbar | 52 high, hairline below; buttons 13/18, padding 5 / 12, radius 7, button border; primary filled accent |
+| header | padding 20 / 32; breadcrumb 12/16 text3; title 22/28 semibold; tabs 13, padding 6 / 10, radius 7, selected fill semibold |
+| body | padding 20 / 32, 20 between sections, hairline above |
+| card | hairline border, radius 10, padding 14 / 16; label 12/16 medium text3 |
+| badge | 10.5/13 semibold, padding 2 / 6, radius 6 |
+| question card | 3 px leading bar, radius 10; option rows 7 / 10, radius 8, 13/18 medium; chosen row page-filled with the question border |
+| state icon (20) | done: filled green circle, white check · needs you: orange ring + centre dot · working: accent ring + quarter fill · waiting: grey dashed ring · superseded: grey ring + bar |
+| sub-goal row | padding 14 / 16, title 14 medium, meta 12 text3, badge trailing |
+| steps | 13/20; ✓ green done, ● accent semibold doing, ○ text3 todo; dropped struck through |
+| progress bar | 120 × 4, radius 2, track inner, fill green |
+| filter chip | 12/16, padding 4 / 10, radius 14, hairline |
+| your bubble | radius 14, padding 10 / 14 |
+| sub-goal tag | 11/14 medium, padding 2 / 7, radius 6, hairline |
+| event line | 12 text3 centred between hairlines |
+| record row | columns 52 · 96 · flexible · 220 · 90, gap 12, padding 9 / 0 |
+| record summary | five cards, number 20/24 semibold, label 12 text3 |
 
 ## The conversation
 
@@ -289,4 +330,4 @@ one of `type.callout` text2, at most one button.
 | Composer | `NSTextView` field | `GtkTextView` in a `.card` |
 | Question options | buttons with radio/check marks | `AdwActionRow` with `GtkCheckButton` (grouped for radio) |
 | Toasts / undo | banner | `AdwToastOverlay` with Undo |
-| Colours | system semantic colours + accent | libadwaita named colours (`@accent_bg_color`, `@warning_color`, `@success_color`, `@error_color`, `@card_bg_color`, `@view_bg_color`) |
+| Colours | the token table's light and dark values as dynamic `NSColor`s | libadwaita named colours (`@accent_bg_color`, `@warning_color`, `@success_color`, `@error_color`, `@card_bg_color`, `@view_bg_color`) |

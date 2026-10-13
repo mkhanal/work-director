@@ -418,6 +418,29 @@ func ago(_ stamp: String) -> String {
     }
 }
 
+/// How long ago an ISO time was, in words: "4 min ago", "2h ago".
+func agoWords(_ stamp: String) -> String {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    guard let d = f.date(from: stamp) ?? ISO8601DateFormatter().date(from: stamp) else { return "" }
+    let s = Int(Date().timeIntervalSince(d))
+    switch s {
+    case ..<60: return "just now"
+    case ..<3600: return "\(s / 60) min ago"
+    case ..<86400: return "\(s / 3600)h ago"
+    case ..<172800: return "yesterday"
+    default: return "\(s / 86400) days ago"
+    }
+}
+
+/// An ISO time as the hour and minute it was, for a record row.
+func clock(_ stamp: String) -> String {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    guard let d = f.date(from: stamp) ?? ISO8601DateFormatter().date(from: stamp) else { return "" }
+    return d.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+}
+
 /// Chips laid out in rows, wrapping at the width they are given.
 struct FlowLayout: Layout {
     var spacing: CGFloat = 6

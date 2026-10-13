@@ -435,6 +435,8 @@ func fakeRunner(_ home: Home) throws {
         var picked = AnswerDraft(yesNo)
         picked.toggle("Yes (recommended)", item: 0)
         #expect(picked.answers == ["Yes"])
+        #expect(AnswerDraft(yesNo).directorDecides == ["Yes"], "the director decides with its recommendation")
+        #expect(AnswerDraft(q).directorDecides == ["Decide this yourself.", "Decide this yourself."])
 
         let plan = try Plan.answer("w1", q, answers: ["teal", "Red, Green"])
         #expect(plan.argv == ["answer", "w1", "teal", "Red, Green"])

@@ -70,6 +70,7 @@ hold only that product's work; with none, every product's.
 - A pick is sent as its label without a `(recommended)` mark.
 - Nothing can be sent until some item has an answer; an item left without one is sent as `(no answer)`.
 - Sending runs `wd answer <id>` with one answer per item, in the order asked.
+- Letting the director decide answers each item with its recommended choice, or with the director's own judgement where none is recommended.
 
 ## The Key That Sends A Message Is The Person's Choice
 - By default Return sends and Shift-Return starts a new line.

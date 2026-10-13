@@ -1,3 +1,63 @@
+/// Where a goal or sub-goal stands, as its icon on a goal page.
+public enum StateMark: Sendable, Hashable {
+    case done, needsYou, working, waiting, superseded
+
+    public var label: String {
+        switch self {
+        case .done: "Done"
+        case .needsYou: "Needs you"
+        case .working: "Working"
+        case .waiting: "Waiting"
+        case .superseded: "Superseded"
+        }
+    }
+}
+
+/// A badge's colour role.
+public enum Tone: Sendable, Hashable {
+    case attention, settled, live, waiting, decision
+}
+
+/// A badge: its words and its colour role.
+public struct GoalBadge: Sendable, Hashable {
+    public let text: String
+    public let tone: Tone
+
+    public init(_ text: String, _ tone: Tone) {
+        self.text = text
+        self.tone = tone
+    }
+}
+
+extension WorkState {
+    public var mark: StateMark {
+        switch self {
+        case .done: .done
+        case .needsInput, .blocked: .needsYou
+        case .running, .review, .softDone: .working
+        case .queued, .briefed, .paused: .waiting
+        case .dropped, .abandoned, .superseded: .superseded
+        }
+    }
+
+    /// The badge beside a goal's title or a sub-goal's row.
+    public var badge: GoalBadge {
+        switch self {
+        case .done: GoalBadge("Done", .settled)
+        case .needsInput: GoalBadge("Needs you", .attention)
+        case .blocked: GoalBadge("Blocked", .attention)
+        case .running: GoalBadge("Working", .live)
+        case .review: GoalBadge("In review", .live)
+        case .softDone: GoalBadge("Ready to close", .live)
+        case .queued, .briefed: GoalBadge("Waiting", .waiting)
+        case .paused: GoalBadge("Paused", .waiting)
+        case .dropped: GoalBadge("Dropped", .waiting)
+        case .abandoned: GoalBadge("Abandoned", .waiting)
+        case .superseded: GoalBadge("Superseded", .waiting)
+        }
+    }
+}
+
 /// Tint names a system colour; the app maps it, so this layer stays free of SwiftUI.
 public enum Tint: String, Sendable {
     case gray, blue, indigo, orange, red, purple, teal, green, brown

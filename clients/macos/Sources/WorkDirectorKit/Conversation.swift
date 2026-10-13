@@ -231,6 +231,16 @@ public struct AnswerDraft: Sendable, Hashable {
         return out.allSatisfy { $0 == Self.unanswered } ? nil : out
     }
 
+    /// The answers that leave each item to the director: its recommended
+    /// choice, or the director's own judgement where none is recommended.
+    public var directorDecides: [String] {
+        question.items.map { item in
+            item.options.map(\.label).first { $0 != Self.unmarked($0) }.map(Self.unmarked) ?? Self.yourCall
+        }
+    }
+
+    static let yourCall = "Decide this yourself."
+
     static let unanswered = "(no answer)"
 
     /// A choice's label as an answer: its recommended mark dropped.

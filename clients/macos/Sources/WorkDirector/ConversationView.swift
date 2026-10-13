@@ -430,6 +430,10 @@ struct QuestionCard: View {
     var title: String? = nil
     /// Who asks, named before the title.
     var asker: String? = nil
+    /// Where in the goal's tree it was asked, each level a way to its page when it has one.
+    var path: [PathPart] = []
+    /// When it was asked.
+    var at: String? = nil
     let answered: () -> Void
 
     @State private var draft: AnswerDraft
@@ -437,100 +441,115 @@ struct QuestionCard: View {
     @State private var sending = false
     @State private var failure: String?
 
-    init(store: Store, workID: String, question: Question, title: String? = nil, asker: String? = nil, answered: @escaping () -> Void) {
+    init(store: Store, workID: String, question: Question, title: String? = nil, asker: String? = nil,
+         path: [PathPart] = [], at: String? = nil, answered: @escaping () -> Void) {
         self.store = store
         self.workID = workID
         self.question = question
         self.title = title
         self.asker = asker
+        self.path = path
+        self.at = at
         self.answered = answered
         _draft = State(initialValue: AnswerDraft(question))
     }
 
-    private var tint: Color { question.pending ? Palette.attention : .secondary }
     private var many: Bool { question.items.count > 1 }
 
     var body: some View {
-        HStack(spacing: 0) {
-            Rectangle().fill(tint.opacity(question.pending ? 1 : 0.3)).frame(width: 3)
-            VStack(alignment: .leading, spacing: Space.s4) {
-                HStack(spacing: Space.s2) {
-                    Image(systemName: question.pending ? "questionmark.bubble.fill" : "checkmark.bubble")
-                    if let asker {
-                        Text(asker).foregroundStyle(Color.primary).fontWeight(.semibold).lineLimit(1).truncationMode(.tail)
-                            .layoutPriority(-1)
-                    }
-                    Text(title ?? (question.pending ? "Waiting on you" : "Asked")).fixedSize()
-                    Spacer()
-                    if many && question.pending {
-                        Text("\(page + 1) of \(question.items.count)").foregroundStyle(.secondary).monospacedDigit()
-                    }
+        if question.pending {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                itemView(question.items[page], at: page)
+                    .id(page)
+                footer
+            }
+            .questionFrame()
+        } else {
+            VStack(alignment: .leading, spacing: Space.s3) {
+                header
+                ForEach(Array(question.items.enumerated()), id: \.offset) { i, item in
+                    itemView(item, at: i)
                 }
-                .font(TypeScale.meta)
-                .foregroundStyle(tint)
-                if question.pending {
-                    itemView(question.items[page], at: page)
-                        .id(page)
-                    footer
-                } else {
-                    ForEach(Array(question.items.enumerated()), id: \.offset) { i, item in
-                        itemView(item, at: i)
-                    }
-                    if let reply = question.reply {
-                        Label {
-                            Text(reply).readable().lineLimit(4).textSelection(.enabled)
-                        } icon: {
-                            Image(systemName: "arrowshape.turn.up.left")
+                if let reply = question.reply {
+                    Text(reply).font(TypeScale.callout).foregroundStyle(Palette.text2).lineLimit(4).textSelection(.enabled)
+                }
+            }
+            .canvasCard(fill: Palette.plainCard)
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+            HStack(spacing: 0) {
+                if let asker {
+                    Text(asker + " ").fontWeight(.semibold).lineLimit(1).truncationMode(.tail).layoutPriority(-1)
+                }
+                Text(title ?? (question.pending ? "Needs you" : "Asked"))
+                if !path.isEmpty {
+                    Text(" · in ")
+                    ForEach(Array(path.enumerated()), id: \.offset) { i, part in
+                        if i > 0 { Text(" › ") }
+                        if let open = part.open {
+                            Button(part.title, action: open).buttonStyle(.plain).foregroundStyle(Palette.link)
+                        } else {
+                            Text(part.title)
                         }
-                        .foregroundStyle(.secondary)
                     }
                 }
             }
-            .padding(Space.s4)
+            .font(TypeScale.meta)
+            .foregroundStyle(question.pending ? BadgeTone.attention.text : Palette.text3)
+            .lineLimit(1)
+            Spacer(minLength: Space.s2)
+            if many && question.pending {
+                Text("\(page + 1) of \(question.items.count)").font(TypeScale.caption).foregroundStyle(Palette.text3).monospacedDigit()
+            }
+            if let at {
+                Text("asked \(agoWords(at))").font(TypeScale.caption).foregroundStyle(Palette.text3)
+            }
         }
-        .background(tint.opacity(question.pending ? 0.06 : 0.04))
-        .clipShape(RoundedRectangle(cornerRadius: Radius.card))
-        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(tint.opacity(question.pending ? 0.45 : 0.2)))
     }
 
     @ViewBuilder private func itemView(_ item: QuestionItem, at i: Int) -> some View {
         let answer = question.answers.flatMap { $0.indices.contains(i) ? $0[i] : nil }
-        VStack(alignment: .leading, spacing: Space.s3) {
+        VStack(alignment: .leading, spacing: 0) {
             if !item.header.isEmpty || item.multi {
                 HStack(spacing: Space.s2) {
-                    if !item.header.isEmpty {
-                        Text(item.header)
-                            .font(TypeScale.micro)
-                            .padding(.horizontal, Space.s2).padding(.vertical, 2)
-                            .background(.quaternary, in: RoundedRectangle(cornerRadius: Radius.chip))
-                    }
-                    if item.multi { Text("Pick any").font(TypeScale.meta).foregroundStyle(.tertiary) }
+                    if !item.header.isEmpty { Badge(item.header, .waiting) }
+                    if item.multi { Text("Pick any").font(TypeScale.caption).foregroundStyle(Palette.text3) }
                 }
+                .padding(.top, 6)
             }
             Text(item.question)
                 .font(TypeScale.bodyMedium)
                 .lineSpacing(TypeScale.bodyLeading)
+                .foregroundStyle(Palette.text)
                 .textSelection(.enabled)
-            if !item.options.isEmpty {
-                VStack(spacing: Space.s1) {
-                    ForEach(item.options, id: \.label) { option in
-                        optionRow(option, item: item, at: i, chosen: chosen(option.label, answer: answer, item: i))
-                    }
+                .padding(.top, 6)
+                .padding(.bottom, 8)
+            VStack(spacing: 0) {
+                ForEach(item.options, id: \.label) { option in
+                    optionRow(option, item: item, at: i, chosen: chosen(option.label, answer: answer, item: i))
                 }
-            }
-            if question.pending {
-                TextField(item.options.isEmpty ? "Your answer…" : (item.multi ? "Something else too…" : "Or in your own words…"),
-                          text: $draft.typed[i], axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(TypeScale.body)
-                    .lineLimit(1...6)
-                    .padding(.horizontal, Space.s3)
-                    .padding(.vertical, Space.s2)
-                    .background(Palette.raised, in: RoundedRectangle(cornerRadius: Radius.chip + 2))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.chip + 2).strokeBorder(Palette.separator))
-                    .onSubmit { advance() }
-            } else if let answer, !item.options.contains(where: { answerParts(answer).contains($0.label) }) {
-                Label(answer, systemImage: "text.bubble").font(TypeScale.callout).textSelection(.enabled)
+                if question.pending {
+                    HStack(spacing: 10) {
+                        Text(draft.typed[i].isEmpty ? "○" : "◉").font(TypeScale.calloutMedium).foregroundStyle(Palette.text)
+                        TextField(item.options.isEmpty ? "Your answer…" : "Something else…", text: $draft.typed[i], axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .font(TypeScale.calloutMedium)
+                            .lineLimit(1...6)
+                            .onSubmit { advance() }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(draft.typed[i].isEmpty ? Color.clear : Palette.page, in: RoundedRectangle(cornerRadius: Radius.option))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.option).strokeBorder(draft.typed[i].isEmpty ? Color.clear : Palette.questionBorder))
+                } else if let answer, !item.options.contains(where: { answerParts(answer).contains(Choice($0.label).label) }) {
+                    Text(answer).font(TypeScale.callout).foregroundStyle(Palette.text).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10).padding(.vertical, 7)
+                }
             }
         }
     }
@@ -540,27 +559,22 @@ struct QuestionCard: View {
         return Button {
             draft.toggle(option.label, item: i)
         } label: {
-            HStack(alignment: .top, spacing: Space.s3) {
-                Image(systemName: item.multi ? (chosen ? "checkmark.square.fill" : "square") : (chosen ? "largecircle.fill.circle" : "circle"))
-                    .font(.system(size: IconSize.turn))
-                    .foregroundStyle(chosen ? Color.accentColor : Color.secondary)
-                    .padding(.top, 1)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(item.multi ? (chosen ? "☑" : "☐") : (chosen ? "◉" : "○")).foregroundStyle(Palette.text)
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: Space.s2) {
-                        Text(choice.label).font(TypeScale.calloutMedium).foregroundStyle(.primary)
-                        if choice.recommended { RecommendedTag() }
-                    }
+                    Text(choice.label).foregroundStyle(Palette.text)
                     if !option.description.isEmpty {
-                        Text(option.description).font(TypeScale.callout).foregroundStyle(.secondary)
+                        Text(option.description).font(TypeScale.caption).foregroundStyle(Palette.text3)
                     }
                 }
-                Spacer(minLength: 0)
+                Spacer(minLength: Space.s2)
+                if choice.recommended { Badge("Recommended", .settled) }
             }
-            .padding(.horizontal, Space.s3)
-            .padding(.vertical, Space.s2 + 1)
-            .frame(minHeight: 36)
-            .background(chosen ? Color.accentColor.opacity(0.1) : Palette.raised.opacity(0.6), in: RoundedRectangle(cornerRadius: Radius.chip + 2))
-            .overlay(RoundedRectangle(cornerRadius: Radius.chip + 2).strokeBorder(chosen ? Color.accentColor.opacity(0.45) : Palette.separator.opacity(0.6)))
+            .font(TypeScale.calloutMedium)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(chosen ? Palette.page : Color.clear, in: RoundedRectangle(cornerRadius: Radius.option))
+            .overlay(RoundedRectangle(cornerRadius: Radius.option).strokeBorder(chosen ? Palette.questionBorder : Color.clear))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -569,7 +583,7 @@ struct QuestionCard: View {
 
     private func chosen(_ label: String, answer: String?, item: Int) -> Bool {
         if question.pending { return draft.picked[item].contains(label) }
-        return answer.map { answerParts($0).contains(label) } ?? false
+        return answer.map { answerParts($0).contains(Choice(label).label) } ?? false
     }
 
     private func answerParts(_ answer: String) -> [String] {
@@ -595,32 +609,29 @@ struct QuestionCard: View {
     }
 
     private var footer: some View {
-        VStack(alignment: .leading, spacing: Space.s2) {
+        VStack(alignment: .trailing, spacing: Space.s2) {
             HStack(spacing: Space.s2) {
-                if let command = plan?.commandLine {
-                    Text(command)
-                        .font(TypeScale.codeTiny)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                if many {
+                    Button("Back") { page -= 1 }.buttonStyle(.canvas).disabled(page == 0)
+                    Button("Next") { page += 1 }.buttonStyle(.canvas).disabled(page == question.items.count - 1)
                 }
                 Spacer(minLength: Space.s2)
-                if many {
-                    Button("Back") { page -= 1 }
-                        .disabled(page == 0)
-                    Button("Next") { page += 1 }
-                        .disabled(page == question.items.count - 1)
+                Button("Let the director decide") {
+                    Task { await send(try? Plan.answer(workID, question, answers: draft.directorDecides)) }
                 }
+                .buttonStyle(.canvas)
+                .disabled(sending)
+                .help("Answers with the director's recommendation, or leaves it to its judgement")
                 Button {
-                    Task { await send() }
+                    Task { await send(plan) }
                 } label: {
                     if sending { ProgressView().controlSize(.small) } else { Text(many && unanswered > 0 ? "Answer (\(unanswered) left open)" : "Answer") }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.canvasPrimary)
                 .keyboardShortcut(.defaultAction)
                 .disabled(plan == nil || sending)
+                .help(plan?.commandLine ?? "Pick an answer")
             }
-            .controlSize(.large)
             if let failure {
                 Label(failure, systemImage: "exclamationmark.triangle.fill")
                     .font(TypeScale.meta)
@@ -628,9 +639,10 @@ struct QuestionCard: View {
                     .textSelection(.enabled)
             }
         }
+        .padding(.top, 6)
     }
 
-    private func send() async {
+    private func send(_ plan: Plan?) async {
         guard let plan else { return }
         sending = true
         defer { sending = false }
@@ -647,6 +659,12 @@ struct QuestionCard: View {
         }
         await store.refresh()
     }
+}
+
+/// One level of where something sits in a goal's tree, and the way to its page.
+struct PathPart {
+    let title: String
+    var open: (() -> Void)? = nil
 }
 
 /// What a task's session is doing now, in a line under the task.
