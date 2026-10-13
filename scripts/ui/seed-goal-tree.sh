@@ -62,7 +62,7 @@ event "$S2c" question "Should a release's rollback steps cover database down-mig
 - Redeploy and down-migrations" 4
 state "$S2" needs-input 4
 event "$G" course "on course: the tag format the first sub-goal chose suits the other three" 12
-event "$S2" course "correct: guides live with each release, not in the wiki" 40
+event "$G" course "correct: guides live with each release, not in the wiki" 40
 event "$S2" note "chore: Refreshed dependencies in the main checkout so the flags agent could run validate" 31
 
 # The sidebar's other goals.

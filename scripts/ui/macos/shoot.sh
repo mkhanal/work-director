@@ -33,7 +33,7 @@ for scheme in light dark; do
     "$app" -place.work "$id" -goal.view "$view" -detail.agents NO -appearance "$scheme" >"$work/app-$screen.log" 2>&1 &
     pid=$!
     bounds=""
-    for _ in $(seq 50); do
+    for _ in $(seq 150); do
       bounds=$(osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid)
         if (count of windows) is 0 then return \"\"
         set frontmost to true

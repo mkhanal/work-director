@@ -34,7 +34,7 @@ screens=(
 for scheme in light dark; do
   for row in "${screens[@]}"; do
     read -r screen work tab <<<"$row"
-    printf 'last-work=%s\ngoal-tab=%s\n' "$work" "$tab" >"$XDG_CONFIG_HOME/work-director/settings"
+    printf 'last-work=%s\ngoal-tab=%s\nagents=hidden\n' "$work" "$tab" >"$XDG_CONFIG_HOME/work-director/settings"
     if [ "$scheme" = dark ]; then export ADW_DEBUG_COLOR_SCHEME=prefer-dark; else unset ADW_DEBUG_COLOR_SCHEME; fi
     "$app" >/tmp/app-$screen.log 2>&1 &
     pid=$!
