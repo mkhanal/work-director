@@ -131,6 +131,65 @@ func jsonEndpointsServeTheBoard(t *testing.T) {
 	var missing map[string]string
 	getJSON(t, api.URL+"/api/goal/"+task.ID, http.StatusNotFound, &missing)
 	getJSON(t, api.URL+"/api/goal/nope", http.StatusNotFound, &missing)
+
+	l := s.ledger
+	r := newReleaseTree(t, l)
+	walk(t, l, r.rollback, core.StateRunning, core.StateNeedsInput)
+	event(t, l, r.rollback, core.EventQuestion, "Which environments?")
+	if err := l.SetFinish(r.top, core.FinishPR, core.FinishFromTaste); err != nil {
+		t.Fatal(err)
+	}
+	shipped := func(title string, line core.FinishLine, landing string) string {
+		t.Helper()
+		g, err := l.Add("p", title, ledger.AddOptions{Kind: core.WorkGoal})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := l.SetFinish(g.ID, line, core.FinishFromGoal); err != nil {
+			t.Fatal(err)
+		}
+		if landing != "" {
+			event(t, l, g.ID, core.EventPr, landing)
+		}
+		walk(t, l, g.ID, core.StateDone)
+		return g.ID
+	}
+	pr := shipped("Changelog", core.FinishPR, "pull-request https://github.com/o/r/pull/512")
+	merged := shipped("Hotfix", core.FinishMerged, "commit https://github.com/o/r/commit/5a5f3bb9e2")
+	research := shipped("Pick a queue", core.FinishResearch, "")
+	type summary struct {
+		Work     core.Work    `json:"work"`
+		Progress treeProgress `json:"progress"`
+		NeedsYou int          `json:"needs_you"`
+		Finish   *struct {
+			Line   core.FinishLine   `json:"line"`
+			Source core.FinishSource `json:"source"`
+		} `json:"finish"`
+		Finished *string `json:"finished"`
+	}
+	var tree struct {
+		Goals []summary `json:"goals"`
+	}
+	getJSON(t, api.URL+"/api/board", http.StatusOK, &tree)
+	byID := map[string]summary{}
+	for _, g := range tree.Goals {
+		byID[g.Work.ID] = g
+	}
+	if len(tree.Goals) != 5 {
+		t.Fatalf("board goals = %d, want the 5 top goals and no sub-goal", len(tree.Goals))
+	}
+	if _, ok := byID[r.guide]; ok {
+		t.Fatalf("the sub-goal %s is on the board", r.guide)
+	}
+	top := byID[r.top]
+	if top.Progress != (treeProgress{Total: 5, Superseded: 1}) || top.NeedsYou != 2 || top.Finish == nil || top.Finish.Line != core.FinishPR || top.Finish.Source != core.FinishFromTaste || top.Finished != nil {
+		t.Fatalf("top goal on the board = %+v", top)
+	}
+	for id, want := range map[string]string{pr: "Complete PR #512", merged: "Merged 5a5f3bb", research: "Research"} {
+		if g := byID[id]; g.Finished == nil || *g.Finished != want {
+			t.Fatalf("%s finished = %v, want %q", g.Work.Title, g.Finished, want)
+		}
+	}
 }
 
 // Under autonomy the one thing a person opens a goal for is what the loop

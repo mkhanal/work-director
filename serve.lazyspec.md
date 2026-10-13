@@ -15,10 +15,10 @@ the standard streams of a client that bundles `wd`. Writes are CLI actions.
 never binds to 0.0.0.0 or a public interface.
 
 ## JSON Endpoints Serve The Board
-`GET /api/board` returns the board view: every goal with its rollup and
-every open standalone work item. `GET /api/goals` returns the same data.
-`GET /api/goal/<id>` returns one goal with its children, rollup and
-events; unknown ids and ids that are not goals return 404.
+- `GET /api/board` returns the board view: every top goal with its rollup, and every open standalone work item; a goal under a goal is not on the board. `GET /api/goals` returns the same data.
+- Each goal carries `progress` over its sub-goals, `needs_you` counting the open questions in its whole tree, and `finish`.
+- Once done, its `finished` says where: the finish line with the landing, `Complete PR #512` for a pull request or the short commit, else the finish line alone; before then it is null.
+- `GET /api/goal/<id>` returns one goal with its children, rollup and events; unknown ids and ids that are not goals return 404.
 
 ## A Goal Serves What The Loop Decided And Where It Reached
 - `GET /api/goal/<id>` also returns `claims` and `landings`, derived from the `events` in the same response.

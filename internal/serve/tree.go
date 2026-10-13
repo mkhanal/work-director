@@ -415,6 +415,56 @@ func (t tree) superseded() []supersededWork {
 	return out
 }
 
+// boardGoal is a top goal as the board shows it.
+func (s *Server) boardGoal(goal core.Work) (boardGoal, error) {
+	tasks, err := s.ledger.Tasks(goal.ID)
+	if err != nil {
+		return boardGoal{}, err
+	}
+	band, err := s.band(goal, tasks)
+	if err != nil {
+		return boardGoal{}, err
+	}
+	events, err := s.ledger.EventsUnder(goal.ID)
+	if err != nil {
+		return boardGoal{}, err
+	}
+	t, err := s.readTree(goal, events)
+	if err != nil {
+		return boardGoal{}, err
+	}
+	g := boardGoal{Work: goal, Rollup: goalRollup(tasks), Band: band, Progress: progressOf(t.kids[goal.ID]), NeedsYou: len(t.question), Finish: finishOf(goal)}
+	if goal.State == core.StateDone && goal.FinishLine != nil {
+		run, err := s.ledger.CurrentRun(goal.ID)
+		if err != nil {
+			return boardGoal{}, err
+		}
+		f := finishedAt(*goal.FinishLine, run)
+		g.Finished = &f
+	}
+	return g, nil
+}
+
+// finishedAt names where a goal finished: its finish line, capitalised, with
+// the latest landing in run as a pull request number or a short commit.
+func finishedAt(line core.FinishLine, run []core.Event) string {
+	out := strings.ToUpper(string(line[:1])) + string(line[1:])
+	for i := len(run) - 1; i >= 0; i-- {
+		if run[i].Kind != core.EventPr {
+			continue
+		}
+		url := core.ParseLanding(run[i].Body).URL
+		if _, n, ok := strings.Cut(url, "/pull/"); ok && n != "" {
+			return out + " #" + strings.TrimSuffix(n, "/")
+		}
+		if _, sha, ok := strings.Cut(url, "/commit/"); ok && sha != "" {
+			return out + " " + sha[:min(7, len(sha))]
+		}
+		return out
+	}
+	return out
+}
+
 // last is the latest event of kind on work whose body opens with prefix.
 func (t tree) last(work string, kind core.EventKind, prefix string) (core.Event, bool) {
 	for i := len(t.events) - 1; i >= 0; i-- {

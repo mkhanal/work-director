@@ -34,9 +34,15 @@ type rollup struct {
 }
 
 type boardGoal struct {
-	Work   core.Work `json:"work"`
-	Rollup rollup    `json:"rollup"`
-	Band   Band      `json:"band"`
+	Work     core.Work `json:"work"`
+	Rollup   rollup    `json:"rollup"`
+	Band     Band      `json:"band"`
+	Progress progress  `json:"progress"`
+	// NeedsYou counts the open questions in the goal's whole tree.
+	NeedsYou int     `json:"needs_you"`
+	Finish   *finish `json:"finish"`
+	// Finished is where a done goal finished, null before.
+	Finished *string `json:"finished"`
 }
 
 type boardItem struct {
@@ -111,8 +117,8 @@ type badRequest struct{ msg string }
 
 func (e badRequest) Error() string { return e.msg }
 
-// board returns every goal with its rollup and every open standalone work item,
-// each in its band.
+// board returns every top goal with its rollup and every open standalone work
+// item, each in its band.
 func (s *Server) board() (boardView, error) {
 	onBoard := false
 	items, err := s.ledger.List(ledger.ListFilter{Archived: &onBoard})
@@ -122,15 +128,18 @@ func (s *Server) board() (boardView, error) {
 	b := boardView{Goals: []boardGoal{}, Standalone: []boardItem{}}
 	for _, w := range items {
 		if core.IsGoal(w.Kind) {
-			children, err := s.ledger.Tasks(w.ID)
+			top, err := s.topGoal(w)
 			if err != nil {
 				return boardView{}, err
 			}
-			band, err := s.band(w, children)
+			if !top {
+				continue
+			}
+			g, err := s.boardGoal(w)
 			if err != nil {
 				return boardView{}, err
 			}
-			b.Goals = append(b.Goals, boardGoal{Work: w, Rollup: goalRollup(children), Band: band})
+			b.Goals = append(b.Goals, g)
 		} else if w.Parent == nil && !core.Settled(w.State) {
 			band, err := s.band(w, nil)
 			if err != nil {
