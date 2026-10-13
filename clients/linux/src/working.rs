@@ -19,6 +19,10 @@ pub enum Write {
     Plan,
     /// A question left to the director.
     Decide,
+    /// The person's answer to a question.
+    Answer,
+    /// A proposed breakdown approved and started.
+    Approve,
 }
 
 impl Write {
@@ -29,6 +33,8 @@ impl Write {
             ["send", id, ..] => Some((Write::Send, id.to_string())),
             ["goal", "plan" | "continue", id, ..] => Some((Write::Plan, id.to_string())),
             ["answer", id, rest @ ..] if rest.contains(&"--director") => Some((Write::Decide, id.to_string())),
+            ["answer", id, ..] => Some((Write::Answer, id.to_string())),
+            ["goal", "approve", id] => Some((Write::Approve, id.to_string())),
             _ => None,
         }
     }
@@ -38,6 +44,8 @@ impl Write {
             Write::Send => "Sending your message",
             Write::Plan => "Planning",
             Write::Decide => "Deciding for you",
+            Write::Answer => "Sending your answer",
+            Write::Approve => "Starting the breakdown",
         }
     }
 }
@@ -144,7 +152,7 @@ impl GoalDetail {
         };
         let written = writes.iter().filter(mine).map(|w| WorkingRow {
             key: format!("write-{}", w.id),
-            who: if w.write == Write::Send { who(&w.work) } else { "Director".to_string() },
+            who: if matches!(w.write, Write::Send | Write::Answer) { who(&w.work) } else { "Director".to_string() },
             doing: w.write.doing().to_string(),
             since: Some(w.at),
         });

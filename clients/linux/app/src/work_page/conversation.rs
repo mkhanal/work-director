@@ -360,7 +360,11 @@ impl WorkPage {
             .filter(|w| w.work == work.id)
             .map(|w| WorkingRow {
                 key: format!("write-{}", w.id),
-                who: if w.write == kit::Write::Send { work.title.clone() } else { "Director".to_string() },
+                who: if matches!(w.write, kit::Write::Send | kit::Write::Answer) {
+                    work.title.clone()
+                } else {
+                    "Director".to_string()
+                },
                 doing: w.write.doing().to_string(),
                 since: Some(w.at),
             })

@@ -1572,7 +1572,7 @@ fn the_kit_reads_a_goal_as_a_tree() {
         vec![tagged.clone(), guide.clone(), workflow.clone()]
     );
     assert_eq!(g.progress, Progress { done: 0, total: 3, superseded: 0 });
-    assert_eq!(g.not_done_because, strings(&["3 sub-goals open"]));
+    assert_eq!(g.not_done_because, strings(&["3 sub-goals are still open"]));
     assert!(g.needs_you.is_empty() && g.course.is_none() && g.finish.is_none());
     assert_eq!(g.paths[&rollback], "Guide › Rollback");
     let guide_node = g.node(&guide).expect("the guide node");
@@ -1903,7 +1903,8 @@ fn work_under_way_shows_what_it_is_doing_and_for_how_long() {
     assert_eq!(Write::of(&Plan::replan("g")), Some((Write::Plan, "g".to_string())));
     assert_eq!(Write::of(&Plan::continue_goal("g", "more").expect("a plan")), Some((Write::Plan, "g".to_string())));
     assert_eq!(Write::of(&Plan::director_decides("a")), Some((Write::Decide, "a".to_string())));
-    assert_eq!(Write::of(&Plan::approve("g")), None);
+    assert_eq!(Write::of(&Plan::approve("g")), Some((Write::Approve, "g".to_string())));
+    assert_eq!(Write::of(&Plan::add_sub_goal("g", "x", "y").expect("a plan")), None, "a quick write shows no row");
 
     assert_eq!(
         goal.sub_goal_rows().iter().map(|r| (r.id.as_str(), r.working)).collect::<Vec<_>>(),
