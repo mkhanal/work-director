@@ -158,6 +158,7 @@ hold only that product's work; with none, every product's.
 ## A Goal Page Shows What Done Means, What Needs You And Its Sub-Goals
 - A goal page is headed by its breadcrumb from the product down, each ancestor a way to its page, and its title with a badge that says Needs you while a question waits below it.
 - The overview opens with the goal's done-when, where its top goal finishes and who decided it, and its course with its verdict; a sub-goal's page leaves out where it finishes.
+- The done-when and the course's why start with a capital letter.
 - Every question below the goal is answered in place, headed by its place in the tree, each level that is a goal a way to its page.
 - Sub-goals are listed as served, each with its state, its line and its badge; a question below a row marks it as needing the person.
 - A sub-goal that is a goal says how many sub-goals it holds and how many are done, with the superseded ones counted apart.

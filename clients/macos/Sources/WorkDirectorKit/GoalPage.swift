@@ -84,6 +84,9 @@ extension GoalDetail {
         return events.first { $0.id == n }?.at
     }
 
+    /// What makes the goal done, as the Done when card says it.
+    public var doneWhenSentence: String? { doneWhen?.sentence }
+
     /// The counts beside the Sub-goals header.
     public var progressLine: String {
         var line = "\(progress.done) of \(progress.total) done"

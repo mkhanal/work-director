@@ -932,6 +932,8 @@ struct SeededTree {
         #expect(goal.finishWords?.source == "From your taste.")
         #expect(goal.course?.badge == GoalBadge("On course", .settled))
         #expect(goal.progressLine == "1 of 4 done")
+        #expect(goal.doneWhenSentence == "Every release has a guide and a note", "the Done when card starts with a capital")
+        #expect(goal.course?.why.sentence == "The tag format suits the rest")
 
         let ask = try #require(goal.needsYou.first)
         #expect(goal.pathParts(of: ask).map(\.title) == ["Whoever deploys gets a guide", "The guide says how to roll back"])

@@ -89,7 +89,7 @@ struct GoalOverview: View {
         HStack(alignment: .top, spacing: Space.s3) {
             VStack(alignment: .leading, spacing: 4) {
                 CardLabel("Done when")
-                Text(goal.doneWhen ?? "Not set yet.")
+                Text(goal.doneWhenSentence ?? "Not set yet.")
                     .font(TypeScale.callout).lineSpacing(TypeScale.calloutLeading)
                     .foregroundStyle(goal.doneWhen == nil ? Palette.text3 : Palette.text)
                     .textSelection(.enabled)
