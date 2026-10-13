@@ -386,7 +386,12 @@ impl WorkPage {
                 key: work.id.clone(),
                 who: work.title.clone(),
                 doing: kit::doing(last.map(|s| s.kind), last.map(Step::line).as_deref()),
-                since: last.and_then(|s| s.at.as_deref()).and_then(kit::time::instant),
+                since: f
+                    .usage
+                    .as_ref()
+                    .and_then(|u| u.started.as_deref())
+                    .or(last.and_then(|s| s.at.as_deref()))
+                    .and_then(kit::time::instant),
             }
         });
         let writes = self

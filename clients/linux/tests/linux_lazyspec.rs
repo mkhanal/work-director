@@ -2025,6 +2025,25 @@ fn work_under_way_shows_what_it_is_doing_and_for_how_long() {
         "only sessions that work, newest first, the goal's own as Director, three shown"
     );
     assert_eq!(quiet.more, 1, "the rest are counted");
+    let mut started = session("running", "tool", "Bash · make", "2026-10-12T10:30:00Z");
+    started["usage"] = json!({"model": "m", "tokens": 1, "tools": 1, "started": "2026-10-12T10:20:00Z", "last": null});
+    let mut timed = goal_view(json!({
+        "goal": titled("g2", "Timed"), "tasks": [], "rollup": {"counts": {}, "done": 0, "total": 0},
+        "events": [], "claims": [], "landings": [], "delivery": null, "reports": {}, "asking": null,
+        "activity": {"g2": started},
+    }));
+    let at_ = |s: &str| kit::time::instant(s).expect("a time");
+    assert_eq!(
+        timed.work_under_way(&[]).rows[0].since,
+        Some(at_("2026-10-12T10:20:00Z")),
+        "how long since the session started"
+    );
+    timed.activity.get_mut("g2").expect("its session").usage = None;
+    assert_eq!(
+        timed.work_under_way(&[]).rows[0].since,
+        Some(at_("2026-10-12T10:30:00Z")),
+        "else since its latest step"
+    );
 
     let at = |s: &str| kit::time::instant(s).expect("a time");
     let sending = InFlight { id: 7, write: Write::Send, work: "g".into(), at: at("2026-10-12T10:06:00Z") };

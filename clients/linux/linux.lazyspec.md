@@ -218,7 +218,8 @@ hold only that product's work; with none, every product's.
 - A blank title is not sent.
 
 ## Work Under Way Shows What It Is Doing And For How Long
-- While a session under the goal works, or a write the app started waits on `wd` (a message, an answer, a question left to the director, planning, continuing, approving), the conversation ends with a row for each: who, what it is doing now in one line, and how long, ticking.
+- While a session under the goal works, or a write the app started waits on `wd` (a message, an answer, a question left to the director, planning, continuing, approving), the conversation ends with a row for each: who, what it is doing now in one line, and how long since it started, ticking.
+- A session started when its usage says it did, else at its latest step; a write when the app started it.
 - The goal's own session is the Director; rows are newest first, three shown and the rest counted.
 - What a session is doing reads from its latest step: the tool it runs, as Running `go test ./...`, Reading, Editing or Searching, else Thinking.
 - A sub-goal on the Overview with a session working under it, and a goal in the sidebar with running work under it, carry a working mark, still when animations are off.

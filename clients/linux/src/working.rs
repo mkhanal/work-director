@@ -145,7 +145,7 @@ impl GoalDetail {
             key: id.clone(),
             who: who(id),
             doing: doing(a.kind, a.now.as_deref()),
-            since: a.at.as_deref().or_else(|| a.usage.as_ref().and_then(|u| u.last.as_deref())).and_then(instant),
+            since: a.usage.as_ref().and_then(|u| u.started.as_deref()).or(a.at.as_deref()).and_then(instant),
         });
         let mine = |w: &&InFlight| {
             w.work == self.goal.id || self.tasks.iter().any(|t| t.id == w.work) || self.node(&w.work).is_some()
