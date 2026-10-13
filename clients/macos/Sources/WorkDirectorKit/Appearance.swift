@@ -25,6 +25,7 @@ extension WorkState {
         case .dropped: StateLook(label: "Dropped", symbol: "minus.circle", tint: .gray)
         case .abandoned: StateLook(label: "Abandoned", symbol: "xmark.octagon", tint: .brown)
         case .paused: StateLook(label: "Paused", symbol: "pause.circle", tint: .purple)
+        case .superseded: StateLook(label: "Superseded", symbol: "minus.circle.fill", tint: .gray)
         }
     }
 }

@@ -100,6 +100,11 @@ public actor Channel {
         try await request("gate", .id(id))
     }
 
+    /// A goal's record, read from the events at every depth under it.
+    public func record(_ id: String) async throws -> GoalRecord {
+        try await request("record", .id(id))
+    }
+
     /// The work's session steps from index `from` on.
     public func conversation(_ id: String, from: Int, agent: String? = nil) async throws -> ConversationPage {
         try await request("conversation", .conversation(id, from: from, agent: agent))

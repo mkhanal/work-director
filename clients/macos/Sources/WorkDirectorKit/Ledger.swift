@@ -16,6 +16,8 @@ public enum WorkState: String, Codable, Sendable, CaseIterable {
     case dropped
     case abandoned
     case paused
+    /// A goal a course change let go of; its history stays readable.
+    case superseded
 }
 
 public enum WorkKind: String, Codable, Sendable {
@@ -69,7 +71,7 @@ public struct Work: Codable, Sendable, Hashable, Identifiable {
     /// Work a person can still pause, tell or cancel.
     public var live: Bool { [.running, .needsInput, .review, .blocked, .queued, .briefed].contains(state) }
 
-    public var atRest: Bool { state == .done || state == .dropped || state == .abandoned }
+    public var atRest: Bool { state == .done || state == .dropped || state == .abandoned || state == .superseded }
 
     enum CodingKeys: String, CodingKey {
         case id, project, title, detail, kind, state, runner, session, ref, cwd
@@ -114,6 +116,17 @@ public struct BoardGoal: Codable, Sendable, Hashable {
     public let work: Work
     public let rollup: Rollup
     public let band: Band
+    public let progress: TreeProgress
+    /// Open questions in the goal's whole tree.
+    public let needsYou: Int
+    public let finish: FinishLine?
+    /// Where a done goal finished, nil before.
+    public let finished: String?
+
+    enum CodingKeys: String, CodingKey {
+        case work, rollup, band, progress, finish, finished
+        case needsYou = "needs_you"
+    }
 }
 
 public struct BoardItem: Codable, Sendable, Hashable {
@@ -225,6 +238,29 @@ public struct GoalDetail: Codable, Sendable, Hashable {
     /// Each task in needs-input whose session asks nothing, with what it waits
     /// on as a question.
     public let waiting: [WaitingTask]
+    /// The breadcrumb, top goal first, ending at this goal.
+    public let chain: [ChainLink]
+    /// The goal's sub-goals, and every work under it named by its place in them.
+    public let tree: [TreeNode]
+    public let paths: [String: String]
+    public let doneWhen: String?
+    /// Where the top goal finishes.
+    public let finish: FinishLine?
+    public let progress: TreeProgress
+    /// What holds the goal back from done, empty once done.
+    public let notDoneBecause: [String]
+    /// Every open question on the goal or under it.
+    public let needsYou: [NeedYou]
+    public let course: Course?
+    public let superseded: [SupersededWork]
+
+    enum CodingKeys: String, CodingKey {
+        case goal, tasks, rollup, events, claims, landings, delivery, activity, asking, reports, waiting
+        case chain, tree, paths, finish, progress, course, superseded
+        case doneWhen = "done_when"
+        case notDoneBecause = "not_done_because"
+        case needsYou = "needs_you"
+    }
 }
 
 public struct WaitingTask: Codable, Sendable, Hashable {

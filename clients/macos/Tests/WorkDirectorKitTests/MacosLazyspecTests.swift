@@ -40,7 +40,10 @@ struct Home {
 
     /// Runs wd as another process would, returning its trimmed stdout.
     @discardableResult
-    func wd(_ argv: String...) throws -> String {
+    func wd(_ argv: String...) throws -> String { try wd(argv) }
+
+    @discardableResult
+    func wd(_ argv: [String]) throws -> String {
         let p = Process()
         p.executableURL = builtWD
         p.arguments = argv
@@ -65,6 +68,23 @@ struct Home {
     func channel() throws -> Channel {
         try Channel(wd: builtWD, environment: environment)
     }
+
+    /// Files a sub-goal under parent and returns its id.
+    func sub(_ parent: String, _ title: String, _ extra: String...) throws -> String {
+        let out = try wd(["goal", "add", parent, title, "--done-when", "\(title) is checked"] + extra + ["--json"])
+        return try JSONDecoder().decode(Work.self, from: Data(out.utf8)).id
+    }
+
+    /// Writes what no wd command files by itself (an agent's steps, a
+    /// supervisor's verdict, a session's question) straight into the ledger.
+    func sql(_ statements: String) throws {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        p.arguments = [dir.appendingPathComponent("ledger.db").path, statements]
+        try p.run()
+        p.waitUntilExit()
+        precondition(p.terminationStatus == 0, "sqlite3: \(statements)")
+    }
 }
 
 func executable(_ url: URL, _ script: String) throws {
@@ -72,6 +92,12 @@ func executable(_ url: URL, _ script: String) throws {
     try script.write(to: url, atomically: true, encoding: .utf8)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
 }
+
+/// A goal view's tree fields for a goal with no sub-goals yet.
+let treeless = #""chain":[],"tree":[],"paths":{},"done_when":null,"finish":null,"progress":{"done":0,"total":0,"superseded":0},"not_done_because":[],"needs_you":[],"course":null,"superseded":[]"#
+
+/// A board goal's summary fields for a goal with no sub-goals yet.
+let unplanned = #""progress":{"done":0,"total":0,"superseded":0},"needs_you":0,"finish":null,"finished":null"#
 
 func workJSON(state: String) -> String {
     """
@@ -496,7 +522,7 @@ func fakeRunner(_ home: Home) throws {
         let asking = #"{"id":"event-11","items":[{"header":"","question":"Tag v1.0.0?","multi":false,"options":[{"label":"yes (recommended)","description":""},{"label":"no","description":""}]}],"answers":null,"reply":null}"#
         let json = """
         {"goal":\(work("g", "Release notes", "running")),"tasks":[\(work("a", "Impacts", "running")),\(work("b", "Collector", "review")),\(work("n", "Weekly note", "running"))],
-         "rollup":{"counts":{},"done":0,"total":3},"events":[\(events)],"claims":[],"landings":[],"delivery":null,"activity":{},"asking":\(asking),"reports":{},"waiting":[]}
+         "rollup":{"counts":{},"done":0,"total":3},"events":[\(events)],"claims":[],"landings":[],"delivery":null,"activity":{},"asking":\(asking),"reports":{},"waiting":[],\(treeless)}
         """
         let goal = try JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
         #expect(goal.supervised)
@@ -594,11 +620,11 @@ func fakeRunner(_ home: Home) throws {
         }
         let board = try JSONDecoder().decode(Board.self, from: Data("""
         {"goals":[
-          {"work":\(work("old", "running", updated: "2026-10-01")),"rollup":{"counts":{},"done":0,"total":1},"band":"in-flight"},
-          {"work":\(work("new", "needs-input", updated: "2026-10-09")),"rollup":{"counts":{},"done":0,"total":1},"band":"needs-you"},
-          {"work":\(work("later", "queued", updated: "2026-10-08")),"rollup":{"counts":{},"done":0,"total":0},"band":"in-flight"},
-          {"work":\(work("shipped", "done", updated: "2026-10-10")),"rollup":{"counts":{},"done":1,"total":1},"band":"at-rest"},
-          {"work":\(work("elsewhere", "running", project: "other", updated: "2026-10-11")),"rollup":{"counts":{},"done":0,"total":1},"band":"in-flight"}
+          {"work":\(work("old", "running", updated: "2026-10-01")),"rollup":{"counts":{},"done":0,"total":1},"band":"in-flight",\(unplanned)},
+          {"work":\(work("new", "needs-input", updated: "2026-10-09")),"rollup":{"counts":{},"done":0,"total":1},"band":"needs-you",\(unplanned)},
+          {"work":\(work("later", "queued", updated: "2026-10-08")),"rollup":{"counts":{},"done":0,"total":0},"band":"in-flight",\(unplanned)},
+          {"work":\(work("shipped", "done", updated: "2026-10-10")),"rollup":{"counts":{},"done":1,"total":1},"band":"at-rest",\(unplanned)},
+          {"work":\(work("elsewhere", "running", project: "other", updated: "2026-10-11")),"rollup":{"counts":{},"done":0,"total":1},"band":"in-flight",\(unplanned)}
         ],"standalone":[
           {"work":\(work("fix", "running", updated: "2026-10-05")),"band":"in-flight"}
         ]}
@@ -629,7 +655,7 @@ func fakeRunner(_ home: Home) throws {
     func arrivalsAnnouncedOnce() throws {
         func board(_ rows: [(String, String, String)]) throws -> Board {
             let goals = rows.map { id, state, band in
-                #"{"work":\#(workJSON(state: state).replacingOccurrences(of: #""id":"w1""#, with: #""id":"\#(id)""#)),"rollup":{"counts":{},"done":0,"total":1},"band":"\#(band)"}"#
+                #"{"work":\#(workJSON(state: state).replacingOccurrences(of: #""id":"w1""#, with: #""id":"\#(id)""#)),"rollup":{"counts":{},"done":0,"total":1},"band":"\#(band)",\#(unplanned)}"#
             }
             return try JSONDecoder().decode(Board.self, from: Data(#"{"goals":[\#(goals.joined(separator: ","))],"standalone":[]}"#.utf8))
         }
@@ -765,10 +791,10 @@ func fakeRunner(_ home: Home) throws {
         {"goal":\(work("g", "running")),"tasks":[\(work("a", "done")),\(work("b", "blocked")),\(work("c", "running")),\(work("d", "queued")),\(work("e", "dropped")),\(work("f", "review"))],
          "rollup":{"counts":{},"done":1,"total":6},"events":[\(events)],"claims":[],"landings":[],"delivery":null,
          "activity":{"c":{"now":"Bash","kind":"tool","at":null,"asking":\(asking),"error":null,"status":"running","usage":null,"subagents":null}},
-         "asking":\(asking),"reports":{"5":\(report)},"waiting":[]}
+         "asking":\(asking),"reports":{"5":\(report)},"waiting":[],\(treeless)}
         """
         let goal = try JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
-        let p = goal.progress
+        let p = goal.taskProgress
         let counts: [Int] = [p.done, p.working, p.review, p.blocked, p.waiting, p.dropped]
         #expect(counts == [1, 1, 1, 1, 1, 1])
         #expect(goal.waitingOnYou == 2, "the goal's own question and task c's")
@@ -786,5 +812,71 @@ func fakeRunner(_ home: Home) throws {
         #expect(r.verdict == "done")
         #expect(r.files == ["x.ts"])
         #expect(r.sections.map(\.name) == ["VERIFY"])
+    }
+    @Test("The Kit Reads A Goal As A Tree")
+    func goalAsTree() async throws {
+        let home = try Home()
+        let top = try home.goal("demo", "Release notes for every release")
+        try home.wd("goal", "edit", top, "--done-when", "every release has a guide and a note")
+        let tagged = try home.sub(top, "Every release is tagged")
+        let guide = try home.sub(top, "Whoever deploys gets a guide", "--split")
+        let agent = try home.sub(top, "Any agent can produce the notes", "--after", "\(tagged),\(guide)")
+        let rollback = try home.sub(guide, "The guide says how to roll back")
+        let wiki = try home.sub(guide, "Guides are published to the wiki")
+        try home.wd("goal", "drop", wiki, "guides live with each release")
+        try home.sql("""
+        UPDATE work SET finish_line='complete PR', finish_source='taste' WHERE id='\(top)';
+        UPDATE work SET state='done' WHERE id='\(tagged)';
+        UPDATE work SET state='needs-input' WHERE id='\(rollback)';
+        INSERT INTO step VALUES ('\(agent)',1,'Read past notes','done'),('\(agent)',2,'Write the template','doing'),('\(agent)',3,'Old idea','dropped');
+        INSERT INTO event (work,kind,body,at) VALUES ('\(top)','course','on course: the tag format suits the rest','2026-10-13T11:52:00Z');
+        INSERT INTO event (work,kind,body,at) VALUES ('\(rollback)','question','Cover down-migrations?
+        - Only redeploy (recommended)
+        - Both','2026-10-13T12:14:00Z');
+        """)
+        let store = await Store(channel: try home.channel())
+        let goal = try await store.goal(top)
+        #expect(goal.chain.map(\.id) == [top])
+        #expect(goal.doneWhen == "every release has a guide and a note")
+        #expect(goal.finish == FinishLine(line: "complete PR", source: "taste"))
+        #expect(goal.progress == TreeProgress(done: 1, total: 3, superseded: 0))
+        #expect(goal.notDoneBecause.first == "2 sub-goals open")
+        #expect(goal.course?.verdict == "on course")
+        #expect(goal.course?.why == "the tag format suits the rest")
+        #expect(goal.tree.map(\.id) == [tagged, guide, agent])
+        let guideNode = goal.tree[1]
+        #expect(guideNode.opensAsGoal && !goal.tree[0].opensAsGoal)
+        #expect(guideNode.children.map(\.id) == [rollback, wiki])
+        #expect(guideNode.plannedInto == 2)
+        #expect(guideNode.needsYou == 1)
+        #expect(guideNode.children[1].work.state == .superseded)
+        #expect(goal.tree[2].waitingOn == ["Whoever deploys gets a guide"], "a settled sibling is no longer waited on")
+        #expect(goal.tree[2].steps.map(\.state) == [.done, .doing, .dropped])
+        #expect(goal.tree[2].doing == "Write the template")
+        #expect(goal.paths[rollback] == "Whoever deploys gets a guide › The guide says how to roll back")
+        #expect(goal.branch(to: rollback).map(\.id) == [guide, rollback])
+        #expect(goal.needsYou.map(\.work) == [rollback])
+        #expect(goal.needsYou.first?.question.items.first?.options.first?.label == "Only redeploy (recommended)")
+        #expect(goal.superseded.map(\.work) == [wiki])
+        #expect(goal.superseded.first?.why == "guides live with each release")
+
+        let nested = try await store.goal(guide)
+        #expect(nested.chain.map(\.id) == [top, guide], "a node that is a goal opens as a page of its own")
+        #expect(nested.tree.map(\.id) == [rollback, wiki])
+
+        await store.refresh()
+        let board = try #require(await store.board)
+        let row = try #require(board.goals.first { $0.work.id == top })
+        #expect(board.goals.map(\.work.id) == [top], "only top goals are on the board")
+        #expect(row.progress == TreeProgress(done: 1, total: 3, superseded: 0))
+        #expect(row.needsYou == 1)
+        #expect(row.finish?.line == "complete PR")
+        #expect(row.finished == nil)
+
+        let record = try await store.record(top)
+        #expect(record.summary.course == 1)
+        #expect(record.entries.first?.kind == "question")
+        #expect(record.entries.first?.where == "Whoever deploys gets a guide › The guide says how to roll back")
+        #expect(record.entries.last?.kind == "asked")
     }
 }

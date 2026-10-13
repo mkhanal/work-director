@@ -81,6 +81,10 @@ public final class Store {
         try await channel.events(of: id)
     }
 
+    public func record(_ id: String) async throws -> GoalRecord {
+        try await channel.record(id)
+    }
+
     /// The next gate on the work's way to done.
     public func gate(of id: String) async throws -> Gate {
         try await channel.gate(of: id)

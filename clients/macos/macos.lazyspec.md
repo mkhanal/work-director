@@ -141,3 +141,10 @@ hold only that product's work; with none, every product's.
 - With Remember on, what is said to work is sent and also filed as feedback on that work and its project, from the director.
 - A message that cannot be filed as feedback says it was sent but not remembered.
 
+
+## The Kit Reads A Goal As A Tree
+- A goal reads its breadcrumb, done-when, finish line, progress, what holds it from done, what needs the person below it, its course and what was superseded, as `wd` serves them.
+- Its sub-goals read as a tree at any depth, each with its state, owner, steps, order and what it waits on.
+- A node that is a goal opens as a goal page of its own; a task, or a group of an older plan's tasks, does not.
+- The board reads each top goal's progress, how many questions below it wait on the person, and where it finished.
+- A goal's record reads as its counts and its entries, newest first.

@@ -99,7 +99,7 @@ struct GoalOverview: View {
             OverviewSection(title: "Progress", trailing: {
                 Button("All tasks") { show(.tasks) }.buttonStyle(.link)
             }) {
-                ProgressCard(progress: goal.progress)
+                ProgressCard(progress: goal.taskProgress)
             }
             if !goal.working.isEmpty {
                 OverviewSection(title: "Working now") {

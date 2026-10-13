@@ -266,7 +266,7 @@ extension GoalDetail {
     }
 
     /// Where the goal's tasks stand.
-    public var progress: TaskProgress {
+    public var taskProgress: TaskProgress {
         var p = TaskProgress()
         for t in tasks {
             switch t.state {
@@ -274,7 +274,7 @@ extension GoalDetail {
             case .running, .needsInput: p.working += 1
             case .review: p.review += 1
             case .blocked: p.blocked += 1
-            case .dropped, .abandoned: p.dropped += 1
+            case .dropped, .abandoned, .superseded: p.dropped += 1
             case .queued, .briefed, .paused: p.waiting += 1
             }
         }
