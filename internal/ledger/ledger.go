@@ -781,6 +781,23 @@ func (l *Ledger) SetDoneWhen(id, text string) error {
 	})
 }
 
+// Judge files the director's judgement of id's done-when; a missed one puts
+// id back to running.
+func (l *Ledger) Judge(id string, met bool, text string) error {
+	if _, err := l.AddEvent(id, core.EventJudged, core.Judgement(met, text)); err != nil {
+		return err
+	}
+	if met {
+		return nil
+	}
+	w, err := l.Get(id)
+	if err != nil || w.State == core.StateRunning {
+		return err
+	}
+	_, err = l.Transition(id, core.StateRunning)
+	return err
+}
+
 // SetFinish stores what the work hands back and where that was decided, and
 // files the change as a decision.
 func (l *Ledger) SetFinish(id string, line core.FinishLine, src core.FinishSource) error {

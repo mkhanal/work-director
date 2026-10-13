@@ -45,6 +45,13 @@ A goal whose other tasks landed and one task was dropped stops complete with
 - A question past either bound is not judged; it is listed in `Unanswered`.
 - A judge that could not run is a `StopFailed`, not an answer.
 
+## A Run Judges Each Finished Sub-Goal Against Its Done-When
+- Each turn, before finished work is closed, every task in review with a done-when and no `met` judgement is put to the judge with its done-when and latest report.
+- Each such judgement spends from the judgement and token bounds and is recorded as any judgement is.
+- `met: <why>` or `missed: <what>` is filed on the task as a `judged` event.
+- A missed task's agent is told what is missing and the task goes back to running.
+- A task the bounds left unjudged stays in review, is named in `Unjudged`, and the stop's `Why` names it.
+
 ## A Refusal Is An Answer, And It Is Retried Never
 - A decline is recorded once and counted against the bound.
 - Nothing is delivered for a decline.

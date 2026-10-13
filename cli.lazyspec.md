@@ -339,7 +339,7 @@ read without `--ack` is shown again.
 - A run that failed to run leaves the work untouched and names the failure.
 
 ## A Run That Lands Every Task Closes The Goal
-- Each turn puts the goal's finished tasks through their remaining gates.
+- Each turn puts the goal's finished tasks through their remaining gates; a task with a done-when goes through them only once it is judged met.
 - When every task has landed, the goal goes through its own: a report naming the tasks it closed, the project's verify in the goal's directory, a derived landing link, soft-done, done.
 - A goal still queued or briefed is moved to running first.
 - `wd drive` on a goal at rest is refused with "nothing left to run".

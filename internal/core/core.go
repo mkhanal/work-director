@@ -560,6 +560,24 @@ func Settled(s State) bool {
 	return s == StateDone || s == StateDropped || s == StateSuperseded
 }
 
+// Judgement is the body of an EventJudged: "met: <text>" or "missed: <text>".
+func Judgement(met bool, text string) string {
+	if met {
+		return "met: " + text
+	}
+	return "missed: " + text
+}
+
+// JudgedMet reports whether the latest EventJudged in evs judged met.
+func JudgedMet(evs []Event) bool {
+	for i := len(evs) - 1; i >= 0; i-- {
+		if evs[i].Kind == EventJudged {
+			return strings.HasPrefix(evs[i].Body, "met: ")
+		}
+	}
+	return false
+}
+
 // RollupState is a nested goal's state from its children's: needs-input if
 // any child needs input; else blocked if any is blocked; else running if any
 // is briefed, running, review or soft-done; else done if every child is

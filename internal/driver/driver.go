@@ -106,6 +106,8 @@ type Turn struct {
 	// what the loop believes rather than leaving that to be noticed later.
 	Promoted []string `json:"promoted"`
 	Held     []string `json:"held"`
+	// Unjudged is the finished work whose done-when this turn left unjudged.
+	Unjudged []string `json:"unjudged"`
 	// Failed is why the turn could not run. Empty is a turn that ran.
 	Failed string `json:"failed"`
 }
@@ -168,6 +170,9 @@ type Result struct {
 	// Unfinished is every task that has not come to rest, so a run that finds
 	// nothing running can still tell a finished goal from an untouched one.
 	Unfinished []string `json:"unfinished"`
+	// Unjudged is the finished work whose done-when the run's last turn left
+	// unjudged, so it waits in review.
+	Unjudged []string `json:"unjudged"`
 }
 
 // Judge answers one question, given the work that is settled. It returns the
@@ -242,6 +247,9 @@ type Driver struct {
 	// Send hands an answer to the executor waiting on it. Without it an answer
 	// is decided and never delivered, which is worse than not deciding.
 	Send func(work, question, answer string) error
+	// Missed tells the agent of a sub-goal judged missed what its done-when
+	// still lacks.
+	Missed func(work, missing string) error
 	// Close puts work that has finished through the gates that are left. Without
 	// it a task that reported DONE sits in review for ever, and the run that
 	// watched it get there calls a goal finished while its work is unfinished.
@@ -268,7 +276,7 @@ func (d *Driver) Drive(goal core.Work, b Budget) (Result, error) {
 	if now == nil {
 		now = time.Now
 	}
-	res := Result{Goal: goal.ID, Answered: []string{}, Unanswered: []Question{}, Open: []string{}, Blocked: map[string]string{}}
+	res := Result{Goal: goal.ID, Answered: []string{}, Unanswered: []Question{}, Open: []string{}, Blocked: map[string]string{}, Unjudged: []string{}}
 	spent := Budget{}
 	settled, err := d.settled()
 	if err != nil {
@@ -318,6 +326,7 @@ func (d *Driver) Drive(goal core.Work, b Budget) (Result, error) {
 		}
 		res.Promoted = append(res.Promoted, t.Promoted...)
 		res.Held = append(res.Held, t.Held...)
+		res.Unjudged = t.Unjudged
 		if d.OnTurn != nil {
 			d.OnTurn(turn, t, spent)
 		}
@@ -355,6 +364,9 @@ func (d *Driver) Drive(goal core.Work, b Budget) (Result, error) {
 		if d.Poll > 0 {
 			time.Sleep(d.Poll)
 		}
+	}
+	if len(res.Unjudged) > 0 && res.Stop != StopComplete {
+		res.Why += "; done-when not judged: " + strings.Join(res.Unjudged, ", ")
 	}
 	res.Shipped = res.Stop.Shipped()
 	res.Answered, res.Unanswered = unique(res.Answered), uniqueQuestions(res.Unanswered)
@@ -409,6 +421,12 @@ func (d *Driver) turn(goal core.Work, b, spent Budget, settled []core.Work, put 
 		return t, spent, nil
 	}
 	t.Answered, t.Escalated = pass.Answered, pass.Escalated
+	// Done-whens are judged before closing, so a sub-goal judged met closes in
+	// the same turn and one judged missed is not closed.
+	t.Unjudged, spent, t.Failed = d.judgeDoneWhens(goal, b, spent, settled, put)
+	if t.Failed != "" {
+		return t, spent, nil
+	}
 	// Closing runs whatever the pass asked about, because the common case is a
 	// task reporting DONE with no question at all, and a loop that only closed
 	// work while somebody was asking it something would sit on finished work for
@@ -474,11 +492,90 @@ func (d *Driver) turn(goal core.Work, b, spent Budget, settled []core.Work, put 
 	// answering a stranger and leaving its own work stuck.
 	ft, spent, err := d.taste(b, spent, settled, put)
 	ft.Answered, ft.Unanswered, ft.Escalated = t.Answered, t.Unanswered, t.Escalated
-	ft.Closed, ft.Blocked = t.Closed, t.Blocked
+	ft.Closed, ft.Blocked, ft.Unjudged = t.Closed, t.Blocked, t.Unjudged
 	if ft.Failed != "" {
 		return ft, spent, nil
 	}
 	return ft, spent, nil
+}
+
+// judgeDoneWhens judges each of goal's tasks in review that has a done-when
+// and no met judgement, against its latest report, and files the verdict. It
+// returns the tasks it left unjudged, the spend after it, and why it failed.
+func (d *Driver) judgeDoneWhens(goal core.Work, b, spent Budget, settled []core.Work, put map[string]bool) ([]string, Budget, string) {
+	unjudged := []string{}
+	if d.Judge == nil {
+		return unjudged, spent, ""
+	}
+	tasks, err := d.Ledger.Tasks(goal.ID)
+	if err != nil {
+		return unjudged, spent, "reading finished work: " + err.Error()
+	}
+	for _, w := range tasks {
+		if w.State != core.StateReview || w.DoneWhen == nil || *w.DoneWhen == "" {
+			continue
+		}
+		evs, err := d.Ledger.Events(w.ID, nil)
+		if err != nil {
+			return unjudged, spent, "reading finished work: " + err.Error()
+		}
+		if core.JudgedMet(evs) {
+			continue
+		}
+		report := ""
+		for _, e := range evs {
+			if e.Kind == core.EventReport {
+				report = e.Body
+			}
+		}
+		asked := fmt.Sprintf("Sub-goal %s (%s) reports it is finished. Is its done-when met?\nDone when: %s\nIts report:\n%s\n\nAnswer \"met: <why the report shows it holds>\" or \"missed: <what is still missing>\".", w.ID, w.Title, *w.DoneWhen, report)
+		if put[asked] {
+			unjudged = append(unjudged, w.ID)
+			continue
+		}
+		put[asked] = true
+		var v Verdict
+		var asks bool
+		var why string
+		v, spent, asks, why = d.putToModel(d.Judge, w.ID, asked, fmt.Sprintf("is the done-when of %s met: %s", w.ID, *w.DoneWhen), b, spent, settled)
+		if why != "" {
+			return unjudged, spent, why
+		}
+		met, text, judged := doneWhenVerdict(v)
+		if !asks || !judged {
+			unjudged = append(unjudged, w.ID)
+			continue
+		}
+		if err := d.Ledger.Judge(w.ID, met, text); err != nil {
+			return unjudged, spent, "filing a judgement: " + err.Error()
+		}
+		if !met && d.Missed != nil {
+			if err := d.Missed(w.ID, text); err != nil {
+				return unjudged, spent, fmt.Sprintf("telling %s what is missing: %v", w.ID, err)
+			}
+		}
+	}
+	return unjudged, spent, ""
+}
+
+// doneWhenVerdict reads a decided answer as met or missed and its text; any
+// other answer is no judgement.
+func doneWhenVerdict(v Verdict) (met bool, text string, ok bool) {
+	if !v.Decided() {
+		return false, "", false
+	}
+	verdict, text, found := strings.Cut(v.Answer, ":")
+	text = strings.TrimSpace(text)
+	if !found || text == "" {
+		return false, "", false
+	}
+	switch strings.ToLower(strings.TrimSpace(verdict)) {
+	case "met":
+		return true, text, true
+	case "missed":
+		return false, text, true
+	}
+	return false, "", false
 }
 
 // putToModel asks the judge one question when there is budget for it, and records

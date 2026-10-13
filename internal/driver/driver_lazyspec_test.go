@@ -709,3 +709,92 @@ func TestADriverWithoutATasteJudgeLeavesTasteAlone(t *testing.T) {
 		t.Errorf("promoted %v held %v, want taste untouched", res.Promoted, res.Held)
 	}
 }
+
+func TestARunJudgesEachFinishedSubGoalAgainstItsDoneWhen(t *testing.T) {
+	h := newHarness(t, 4)
+	met, missed, unjudged, plain := h.tasks[0], h.tasks[1], h.tasks[2], h.tasks[3]
+	for _, w := range []core.Work{met, missed, unjudged} {
+		if err := h.l.SetDoneWhen(w.ID, "the tag "+w.Title+" exists"); err != nil {
+			t.Fatalf("done-when: %v", err)
+		}
+	}
+	for _, w := range h.tasks {
+		if _, err := h.l.AddEvent(w.ID, core.EventReport, "DONE\ntagged "+w.Title); err != nil {
+			t.Fatalf("report: %v", err)
+		}
+		if _, err := h.l.Transition(w.ID, core.StateReview); err != nil {
+			t.Fatalf("review: %v", err)
+		}
+	}
+	h.pass = func(int) (Turn, error) { return Turn{}, nil }
+	h.d.Judge = func(question string, _ []core.Work) (Verdict, error) {
+		h.judged = append(h.judged, question)
+		if strings.Contains(question, missed.Title) {
+			return Verdict{Answer: "missed: the tag is not pushed", Tokens: 10}, nil
+		}
+		return Verdict{Answer: "met: the tag exists", Tokens: 10}, nil
+	}
+	told := map[string]string{}
+	h.d.Missed = func(work, missing string) error { told[work] = missing; return nil }
+	judgedBeforeClose := false
+	h.d.Close = func(core.Work) (Closing, error) {
+		evs, err := h.l.Events(met.ID, nil)
+		if err != nil {
+			return Closing{}, err
+		}
+		judgedBeforeClose = judgedBeforeClose || core.JudgedMet(evs)
+		return Closing{}, nil
+	}
+
+	res, err := h.drive(Budget{Turns: 3, Judgements: 2, Stalled: 0})
+	if err != nil {
+		t.Fatalf("Drive: %v", err)
+	}
+	if len(h.judged) != 2 || !strings.Contains(h.judged[0], "the tag "+met.Title+" exists") {
+		t.Fatalf("judged %q, want the first two done-whens put to the judge with their done-when", h.judged)
+	}
+	if len(h.spent) != 2 {
+		t.Errorf("spent %v, want each judgement recorded through the budget", h.spent)
+	}
+	if !judgedBeforeClose {
+		t.Error("closing never saw the met judgement, want judging before closing")
+	}
+	bodies := func(w core.Work) []string {
+		judged := core.EventJudged
+		evs, err := h.l.Events(w.ID, &judged)
+		if err != nil {
+			t.Fatalf("events: %v", err)
+		}
+		out := []string{}
+		for _, e := range evs {
+			out = append(out, e.Body)
+		}
+		return out
+	}
+	if got := bodies(met); len(got) != 1 || got[0] != "met: the tag exists" {
+		t.Errorf("met judgements = %q, want one met", got)
+	}
+	if got := bodies(missed); len(got) != 1 || got[0] != "missed: the tag is not pushed" {
+		t.Errorf("missed judgements = %q, want one missed", got)
+	}
+	if told[missed.ID] != "the tag is not pushed" {
+		t.Errorf("told %v, want the missed sub-goal's agent told what is missing", told)
+	}
+	if w, err := h.l.Get(missed.ID); err != nil || w.State != core.StateRunning {
+		t.Errorf("missed state = %s (%v), want back to running", w.State, err)
+	}
+	for _, w := range []core.Work{unjudged, plain} {
+		if got := bodies(w); len(got) != 0 {
+			t.Errorf("%s judgements = %q, want none", w.ID, got)
+		}
+		if got, err := h.l.Get(w.ID); err != nil || got.State != core.StateReview {
+			t.Errorf("%s state = %s (%v), want left in review", w.ID, got.State, err)
+		}
+	}
+	if len(res.Unjudged) != 1 || res.Unjudged[0] != unjudged.ID {
+		t.Errorf("unjudged = %v, want only the sub-goal past the bound", res.Unjudged)
+	}
+	if res.Stop != StopBudget || !strings.Contains(res.Why, unjudged.ID) {
+		t.Errorf("stop = %s (%s), want the budget stop naming %s", res.Stop, res.Why, unjudged.ID)
+	}
+}

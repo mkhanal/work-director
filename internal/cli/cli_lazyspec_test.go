@@ -3641,15 +3641,22 @@ func TestARunThatLandsEveryTaskClosesTheGoal(t *testing.T) {
 	f := newCLIFixture(t)
 	publish(t, f.sample)
 	driveProject(t, f)
-	goal, task := drivenGoal(t, f, "Serve on a fixed port")
+	goal := jsonString(t, f.runOK(t, "goal", "add", "driven", "Serve on a fixed port", "--json"), "id")
+	task := jsonString(t, f.runOK(t, "add", "driven", "Wire the server", "--goal", goal, "--json"), "id")
+	f.runOK(t, "goal", "edit", task, "--done-when", "the server serves on one fixed port")
+	f.runOK(t, "set", task, "running")
+	f.runOK(t, "attach", task, "executor-s1", "--runner", "driven")
 	judgeAnswer(t, f, true)
 
 	// Nothing here waits for a person: the task's question is judged, the answer
-	// is delivered, the executor reports DONE, the task is put through its gates
-	// and then the goal is put through its own.
-	out := f.runOK(t, "drive", goal, "--turns", "8", "--judgements", "2", "--poll-seconds", "1")
+	// is delivered, the executor reports DONE, its done-when is judged met, the
+	// task is put through its gates and then the goal is put through its own.
+	out := f.runOK(t, "drive", goal, "--turns", "8", "--judgements", "3", "--poll-seconds", "1")
 	if !strings.Contains(out, "shipped and closed") {
 		t.Fatalf("drive = %q, want it to say the goal closed itself", out)
+	}
+	if got := f.bodies(t, task, core.EventJudged); len(got) != 1 || !strings.HasPrefix(got[0], "met: ") {
+		t.Errorf("task judgements = %q, want it closed only after its done-when was judged met", got)
 	}
 	if got := f.workRow(t, task).State; got != core.StateDone {
 		t.Errorf("task state = %s, want done: a task that reported DONE has nowhere to sit", got)

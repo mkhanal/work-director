@@ -629,14 +629,7 @@ func (c *Cli) applyAction(goal core.Work, p *project.Project, a coordinator.Acti
 		if err != nil {
 			return err
 		}
-		if _, err := c.tellTask(t, "Your sub-goal's done-when is not met yet: "+a.Text); err != nil {
-			return err
-		}
-		if t, err = c.Ledger.Get(t.ID); err != nil || t.State == core.StateRunning {
-			return err
-		}
-		_, err = c.Ledger.Transition(t.ID, core.StateRunning)
-		return err
+		return c.tellMissed(t.ID, a.Text)
 	case coordinator.ActChore:
 		return c.chore(goal, p, a.Text)
 	case coordinator.ActResolve:
@@ -660,12 +653,18 @@ func (c *Cli) judged(child func(string) (core.Work, error), a coordinator.Action
 	if t.Kind != core.WorkTask || t.State != core.StateReview {
 		return t, fmt.Errorf("%s is %s; only a sub-goal in review is judged", t.ID, t.State)
 	}
-	verdict := "met: "
-	if a.Kind == coordinator.ActMissed {
-		verdict = "missed: "
+	return t, c.Ledger.Judge(t.ID, a.Kind == coordinator.ActMet, a.Text)
+}
+
+// tellMissed tells the agent of sub-goal id, judged missed, what its
+// done-when still lacks.
+func (c *Cli) tellMissed(id, missing string) error {
+	t, err := c.Ledger.Get(id)
+	if err != nil {
+		return err
 	}
-	_, err = c.Ledger.AddEvent(t.ID, core.EventJudged, verdict+a.Text)
-	return t, err
+	_, err = c.tellTask(t, "Your sub-goal's done-when is not met yet: "+missing)
+	return err
 }
 
 // chorePrefix opens the spawn event that records a chore's session on its goal.
@@ -741,7 +740,7 @@ func (c *Cli) unfinished(goal core.Work) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if len(evs) == 0 || !strings.HasPrefix(evs[len(evs)-1].Body, "met: ") {
+		if !core.JudgedMet(evs) {
 			return t.ID + " is done but its done-when was never judged met: MET it with why", nil
 		}
 	}

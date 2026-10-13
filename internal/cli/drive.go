@@ -50,6 +50,15 @@ func (c *Cli) closeFinished(goal core.Work) (driver.Closing, error) {
 		if t.State != core.StateReview {
 			continue
 		}
+		if t.DoneWhen != nil && *t.DoneWhen != "" {
+			evs, err := c.Ledger.Events(t.ID, nil)
+			if err != nil {
+				return out, err
+			}
+			if !core.JudgedMet(evs) {
+				continue
+			}
+		}
 		ready, stopped, err := c.closeReady(t.ID)
 		if err != nil {
 			return out, err
@@ -407,6 +416,7 @@ func (c *Cli) drive(rest []string) error {
 		TasteJudge: c.tasteJudgeOnce(p),
 		Candidates: func() ([]driver.Candidate, error) { return c.promoteTaste(p) },
 		Close:      c.closeFinished,
+		Missed:     c.tellMissed,
 		Spend:      c.spendJudgement,
 		Send:       c.sendAnswer(p),
 		Poll:       time.Duration(intOr(c.Args, "poll-seconds", int(drivePoll/time.Second))) * time.Second,

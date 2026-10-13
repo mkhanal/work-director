@@ -6,7 +6,7 @@
 # Sessions it spawns are judgements (judge-sN): it reads the brief it was given
 # and answers from the settled position shown in it, or refuses when the test
 # seeds judge-decline. The executor's session is attached, not spawned, and asks
-# a question the settled position cannot settle.
+# a question the settled position cannot settle. A done-when put to it is met.
 set -u
 state=${WD_FAKE_STATE:?WD_FAKE_STATE needed}
 case "$1" in
@@ -20,7 +20,10 @@ case "$1" in
   export)
     case "$2" in
       judge-*)
-        if [ -f "$state/judge-decline" ]; then
+        if grep -q 'Is its done-when met?' "$state/judge-brief-$((16#${2#judge-s}))" 2>/dev/null; then
+          echo 'ANSWER: met: the report says the server serves on 8080'
+          echo 'TOKENS: 300'
+        elif [ -f "$state/judge-decline" ]; then
           echo 'DECLINE: the settled position does not say'
           echo 'TOKENS: 900'
         else
