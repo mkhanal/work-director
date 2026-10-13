@@ -5212,3 +5212,40 @@ func TestPlanningFilesSubGoalsWithTheirDoneWhenAndOrder(t *testing.T) {
 		t.Errorf("children = %+v, want the sub-goal filed all the same", kids)
 	}
 }
+
+func TestASubGoalStartsOnlyOnceWhatItWaitsOnIsSettled(t *testing.T) {
+	f := newCLIFixture(t)
+	f.planReply(t, "NAME: Release notes\nFINISH: complete PR | from: taste\n- Every release is tagged\n  done when: each release has a tag\n- Customers read what changed\n  done when: the changelog lists it\n  after: 1\n")
+	var started struct {
+		Goal  core.Work   `json:"goal"`
+		Tasks []core.Work `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "goal", "start", "sample-app", "Release notes", "--runner", "planner", "--json")), &started); err != nil || len(started.Tasks) != 2 {
+		t.Fatalf("start = %+v, %v; want two sub-goals", started, err)
+	}
+	first, second := started.Tasks[0], started.Tasks[1]
+	if first.State != core.StateRunning || second.State != core.StateQueued {
+		t.Fatalf("states = %s, %s; want the first started and the second waiting", first.State, second.State)
+	}
+	for _, args := range [][]string{{"goal", "run", started.Goal.ID, "--only", second.ID}, {"spawn", second.ID}} {
+		if errStr := f.runFail(t, args...); !strings.Contains(errStr, "waits on "+first.ID) {
+			t.Errorf("wd %s = %q, want it refused naming %s", strings.Join(args, " "), errStr, first.ID)
+		}
+	}
+	f.runOK(t, "goal", "run", started.Goal.ID)
+	if s := f.stateOf(t, second.ID); s != core.StateQueued {
+		t.Fatalf("after starting every open sub-goal, the waiting one is %s", s)
+	}
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Drop(first.ID, "landed elsewhere"); err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	f.runOK(t, "goal", "run", started.Goal.ID)
+	if s := f.stateOf(t, second.ID); s != core.StateRunning {
+		t.Fatalf("once what it waits on is settled, the sub-goal is %s, want running", s)
+	}
+}

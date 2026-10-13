@@ -490,6 +490,9 @@ func (c *Cli) spawn(rest []string) error {
 	if err != nil {
 		return err
 	}
+	if err := c.mayStart(w); err != nil {
+		return err
+	}
 	cwd := p.Path
 	var runnerWorktree *bool
 	if w.Parent != nil {
@@ -575,6 +578,11 @@ func (c *Cli) spawnTasks(goal core.Work, p *project.Project, runners []string, d
 		spawnable := child.State == core.StateQueued || child.State == core.StateBriefed ||
 			(child.State == core.StateRunning && child.Session == nil && child.Claim == nil)
 		if !spawnable {
+			continue
+		}
+		if waits, err := c.waitingOn(child); err != nil {
+			return nil, nil, err
+		} else if waits != "" {
 			continue
 		}
 		runnerName := runners[i%len(runners)]
@@ -1475,7 +1483,11 @@ func (c *Cli) goalRun(cmd, kindWord string, goal core.Work) error {
 	if v := str(a, "only"); v != nil {
 		for _, s := range strings.Split(*v, ",") {
 			if t := strings.TrimSpace(s); t != "" {
-				if _, err := c.Ledger.Get(t); err != nil {
+				w, err := c.Ledger.Get(t)
+				if err != nil {
+					return err
+				}
+				if err := c.mayStart(w); err != nil {
 					return err
 				}
 				only = append(only, t)

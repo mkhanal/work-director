@@ -553,9 +553,39 @@ func (c *Cli) concernUnder(goal core.Work, tasks []core.Work, n int) (core.Conce
 	return core.Concern{}, fmt.Errorf("concern %d is not under %s", n, goal.ID)
 }
 
+// waitingOn is the first sibling w waits on that is not settled yet, or "".
+func (c *Cli) waitingOn(w core.Work) (string, error) {
+	ids, err := c.Ledger.After(w.ID)
+	if err != nil {
+		return "", err
+	}
+	for _, id := range ids {
+		o, err := c.Ledger.Get(id)
+		if err != nil {
+			return "", err
+		}
+		if !core.Settled(o.State) {
+			return id, nil
+		}
+	}
+	return "", nil
+}
+
+// mayStart refuses to start w while it waits on an unsettled sibling.
+func (c *Cli) mayStart(w core.Work) error {
+	id, err := c.waitingOn(w)
+	if err != nil || id == "" {
+		return err
+	}
+	return fail("%s waits on %s, which is not settled yet", w.ID, id)
+}
+
 // startUnder starts task t of goal on the goal's shared worktree, on the
 // project's runners.
 func (c *Cli) startUnder(goal core.Work, p *project.Project, t core.Work) error {
+	if err := c.mayStart(t); err != nil {
+		return err
+	}
 	runners, err := project.ParseRunnerList(p.Runner, p.Runner, runner.AllRunnerNames)
 	if err != nil {
 		return err
@@ -580,6 +610,12 @@ func (c *Cli) startSubGoals(top core.Work, p *project.Project, subs []core.Work,
 	var leaves []core.Work
 	var lines []string
 	for _, s := range subs {
+		if waits, err := c.waitingOn(s); err != nil || waits != "" {
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if !core.IsGoal(s.Kind) {
 			leaves = append(leaves, s)
 			continue

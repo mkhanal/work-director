@@ -126,6 +126,10 @@ verify event.
 - A top goal's finish line is stored with where it came from; an unsure one is asked as a question with its choices, and the goal waits on it.
 - In ask mode the breakdown is proposed and nothing starts until `wd goal approve`.
 
+## A Sub-Goal Starts Only Once What It Waits On Is Settled
+- Starting a sub-goal that waits on an unsettled sibling is refused naming the sibling.
+- Starting every open sub-goal of a goal starts only those with nothing left to wait on.
+
 ## A Goal Is Named By Its Planner Until A Person Renames It
 - A goal its planner names takes that name as its title, noting it.
 - A goal a person has renamed keeps their name when it is planned.
