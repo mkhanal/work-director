@@ -1,0 +1,47 @@
+/* The tokens while the system is dark: libadwaita's dark palette for the
+   surfaces and text, and each badge its light hue at 18% over the page with
+   a lightened foreground (4.5:1 or better). */
+
+@define-color wd_page #242424;
+@define-color wd_sidebar #2e2e32;
+@define-color wd_search #3a3a3f;
+@define-color wd_hairline #3a3a3f;
+@define-color wd_separator #333338;
+@define-color wd_record_separator #303035;
+@define-color wd_text #f2f2f4;
+@define-color wd_text2 #c0c0c6;
+@define-color wd_text3 #9d9da5;
+@define-color wd_step #d6d6dc;
+@define-color wd_accent #3584e4;
+@define-color wd_link #78aeed;
+@define-color wd_selected #414148;
+@define-color wd_button_border #4a4a50;
+@define-color wd_tab_on #38383d;
+@define-color wd_done #2fb56a;
+@define-color wd_needs #f0952e;
+@define-color wd_waiting #8a8a92;
+@define-color wd_blocked #ff7b63;
+@define-color wd_attention_bg alpha(#e8820c, 0.18);
+@define-color wd_attention_fg #ffb36b;
+@define-color wd_settled_bg alpha(#1f9d55, 0.18);
+@define-color wd_settled_fg #7bd8a2;
+@define-color wd_live_bg alpha(#0a64d6, 0.18);
+@define-color wd_live_fg #9cc2f7;
+@define-color wd_waiting_bg alpha(#9a9aa0, 0.18);
+@define-color wd_waiting_fg #c8c8ce;
+@define-color wd_decision_bg alpha(#7a4fd0, 0.18);
+@define-color wd_decision_fg #cdb2f7;
+@define-color wd_question_border #6e4a24;
+@define-color wd_question_fill alpha(#e8820c, 0.08);
+@define-color wd_question_rule #5a3f22;
+@define-color wd_question_row alpha(#e8820c, 0.06);
+@define-color wd_bubble_fill alpha(#3584e4, 0.22);
+@define-color wd_bubble_border alpha(#3584e4, 0.45);
+@define-color wd_tag_fill #2e2e32;
+@define-color wd_answered_fill alpha(#1f9d55, 0.12);
+@define-color wd_answered_border alpha(#1f9d55, 0.35);
+@define-color wd_proposed_fill #2a2a2e;
+@define-color wd_compare_border #5a4630;
+@define-color wd_compare_rule #3d352c;
+@define-color wd_struck #6c6c72;
+@define-color wd_failure #ff7b63;

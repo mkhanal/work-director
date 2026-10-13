@@ -38,12 +38,24 @@ fn main() -> glib::ExitCode {
     application.run()
 }
 
+/// The tokens, and over them the dark ones while the system is dark.
 fn load_css() {
-    let provider = gtk::CssProvider::new();
-    provider.load_from_string(include_str!("style.css"));
-    if let Some(display) = gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-    }
+    let Some(display) = gdk::Display::default() else { return };
+    let light = gtk::CssProvider::new();
+    light.load_from_string(include_str!("style.css"));
+    gtk::style_context_add_provider_for_display(&display, &light, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+    let dark = gtk::CssProvider::new();
+    dark.load_from_string(include_str!("dark.css"));
+    let follow = move |manager: &adw::StyleManager| {
+        if manager.is_dark() {
+            gtk::style_context_add_provider_for_display(&display, &dark, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+        } else {
+            gtk::style_context_remove_provider_for_display(&display, &dark);
+        }
+    };
+    let manager = adw::StyleManager::default();
+    follow(&manager);
+    manager.connect_dark_notify(follow);
 }
 
 /// Runs the store's futures on GTK's main loop.

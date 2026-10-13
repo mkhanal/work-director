@@ -8,12 +8,13 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use kit::{Plan, PlanError, Store, Work, WorkState};
+use kit::{Link, Plan, PlanError, Store, Work, WorkState};
 
 use crate::settings::Settings;
 use crate::ui;
 
 type Opener = Rc<dyn Fn(Place)>;
+type PathShower = Rc<dyn Fn(&[Link])>;
 
 /// What the main pane shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +35,7 @@ pub struct App {
     /// The split that holds the sidebar, so a page can show or hide it.
     pub sidebar_split: adw::OverlaySplitView,
     opener: Rc<RefCell<Option<Opener>>>,
+    path: Rc<RefCell<Option<PathShower>>>,
 }
 
 impl App {
@@ -44,7 +46,15 @@ impl App {
         toasts: adw::ToastOverlay,
         sidebar_split: adw::OverlaySplitView,
     ) -> App {
-        App { store, settings, window, toasts, sidebar_split, opener: Rc::new(RefCell::new(None)) }
+        App {
+            store,
+            settings,
+            window,
+            toasts,
+            sidebar_split,
+            opener: Rc::new(RefCell::new(None)),
+            path: Rc::new(RefCell::new(None)),
+        }
     }
 
     /// Sets what opening a place does; the window sets it once it is built.
@@ -56,6 +66,19 @@ impl App {
         let open = self.opener.borrow().clone();
         if let Some(open) = open {
             open(place);
+        }
+    }
+
+    /// Sets what showing an open goal's breadcrumb does; the window sets it.
+    pub fn set_path_shower(&self, show: impl Fn(&[Link]) + 'static) {
+        *self.path.borrow_mut() = Some(Rc::new(show));
+    }
+
+    /// Shows the breadcrumb of the goal open, top goal first.
+    pub fn show_path(&self, chain: &[Link]) {
+        let show = self.path.borrow().clone();
+        if let Some(show) = show {
+            show(chain);
         }
     }
 

@@ -44,10 +44,10 @@ pub struct StateLook {
 impl WorkState {
     pub fn look(self) -> StateLook {
         let (label, icon, tint) = match self {
-            WorkState::Queued => ("Queued", "document-open-recent-symbolic", Tint::Gray),
+            WorkState::Queued => ("Waiting", "document-open-recent-symbolic", Tint::Gray),
             WorkState::Briefed => ("Briefed", "text-x-generic-symbolic", Tint::Gray),
-            WorkState::Running => ("Running", "media-playback-start-symbolic", Tint::Blue),
-            WorkState::NeedsInput => ("Needs input", "dialog-question-symbolic", Tint::Orange),
+            WorkState::Running => ("Working", "media-playback-start-symbolic", Tint::Blue),
+            WorkState::NeedsInput => ("Needs you", "dialog-question-symbolic", Tint::Orange),
             WorkState::Blocked => ("Blocked", "action-unavailable-symbolic", Tint::Red),
             WorkState::Review => ("In review", "edit-find-symbolic", Tint::Indigo),
             WorkState::SoftDone => ("Ready to close", "object-select-symbolic", Tint::Teal),
@@ -58,6 +58,83 @@ impl WorkState {
             WorkState::Superseded => ("Superseded", "edit-redo-symbolic", Tint::Gray),
         };
         StateLook { label, icon, tint }
+    }
+
+    /// The drawn state icon a sub-goal row and the sidebar show.
+    pub fn mark(self) -> Mark {
+        match self {
+            WorkState::Done | WorkState::SoftDone => Mark::Done,
+            WorkState::NeedsInput => Mark::NeedsYou,
+            WorkState::Running | WorkState::Review => Mark::Working,
+            WorkState::Queued | WorkState::Briefed | WorkState::Paused => Mark::Waiting,
+            WorkState::Blocked => Mark::Blocked,
+            WorkState::Dropped | WorkState::Abandoned | WorkState::Superseded => Mark::Superseded,
+        }
+    }
+
+    /// The state as a badge: its label in its tone.
+    pub fn badge(self) -> (&'static str, Tone) {
+        let look = self.look();
+        (look.label, look.tint.tone())
+    }
+}
+
+/// A badge's colours: something for the person, settled, moving, waiting,
+/// or a decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Tone {
+    Attention,
+    Settled,
+    Live,
+    Waiting,
+    Decision,
+}
+
+impl Tone {
+    pub fn css_class(self) -> &'static str {
+        match self {
+            Tone::Attention => "badge-attention",
+            Tone::Settled => "badge-settled",
+            Tone::Live => "badge-live",
+            Tone::Waiting => "badge-waiting",
+            Tone::Decision => "badge-decision",
+        }
+    }
+}
+
+impl Tint {
+    pub fn tone(self) -> Tone {
+        match self {
+            Tint::Orange | Tint::Red => Tone::Attention,
+            Tint::Green | Tint::Teal => Tone::Settled,
+            Tint::Blue | Tint::Indigo => Tone::Live,
+            Tint::Gray | Tint::Purple | Tint::Brown => Tone::Waiting,
+        }
+    }
+}
+
+/// The 20 px state icon: a filled check, a ring with a dot, a ring a quarter
+/// full, a dashed ring, a ring struck through, or a red ring struck through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Mark {
+    Done,
+    NeedsYou,
+    Working,
+    Waiting,
+    Superseded,
+    Blocked,
+}
+
+impl Mark {
+    pub fn css_class(self) -> &'static str {
+        match self {
+            Mark::Done => "mark-done",
+            Mark::NeedsYou => "mark-needs-you",
+            Mark::Working => "mark-working",
+            Mark::Waiting => "mark-waiting",
+            Mark::Superseded => "mark-superseded",
+            Mark::Blocked => "mark-blocked",
+        }
     }
 }
 

@@ -13,7 +13,7 @@ use crate::app::{App, Place};
 use crate::new_goal_page::NewGoalPage;
 use crate::pages;
 use crate::settings::Settings;
-use crate::sidebar::{band_named, Sidebar};
+use crate::sidebar::Sidebar;
 use crate::ui;
 use crate::work_page::WorkPage;
 
@@ -94,6 +94,12 @@ impl Window {
                 }
             }
         }));
+        let weak = win.me.clone();
+        app.set_path_shower(move |chain| {
+            if let Some(win) = weak.upgrade() {
+                win.sidebar.set_path(chain);
+            }
+        });
         win.actions();
         let first = app.settings.last_work().map_or(Place::NewGoal, Place::Work);
         win.open(first);
@@ -219,15 +225,6 @@ impl Window {
             }
         });
         window.add_action(&key);
-
-        let band = gio::SimpleAction::new_stateful("band", Some(glib::VariantTy::STRING), &"".to_variant());
-        let weak = self.me.clone();
-        band.connect_activate(move |action, param| {
-            let (Some(win), Some(name)) = (weak.upgrade(), param.and_then(|p| p.get::<String>())) else { return };
-            action.set_state(&name.to_variant());
-            win.sidebar.set_band(band_named(&name));
-        });
-        window.add_action(&band);
     }
 
     /// Asks the words a decision or a reopen needs, for work read fresh.

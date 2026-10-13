@@ -12,6 +12,7 @@ pub mod look;
 pub mod markdown;
 pub mod new_goal;
 pub mod outbox;
+pub mod overview;
 pub mod plan;
 pub mod record;
 pub mod send_key;
@@ -26,16 +27,15 @@ pub use conversation::*;
 pub use escape::EscapeTaps;
 pub use ledger::*;
 pub use locator::{locate_wd, LocatorError};
-pub use look::{StateLook, Tint};
+pub use look::{Mark, StateLook, Tint, Tone};
 pub use new_goal::{NewGoal, NewGoalPhase};
 pub use outbox::{Outgoing, OutgoingState};
+pub use overview::SubGoalRow;
 pub use plan::{Plan, PlanError};
 pub use record::{RecordBy, RecordEntry, RecordKind, RecordSummary, RecordView};
 pub use send_key::{Chord, ReturnPress, SendKey};
 pub use store::{Change, Feed, FeedState, Spawner, Store, Watch};
-pub use thread::{
-    AskedItem, SupervisorAction, SupervisorReply, TaskProgress, ThreadFilter, ThreadItem, ThreadStep, WaitingTask,
-};
+pub use thread::{AskedItem, SupervisorAction, SupervisorReply, ThreadFilter, ThreadItem, ThreadStep};
 pub use tree::{
     Course, Finish, FinishLine, FinishSource, Judgement, Link, NeedYou, Node, Owner, PlanStep, Progress, StepState,
     Superseded,

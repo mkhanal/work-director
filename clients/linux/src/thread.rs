@@ -2,8 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::conversation::{Question, QuestionItem, QuestionOption, SessionStatus};
-use crate::ledger::{Event, GoalDetail, Work, WorkState};
+use crate::ledger::{Event, GoalDetail};
 
 /// What a goal's conversation is narrowed to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -51,31 +50,6 @@ impl ThreadItem {
             ThreadItem::Updates(run) => run.first().map_or(0, ThreadStep::id),
         }
     }
-}
-
-/// How far a goal's tasks have come, by where each stands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct TaskProgress {
-    pub done: usize,
-    pub working: usize,
-    pub review: usize,
-    pub blocked: usize,
-    pub waiting: usize,
-    pub dropped: usize,
-}
-
-impl TaskProgress {
-    pub fn total(&self) -> usize {
-        self.done + self.working + self.review + self.blocked + self.waiting + self.dropped
-    }
-}
-
-/// A task waiting on the person with no question open in its session, and
-/// what it asked.
-#[derive(Debug, Clone, PartialEq)]
-pub struct WaitingTask {
-    pub task: Work,
-    pub question: Question,
 }
 
 /// One step of a goal read as a conversation.
@@ -347,100 +321,6 @@ impl GoalDetail {
             _ => false,
         }
     }
-
-    /// Where the goal's tasks stand.
-    pub fn progress(&self) -> TaskProgress {
-        let mut p = TaskProgress::default();
-        for t in &self.tasks {
-            match t.state {
-                WorkState::Done | WorkState::SoftDone => p.done += 1,
-                WorkState::Running | WorkState::NeedsInput => p.working += 1,
-                WorkState::Review => p.review += 1,
-                WorkState::Blocked => p.blocked += 1,
-                WorkState::Dropped | WorkState::Abandoned | WorkState::Superseded => p.dropped += 1,
-                WorkState::Queued | WorkState::Briefed | WorkState::Paused => p.waiting += 1,
-            }
-        }
-        p
-    }
-
-    /// The supervisor's latest reply, the freshest word on where the goal is.
-    pub fn latest_supervision(&self) -> Option<(Event, SupervisorReply)> {
-        self.thread().into_iter().rev().find_map(|step| match step {
-            ThreadStep::Supervisor(e, r) => Some((e, r)),
-            _ => None,
-        })
-    }
-
-    /// The tasks whose sessions are running now.
-    pub fn working(&self) -> Vec<&Work> {
-        self.tasks
-            .iter()
-            .filter(|t| self.activity.get(&t.id).and_then(|a| a.status) == Some(SessionStatus::Running))
-            .collect()
-    }
-
-    /// What waits on the person: the goal's own question, each task's session
-    /// question, and each task waiting on them some other way.
-    pub fn waiting_on_you(&self) -> usize {
-        usize::from(self.asking.is_some())
-            + self.tasks.iter().filter(|t| self.activity.get(&t.id).is_some_and(|a| a.asking.is_some())).count()
-            + self.waiting_tasks().len()
-    }
-
-    /// Tasks waiting on the person with no question open in their session:
-    /// what they last asked, or what their report said they need.
-    pub fn waiting_tasks(&self) -> Vec<WaitingTask> {
-        self.tasks
-            .iter()
-            .filter(|t| t.state == WorkState::NeedsInput && self.activity.get(&t.id).is_none_or(|a| a.asking.is_none()))
-            .filter_map(|t| {
-                let question =
-                    self.events.iter().rev().filter(|e| e.work == t.id).find_map(|e| match e.kind.as_str() {
-                        "answer" | "decision" => Some(None),
-                        "question" => {
-                            let items = e
-                                .asked_items()
-                                .into_iter()
-                                .map(|i| QuestionItem {
-                                    header: String::new(),
-                                    question: i.question,
-                                    multi: false,
-                                    options: i
-                                        .choices
-                                        .into_iter()
-                                        .map(|label| QuestionOption { label, description: String::new() })
-                                        .collect(),
-                                })
-                                .collect();
-                            Some(Some(asked(e, items)))
-                        }
-                        "report" => {
-                            let report = self.reports.get(&e.id.to_string());
-                            let notes = report.and_then(|r| r.sections.iter().find(|s| s.name == "NOTES"));
-                            let said = [report.map(|r| r.said.as_str()), notes.map(|s| s.text.as_str())]
-                                .into_iter()
-                                .flatten()
-                                .find(|s| !s.is_empty())
-                                .unwrap_or(&e.body);
-                            let item = QuestionItem {
-                                header: String::new(),
-                                question: said.to_string(),
-                                multi: false,
-                                options: Vec::new(),
-                            };
-                            Some(Some(asked(e, vec![item])))
-                        }
-                        _ => None,
-                    })??;
-                Some(WaitingTask { task: t.clone(), question })
-            })
-            .collect()
-    }
-}
-
-fn asked(e: &Event, items: Vec<QuestionItem>) -> Question {
-    Question { id: format!("event-{}", e.id), items, answers: None, reply: None }
 }
 
 fn is_update(step: &ThreadStep) -> bool {

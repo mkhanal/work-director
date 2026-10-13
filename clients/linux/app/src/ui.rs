@@ -5,14 +5,13 @@ use adw::prelude::*;
 use gtk::{glib, pango};
 
 use kit::markdown::{self, Block};
-use kit::WorkState;
+use kit::{Mark, Tone, WorkState};
 
 /// Space tokens, in pixels.
 pub const SPACE_1: i32 = 4;
 pub const SPACE_2: i32 = 8;
 pub const SPACE_3: i32 = 12;
 pub const SPACE_4: i32 = 16;
-pub const SPACE_5: i32 = 24;
 pub const SPACE_6: i32 = 32;
 pub const SPACE_7: i32 = 48;
 
@@ -313,6 +312,151 @@ pub fn failure(why: &str) -> gtk::Box {
     label.set_hexpand(true);
     row.append(&label);
     row
+}
+
+/// A badge: a short word in its tone's colours.
+pub fn badge(text: &str, tone: Tone) -> gtk::Label {
+    let label = gtk::Label::builder().label(text).valign(gtk::Align::Center).halign(gtk::Align::Start).build();
+    label.add_css_class("badge");
+    label.add_css_class(tone.css_class());
+    label
+}
+
+/// A state as a badge.
+pub fn state_badge(state: WorkState) -> gtk::Label {
+    let (text, tone) = state.badge();
+    badge(text, tone)
+}
+
+/// The drawn state icon, `size` pixels square, coloured by its class and
+/// named for a screen reader.
+pub fn mark(mark: Mark, size: i32, name: &str) -> gtk::DrawingArea {
+    let area = gtk::DrawingArea::builder().content_width(size).content_height(size).valign(gtk::Align::Start).build();
+    area.add_css_class(mark.css_class());
+    area.update_property(&[gtk::accessible::Property::Label(name)]);
+    area.set_tooltip_text(Some(name));
+    area.set_draw_func(move |area, cr, w, h| {
+        let c = area.color();
+        let (r, g, b) = (f64::from(c.red()), f64::from(c.green()), f64::from(c.blue()));
+        let unit = f64::from(w.min(h)) / 20.0;
+        let (cx, cy) = (f64::from(w) / 2.0, f64::from(h) / 2.0);
+        cr.set_source_rgb(r, g, b);
+        cr.set_line_width(2.0 * unit);
+        let ring = |cr: &gtk::cairo::Context| {
+            cr.new_path();
+            cr.arc(cx, cy, 8.0 * unit, 0.0, std::f64::consts::TAU);
+            let _ = cr.stroke();
+        };
+        // A failed stroke or fill leaves the icon blank; there is nothing else to draw instead.
+        match mark {
+            Mark::Done => {
+                cr.arc(cx, cy, 9.0 * unit, 0.0, std::f64::consts::TAU);
+                let _ = cr.fill();
+                cr.set_source_rgb(1.0, 1.0, 1.0);
+                cr.move_to(cx - 4.0 * unit, cy + 0.5 * unit);
+                cr.line_to(cx - 1.4 * unit, cy + 3.0 * unit);
+                cr.line_to(cx + 4.0 * unit, cy - 2.5 * unit);
+                let _ = cr.stroke();
+            }
+            Mark::NeedsYou => {
+                ring(cr);
+                cr.arc(cx, cy, 3.0 * unit, 0.0, std::f64::consts::TAU);
+                let _ = cr.fill();
+            }
+            Mark::Working => {
+                ring(cr);
+                cr.move_to(cx, cy);
+                cr.line_to(cx, cy - 8.0 * unit);
+                cr.arc(cx, cy, 8.0 * unit, -std::f64::consts::FRAC_PI_2, 0.0);
+                cr.close_path();
+                let _ = cr.fill();
+            }
+            Mark::Waiting => {
+                cr.set_dash(&[3.0 * unit, 3.0 * unit], 0.0);
+                ring(cr);
+            }
+            Mark::Superseded | Mark::Blocked => {
+                ring(cr);
+                cr.move_to(cx - 5.0 * unit, cy);
+                cr.line_to(cx + 5.0 * unit, cy);
+                let _ = cr.stroke();
+            }
+        }
+    });
+    area
+}
+
+/// A state's drawn icon, named by its label.
+pub fn state_mark(state: WorkState, size: i32) -> gtk::DrawingArea {
+    mark(state.mark(), size, state.look().label)
+}
+
+/// A bordered card in the canvas's shape.
+pub fn wd_card(spacing: i32) -> gtk::Box {
+    let card = vbox(spacing);
+    card.add_css_class("wd-card");
+    card
+}
+
+/// A card's label: 12 px, medium, third text colour.
+pub fn label(text: &str) -> gtk::Label {
+    let label = gtk::Label::builder().label(text).xalign(0.0).wrap(true).build();
+    label.add_css_class("label");
+    label
+}
+
+/// A sub-goal's path as a small tag.
+pub fn sgtag(text: &str) -> gtk::Label {
+    let label = gtk::Label::builder().label(text).valign(gtk::Align::Center).build();
+    label.add_css_class("sgtag");
+    label
+}
+
+/// A button in the canvas's shape; `primary` fills it with the accent.
+pub fn button(text: &str, primary: bool) -> gtk::Button {
+    let button = gtk::Button::with_label(text);
+    button.add_css_class("wd-button");
+    if primary {
+        button.add_css_class("primary");
+    }
+    button.set_valign(gtk::Align::Center);
+    button
+}
+
+/// A small link inside a line of text.
+pub fn inline_link(text: &str) -> gtk::Button {
+    let button = gtk::Button::with_label(text);
+    button.add_css_class("inline-link");
+    button.set_valign(gtk::Align::Center);
+    button
+}
+
+/// A filter chip; chips in one row share a group so one is chosen.
+pub fn fchip(text: &str, chosen: bool, group: Option<&gtk::ToggleButton>) -> gtk::ToggleButton {
+    let chip = gtk::ToggleButton::builder().label(text).active(chosen).build();
+    chip.add_css_class("fchip");
+    if let Some(group) = group {
+        chip.set_group(Some(group));
+    }
+    chip
+}
+
+/// Done of total as a 120 by 4 bar.
+pub fn progress_bar(done: i64, total: i64) -> gtk::ProgressBar {
+    let bar = gtk::ProgressBar::new();
+    bar.add_css_class("wd-progress");
+    bar.set_valign(gtk::Align::Center);
+    bar.set_size_request(120, 4);
+    bar.set_fraction(if total > 0 { done as f64 / total as f64 } else { 0.0 });
+    bar.update_property(&[gtk::accessible::Property::Label(&format!("{done} of {total} done"))]);
+    bar
+}
+
+/// A horizontal hairline.
+pub fn hairline() -> gtk::Box {
+    let line = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    line.add_css_class("hairline");
+    line
 }
 
 /// Removes every child of a box.

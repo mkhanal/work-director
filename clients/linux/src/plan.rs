@@ -2,8 +2,11 @@
 
 use std::fmt;
 
-use crate::conversation::Question;
+use crate::conversation::{unmarked, Question};
 use crate::ledger::{Gate, Work};
+
+/// What an item the director decides with no option recommended is answered.
+pub const LEFT_TO_THE_DIRECTOR: &str = "Your call: decide as you judge best.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanError {
@@ -140,6 +143,33 @@ impl Plan {
             return Err(PlanError::Empty);
         }
         Ok(plan("Answer", [words(&["answer", id]), answers].concat()))
+    }
+
+    /// Leaves a question to the director: each item answered with the option
+    /// it recommends, or left to its judgement when it recommends none.
+    pub fn director_decides(id: &str, question: &Question) -> Result<Plan, PlanError> {
+        let answers: Vec<String> = question
+            .items
+            .iter()
+            .map(|item| {
+                item.options
+                    .iter()
+                    .map(|o| o.label.as_str())
+                    .find(|l| unmarked(l).len() != l.len())
+                    .map_or_else(|| LEFT_TO_THE_DIRECTOR.to_string(), |l| unmarked(l).to_string())
+            })
+            .collect();
+        Plan::answer(id, question, &answers).map(|p| Plan { title: "Let the director decide".into(), ..p })
+    }
+
+    /// A sub-goal added to a goal, with what makes it done.
+    pub fn add_sub_goal(goal: &str, outcome: &str, done_when: &str) -> Result<Plan, PlanError> {
+        let outcome = required(outcome, "a sub-goal")?;
+        let done_when = required(done_when, "a sub-goal's done-when")?;
+        Ok(plan(
+            "Add sub-goal",
+            vec!["goal".into(), "add".into(), goal.into(), outcome, "--done-when".into(), done_when],
+        ))
     }
 
     /// Interrupts what work's sessions are doing and takes back the messages

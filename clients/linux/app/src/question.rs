@@ -1,16 +1,16 @@
-//! A question laid out as it was asked: each item with its options, picked in
-//! place and sent as the answer. Answered, it stays where it was asked,
-//! showing what was chosen.
+//! A question laid out as the canvas's question card: each item with its
+//! options, picked in place and sent as the answer, or left to the
+//! director. Answered, it stays where it was asked, showing what was chosen.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
 
-use kit::{AnswerDraft, Plan, Question, QuestionItem};
+use kit::{AnswerDraft, Plan, Question, QuestionItem, Tone};
 
 use crate::app::App;
-use crate::ui::{self, SPACE_1, SPACE_2, SPACE_3};
+use crate::ui::{self, SPACE_1, SPACE_2};
 
 /// The label an option is shown with, and whether it is the recommended one.
 fn shown(label: &str) -> (&str, bool) {
@@ -18,30 +18,37 @@ fn shown(label: &str) -> (&str, bool) {
     (bare, bare.len() != label.len())
 }
 
-/// The question waiting on the person, answered in place; `answered` runs
-/// once wd has taken the answer.
-pub fn pending(app: &App, work: &str, question: &Question, title: &str, answered: Rc<dyn Fn()>) -> gtk::Widget {
-    let card = ui::card("attention");
-    card.append(&ui::line(title, &["meta", "attention-text"]));
+/// The question waiting on the person, answered in place; `label` heads the
+/// card, `extra` sits between the question and its buttons, and `answered`
+/// runs once wd has taken the answer.
+pub fn pending(
+    app: &App,
+    work: &str,
+    question: &Question,
+    label: &str,
+    extra: Option<gtk::Widget>,
+    answered: Rc<dyn Fn()>,
+) -> gtk::Widget {
+    let card = ui::vbox(SPACE_2);
+    card.add_css_class("question");
+    let head = ui::label(label);
+    head.add_css_class("attention-text");
+    card.append(&head);
     let draft = Rc::new(RefCell::new(AnswerDraft::new(question.clone())));
     let pages =
         gtk::Stack::builder().vhomogeneous(false).transition_type(gtk::StackTransitionType::SlideLeftRight).build();
-    let answer = gtk::Button::with_label("Answer");
-    answer.add_css_class("suggested-action");
+    let answer = ui::button("Answer", true);
     answer.set_sensitive(false);
-    let command = ui::line("", &["meta", "text3"]);
-    command.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-    command.set_hexpand(true);
+    let decide = ui::button("Let the director decide", false);
     let failure = ui::text("", &["callout", "failure"]);
     failure.set_visible(false);
 
     let refresh: Rc<dyn Fn()> = {
-        let (draft, answer, command, work, q) =
-            (draft.clone(), answer.clone(), command.clone(), work.to_string(), question.clone());
+        let (draft, answer, work, q) = (draft.clone(), answer.clone(), work.to_string(), question.clone());
         Rc::new(move || {
             let plan = draft.borrow().answers().and_then(|a| Plan::answer(&work, &q, &a).ok());
             answer.set_sensitive(plan.is_some());
-            command.set_label(&plan.map(|p| p.command_line()).unwrap_or_default());
+            answer.set_tooltip_text(plan.map(|p| p.command_line()).as_deref());
         })
     };
 
@@ -51,13 +58,19 @@ pub fn pending(app: &App, work: &str, question: &Question, title: &str, answered
         pages.add_named(&page, Some(&i.to_string()));
     }
     card.append(&pages);
+    if let Some(extra) = extra {
+        card.append(&extra);
+    }
 
     let footer = ui::hbox(SPACE_2);
-    footer.append(&command);
+    footer.set_margin_top(6);
+    let spacer = ui::hbox(0);
+    spacer.set_hexpand(true);
+    footer.append(&spacer);
     if count > 1 {
         let at = Rc::new(Cell::new(0usize));
-        let back = gtk::Button::with_label("Back");
-        let next = gtk::Button::with_label("Next");
+        let back = ui::button("Back", false);
+        let next = ui::button("Next", false);
         back.set_sensitive(false);
         let step: Rc<dyn Fn(isize)> = {
             let (at, pages, back, next) = (at.clone(), pages.clone(), back.clone(), next.clone());
@@ -75,36 +88,56 @@ pub fn pending(app: &App, work: &str, question: &Question, title: &str, answered
         footer.append(&back);
         footer.append(&next);
     }
+    footer.append(&decide);
     footer.append(&answer);
     card.append(&footer);
     card.append(&failure);
 
-    let (app, work, q) = (app.clone(), work.to_string(), question.clone());
-    answer.connect_clicked(move |button| {
-        let Some(plan) = draft.borrow().answers().and_then(|a| Plan::answer(&work, &q, &a).ok()) else { return };
-        button.set_sensitive(false);
-        let (app, failure, button, answered) = (app.clone(), failure.clone(), button.clone(), answered.clone());
-        app.clone().spawn(async move {
-            match app.store.run(&plan).await {
-                Ok(result) if result.code == 0 => {
-                    failure.set_visible(false);
-                    app.toast(&plan.command_line());
-                    answered();
-                }
-                Ok(result) => {
-                    failure.set_label(result.complaint());
-                    failure.set_visible(true);
-                    button.set_sensitive(true);
-                }
-                Err(e) => {
-                    failure.set_label(&e.to_string());
-                    failure.set_visible(true);
-                    button.set_sensitive(true);
-                }
+    let send = {
+        let (app, failure, answered) = (app.clone(), failure.clone(), answered.clone());
+        Rc::new(move |plan: Plan, buttons: [gtk::Button; 2]| {
+            for b in &buttons {
+                b.set_sensitive(false);
             }
-            app.store.refresh().await;
-        });
+            let (app, failure, answered) = (app.clone(), failure.clone(), answered.clone());
+            app.clone().spawn(async move {
+                let refused = match app.store.run(&plan).await {
+                    Ok(result) if result.code == 0 => None,
+                    Ok(result) => Some(result.complaint().to_string()),
+                    Err(e) => Some(e.to_string()),
+                };
+                match refused {
+                    None => {
+                        failure.set_visible(false);
+                        app.toast(&plan.command_line());
+                        answered();
+                    }
+                    Some(why) => {
+                        failure.set_label(&why);
+                        failure.set_visible(true);
+                        for b in &buttons {
+                            b.set_sensitive(true);
+                        }
+                    }
+                }
+                app.store.refresh().await;
+            });
+        })
+    };
+    let (s, work_id, q, pair) = (send.clone(), work.to_string(), question.clone(), [answer.clone(), decide.clone()]);
+    answer.connect_clicked(move |_| {
+        if let Some(plan) = draft.borrow().answers().and_then(|a| Plan::answer(&work_id, &q, &a).ok()) {
+            s(plan, pair.clone());
+        }
     });
+    let (work_id, q, pair) = (work.to_string(), question.clone(), [answer.clone(), decide.clone()]);
+    match Plan::director_decides(&work_id, &q) {
+        Ok(plan) => {
+            decide.set_tooltip_text(Some(&plan.command_line()));
+            decide.connect_clicked(move |_| send(plan.clone(), pair.clone()));
+        }
+        Err(_) => decide.set_visible(false),
+    }
     card.upcast()
 }
 
@@ -115,27 +148,45 @@ fn item_page(
     draft: &Rc<RefCell<AnswerDraft>>,
     refresh: &Rc<dyn Fn()>,
 ) -> gtk::Box {
-    let page = ui::vbox(SPACE_3);
+    let page = ui::vbox(0);
     let head = ui::hbox(SPACE_2);
     if count > 1 {
-        head.append(&ui::line(&format!("{} of {count}", i + 1), &["meta", "text2"]));
+        head.append(&ui::line(&format!("{} of {count}", i + 1), &["meta", "text3"]));
     }
     if !item.header.is_empty() {
-        head.append(&ui::tag(&item.header, &["meta"]));
+        head.append(&ui::sgtag(&item.header));
     }
     if item.multi {
         head.append(&ui::line("pick any", &["meta", "text3"]));
     }
     if head.first_child().is_some() {
+        head.set_margin_bottom(SPACE_1);
         page.append(&head);
     }
-    page.append(&ui::said(&item.question, &["body", "strong"]));
+    let asked = ui::said(&item.question, &["body", "medium"]);
+    asked.set_margin_top(6);
+    asked.set_margin_bottom(SPACE_2);
+    page.append(&asked);
 
-    let list = gtk::ListBox::new();
-    list.add_css_class("boxed-list");
-    list.set_selection_mode(gtk::SelectionMode::None);
-    let other =
-        adw::EntryRow::builder().title(if item.multi { "Add something else…" } else { "Something else…" }).build();
+    let rows: Rc<RefCell<Vec<(gtk::Box, String)>>> = Rc::new(RefCell::new(Vec::new()));
+    let mark_chosen = {
+        let (rows, draft) = (rows.clone(), draft.clone());
+        Rc::new(move || {
+            for (row, label) in rows.borrow().iter() {
+                if draft.borrow().is_picked(label, i) {
+                    row.add_css_class("chosen");
+                } else {
+                    row.remove_css_class("chosen");
+                }
+            }
+        })
+    };
+    let other = gtk::Entry::builder()
+        .placeholder_text(if item.multi { "Add something else…" } else { "Something else…" })
+        .hexpand(true)
+        .has_frame(false)
+        .build();
+    other.add_css_class("callout");
     let mut group: Option<gtk::CheckButton> = None;
     for option in &item.options {
         let check = gtk::CheckButton::new();
@@ -147,19 +198,26 @@ fn item_page(
             }
         }
         let (label, recommended) = shown(&option.label);
-        let row = adw::ActionRow::builder().title(label).use_markup(false).activatable(true).build();
+        let row = ui::hbox(SPACE_2);
+        row.add_css_class("option");
+        row.append(&check);
+        let words = ui::vbox(2);
+        words.set_hexpand(true);
+        words.append(&ui::text(label, &["callout", "medium"]));
         if !option.description.is_empty() {
-            row.set_subtitle(&option.description);
+            words.append(&ui::text(&option.description, &["meta", "text3"]));
         }
-        row.add_prefix(&check);
-        row.set_activatable_widget(Some(&check));
+        row.append(&words);
         if recommended {
-            let tag = ui::tag("Recommended", &["meta", "settled-text"]);
-            tag.set_valign(gtk::Align::Center);
-            row.add_suffix(&tag);
+            row.append(&ui::badge("Recommended", Tone::Settled));
         }
-        let (draft, refresh, label, multi, other) =
-            (draft.clone(), refresh.clone(), option.label.clone(), item.multi, other.clone());
+        let click = gtk::GestureClick::new();
+        let (c, multi) = (check.clone(), item.multi);
+        click.connect_released(move |_, _, _, _| c.set_active(!multi || !c.is_active()));
+        words.add_controller(click);
+        rows.borrow_mut().push((row.clone(), option.label.clone()));
+        let (draft, refresh, label, multi, other, mark) =
+            (draft.clone(), refresh.clone(), option.label.clone(), item.multi, other.clone(), mark_chosen.clone());
         check.connect_toggled(move |check| {
             let picked = draft.borrow().is_picked(&label, i);
             if multi {
@@ -170,36 +228,41 @@ fn item_page(
                 draft.borrow_mut().toggle(&label, i);
                 other.set_text("");
             }
+            mark();
             refresh();
         });
-        list.append(&row);
+        page.append(&row);
     }
+    let row = ui::hbox(SPACE_2);
+    row.add_css_class("option");
+    let mark = gtk::Label::new(Some("○"));
+    mark.add_css_class("text3");
+    row.append(&mark);
+    row.append(&other);
+    page.append(&row);
     let (d, r) = (draft.clone(), refresh.clone());
     other.connect_changed(move |entry| {
         d.borrow_mut().set_typed(i, &entry.text());
         r();
     });
-    list.append(&other);
-    page.append(&list);
     page
 }
 
 /// A question already answered, or asked of a session and answered there:
 /// its items with what was chosen, and any reply instead.
 pub fn answered(question: &Question) -> gtk::Widget {
-    let card = ui::card("raised");
-    card.append(&ui::line("Asked", &["meta", "text2"]));
+    let card = ui::wd_card(SPACE_2);
+    card.append(&ui::label("Asked"));
     for (i, item) in question.items.iter().enumerate() {
         let answer = question.answers.as_ref().and_then(|a| a.get(i));
         let parts: Vec<&str> = answer.map(|a| a.split(", ").collect()).unwrap_or_default();
         let column = ui::vbox(SPACE_1);
-        column.append(&ui::said(&item.question, &["body", "strong"]));
+        column.append(&ui::said(&item.question, &["callout", "medium"]));
         for option in &item.options {
             let chosen = parts.contains(&option.label.as_str());
             let row = ui::hbox(SPACE_2);
-            let mark = if chosen { "object-select-symbolic" } else { "radio-symbolic" };
-            row.append(&ui::icon(mark, &[if chosen { "accent-text" } else { "text3" }]));
-            row.append(&ui::text(shown(&option.label).0, &["callout", if chosen { "strong" } else { "text2" }]));
+            row.append(&ui::line(if chosen { "◉" } else { "○" }, &[if chosen { "accent-text" } else { "text3" }]));
+            row.append(&ui::text(shown(&option.label).0, &["callout", if chosen { "medium" } else { "text2" }]));
             column.append(&row);
         }
         if let Some(answer) = answer.filter(|a| !item.options.iter().any(|o| a.split(", ").any(|p| p == o.label))) {

@@ -837,6 +837,104 @@ fn a_goal_reads_as_one_conversation_with_its_supervisor_and_its_agents() {
     assert_eq!(reply.refused, strings(&["START b — b is review, already under way"]));
 }
 
+/// A node of a goal's tree as wd serves one, from the fields a test names.
+fn node_json(id: &str, kind: &str, state: &str, fields: Value) -> Value {
+    let mut w = work_json(id, state);
+    w["kind"] = json!(kind);
+    w["title"] = json!(format!("Title {id}"));
+    let mut n = json!({"work": w, "group": false, "done_when": null, "after": [], "waiting_on": [],
+        "why_not_moving": null, "owner": null, "planned_into": null, "progress": null, "doing": null,
+        "steps": [], "judged": null, "needs_you": 0, "children": []});
+    for (k, v) in fields.as_object().expect("an object") {
+        n[k] = v.clone();
+    }
+    n
+}
+
+/// A Goal Page Shows What Done Means, What Needs You And Its Sub-Goals
+#[test]
+fn a_goal_page_shows_what_done_means_what_needs_you_and_its_sub_goals() {
+    let step = |n: i64, state: &str| json!({"n": n, "text": format!("step {n}"), "state": state});
+    let claude = json!({"runner": "claude", "agent": null});
+    let child = node_json("r", "task", "needs-input", json!({"needs_you": 1}));
+    let goal = goal_view(json!({
+        "goal": work_json("g", "running"), "tasks": [], "rollup": {"counts": {}, "done": 1, "total": 4},
+        "events": [], "claims": [], "landings": [], "delivery": null, "activity": {}, "reports": {},
+        "asking": null,
+        "chain": [{"id": "g", "title": "Release notes", "state": "running"}],
+        "done_when": "every release has notes",
+        "finish": {"line": "complete PR", "source": "taste"},
+        "progress": {"done": 1, "total": 4, "superseded": 1},
+        "not_done_because": ["3 sub-goals open", "done-when not judged met yet"],
+        "course": {"verdict": "on course", "why": "the tag format suits the rest", "at": "2026-10-12T01:00:00Z"},
+        "tree": [
+            node_json("t", "task", "done", json!({"done_when": "each release has a tag", "owner": claude,
+                "steps": [step(1, "done"), step(2, "done")], "judged": {"verdict": "met", "why": "ok"}})),
+            node_json("d", "goal", "running", json!({"planned_into": 3, "progress": {"done": 1, "total": 3, "superseded": 0},
+                "needs_you": 1, "children": [child]})),
+            node_json("c", "task", "running", json!({"owner": claude, "doing": "Writing the template",
+                "steps": [step(1, "done"), step(2, "doing"), step(3, "todo"), step(4, "dropped")]})),
+            node_json("a", "task", "queued", json!({"why_not_moving": "waits on Title d, Title c"})),
+            node_json("x", "task", "running", json!({"steps": [step(1, "doing")]})),
+            node_json("w", "task", "superseded", json!({"why_not_moving": "guides live with each release"})),
+        ],
+    }));
+    assert!(!goal.nested());
+    assert_eq!(
+        goal.finish_card(),
+        Some((
+            "A complete PR".to_string(),
+            "From your taste: a PR open with checks green and the done-when met.".to_string()
+        ))
+    );
+    assert_eq!(goal.course.as_ref().map(Course::badge), Some(("On course".to_string(), Tone::Settled)));
+    assert_eq!(goal.progress_line(), "1 of 4 done · 1 superseded");
+
+    let rows = goal.sub_goal_rows();
+    let row = |id: &str| rows.iter().find(|r| r.id == id).expect("a row").clone();
+    assert_eq!(row("t").meta, "Done when each release has a tag · claude · 2 steps · judged met");
+    assert_eq!(row("t").badge, ("Done".to_string(), Tone::Settled));
+    assert_eq!(row("d").meta, "Planned into 3 sub-goals · 1 of 3 done");
+    assert_eq!(row("d").badge, ("1 needs you".to_string(), Tone::Attention));
+    assert_eq!(row("d").opens.as_deref(), Some("d"), "a sub-goal that is a goal opens its page");
+    assert_eq!(row("c").meta, "claude · now: Writing the template");
+    assert_eq!(row("c").badge, ("Working · 1 of 3".to_string(), Tone::Live), "a dropped step is not counted");
+    assert!(row("c").open && !row("x").open, "only the first working task starts with its steps shown");
+    assert_eq!((row("c").opens, row("c").mark), (None, Mark::Working));
+    assert_eq!(row("a").meta, "Waits on Title d, Title c");
+    assert_eq!(row("a").badge, ("Waiting".to_string(), Tone::Waiting));
+    assert_eq!(row("w").meta, "Superseded: guides live with each release");
+    assert!(row("w").struck);
+
+    let mut nested = goal.clone();
+    nested.chain.push(Link { id: "d".into(), title: "Guide".into(), state: WorkState::Running });
+    assert!(nested.nested() && nested.finish_card().is_none(), "a sub-goal finishes where its top goal does");
+
+    let q: Question = serde_json::from_value(json!({"id": "q", "items": [
+        {"header": "", "question": "Rollback?", "multi": false, "options": [
+            {"label": "Redeploy only (recommended)", "description": ""}, {"label": "Both", "description": ""}]},
+        {"header": "", "question": "Notes in English?", "multi": false, "options": []}],
+        "answers": null, "reply": null}))
+    .expect("a question");
+    assert_eq!(
+        Plan::director_decides("r", &q).map(|p| p.argv),
+        Ok(strings(&["answer", "r", "Redeploy only", kit::plan::LEFT_TO_THE_DIRECTOR]))
+    );
+    assert_eq!(
+        Plan::add_sub_goal("g", " Guides for each release ", "a guide per release").map(|p| p.argv),
+        Ok(strings(&["goal", "add", "g", "Guides for each release", "--done-when", "a guide per release"]))
+    );
+    assert!(Plan::add_sub_goal("g", "Guides", " ").is_err(), "a sub-goal needs what makes it done");
+
+    let record: RecordView = serde_json::from_value(json!({"summary": {"decisions": 1, "yours": 1, "course": 1,
+        "corrections": 0, "questions": 0, "answered_by_director": 0, "chores": 1, "judged": 0}, "entries": [
+        {"event": 3, "at": "a", "kind": "course", "what": "on course: fine", "where": "Guide", "by": "director"},
+        {"event": 2, "at": "a", "kind": "chore", "what": "refreshed dependencies", "where": "Guide › Flags", "by": "director"},
+        {"event": 1, "at": "a", "kind": "decision", "what": "English only", "where": "Guide", "by": "you"}]}))
+    .expect("a record");
+    assert_eq!(record.director_did().iter().map(|e| e.event).collect::<Vec<_>>(), vec![3, 2]);
+}
+
 /// The Kit Reads A Goal As A Tree
 #[test]
 fn the_kit_reads_a_goal_as_a_tree() {
@@ -873,7 +971,10 @@ fn the_kit_reads_a_goal_as_a_tree() {
     assert_eq!(g.node(&rollback).map(|n| n.done_when.clone()), Some(Some("it is so".to_string())));
     assert_eq!(g.node(&tagged).and_then(Node::opens), None, "a task opens no goal page");
     let w = g.node(&workflow).expect("the workflow node");
-    assert_eq!(w.waiting_on, strings(&["Tagged", "Guide"]));
+    assert_eq!(
+        w.waiting_on.iter().cloned().collect::<HashSet<_>>(),
+        HashSet::from(["Tagged".to_string(), "Guide".to_string()])
+    );
     assert!(w.why_not_moving.is_some());
 
     let nested = run.wait(store.goal(&guide)).expect("the sub-goal");
@@ -911,9 +1012,9 @@ fn the_kit_reads_a_goal_as_a_tree() {
     store.stop();
 }
 
-/// A Goal Is Read As Its Overview, Its Conversation, Its Tasks Or Its Record
+/// A Goal Is Read As Its Overview, Its Conversation Or Its Record
 #[test]
-fn a_goal_is_read_as_its_overview_its_conversation_its_tasks_or_its_record() {
+fn a_goal_is_read_as_its_overview_its_conversation_or_its_record() {
     let event = |id: i64, work: &str, kind: &str, body: &str, decision: Value| {
         json!({"id": id, "work": work, "kind": kind, "body": body, "at": format!("2026-10-12T01:{id:02}:00Z"),
             "effective": null, "decision": decision})
@@ -944,9 +1045,6 @@ fn a_goal_is_read_as_its_overview_its_conversation_its_tasks_or_its_record() {
         "reports": {"5": {"verdict": "done", "said": "", "files": ["x.ts"], "file_note": "",
             "sections": [{"name": "VERIFY", "text": "go test → 0"}]}},
     }));
-    let p = goal.progress();
-    assert_eq!([p.done, p.working, p.review, p.blocked, p.waiting, p.dropped], [1, 1, 1, 1, 1, 1]);
-    assert_eq!(goal.waiting_on_you(), 2, "the goal's own question and task c's");
 
     let ids = |filter| goal.items(filter).iter().map(ThreadItem::id).collect::<Vec<_>>();
     assert_eq!(
@@ -967,34 +1065,52 @@ fn a_goal_is_read_as_its_overview_its_conversation_its_tasks_or_its_record() {
     assert_eq!(r.sections.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), vec!["VERIFY"]);
 }
 
-/// The Sidebar Lists Work As Threads, Most Recently Active First
+/// The Sidebar Bands Top Goals By Whether They Need You, Work Or Are Completed
 #[test]
-fn the_sidebar_lists_work_as_threads_most_recently_active_first() {
+fn the_sidebar_bands_top_goals_by_whether_they_need_you_work_or_are_completed() {
     let item = |id: &str, state: &str, project: &str, updated: &str| {
         let mut w = work_json(id, state);
         w["project"] = json!(project);
         w["updated"] = json!(updated);
         w
     };
-    let goal = |w: Value, band: &str| board_goal(w, band);
+    let goal = |w: Value, band: &str, done: i64, total: i64, needs_you: i64| {
+        let mut g = board_goal(w, band);
+        g["progress"] = json!({"done": done, "total": total, "superseded": 0});
+        g["needs_you"] = json!(needs_you);
+        g
+    };
+    let mut discovery = goal(item("why", "running", "demo", "2026-10-03T00:00:00Z"), "in-flight", 0, 0, 0);
+    discovery["finish"] = json!({"line": "discovery", "source": "goal"});
+    let mut shipped = goal(item("shipped", "done", "demo", "2026-10-10T00:00:00Z"), "at-rest", 4, 4, 0);
+    shipped["finished"] = json!("Complete PR #512");
     let board: Board = serde_json::from_value(json!({
         "goals": [
-            goal(item("old", "running", "demo", "2026-10-01"), "in-flight"),
-            goal(item("new", "needs-input", "demo", "2026-10-09"), "needs-you"),
-            goal(item("later", "queued", "demo", "2026-10-08"), "in-flight"),
-            goal(item("shipped", "done", "demo", "2026-10-10"), "at-rest"),
-            goal(item("elsewhere", "running", "other", "2026-10-11"), "in-flight"),
+            goal(item("old", "running", "demo", "2026-10-01T00:00:00Z"), "in-flight", 5, 11, 0),
+            goal(item("asks", "running", "demo", "2026-10-09T00:00:00Z"), "in-flight", 1, 4, 1),
+            goal(item("later", "queued", "demo", "2026-10-08T00:00:00Z"), "in-flight", 0, 0, 0),
+            goal(item("push", "review", "demo", "2026-10-07T00:00:00Z"), "ready-to-push", 2, 2, 0),
+            shipped,
+            discovery,
+            goal(item("gone", "superseded", "demo", "2026-10-06T00:00:00Z"), "at-rest", 0, 1, 0),
+            goal(item("elsewhere", "running", "other", "2026-10-11T00:00:00Z"), "in-flight", 0, 1, 0),
         ],
-        "standalone": [{"work": item("fix", "running", "demo", "2026-10-05"), "band": "in-flight"}],
+        "standalone": [{"work": item("fix", "running", "demo", "2026-10-05T00:00:00Z"), "band": "in-flight"}],
     }))
     .expect("a board");
-    let ids = |threads: &[BoardThread]| threads.iter().map(|t| t.work.id.clone()).collect::<Vec<_>>();
-    let t = board.threads(Some("demo"), None);
-    assert_eq!(ids(&t.open), strings(&["new", "fix", "old"]));
-    assert_eq!(ids(&t.queued), strings(&["later"]));
-    assert_eq!(ids(&t.settled), strings(&["shipped"]));
-    assert_eq!(board.threads(None, None).open.first().map(|t| t.work.id.as_str()), Some("elsewhere"));
-    assert_eq!(ids(&board.threads(Some("demo"), Some(Band::NeedsYou)).open), strings(&["new"]));
+    let now = kit::time::instant("2026-10-10T02:00:00Z").expect("a time");
+    let ids = |rows: &[SidebarRow]| rows.iter().map(|r| r.work.id.clone()).collect::<Vec<_>>();
+    let b = board.bands(Some("demo"), now);
+    assert_eq!(ids(&b.needs_you), strings(&["asks", "push"]), "a question under it, or a gate for a person");
+    assert_eq!(ids(&b.working), strings(&["later", "fix", "why", "old"]));
+    assert_eq!(ids(&b.completed), strings(&["shipped"]));
+    assert_eq!(ids(&b.settled), strings(&["gone"]));
+    assert_eq!(board.bands(None, now).working.first().map(|r| r.work.id.as_str()), Some("elsewhere"));
+    let meta = |id: &str| b.all().find(|r| r.work.id == id).map(|r| (r.meta.clone(), r.needs_you));
+    assert_eq!(meta("asks"), Some(("1 of 4".to_string(), 1)));
+    assert_eq!(meta("old"), Some(("5 of 11".to_string(), 0)));
+    assert_eq!(meta("why"), Some(("Discovery".to_string(), 0)), "the finish line, before there are sub-goals");
+    assert_eq!(meta("shipped"), Some(("Complete PR #512 · 2h".to_string(), 0)));
 }
 
 /// The Next Gate Is One Button

@@ -1,123 +1,252 @@
-/* The desktop design's tokens (docs/design/desktop.md) over libadwaita's
-   named colours, so light and dark both follow the system. */
+/* The goal-tree canvas's tokens (docs/design/goal-tree), light. dark.css
+   redefines every wd_ colour at a higher priority while the system is dark;
+   nothing below names a colour any other way. */
 
-/* Type */
+@define-color wd_page #ffffff;
+@define-color wd_sidebar #f2f2f6;
+@define-color wd_search #e6e6ec;
+@define-color wd_hairline #e3e3e8;
+@define-color wd_separator #ececf1;
+@define-color wd_record_separator #f0f0f3;
+@define-color wd_text #1d1d1f;
+@define-color wd_text2 #55555b;
+@define-color wd_text3 #6c6c72;
+@define-color wd_step #3a3a3f;
+@define-color wd_accent #0a64d6;
+@define-color wd_link #0a5cc7;
+@define-color wd_selected #dcdce3;
+@define-color wd_button_border #d6d6dc;
+@define-color wd_tab_on #ececf1;
+@define-color wd_done #1f9d55;
+@define-color wd_needs #e8820c;
+@define-color wd_waiting #9a9aa0;
+@define-color wd_blocked #c01c28;
+@define-color wd_attention_bg #fff1e0;
+@define-color wd_attention_fg #9a3b00;
+@define-color wd_settled_bg #e6f6ec;
+@define-color wd_settled_fg #11692f;
+@define-color wd_live_bg #e8effc;
+@define-color wd_live_fg #0a4fb0;
+@define-color wd_waiting_bg #efeff3;
+@define-color wd_waiting_fg #55555b;
+@define-color wd_decision_bg #f1ebfb;
+@define-color wd_decision_fg #5b2aa8;
+@define-color wd_question_border #f3c99a;
+@define-color wd_question_fill #fff8f0;
+@define-color wd_question_rule #f3dfc8;
+@define-color wd_question_row #fffaf4;
+@define-color wd_bubble_fill #e5effc;
+@define-color wd_bubble_border #bcd3f3;
+@define-color wd_tag_fill #f2f2f6;
+@define-color wd_answered_fill #f0faf3;
+@define-color wd_answered_border #cdebd7;
+@define-color wd_proposed_fill #fafafc;
+@define-color wd_compare_border #f0dcc4;
+@define-color wd_compare_rule #f4ece2;
+@define-color wd_struck #b9b9bf;
+@define-color wd_failure #c01c28;
+
+/* libadwaita's own named colours follow the tokens, so its widgets do too. */
+@define-color window_bg_color @wd_page;
+@define-color window_fg_color @wd_text;
+@define-color view_bg_color @wd_page;
+@define-color view_fg_color @wd_text;
+@define-color headerbar_bg_color @wd_page;
+@define-color headerbar_fg_color @wd_text;
+@define-color headerbar_shade_color @wd_hairline;
+@define-color sidebar_bg_color @wd_sidebar;
+@define-color sidebar_fg_color @wd_text;
+@define-color card_bg_color @wd_page;
+@define-color card_fg_color @wd_text;
+@define-color accent_bg_color @wd_accent;
+@define-color accent_color @wd_link;
+@define-color success_color @wd_done;
+@define-color warning_color @wd_needs;
+@define-color error_color @wd_failure;
+
+/* Type: size / line height, weight */
 .display { font-size: 22px; font-weight: 600; }
 .title { font-size: 16px; font-weight: 600; }
 .body { font-size: 14px; }
 .callout { font-size: 13px; }
-.meta { font-size: 12px; font-weight: 500; }
-.micro { font-size: 11px; font-weight: 600; letter-spacing: 0.4px; }
+.meta { font-size: 12px; }
+.micro { font-size: 11px; font-weight: 600; letter-spacing: 0.4px; color: @wd_text3; }
 .code { font-family: monospace; font-size: 12.5px; }
 .strong { font-weight: 600; }
+.medium { font-weight: 500; }
 .numeric { font-feature-settings: "tnum"; }
-.speaker { font-size: 12px; font-weight: 600; }
+.speaker { font-size: 12px; font-weight: 500; color: @wd_text2; }
+.number { font-size: 20px; font-weight: 600; }
+.label { font-size: 12px; font-weight: 500; color: @wd_text3; }
+.struck { text-decoration-line: line-through; text-decoration-color: @wd_struck; color: @wd_text2; }
 
 /* Text colours */
-.text2 { color: alpha(@window_fg_color, 0.72); }
-.text3 { color: alpha(@window_fg_color, 0.5); }
-.failure { color: @error_color; }
-.attention-text { color: @warning_color; }
-.settled-text { color: @success_color; }
-.accent-text { color: @accent_color; }
+.text2 { color: @wd_text2; }
+.text3 { color: @wd_text3; }
+.step-text { color: @wd_step; }
+.failure { color: @wd_failure; }
+.attention-text { color: @wd_attention_fg; }
+.settled-text { color: @wd_settled_fg; }
+.accent-text { color: @wd_accent; }
+.done-text { color: @wd_done; }
+.needs-text { color: @wd_needs; }
+.waiting-text { color: @wd_waiting; }
 
-/* Boxes that mean something */
-.bubble-you {
-  background-color: alpha(@accent_bg_color, 0.14);
-  border: 1px solid alpha(@accent_bg_color, 0.30);
-  border-radius: 14px;
-  padding: 10px 14px;
-}
-.raised {
-  background-color: @card_bg_color;
-  border: 1px solid alpha(@window_fg_color, 0.10);
-  border-radius: 10px;
-  padding: 16px;
-}
-.attention {
-  background-color: alpha(@warning_color, 0.08);
-  border: 1px solid alpha(@warning_color, 0.45);
-  border-left: 3px solid @warning_color;
-  border-radius: 10px;
-  padding: 16px;
-}
-.settled {
-  background-color: alpha(@success_color, 0.08);
-  border: 1px solid alpha(@success_color, 0.30);
-  border-radius: 10px;
-  padding: 12px;
-}
-.sunken {
-  background-color: alpha(@window_fg_color, 0.06);
-  border-radius: 10px;
-}
-.sunken > viewport > label, .sunken label { padding: 12px; }
+/* The page and the sidebar */
+.page { background-color: @wd_page; }
+.page-header { padding: 20px 32px 12px 32px; }
+.page-body { padding: 20px 32px; }
+.hairline { background-color: @wd_hairline; min-height: 1px; min-width: 1px; }
+.sidebar-pane { background-color: @wd_sidebar; border-right: 1px solid @wd_hairline; }
+.sidebar-pane list, .sidebar-pane row { background-color: transparent; }
+.sidebar-pane .search { background-color: @wd_search; border-radius: 8px; min-height: 28px; font-size: 13px; }
+.sidebar-pane row.goal-row { padding: 8px 10px; border-radius: 10px; margin: 0 0 4px 0; }
+.sidebar-pane row.goal-row:selected { background-color: @wd_selected; color: @wd_text; }
+.sidebar-pane row.goal-row:hover:not(:selected) { background-color: alpha(@wd_selected, 0.5); }
+.sidebar-pane row.nav-row { padding: 6px 10px; border-radius: 8px; }
+.sidebar-pane row.nav-row:selected { background-color: @wd_selected; color: @wd_text; }
+.sidebar-title { font-size: 13px; font-weight: 600; }
+.goal-title { font-size: 13px; font-weight: 500; }
+.goal-path { border-left: 2px solid #c9c9d1; padding: 2px 0 2px 10px; margin-top: 8px; }
+.sidebar-dot { min-width: 8px; min-height: 8px; border-radius: 4px; margin-top: 5px; }
+.sidebar-dot.needs-you { background-color: @wd_needs; }
+.sidebar-dot.working { background-color: @wd_accent; }
+.sidebar-dot.completed { background-color: @wd_done; }
+.sidebar-dot.settled { background-color: @wd_waiting; }
 
-/* Chips, tags, pills */
-.tag, .pill:not(button) {
-  border-radius: 6px;
-  padding: 2px 8px;
-  background-color: alpha(@window_fg_color, 0.08);
+/* Toolbar and buttons */
+headerbar { min-height: 52px; box-shadow: inset 0 -1px @wd_hairline; background-color: @wd_page; }
+button.wd-button {
+  font-size: 13px; padding: 5px 12px; min-height: 0; border-radius: 7px;
+  border: 1px solid @wd_button_border; background-color: @wd_page; color: @wd_text; box-shadow: none;
 }
+button.wd-button, button.tab, button.fchip, button.inline-link, button.crumb-link, button.row-button,
+menubutton.wd-button > button, togglebutton.wd-button { font-weight: normal; }
+button.wd-button:hover { background-color: alpha(@wd_text, 0.04); }
+button.wd-button.primary, button.wd-button.suggested-action {
+  background-color: @wd_accent; border-color: @wd_accent; color: #ffffff; font-weight: 500;
+}
+button.wd-button.small { padding: 3px 8px; }
+button.wd-button.menu-button > button, menubutton.wd-button > button {
+  font-size: 13px; padding: 5px 12px; min-height: 0; border-radius: 7px;
+  border: 1px solid @wd_button_border; background-color: @wd_page; box-shadow: none;
+}
+button.inline-link {
+  font-size: 12px; padding: 2px 4px; min-height: 0; color: @wd_link; background: none; border: none; box-shadow: none;
+}
+button.crumb-link { font-size: 12px; padding: 0; min-height: 0; color: @wd_text3; background: none; box-shadow: none; }
+button.crumb-link:hover { color: @wd_link; }
+button.row-button { padding: 0; background: none; border: none; box-shadow: none; border-radius: 0; }
+button.row-button:hover { background-color: alpha(@wd_text, 0.03); }
+
+/* Tabs */
+button.tab { font-size: 13px; padding: 6px 10px; min-height: 0; border-radius: 7px; color: @wd_text2; background: none; box-shadow: none; }
+button.tab:checked { background-color: @wd_tab_on; color: @wd_text; font-weight: 600; }
+
+/* Cards */
+.wd-card { border: 1px solid @wd_hairline; border-radius: 10px; padding: 14px 16px; background-color: @wd_page; }
+.wd-card.flush { padding: 0; }
+.wd-card.dashed { border-style: dashed; background-color: @wd_proposed_fill; }
+.wd-card.answered { border-radius: 8px; padding: 8px 10px; background-color: @wd_answered_fill; border-color: @wd_answered_border; }
+.sum-card { border: 1px solid @wd_hairline; border-radius: 10px; padding: 10px 12px; }
+.sub-goal { padding: 14px 16px; border-bottom: 1px solid @wd_separator; }
+.sub-goal.last { border-bottom: none; }
+.sub-goal.asking { background-color: @wd_question_row; }
+.sub-goal.superseded { opacity: 0.75; }
+.step { font-size: 13px; }
+
+/* The question card */
+.question {
+  border: 1px solid @wd_question_border; border-left: 3px solid @wd_needs; border-radius: 10px;
+  background-color: @wd_question_fill; padding: 14px 16px 14px 13px;
+}
+.question .option { padding: 7px 10px; border-radius: 8px; border: 1px solid transparent; font-size: 13px; font-weight: 500; }
+.question .option.chosen { background-color: @wd_page; border-color: @wd_question_border; }
+.question .option.big { padding: 10px 12px; }
+.question .sources { border-top: 1px solid @wd_question_rule; padding-top: 10px; }
+.question .proposed { border: 1px solid @wd_hairline; border-radius: 10px; padding: 14px 14px 12px 8px; background-color: @wd_page; }
+.question .proposed.dashed { border-style: dashed; background-color: @wd_proposed_fill; }
+.compare { border: 1px solid @wd_compare_border; border-radius: 8px; background-color: @wd_page; }
+.compare .cell { padding: 8px 12px; border-bottom: 1px solid @wd_compare_rule; font-size: 13px; }
+.compare .cell.last { border-bottom: none; }
+.number-dot { min-width: 22px; min-height: 22px; border-radius: 11px; background-color: @wd_tab_on; font-size: 12px; font-weight: 600; }
+
+/* Badges, chips, tags */
+.badge { font-size: 10.5px; font-weight: 600; padding: 2px 6px; border-radius: 6px; }
+.badge-attention { background-color: @wd_attention_bg; color: @wd_attention_fg; }
+.badge-settled { background-color: @wd_settled_bg; color: @wd_settled_fg; }
+.badge-live { background-color: @wd_live_bg; color: @wd_live_fg; }
+.badge-waiting { background-color: @wd_waiting_bg; color: @wd_waiting_fg; }
+.badge-decision { background-color: @wd_decision_bg; color: @wd_decision_fg; }
+button.fchip {
+  font-size: 12px; padding: 4px 10px; min-height: 0; border-radius: 14px; border: 1px solid @wd_hairline;
+  background-color: @wd_page; color: @wd_step; box-shadow: none;
+}
+button.fchip:checked { background-color: @wd_text; border-color: @wd_text; color: @wd_page; }
+.sgtag { font-size: 11px; font-weight: 500; padding: 2px 7px; border-radius: 6px; background-color: @wd_tag_fill; color: @wd_step; border: 1px solid @wd_hairline; }
+.chip-tag { font-size: 12px; padding: 2px 8px; border-radius: 6px; background-color: @wd_tag_fill; color: @wd_step; border: 1px solid @wd_hairline; }
+.tag, .pill:not(button) { border-radius: 6px; padding: 2px 8px; background-color: @wd_tag_fill; }
 .chip { border-radius: 6px; padding: 2px 10px; font-size: 13px; }
-.agent-chip {
-  border-radius: 8px;
-  padding: 10px;
-  background-color: alpha(@window_fg_color, 0.04);
+.agent-chip { border-radius: 8px; padding: 10px; background-color: alpha(@wd_text, 0.04); }
+.link-button { padding: 0 2px; min-height: 0; color: @wd_link; }
+
+/* The progress bar: 120 by 4 */
+progressbar.wd-progress trough { min-height: 4px; min-width: 120px; border-radius: 2px; background-color: @wd_separator; }
+progressbar.wd-progress progress { min-height: 4px; border-radius: 2px; background-color: @wd_done; }
+
+/* The record table */
+.record-row { padding: 9px 0; border-bottom: 1px solid @wd_record_separator; font-size: 13px; }
+.record-head { padding: 0 0 9px 0; border-bottom: 1px solid @wd_hairline; }
+.record-day { font-size: 12px; font-weight: 600; color: @wd_step; padding: 14px 0 6px 0; }
+
+/* Conversation */
+.bubble-you { background-color: @wd_bubble_fill; border: 1px solid @wd_bubble_border; border-radius: 14px; padding: 10px 14px; }
+.raised { background-color: @wd_page; border: 1px solid @wd_hairline; border-radius: 10px; padding: 14px 16px; }
+.attention {
+  background-color: @wd_question_fill; border: 1px solid @wd_question_border; border-left: 3px solid @wd_needs;
+  border-radius: 10px; padding: 14px 16px 14px 13px;
 }
-.link-button { padding: 0 2px; min-height: 0; color: @accent_color; }
+.settled { background-color: @wd_answered_fill; border: 1px solid @wd_answered_border; border-radius: 8px; padding: 8px 10px; }
+.sunken { background-color: alpha(@wd_text, 0.06); border-radius: 10px; }
+.sunken > viewport > label, .sunken label { padding: 12px; }
+.director-line { padding: 6px 0; font-size: 13px; }
 
 /* The composer */
 .composer {
-  background-color: @card_bg_color;
-  border: 1px solid alpha(@window_fg_color, 0.12);
-  border-radius: 14px;
-  padding: 12px 14px;
+  background-color: @wd_page; border: 1px solid @wd_hairline; border-radius: 14px; padding: 12px 14px;
   box-shadow: 0 2px 10px alpha(black, 0.07);
 }
 .composer-field, .composer-field text { background-color: transparent; font-size: 14px; }
 button.send { min-width: 28px; min-height: 28px; padding: 0; }
 button.jump { min-width: 34px; min-height: 34px; }
+.to-button { font-size: 12px; color: @wd_text3; padding: 2px 4px; min-height: 0; }
 
 /* Event lines */
-.event-line separator { background-color: alpha(@window_fg_color, 0.12); min-height: 1px; }
+.event-line separator { background-color: @wd_hairline; min-height: 1px; }
 
 /* Dots and state tints */
-.dot { min-width: 8px; min-height: 8px; border-radius: 4px; background-color: alpha(@window_fg_color, 0.35); }
-.dot.asking { background-color: transparent; border: 2px solid @warning_color; min-width: 6px; min-height: 6px; }
-.dot.resting { background-color: transparent; border: 1.5px solid alpha(@window_fg_color, 0.5); min-width: 6px; min-height: 6px; }
-.dot.band-in-flight { background-color: @accent_bg_color; }
-.dot.band-ready { background-color: @success_color; }
-.dot.band-in-review { background-color: @purple_3; }
-.dot.band-paused { background-color: transparent; border: 1.5px solid alpha(@window_fg_color, 0.5); }
-.dot.band-at-rest { background-color: alpha(@window_fg_color, 0.25); }
+.dot { min-width: 8px; min-height: 8px; border-radius: 4px; background-color: @wd_waiting; }
+.dot.asking { background-color: transparent; border: 2px solid @wd_needs; min-width: 6px; min-height: 6px; }
+.dot.resting { background-color: transparent; border: 1.5px solid @wd_waiting; min-width: 6px; min-height: 6px; }
 
-.tint-gray { color: alpha(@window_fg_color, 0.6); }
-.tint-blue { color: @blue_3; }
-.tint-indigo { color: @purple_2; }
-.tint-orange { color: @warning_color; }
-.tint-red { color: @error_color; }
-.tint-purple { color: @purple_3; }
-.tint-teal { color: @green_4; }
-.tint-green { color: @success_color; }
-.tint-brown { color: @brown_3; }
+.tint-gray { color: @wd_waiting; }
+.tint-blue { color: @wd_accent; }
+.tint-indigo { color: @wd_live_fg; }
+.tint-orange { color: @wd_needs; }
+.tint-red { color: @wd_failure; }
+.tint-purple { color: @wd_decision_fg; }
+.tint-teal { color: @wd_settled_fg; }
+.tint-green { color: @wd_done; }
+.tint-brown { color: @wd_attention_fg; }
 
-/* The progress bar, one cell per task */
-.progress-bar { min-height: 8px; border-radius: 4px; }
-.progress-bar > box { min-height: 8px; }
-.bar-done { background-color: @success_color; }
-.bar-working { background-color: @accent_bg_color; }
-.bar-review { background-color: @purple_3; }
-.bar-blocked { background-color: @error_color; }
-.bar-waiting { background-color: alpha(@window_fg_color, 0.3); }
-.bar-dropped { background-color: alpha(@window_fg_color, 0.12); }
-.dot.bar-done { background-color: @success_color; }
-.dot.bar-working { background-color: @accent_bg_color; }
-.dot.bar-review { background-color: @purple_3; }
-.dot.bar-blocked { background-color: @error_color; }
-.dot.bar-waiting { background-color: alpha(@window_fg_color, 0.3); }
-.dot.bar-dropped { background-color: alpha(@window_fg_color, 0.12); }
+/* The drawn state icons take their colour from here. */
+.mark-done { color: @wd_done; }
+.mark-needs-you { color: @wd_needs; }
+.mark-working { color: @wd_accent; }
+.mark-waiting { color: @wd_waiting; }
+.mark-superseded { color: @wd_waiting; }
+.mark-blocked { color: @wd_blocked; }
 
 /* The agents inspector */
-.inspector { background-color: @sidebar_bg_color; }
+.inspector { background-color: @wd_sidebar; }
 .agent-card { padding: 6px 4px; }

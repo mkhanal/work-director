@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use crate::conversation::{Activity, Question};
@@ -214,26 +215,51 @@ pub struct Board {
     pub standalone: Vec<BoardItem>,
 }
 
-/// The sidebar's three lists.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Threads {
-    pub open: Vec<BoardThread>,
-    pub queued: Vec<BoardThread>,
-    pub settled: Vec<BoardThread>,
+/// Where the sidebar lists a top goal or a standalone work item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SidebarBand {
+    /// A question open anywhere under it, or a gate only a person passes.
+    NeedsYou,
+    Working,
+    /// Done.
+    Completed,
+    /// Dropped, abandoned or superseded: folded away.
+    Settled,
 }
 
-impl Threads {
-    pub fn all(&self) -> impl Iterator<Item = &BoardThread> {
-        self.open.iter().chain(&self.queued).chain(&self.settled)
+/// One row of the sidebar.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SidebarRow {
+    pub work: Work,
+    pub band: SidebarBand,
+    /// Progress, the finish line, or where it finished, and how long ago.
+    pub meta: String,
+    /// How many questions under it wait on the person.
+    pub needs_you: i64,
+}
+
+/// The sidebar's bands, each most recently active first.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SidebarBands {
+    pub needs_you: Vec<SidebarRow>,
+    pub working: Vec<SidebarRow>,
+    pub completed: Vec<SidebarRow>,
+    pub settled: Vec<SidebarRow>,
+}
+
+impl SidebarBands {
+    pub fn all(&self) -> impl Iterator<Item = &SidebarRow> {
+        self.needs_you.iter().chain(&self.working).chain(&self.completed).chain(&self.settled)
     }
 }
 
-/// One goal or standalone item as the sidebar lists it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct BoardThread {
-    pub work: Work,
-    pub band: Band,
-    pub rollup: Option<Rollup>,
+fn sidebar_band(work: &Work, band: Band, needs_you: i64) -> SidebarBand {
+    match work.state {
+        WorkState::Done => SidebarBand::Completed,
+        WorkState::Dropped | WorkState::Abandoned | WorkState::Superseded => SidebarBand::Settled,
+        _ if needs_you > 0 || Band::ANNOUNCED.contains(&band) => SidebarBand::NeedsYou,
+        _ => SidebarBand::Working,
+    }
 }
 
 /// Work that has just come to wait on a person: a question or a block, or a
@@ -268,48 +294,65 @@ impl Board {
         self.goals.iter().find(|g| g.work.id == id).map(|g| &g.rollup)
     }
 
-    /// The board as threads: every goal and open standalone item within one
-    /// product when one is named, in one band when one is named, most recently
-    /// active first. Work not started yet is set apart as queued, and work at
-    /// rest as settled.
-    pub fn threads(&self, project: Option<&str>, band: Option<Band>) -> Threads {
-        let mut shown: Vec<BoardThread> = self
-            .goals
-            .iter()
-            .map(|g| BoardThread { work: g.work.clone(), band: g.band, rollup: Some(g.rollup.clone()) })
-            .chain(self.standalone.iter().map(|s| BoardThread { work: s.work.clone(), band: s.band, rollup: None }))
-            .filter(|t| project.is_none_or(|p| t.work.project == p))
-            .filter(|t| band.is_none_or(|b| t.band == b))
-            .collect();
-        shown.sort_by(|a, b| b.work.updated.cmp(&a.work.updated));
-        let waiting = |t: &BoardThread| matches!(t.work.state, WorkState::Queued | WorkState::Briefed);
-        let mut threads = Threads::default();
-        for t in shown {
-            if t.band == Band::AtRest {
-                threads.settled.push(t);
-            } else if waiting(&t) {
-                threads.queued.push(t);
+    /// Top goals and standalone work, within one product when one is named,
+    /// banded by whether they need the person, work, are completed or were
+    /// let go, each band most recently active first.
+    pub fn bands(&self, project: Option<&str>, now: DateTime<Utc>) -> SidebarBands {
+        let mine = |w: &Work| project.is_none_or(|p| w.project == p);
+        let ago = |w: &Work| crate::time::ago(&w.updated, now);
+        let goals = self.goals.iter().filter(|g| mine(&g.work)).map(|g| {
+            let band = sidebar_band(&g.work, g.band, g.needs_you);
+            let lead = if band == SidebarBand::Completed {
+                Some(g.finished.clone().unwrap_or_else(|| "Done".to_string()))
+            } else if g.progress.total > 0 {
+                Some(format!("{} of {}", g.progress.done, g.progress.total))
             } else {
-                threads.open.push(t);
+                g.finish.map(|f| f.line.name().to_string())
+            };
+            let meta = match lead {
+                Some(lead) if band == SidebarBand::Completed => format!("{lead} · {}", ago(&g.work)),
+                Some(lead) => lead,
+                None => ago(&g.work),
+            };
+            SidebarRow { work: g.work.clone(), band, meta, needs_you: g.needs_you }
+        });
+        let standalone = self.standalone.iter().filter(|s| mine(&s.work)).map(|s| SidebarRow {
+            work: s.work.clone(),
+            band: sidebar_band(&s.work, s.band, 0),
+            meta: format!("{} · {}", s.work.state.look().label, ago(&s.work)),
+            needs_you: 0,
+        });
+        let mut rows: Vec<SidebarRow> = goals.chain(standalone).collect();
+        rows.sort_by(|a, b| b.work.updated.cmp(&a.work.updated));
+        let mut bands = SidebarBands::default();
+        for row in rows {
+            match row.band {
+                SidebarBand::NeedsYou => bands.needs_you.push(row),
+                SidebarBand::Working => bands.working.push(row),
+                SidebarBand::Completed => bands.completed.push(row),
+                SidebarBand::Settled => bands.settled.push(row),
             }
         }
-        threads
+        bands
     }
 
     /// Work that entered an announced band since `earlier`. With no earlier
     /// board there is nothing to compare, so nothing has arrived.
     pub fn arrivals(&self, earlier: Option<&Board>) -> Vec<Arrival> {
         let Some(earlier) = earlier else { return Vec::new() };
-        let before_threads = earlier.threads(None, None);
         let mut before: HashMap<&str, Band> = HashMap::new();
-        for t in before_threads.all() {
-            before.entry(t.work.id.as_str()).or_insert(t.band);
+        for (work, band) in earlier.listed() {
+            before.entry(work.id.as_str()).or_insert(band);
         }
-        self.threads(None, None)
-            .all()
-            .filter(|t| Band::ANNOUNCED.contains(&t.band) && before.get(t.work.id.as_str()) != Some(&t.band))
-            .map(|t| Arrival { work: t.work.clone(), band: t.band })
+        self.listed()
+            .filter(|(w, band)| Band::ANNOUNCED.contains(band) && before.get(w.id.as_str()) != Some(band))
+            .map(|(w, band)| Arrival { work: w.clone(), band })
             .collect()
+    }
+
+    /// Every goal and standalone item on the board, with its band.
+    fn listed(&self) -> impl Iterator<Item = (&Work, Band)> {
+        self.goals.iter().map(|g| (&g.work, g.band)).chain(self.standalone.iter().map(|s| (&s.work, s.band)))
     }
 }
 

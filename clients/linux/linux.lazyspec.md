@@ -99,6 +99,14 @@ hold only that product's work; with none, every product's.
 - The panel counts settled cards and adds every card's tokens, subagents included.
 - Choosing a subagent shows its own conversation.
 
+## A Goal Page Shows What Done Means, What Needs You And Its Sub-Goals
+- A top goal's page shows its done-when, where it finishes and where that came from, and its course; a sub-goal's page shows its done-when and its course.
+- Each question waiting on the person anywhere under the goal is answered in place, or left to the director, which answers each item with the option it recommends.
+- Each sub-goal reads its state, then what makes it done, what it is doing, or what it waits on, and a badge; a superseded one is struck through with why.
+- A sub-goal that is a goal opens its own page; a task's steps fold open and closed, closed except the first working task's.
+- A sub-goal is added with its outcome and what makes it done.
+- What holds the goal back from done is listed, and a sub-goal's page lists what the director did under it.
+
 ## The Kit Reads A Goal As A Tree
 - A goal at any depth reads as its breadcrumb, done-when, finish line, progress, what keeps it from done, what needs the person, its course and its sub-goals as a tree.
 - Every work under a goal is named by its path through the tree.
@@ -114,17 +122,17 @@ hold only that product's work; with none, every product's.
 - A question reads with its answer, and the answer says whether the director gave it or the person did; the answer's message to the session is not shown again.
 - The question a goal waits on the person for is answered in place, one answer per question, its choices offered as a session's are.
 
-## A Goal Is Read As Its Overview, Its Conversation, Its Tasks Or Its Record
-- The overview counts the goal's tasks as done, working, in review, blocked, waiting or dropped.
-- The overview counts what waits on the person: the goal's own question and each task's.
+## A Goal Is Read As Its Overview, Its Conversation Or Its Record
 - The conversation narrows to the person's words, the supervisor, reports or questions.
 - Everything folds each run of two or more updates — looks, state changes, checks, landings and messages told to a task — into one row.
 - A report reads as its verdict, what it said with it, its files and its named sections.
 
-## The Sidebar Lists Work As Threads, Most Recently Active First
-- Goals and standalone work in the product in scope are listed most recently updated first.
-- Work not started yet is listed apart as queued, and work at rest apart as settled.
-- Choosing a band shows only the work in it.
+## The Sidebar Bands Top Goals By Whether They Need You, Work Or Are Completed
+- Top goals and standalone work in the product in scope are listed in bands, each most recently updated first.
+- Needs you holds work with a question open anywhere under it, or waiting on a person to push or close it.
+- Completed holds done work; dropped, abandoned and superseded work is listed apart as settled.
+- Everything else is working.
+- A goal reads its progress, or its finish line before it has sub-goals, and how many questions need the person; a completed one reads where it finished and when.
 
 ## The Next Gate Is One Button
 - A work page offers the gate `wd` serves for it as one button, which runs the gate's argv.

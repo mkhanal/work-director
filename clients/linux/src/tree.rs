@@ -126,6 +126,18 @@ impl FinishLine {
         }
     }
 
+    /// The finish line in a word or two, as the sidebar shows it.
+    pub fn name(self) -> &'static str {
+        match self {
+            FinishLine::Discovery => "Discovery",
+            FinishLine::Research => "Research",
+            FinishLine::LocalBuild => "Local build",
+            FinishLine::CompletePr => "Complete PR",
+            FinishLine::Merged => "Merged",
+            FinishLine::Released => "Released",
+        }
+    }
+
     /// What it hands back, in a sentence's words.
     pub fn means(self) -> &'static str {
         match self {
