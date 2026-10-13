@@ -82,6 +82,10 @@ The canvas fixes every colour and component measure. Light values are the
 canvas's; dark keeps the structure and takes the platform's dark equivalent,
 badges as the same hue at 18 % over the dark page with the foreground
 lightened to 4.5:1. macOS: `clients/macos/Sources/WorkDirector/Design.swift`.
+Linux: `clients/linux/app/src/style.css` (light) and `dark.css` (dark, loaded
+over it while the system is dark); both apps carry the same values. The last
+five rows are tokens only the Linux app names so far: the proposal and
+course-change cards' rules, the proposed card's fill and struck-through text.
 
 | Token | Light | Dark |
 |---|---|---|
@@ -109,6 +113,10 @@ lightened to 4.5:1. macOS: `clients/macos/Sources/WorkDirector/Design.swift`.
 | director answered fill / border | `#f0faf3` / `#cdebd7` | `#1b2a20` / `#2b4a35` |
 | filter chip selected fill / text | `#1d1d1f` / `#ffffff` | `#f2f2f7` / `#1d1d1f` |
 | failure | `#d70015` | `#ff6961` |
+| question card inner rule | `#f3dfc8` | `#4a3620` |
+| proposed sub-goal card fill (dashed) | `#fafafc` | `#232327` |
+| course change table border / row rule | `#f0dcc4` / `#f4ece2` | `#5a4630` / `#3a3128` |
+| struck-through text line | `#b9b9bf` | `#6c6c72` |
 
 | Component | Measure |
 |---|---|
@@ -331,4 +339,4 @@ one of `type.callout` text2, at most one button.
 | Composer | `NSTextView` field | `GtkTextView` in a `.card` |
 | Question options | buttons with radio/check marks | `AdwActionRow` with `GtkCheckButton` (grouped for radio) |
 | Toasts / undo | banner | `AdwToastOverlay` with Undo |
-| Colours | the token table's light and dark values as dynamic `NSColor`s | libadwaita named colours (`@accent_bg_color`, `@warning_color`, `@success_color`, `@error_color`, `@card_bg_color`, `@view_bg_color`) |
+| Colours | the token table's light and dark values as dynamic `NSColor`s | the token table's values as `@define-color wd_*` in `style.css`, redefined by `dark.css` while dark; libadwaita's named colours (`@window_bg_color`, `@accent_bg_color`, …) are pointed at them |

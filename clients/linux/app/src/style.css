@@ -20,7 +20,7 @@
 @define-color wd_done #1f9d55;
 @define-color wd_needs #e8820c;
 @define-color wd_waiting #9a9aa0;
-@define-color wd_blocked #c01c28;
+@define-color wd_blocked #d70015;
 @define-color wd_attention_bg #fff1e0;
 @define-color wd_attention_fg #9a3b00;
 @define-color wd_settled_bg #e6f6ec;
@@ -44,7 +44,7 @@
 @define-color wd_compare_border #f0dcc4;
 @define-color wd_compare_rule #f4ece2;
 @define-color wd_struck #b9b9bf;
-@define-color wd_failure #c01c28;
+@define-color wd_failure #d70015;
 
 /* libadwaita's own named colours follow the tokens, so its widgets do too. */
 @define-color window_bg_color @wd_page;
