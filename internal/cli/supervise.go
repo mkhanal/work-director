@@ -393,166 +393,74 @@ func (c *Cli) subPictures(parent string, superseded *[]coordinator.SubPicture) (
 // supersededPrefix opens the note Supersede files with why.
 const supersededPrefix = "superseded: "
 
+// planChange are the actions that change a goal's sub-goals: in ask mode they
+// wait for the person.
+var planChange = []coordinator.ActionKind{coordinator.ActGoal, coordinator.ActSupersede, coordinator.ActEdit, coordinator.ActAfter}
+
 // carryOut does what the supervisor's reply says, each action on its own, and
-// files the reply with what was done and refused as one supervised event.
+// files the reply with what was done and refused as one supervised event. A
+// change to the top goal, and in ask mode a change to the plan, is filed as a
+// question for the person instead, with what an answer carries out.
 func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supervision, error) {
 	out := supervision{Applied: true, Actions: []string{}, Refused: []string{}}
 	actions, unread := coordinator.ParseSupervision(reply)
 	for _, line := range unread {
 		out.Refused = append(out.Refused, line+" — not an action")
 	}
-	tasks, err := c.Ledger.Tasks(goal.ID)
-	if err != nil {
-		return out, err
-	}
-	tree, err := c.Ledger.Under(goal.ID)
-	if err != nil {
-		return out, err
-	}
-	child := func(id string) (core.Work, error) {
-		for _, t := range tree[1:] {
-			if t.ID == id {
-				return c.Ledger.Get(id)
-			}
-		}
-		return core.Work{}, fmt.Errorf("%s is not a sub-goal of %s", id, goal.ID)
-	}
-	var asked []coordinator.Action
-	var done *coordinator.Action
+	var asked, held []coordinator.Action
+	var done, proposed *coordinator.Action
 	for _, a := range actions {
-		err := func() error {
-			switch a.Kind {
-			case coordinator.ActSend:
-				t, err := child(a.Work)
-				if err != nil {
-					return err
-				}
-				_, err = c.tellTask(t, a.Text)
-				return err
-			case coordinator.ActGoal:
-				parent := goal
-				if a.Work != goal.ID {
-					var err error
-					if parent, err = child(a.Work); err != nil {
-						return err
-					}
-				}
-				w, err := c.addSubGoal(parent, a.Title, a.DoneWhen, a.After, a.Split)
-				if err != nil {
-					return err
-				}
-				if waits, err := c.waitingOn(w); err != nil || waits != "" {
-					return err
-				}
-				if core.IsGoal(w.Kind) {
-					_, err := c.startGoalRow(goal, p, w, true)
-					return err
-				}
-				return c.startUnder(goal, p, w)
-			case coordinator.ActStart:
-				t, err := child(a.Work)
-				if err != nil {
-					return err
-				}
-				if t.State != core.StateQueued && t.State != core.StateBriefed {
-					return fmt.Errorf("%s is %s, already under way", t.ID, t.State)
-				}
-				if held, err := c.proposed(*t.Parent); err != nil || held {
-					if err != nil {
-						return err
-					}
-					return fmt.Errorf("%s is in a proposed breakdown; it waits for wd goal approve %s", t.ID, *t.Parent)
-				}
-				if core.IsGoal(t.Kind) {
-					_, err := c.startGoalRow(goal, p, t, true)
-					return err
-				}
-				return c.startUnder(goal, p, t)
-			case coordinator.ActSupersede:
-				t, err := child(a.Work)
-				if err != nil {
-					return err
-				}
-				_, err = c.supersedeSubGoal(t, a.Text)
-				return err
-			case coordinator.ActEdit:
-				t, err := child(a.Work)
-				if err != nil {
-					return err
-				}
-				var title, doneWhen *string
-				if a.Title != "" {
-					title = &a.Title
-				}
-				if a.DoneWhen != "" {
-					doneWhen = &a.DoneWhen
-				}
-				_, _, err = c.editSubGoal(t, title, doneWhen)
-				return err
-			case coordinator.ActAfter:
-				t, err := child(a.Work)
-				if err != nil {
-					return err
-				}
-				what, err := c.orderSubGoal(t, a.After)
-				if err != nil {
-					return err
-				}
-				_, err = c.tellWorking(t.ID, "Your sub-goal now waits on: "+what)
-				return err
-			case coordinator.ActMet:
-				t, err := c.judged(child, a)
-				if err != nil {
-					return err
-				}
-				gate, err := c.closeOne(t)
-				if err != nil || gate == "" {
-					return err
-				}
-				return fmt.Errorf("judged met, but its %s gate stopped it", gate)
-			case coordinator.ActMissed:
-				t, err := c.judged(child, a)
-				if err != nil {
-					return err
-				}
-				if _, err := c.tellTask(t, "Your sub-goal's done-when is not met yet: "+a.Text); err != nil {
-					return err
-				}
-				if t, err = c.Ledger.Get(t.ID); err != nil || t.State == core.StateRunning {
-					return err
-				}
-				_, err = c.Ledger.Transition(t.ID, core.StateRunning)
-				return err
-			case coordinator.ActChore:
-				return c.chore(goal, p, a.Text)
-			case coordinator.ActPropose:
-				return fmt.Errorf("a change to the top goal is not carried out yet")
-			case coordinator.ActResolve:
-				cx, err := c.concernUnder(goal, tasks, a.Concern)
-				if err != nil {
-					return err
-				}
-				_, err = c.Ledger.ResolveConcern(cx.ID, a.Text)
-				return err
-			case coordinator.ActAsk:
-				asked = append(asked, a)
-			case coordinator.ActDone:
-				done = &a
-			}
-			return nil
-		}()
-		if err != nil {
+		switch {
+		case a.Kind == coordinator.ActAsk:
+			asked = append(asked, a)
+			continue
+		case a.Kind == coordinator.ActDone:
+			done = &a
+			continue
+		case a.Kind == coordinator.ActWait:
+			continue
+		case a.Kind == coordinator.ActPropose:
+			proposed = &a
+			continue
+		case p.Mode == project.ModeAsk && slices.Contains(planChange, a.Kind):
+			held = append(held, a)
+			continue
+		}
+		if err := c.applyAction(goal, p, a); err != nil {
 			out.Refused = append(out.Refused, a.Line()+" — "+err.Error())
 			continue
 		}
-		if a.Kind != coordinator.ActDone && a.Kind != coordinator.ActWait {
-			out.Actions = append(out.Actions, a.Line())
+		out.Actions = append(out.Actions, a.Line())
+	}
+	var change core.Change
+	if len(held) > 0 {
+		lines := make([]string, len(held))
+		for i, a := range held {
+			lines[i] = a.Line()
 		}
+		change.Actions = lines
+		asked = append([]coordinator.Action{{Kind: coordinator.ActAsk, Text: planChangeQuestion + "\n" + strings.Join(lines, "\n"),
+			Options: []string{applyChoice, keepPlanChoice}}}, asked...)
+	}
+	if proposed != nil {
+		change.Title, change.DoneWhen, change.Finish = proposed.Title, proposed.DoneWhen, proposed.Finish
+		finish := "not decided"
+		if goal.FinishLine != nil {
+			finish = string(*goal.FinishLine)
+		}
+		text := fmt.Sprintf("%s\nNow: %s | done when: %s | finish: %s\nProposed: %s | done when: %s | finish: %s\nWhy: %s",
+			courseQuestion, goal.Title, textOr(goal.DoneWhen, "not set"), finish, proposed.Title, proposed.DoneWhen, proposed.Finish, proposed.Text)
+		asked = append([]coordinator.Action{{Kind: coordinator.ActAsk, Text: text, Options: []string{changeCourseChoice, keepGoalChoice}}}, asked...)
 	}
 	if done != nil {
-		if open, err := c.unfinished(goal); err != nil {
+		open, err := c.unfinished(goal)
+		if err != nil {
 			return out, err
-		} else if open != "" {
+		}
+		if open == "" && (len(held) > 0 || proposed != nil) {
+			open = "a change waits for the person"
+		}
+		if open != "" {
 			out.Refused = append(out.Refused, done.Line()+" — "+open)
 			done = nil
 		}
@@ -580,17 +488,166 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 		}
 		out.Actions = append(out.Actions, done.Line())
 	case len(asked) > 0:
-		if _, err := c.Ledger.AddEvent(goal.ID, core.EventQuestion, coordinator.QuestionBody(asked)); err != nil {
+		qbody := coordinator.QuestionBody(asked)
+		if len(held) > 0 || proposed != nil {
+			if _, err := c.Ledger.Ask(goal.ID, qbody, change); err != nil {
+				return out, err
+			}
+		} else if _, err := c.Ledger.AddEvent(goal.ID, core.EventQuestion, qbody); err != nil {
 			return out, err
 		}
 		if _, err := c.Ledger.Transition(goal.ID, core.StateNeedsInput); err != nil {
 			return out, err
 		}
 		for _, q := range asked {
+			if first, _, more := strings.Cut(q.Text, "\n"); more {
+				q = coordinator.Action{Kind: coordinator.ActAsk, Text: first, Options: q.Options}
+			}
 			out.Actions = append(out.Actions, q.Line())
 		}
 	}
 	return out, nil
+}
+
+// The questions a supervisor's change is put to the person as, and their
+// choices; the first carries the change out.
+const (
+	planChangeQuestion = "Change the plan?"
+	applyChoice        = "Apply these changes (recommended)"
+	keepPlanChoice     = "Keep the plan as it is"
+	courseQuestion     = "Change course?"
+	changeCourseChoice = "Change course (recommended)"
+	keepGoalChoice     = "Keep the goal as it is"
+)
+
+// applyAction carries out one of a supervisor's actions on goal: anything but
+// ASK, DONE, WAIT and PROPOSE.
+func (c *Cli) applyAction(goal core.Work, p *project.Project, a coordinator.Action) error {
+	tree, err := c.Ledger.Under(goal.ID)
+	if err != nil {
+		return err
+	}
+	child := func(id string) (core.Work, error) {
+		for _, t := range tree[1:] {
+			if t.ID == id {
+				return c.Ledger.Get(id)
+			}
+		}
+		return core.Work{}, fmt.Errorf("%s is not a sub-goal of %s", id, goal.ID)
+	}
+	switch a.Kind {
+	case coordinator.ActSend:
+		t, err := child(a.Work)
+		if err != nil {
+			return err
+		}
+		_, err = c.tellTask(t, a.Text)
+		return err
+	case coordinator.ActGoal:
+		parent := goal
+		if a.Work != goal.ID {
+			var err error
+			if parent, err = child(a.Work); err != nil {
+				return err
+			}
+		}
+		w, err := c.addSubGoal(parent, a.Title, a.DoneWhen, a.After, a.Split)
+		if err != nil {
+			return err
+		}
+		if waits, err := c.waitingOn(w); err != nil || waits != "" {
+			return err
+		}
+		if core.IsGoal(w.Kind) {
+			_, err := c.startGoalRow(goal, p, w, true)
+			return err
+		}
+		return c.startUnder(goal, p, w)
+	case coordinator.ActStart:
+		t, err := child(a.Work)
+		if err != nil {
+			return err
+		}
+		if t.State != core.StateQueued && t.State != core.StateBriefed {
+			return fmt.Errorf("%s is %s, already under way", t.ID, t.State)
+		}
+		if held, err := c.proposed(*t.Parent); err != nil || held {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("%s is in a proposed breakdown; it waits for wd goal approve %s", t.ID, *t.Parent)
+		}
+		if core.IsGoal(t.Kind) {
+			_, err := c.startGoalRow(goal, p, t, true)
+			return err
+		}
+		return c.startUnder(goal, p, t)
+	case coordinator.ActSupersede:
+		t, err := child(a.Work)
+		if err != nil {
+			return err
+		}
+		_, err = c.supersedeSubGoal(t, a.Text)
+		return err
+	case coordinator.ActEdit:
+		t, err := child(a.Work)
+		if err != nil {
+			return err
+		}
+		var title, doneWhen *string
+		if a.Title != "" {
+			title = &a.Title
+		}
+		if a.DoneWhen != "" {
+			doneWhen = &a.DoneWhen
+		}
+		_, _, err = c.editSubGoal(t, title, doneWhen)
+		return err
+	case coordinator.ActAfter:
+		t, err := child(a.Work)
+		if err != nil {
+			return err
+		}
+		what, err := c.orderSubGoal(t, a.After)
+		if err != nil {
+			return err
+		}
+		_, err = c.tellWorking(t.ID, "Your sub-goal now waits on: "+what)
+		return err
+	case coordinator.ActMet:
+		t, err := c.judged(child, a)
+		if err != nil {
+			return err
+		}
+		gate, err := c.closeOne(t)
+		if err != nil || gate == "" {
+			return err
+		}
+		return fmt.Errorf("judged met, but its %s gate stopped it", gate)
+	case coordinator.ActMissed:
+		t, err := c.judged(child, a)
+		if err != nil {
+			return err
+		}
+		if _, err := c.tellTask(t, "Your sub-goal's done-when is not met yet: "+a.Text); err != nil {
+			return err
+		}
+		if t, err = c.Ledger.Get(t.ID); err != nil || t.State == core.StateRunning {
+			return err
+		}
+		_, err = c.Ledger.Transition(t.ID, core.StateRunning)
+		return err
+	case coordinator.ActChore:
+		return c.chore(goal, p, a.Text)
+	case coordinator.ActResolve:
+		cx, err := c.concernUnder(goal, tree[1:], a.Concern)
+		if err != nil {
+			return err
+		}
+		_, err = c.Ledger.ResolveConcern(cx.ID, a.Text)
+		return err
+	}
+	return fmt.Errorf("%s is not carried out here", a.Kind)
 }
 
 // judged files a MET or MISSED judgement on the sub-goal it names, which must

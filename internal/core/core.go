@@ -299,6 +299,20 @@ type Event struct {
 	// one-line form is what a person types, and a review that needs structure
 	// can still read the body.
 	Decision *Decision `json:"decision"`
+	// Change is what a question the director filed carries out when it is
+	// answered with its first choice; nil on any other event. It stays off the
+	// event's wire schema, whose keys are fixed.
+	Change *Change `json:"-"`
+}
+
+// Change is what answering a director's question with its first choice
+// carries out: a supervisor's plan changes, as its action lines, and a
+// proposed top goal, when Title is set.
+type Change struct {
+	Actions  []string   `json:"actions,omitempty"`
+	Title    string     `json:"title,omitempty"`
+	DoneWhen string     `json:"done_when,omitempty"`
+	Finish   FinishLine `json:"finish,omitempty"`
 }
 
 // Decision is a decision with its parts, so a review can show what was asked,

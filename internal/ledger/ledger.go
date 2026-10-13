@@ -286,7 +286,13 @@ func scanEvent(s rowScanner) (core.Event, error) {
 		return core.Event{}, fmt.Errorf("event %d: %w", e.ID, err)
 	}
 	e.Effective = nullStr(effective)
-	if payload.Valid && payload.String != "" {
+	if payload.Valid && payload.String != "" && e.Kind == core.EventQuestion {
+		var ch core.Change
+		if err := json.Unmarshal([]byte(payload.String), &ch); err != nil {
+			return core.Event{}, fmt.Errorf("event %d: change payload: %w", e.ID, err)
+		}
+		e.Change = &ch
+	} else if payload.Valid && payload.String != "" {
 		var d core.Decision
 		if err := json.Unmarshal([]byte(payload.String), &d); err != nil {
 			return core.Event{}, fmt.Errorf("event %d: decision payload: %w", e.ID, err)
@@ -1572,6 +1578,26 @@ func (l *Ledger) Answer(work string, d core.Decision) (core.Event, error) {
 	err := l.inTx(func(tx *sql.Tx) error {
 		var err error
 		e, err = addClaim(tx, work, core.EventAnswer, d.Answer, now(), nil, &d)
+		return err
+	})
+	return e, err
+}
+
+// Ask records a question on work that carries out change when answered with
+// its first choice.
+func (l *Ledger) Ask(work, body string, change core.Change) (core.Event, error) {
+	raw, err := json.Marshal(change)
+	if err != nil {
+		return core.Event{}, err
+	}
+	var e core.Event
+	err = l.inTx(func(tx *sql.Tx) error {
+		at := now()
+		if err := updateWork(tx, work, `UPDATE work SET updated = ? WHERE id = ?`, at, work); err != nil {
+			return err
+		}
+		e, err = scanEvent(tx.QueryRow(`INSERT INTO event (work, kind, body, at, payload) VALUES (?, ?, ?, ?, ?)
+			RETURNING id, work, kind, body, at, effective, payload`, work, string(core.EventQuestion), body, at, string(raw)))
 		return err
 	})
 	return e, err

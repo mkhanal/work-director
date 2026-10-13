@@ -541,11 +541,18 @@ func StoppedSaying(events []core.Event) string {
 }
 
 // QuestionBody is a supervisor's questions as one question event: each on its
-// own line, followed by its choices as `- ` lines.
+// own line, the rest of its text indented under it, followed by its choices
+// as `- ` lines.
 func QuestionBody(asks []Action) string {
 	var lines []string
 	for _, a := range asks {
-		lines = append(lines, a.Text)
+		first, detail, _ := strings.Cut(a.Text, "\n")
+		lines = append(lines, first)
+		for _, d := range strings.Split(detail, "\n") {
+			if strings.TrimSpace(d) != "" {
+				lines = append(lines, "  "+strings.TrimSpace(d))
+			}
+		}
 		for _, o := range a.Options {
 			lines = append(lines, "- "+o)
 		}
@@ -554,17 +561,23 @@ func QuestionBody(asks []Action) string {
 }
 
 // AskedQuestion reads a question event as the question it asks: each line one
-// question, and the `- ` lines under it its choices.
+// question, the indented lines under it part of it, and the `- ` lines under
+// it its choices.
 func AskedQuestion(e core.Event) runner.Question {
 	q := runner.Question{ID: fmt.Sprintf("event-%d", e.ID), Items: []runner.QuestionItem{}}
-	for _, line := range strings.Split(e.Body, "\n") {
-		line = strings.TrimSpace(line)
+	for _, raw := range strings.Split(e.Body, "\n") {
+		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
 		}
 		if o, ok := strings.CutPrefix(line, "- "); ok && len(q.Items) > 0 {
 			it := &q.Items[len(q.Items)-1]
 			it.Options = append(it.Options, runner.Option{Label: strings.TrimSpace(o)})
+			continue
+		}
+		// An indented line under a question is part of it.
+		if n := len(q.Items); n > 0 && strings.HasPrefix(raw, "  ") && len(q.Items[n-1].Options) == 0 {
+			q.Items[n-1].Question += "\n" + line
 			continue
 		}
 		q.Items = append(q.Items, runner.QuestionItem{Question: line, Options: []runner.Option{}})

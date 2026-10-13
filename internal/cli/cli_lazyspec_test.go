@@ -4875,6 +4875,100 @@ func TestAChoreRunsAsASessionOnTheGoalNotAsWork(t *testing.T) {
 	}
 }
 
+func TestAPlanChangeWaitsForThePersonInAskMode(t *testing.T) {
+	f := newCLIFixture(t)
+	o := overseenGoal(t, f)
+	proj := "---\npath: " + f.sample + "\nrunner: overseer\nmode: ask\nverify: [test -f README.md]\n---\n"
+	if err := os.WriteFile(filepath.Join(f.wdHome, "projects", "overseen.md"), []byte(proj), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	superviseOnce(t, f, o.goal)
+	change := []string{
+		"GOAL " + o.goal + ": Whoever deploys gets a guide | done when: a guide covers rollback",
+		"EDIT " + o.a + ": done when: impacts are listed per release",
+	}
+	propose := func() supervised {
+		o.say(t, supervisor, append(append([]string{"ACTIONS:"}, change...), "SEND "+o.b+": tidy the output")...)
+		return superviseOnce(t, f, o.goal)
+	}
+	s := propose()
+	if !slices.Contains(s.Actions, "SEND "+o.b+": tidy the output") || len(s.Refused) != 0 {
+		t.Fatalf("supervise = %+v, want SEND carried out and nothing refused", s)
+	}
+	if got := stateOf(t, f, o.goal); got != core.StateNeedsInput {
+		t.Fatalf("goal = %s, want needs-input", got)
+	}
+	qs := f.bodies(t, o.goal, core.EventQuestion)
+	if len(qs) != 1 || !strings.HasPrefix(qs[0], "Change the plan?") || !strings.Contains(qs[0], change[0]) || !strings.Contains(qs[0], change[1]) ||
+		!strings.Contains(qs[0], "\n- Apply these changes (recommended)\n- Keep the plan as it is") {
+		t.Fatalf("questions = %q, want the changes asked", qs)
+	}
+	tasks := func() int {
+		var ts []core.Work
+		if err := json.Unmarshal([]byte(f.runOK(t, "tasks", o.goal, "--json")), &ts); err != nil {
+			t.Fatal(err)
+		}
+		return len(ts)
+	}
+	if n := tasks(); n != 2 {
+		t.Fatalf("tasks = %d, want the GOAL not filed yet", n)
+	}
+	f.runOK(t, "answer", o.goal, "Keep the plan as it is")
+	if n := tasks(); n != 2 || stateOf(t, f, o.goal) != core.StateRunning {
+		t.Fatalf("after keeping the plan: %d tasks, goal %s; want 2 and running", n, stateOf(t, f, o.goal))
+	}
+	if sent, _ := os.ReadFile(filepath.Join(o.state, "sent-task-"+o.a)); strings.Contains(string(sent), "impacts are listed per release") {
+		t.Fatalf("%s was told an edit the person kept out: %q", o.a, sent)
+	}
+	propose()
+	f.runOK(t, "answer", o.goal, "Apply these changes")
+	if n := tasks(); n != 3 || stateOf(t, f, o.goal) != core.StateRunning {
+		t.Fatalf("after applying: %d tasks, goal %s; want 3 and running", n, stateOf(t, f, o.goal))
+	}
+	if sent := readFile(t, filepath.Join(o.state, "sent-task-"+o.a)); !strings.Contains(sent, "impacts are listed per release") {
+		t.Fatalf("%s was sent %q, want the edit", o.a, sent)
+	}
+	if decided := f.bodies(t, o.goal, core.EventDecision); !slices.Contains(decided, "edited "+o.a+": done when: impacts are listed per release") {
+		t.Fatalf("decisions = %q, want the edit recorded", decided)
+	}
+}
+
+func TestAChangeToTheTopGoalAlwaysWaitsForThePerson(t *testing.T) {
+	f := newCLIFixture(t)
+	o := overseenGoal(t, f)
+	superviseOnce(t, f, o.goal)
+	propose := func() {
+		o.say(t, supervisor, "COURSE: pivot — tags already exist", "ACTIONS:",
+			"PROPOSE: Ship tagged releases | done when: every release is tagged | finish: merged — tags already exist")
+		superviseOnce(t, f, o.goal)
+	}
+	propose()
+	if got := stateOf(t, f, o.goal); got != core.StateNeedsInput {
+		t.Fatalf("goal = %s, want it waiting on the person in auto mode too", got)
+	}
+	qs := f.bodies(t, o.goal, core.EventQuestion)
+	if len(qs) != 1 || !strings.HasPrefix(qs[0], "Change course?") ||
+		!strings.Contains(qs[0], "Now: Release notes for engineers and customers | done when: not set | finish: not decided") ||
+		!strings.Contains(qs[0], "Proposed: Ship tagged releases | done when: every release is tagged | finish: merged") ||
+		!strings.Contains(qs[0], "\n- Change course (recommended)\n- Keep the goal as it is") {
+		t.Fatalf("questions = %q, want the goal now and as proposed", qs)
+	}
+	f.runOK(t, "answer", o.goal, "Keep the goal as it is")
+	if g, err := f.work(t, o.goal); err != nil || g.Title != "Release notes for engineers and customers" || g.DoneWhen != nil || g.FinishLine != nil {
+		t.Fatalf("goal after keeping it = %+v (%v), want it unchanged", g, err)
+	}
+	propose()
+	f.runOK(t, "answer", o.goal, "Change course (recommended)")
+	g, err := f.work(t, o.goal)
+	if err != nil || g.Title != "Ship tagged releases" || g.DoneWhen == nil || *g.DoneWhen != "every release is tagged" ||
+		g.FinishLine == nil || *g.FinishLine != core.FinishMerged || *g.FinishSource != core.FinishFromPerson || g.State != core.StateRunning {
+		t.Fatalf("goal after changing course = %+v (%v)", g, err)
+	}
+	if notes := f.bodies(t, o.goal, core.EventNote); !slices.Contains(notes, "renamed from: Release notes for engineers and customers") {
+		t.Fatalf("notes = %q, want the rename noted", notes)
+	}
+}
+
 func TestWdSendToAGoalKeepsItAsADecisionForTheGoalsSupervisor(t *testing.T) {
 	f := newCLIFixture(t)
 	o := overseenGoal(t, f)
@@ -5321,6 +5415,10 @@ func TestPlanningFilesSubGoalsWithTheirDoneWhenAndOrder(t *testing.T) {
 	}
 	if kids, _ := f.tree(t, unsure); len(kids) != 1 {
 		t.Errorf("children = %+v, want the sub-goal filed all the same", kids)
+	}
+	f.runOK(t, "answer", unsure, "research (recommended)")
+	if g, err := f.work(t, unsure); err != nil || g.FinishLine == nil || *g.FinishLine != core.FinishResearch || g.FinishSource == nil || *g.FinishSource != core.FinishFromPerson {
+		t.Fatalf("goal after the answer = %+v (%v), want it finishing at research, from the person", g, err)
 	}
 }
 

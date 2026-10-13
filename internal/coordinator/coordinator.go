@@ -182,7 +182,7 @@ func ParseOutcomes(texts []string) []PlanOutcome {
 		if m := outcomeRe.FindStringSubmatch(line); m != nil {
 			title := strings.Trim(strings.TrimSpace(m[1]), "*")
 			if choosing {
-				if _, ok := finishChoice(title); ok {
+				if _, ok := FinishChoice(title); ok {
 					continue
 				}
 			}
@@ -214,8 +214,8 @@ func ParseOutcomes(texts []string) []PlanOutcome {
 	return out
 }
 
-// finishChoice reads one offered finish line, marked (recommended) or not.
-func finishChoice(text string) (core.FinishLine, bool) {
+// FinishChoice reads one offered finish line, marked (recommended) or not.
+func FinishChoice(text string) (core.FinishLine, bool) {
 	bare := strings.TrimSpace(strings.Replace(text, "(recommended)", "", 1))
 	f, err := core.ParseFinishLine(bare)
 	return f, err == nil
@@ -250,7 +250,7 @@ func ParseFinish(texts []string) (PlanFinish, bool) {
 				if c == nil {
 					break
 				}
-				if _, isLine := finishChoice(c[1]); !isLine {
+				if _, isLine := FinishChoice(c[1]); !isLine {
 					break
 				}
 				found.Choices = append(found.Choices, strings.TrimSpace(c[1]))

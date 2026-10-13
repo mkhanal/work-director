@@ -127,6 +127,7 @@ verify event.
 ## Planning Files Sub-Goals With Their Done-When And Order
 - `wd goal plan` files each outcome under the goal: a task, or a goal when it is to be split, each with its done-when and what it waits on.
 - A top goal's finish line is stored with where it came from; an unsure one is asked as a question with its choices, and the goal waits on it.
+- Answering that question with one of its finish lines stores it, from the person.
 - In ask mode the breakdown is proposed and nothing starts until `wd goal approve`.
 
 ## A Sub-Goal Starts Only Once What It Waits On Is Settled
@@ -467,3 +468,11 @@ could not with their work, the bound that ran out, and the work still open.
 
 ## A Chore Runs As A Session On The Goal, Not As Work
 - `CHORE` starts a session hung off the goal and files it and what it is for on the goal, adding no work.
+
+## A Plan Change Waits For The Person In Ask Mode
+- In ask mode a supervisor's GOAL, SUPERSEDE, EDIT and AFTER are filed as one question with the changes, not applied.
+- Answering it with Apply carries them out; any other answer leaves the plan as it is.
+
+## A Change To The Top Goal Always Waits For The Person
+- PROPOSE files a question with the goal now and as proposed, whatever the mode, and the goal waits on it.
+- Answering Change course sets the title, done-when and finish line as proposed, from the person; any other answer changes nothing.
