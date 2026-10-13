@@ -69,6 +69,10 @@ public struct TreeNode: Codable, Sendable, Hashable, Identifiable {
     public let steps: [PlanStep]
     public let judged: Judgement?
     public let needsYou: Int
+    /// Set while its work runs and its agent stopped without reporting.
+    public let stopped: Stopped?
+    /// Why blocked work is blocked, when wd knows.
+    public let blockedBecause: String?
     public let children: [TreeNode]
 
     public var id: String { work.id }
@@ -77,12 +81,25 @@ public struct TreeNode: Codable, Sendable, Hashable, Identifiable {
     public var opensAsGoal: Bool { work.kind.isGoal && !group }
 
     enum CodingKeys: String, CodingKey {
-        case work, group, after, owner, progress, doing, steps, judged, children
+        case work, group, after, owner, progress, doing, steps, judged, children, stopped
         case doneWhen = "done_when"
         case waitingOn = "waiting_on"
         case whyNotMoving = "why_not_moving"
         case plannedInto = "planned_into"
         case needsYou = "needs_you"
+        case blockedBecause = "blocked_because"
+    }
+}
+
+/// What running work last said when its agent stopped without reporting, and
+/// when that was noted.
+public struct Stopped: Codable, Sendable, Hashable {
+    public let said: String
+    public let at: String
+
+    /// The first line of what it said.
+    public var firstLine: String {
+        said.split(separator: "\n").first.map(String.init) ?? ""
     }
 }
 

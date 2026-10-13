@@ -159,7 +159,7 @@ struct GoalOverview: View {
                     ForEach(Array(goal.tree.enumerated()), id: \.element.id) { i, node in
                         if i > 0 { Rectangle().fill(Palette.inner).frame(height: 1) }
                         SubGoalRow(node: node, depth: 0, superseded: goal.superseded, working: Set(goal.nodes.map(\.id).filter(goal.isWorking)),
-                                   opened: openedRows, toggle: toggle, open: open, focus: focus)
+                                   opened: openedRows, toggle: toggle, open: open, focus: focus, run: run)
                     }
                 }
                 .background(Palette.page, in: RoundedRectangle(cornerRadius: Radius.card))
@@ -190,6 +190,7 @@ struct SubGoalRow: View {
     let toggle: (String) -> Void
     let open: (String) -> Void
     let focus: (String) -> Void
+    let run: (Plan) -> Void
 
     private var isOpen: Bool { opened.contains(node.id) }
     private var gone: Bool { node.work.state.mark == .superseded }
@@ -209,6 +210,12 @@ struct SubGoalRow: View {
                         if node.folds && !isOpen && node.work.state.mark == .working {
                             Text(" · ")
                             Text("Show steps (\(node.steps.filter { $0.state == .done }.count) of \(node.steps.filter { $0.state != .dropped }.count))").foregroundStyle(Palette.link)
+                        }
+                        if node.stopped != nil {
+                            Text(" · ")
+                            Button("Tell it to carry on") { run(.carryOn(node.id)) }
+                                .buttonStyle(.plain).foregroundStyle(Palette.link)
+                                .help("Ask its agent to pick up where it stopped")
                         }
                     }
                     .font(TypeScale.caption)
@@ -243,7 +250,7 @@ struct SubGoalRow: View {
             if isOpen && node.group {
                 ForEach(node.children) { child in
                     Rectangle().fill(Palette.inner).frame(height: 1)
-                    SubGoalRow(node: child, depth: depth + 1, superseded: superseded, working: working, opened: opened, toggle: toggle, open: open, focus: focus)
+                    SubGoalRow(node: child, depth: depth + 1, superseded: superseded, working: working, opened: opened, toggle: toggle, open: open, focus: focus, run: run)
                 }
             }
         }

@@ -99,6 +99,11 @@ public struct Plan: Hashable, Sendable, Identifiable {
         return Plan(title: "Send", argv: ["send", id, text]).attaching(files)
     }
 
+    /// Tells work whose agent stopped without finishing to pick it up again.
+    public static func carryOn(_ id: String) -> Plan {
+        Plan(title: "Tell it to carry on", argv: ["send", id, "Carry on where you left off."])
+    }
+
     /// A new title a person chose; a goal renamed keeps it when it is planned.
     public static func rename(_ id: String, title: String) throws -> Plan {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)

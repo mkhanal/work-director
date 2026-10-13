@@ -54,7 +54,11 @@ extension TreeNode {
         } else {
             if work.state == .done, let doneWhen { parts.append("Done when " + doneWhen) }
             if let owner { parts.append(owner.agent ?? owner.runner) }
-            if !waitingOn.isEmpty {
+            if let stopped {
+                parts.append(Words.stopped(said: stopped.firstLine))
+            } else if work.state == .blocked, let blockedBecause, !blockedBecause.isEmpty {
+                parts.append(blockedBecause.sentence)
+            } else if !waitingOn.isEmpty {
                 parts.append("Waits on: " + waitingOn.joined(separator: " · "))
             } else if work.state == .needsInput, let whyNotMoving {
                 parts.append(whyNotMoving)

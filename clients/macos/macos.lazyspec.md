@@ -144,8 +144,9 @@ hold only that product's work; with none, every product's.
 - The button says what it does: Check it, Deliver it, Confirm it's finished or Mark it done, or the words `wd` serves for the gate.
 
 ## A Notification Says What Happened And Where
-- Its title says what happened: Question for you, Approve the plan, Change of course proposed, Choose where it finishes, Plan change to approve, Blocked, Finished or Ready for review.
-- Its body names the goal, then what about it: a question's first line and how many more came with it, how many sub-goals a plan has, the course's proposed title, what under it is blocked, or where it finished.
+- Its title says what happened: Question for you, Approve the plan, Change of course proposed, Choose where it finishes, Plan change to approve, Blocked, Stopped without finishing, Finished or Ready for review.
+- Its body names the goal, then what about it: a question's first line and how many more came with it, how many sub-goals a plan has, the course's proposed title, what under it is blocked and why when `wd` says, what under it stopped without finishing and the first line it last said, or where it finished.
+- Stopped without finishing is told once each time work's agent stops without reporting.
 - Ready for review is told when work reaches Ready to Push, In Review or Ready to Close.
 - Nothing is told from the first read, twice, or about work the person wrote to from the app in the last few seconds.
 - Clicking it opens its goal; with notifications turned off in Settings, none is shown.
@@ -174,6 +175,8 @@ hold only that product's work; with none, every product's.
 - Every question below the goal is answered in place, headed by its place in the tree, each level that is a goal a way to its page.
 - Sub-goals are listed as served, each with its state, its line and its badge; a question below a row marks it as needing the person.
 - A sub-goal that is a goal says how many sub-goals it holds and how many are done, with the replaced ones counted apart.
+- A sub-goal whose agent stopped without reporting says Stopped without finishing with the first line it last said, and offers Tell it to carry on, which runs `wd send <id> "Carry on where you left off."`.
+- A blocked sub-goal's line says why it is blocked, when `wd` says.
 - A goal row opens its own page; a task row folds its steps open and closed, all closed but the first working row's.
 - Adding a sub-goal runs `wd goal add <id> "<outcome>" --done-when "<done when>"`; both are required.
 - What holds the goal from done is listed as served.

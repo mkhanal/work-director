@@ -13,6 +13,11 @@ public enum Words {
         "Replaced by a change of plan" + (why.map { ": " + $0 } ?? "")
     }
 
+    /// Work whose agent stopped without reporting, and the first line it last said.
+    public static func stopped(said: String) -> String {
+        "Stopped without finishing" + (said.isEmpty ? "" : ": " + said)
+    }
+
     /// How many sub-goals were replaced, counted apart.
     public static func replaced(count: Int) -> String { "\(count) replaced" }
 

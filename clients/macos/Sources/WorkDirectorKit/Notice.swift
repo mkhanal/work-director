@@ -42,8 +42,11 @@ extension GoalDetail {
 /// goal, in plain words.
 public struct Notice: Sendable, Hashable {
     public enum Kind: String, Sendable {
-        case question, plan, course, finish, planChange, blocked, finished, review
+        case question, plan, course, finish, planChange, blocked, stopped, finished, review
     }
+
+    /// One stop of one work, told once.
+    static func stoppedKey(_ work: String, _ stopped: Stopped) -> String { "stopped:\(work):\(stopped.at)" }
 
     public let kind: Kind
     public let title: String
@@ -110,8 +113,17 @@ public struct Notice: Sendable, Hashable {
             }
             if let detail, let known = earlier.knownBlocked(w.id) {
                 for node in detail.nodes where node.work.state == .blocked && !known.contains(node.work.id) {
-                    said.append(Notice(kind: .blocked, title: "Blocked", body: "\(w.title) — \(node.work.title)", work: w.id,
+                    let lines = ["\(w.title) — \(node.work.title)"] + (node.blockedBecause.map { $0.isEmpty ? [] : [$0.sentence] } ?? [])
+                    said.append(Notice(kind: .blocked, title: "Blocked", body: lines.joined(separator: "\n"), work: w.id,
                                        keys: ["blocked:\(node.work.id):\(node.work.updated)"], about: [w.id, node.work.id]))
+                }
+            }
+            if let detail, let known = earlier.knownStopped(w.id) {
+                for node in detail.nodes {
+                    guard let stopped = node.stopped, !known.contains(Self.stoppedKey(node.work.id, stopped)) else { continue }
+                    let lines = ["\(w.title) — \(node.work.title)"] + (stopped.firstLine.isEmpty ? [] : [stopped.firstLine])
+                    said.append(Notice(kind: .stopped, title: "Stopped without finishing", body: lines.joined(separator: "\n"), work: w.id,
+                                       keys: [Self.stoppedKey(node.work.id, stopped)], about: [w.id, node.work.id]))
                 }
             }
 
@@ -181,6 +193,14 @@ extension Sighting {
         if let g = board.goals.first(where: { $0.work.id == id }), (g.rollup.counts["blocked"] ?? 0) > 0 || !g.work.atRest {
             return nil
         }
+        return []
+    }
+
+    /// The stops already seen under a goal at this sighting; nil when work
+    /// under it may have stopped where this sighting did not read.
+    func knownStopped(_ id: String) -> Set<String>? {
+        if let d = goals[id] { return Set(d.nodes.compactMap { n in n.stopped.map { Notice.stoppedKey(n.work.id, $0) } }) }
+        if let g = board.goals.first(where: { $0.work.id == id }), !g.work.atRest { return nil }
         return []
     }
 }

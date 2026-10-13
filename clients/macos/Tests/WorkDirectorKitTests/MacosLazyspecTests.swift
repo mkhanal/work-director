@@ -766,7 +766,9 @@ struct SeededTree {
         try home.wd("set", id, "running")
         try home.wd("set", id, "review")
         try home.wd("report", id, "DONE\nSTATUS: DONE")
-        let verify = try #require(Plan.passing(try await store.gate(of: id)))
+        let gate = try await store.gate(of: id)
+        #expect(gate.label == "Check it", "wd serves the button's words")
+        let verify = try #require(Plan.passing(gate))
         #expect(verify.argv == ["verify", id])
         #expect(verify.title == "Check it", "named in plain words")
         let served = try JSONDecoder().decode(Gate.self, from: Data(#"{"work":"w","gate":"land","title":"Land","label":"Ship it","argv":["pr","w"]}"#.utf8))
@@ -785,10 +787,10 @@ struct SeededTree {
              "progress": ["done": 0, "total": total, "superseded": 0], "needs_you": needsYou, "finish": NSNull(),
              "finished": finished ?? NSNull(), "proposed": proposed]
         }
-        func node(_ w: [String: Any], _ children: [[String: Any]] = []) -> [String: Any] {
+        func node(_ w: [String: Any], _ children: [[String: Any]] = [], stopped: [String: Any]? = nil, because: String? = nil) -> [String: Any] {
             ["work": w, "group": false, "done_when": NSNull(), "after": [String](), "waiting_on": [String](), "why_not_moving": NSNull(),
              "owner": NSNull(), "planned_into": NSNull(), "progress": NSNull(), "doing": NSNull(), "steps": [Any](), "judged": NSNull(),
-             "needs_you": 0, "children": children]
+             "needs_you": 0, "stopped": stopped ?? NSNull(), "blocked_because": because ?? NSNull(), "children": children]
         }
         func ask(_ id: String, on work: String, _ text: String, change: [String: Any]? = nil) -> [String: Any] {
             ["work": work, "path": work, "change": change ?? NSNull(),
@@ -814,7 +816,7 @@ struct SeededTree {
         let before = try sighting(
             [row(export, "in-flight"), row(audit, "in-flight", total: 3), row(sync, "in-flight"), row(search, "in-flight"), row(why, "in-flight")],
             [row(keys, "in-flight")],
-            ["g": detail(export, tree: [node(csv)]), "p": detail(audit), "d": detail(sync), "r": detail(search), "c": detail(why)])
+            ["g": detail(export, tree: [node(csv), node(work("x", "Write the README", "running", kind: "task"))]), "p": detail(audit), "d": detail(sync), "r": detail(search), "c": detail(why)])
 
         let exportNow = work("g", "Ship the export", "needs-input", updated: "u1"), whyNow = work("c", "Why does sync drop events?", "needs-input", updated: "u1")
         let course: [String: Any] = ["kind": "course", "proposed": ["title": "Sync never drops events", "done_when": NSNull(), "finish": NSNull()]]
@@ -823,7 +825,10 @@ struct SeededTree {
              row(work("d", "Fix sync", "done", updated: "u1"), "at-rest", finished: "Complete PR #512"),
              row(work("r", "Speed up search", "review", updated: "u1"), "ready-to-push"), row(whyNow, "needs-you", needsYou: 3)],
             [row(work("t", "Rotate keys", "blocked", kind: "task", updated: "u1"), "needs-you")],
-            ["g": detail(exportNow, tree: [node(work("s", "Export as CSV", "needs-input"), [node(work("b", "Upload to S3", "blocked", kind: "task"))])],
+            ["g": detail(exportNow, tree: [node(work("s", "Export as CSV", "needs-input"),
+                                                [node(work("b", "Upload to S3", "blocked", kind: "task"), because: "the bucket's keys expired")]),
+                                           node(work("x", "Write the README", "running", kind: "task"),
+                                                stopped: ["said": "I ran out of room before the examples\nthen more", "at": "t1"])],
                          asks: [ask("q1", on: "s", "Which columns go in?\nThe export has forty."), ask("q2", on: "g", "Is UTF-8 fine?")]),
              "p": detail(audit), "r": detail(work("r", "Speed up search", "review")),
              "c": detail(whyNow, asks: [ask("q3", on: "c", "Turn this into fixing it?", change: course),
@@ -834,7 +839,8 @@ struct SeededTree {
         let told = Notice.between(before, after)
         #expect(told.map { [$0.title, $0.body, $0.work] } == [
             ["Question for you", "Ship the export\nWhich columns go in?\n1 more question", "g"],
-            ["Blocked", "Ship the export — Upload to S3", "g"],
+            ["Blocked", "Ship the export — Upload to S3\nThe bucket's keys expired", "g"],
+            ["Stopped without finishing", "Ship the export — Write the README\nI ran out of room before the examples", "g"],
             ["Approve the plan", "Audit trail · 3 sub-goals", "p"],
             ["Finished", "Fix sync — Complete PR #512", "d"],
             ["Ready for review", "Speed up search", "r"],
@@ -844,6 +850,14 @@ struct SeededTree {
             ["Blocked", "Rotate keys", "t"],
         ])
         #expect(Notice.between(after, after).isEmpty, "staying put is not news")
+        func readme(_ stopped: [String: Any]?) throws -> Sighting {
+            try sighting([row(export, "in-flight")], [],
+                         ["g": detail(export, tree: [node(work("x", "Write the README", "running", kind: "task"), stopped: stopped)])])
+        }
+        let first = try readme(["said": "halfway", "at": "t1"]), again = try readme(["said": "halfway", "at": "t2"])
+        #expect(Notice.between(try readme(nil), first).map(\.keys) == [["stopped:x:t1"]])
+        #expect(Notice.between(first, again).map(\.body) == ["Ship the export — Write the README\nhalfway"], "a later stop is told again")
+        #expect(Notice.between(first, try readme(nil)).isEmpty, "carrying on is not news")
         #expect(Notice.between(before, after, told: Set(told.flatMap(\.keys))).isEmpty, "nothing is told twice")
         #expect(!Notice.between(before, after, quiet: ["g", "q3"]).contains { $0.work == "g" || $0.body.contains("Sync never") },
                 "what the person just did is not told back to them")
@@ -1097,6 +1111,28 @@ struct SeededTree {
         #expect(throws: PlanError.self) { try Plan.addSubGoal(t.top, outcome: "Notes", doneWhen: " ") }
         #expect(try await store.run(add).code == 0)
         #expect(try await store.goal(t.top).tree.last?.work.title == "Notes are translated")
+
+        try fakeRunner(t.home)
+        let halted = try t.home.wd("add", "demo", "Tag every release again")
+        let stuck = try t.home.wd("add", "demo", "List the flags")
+        try t.home.sql("""
+        UPDATE work SET parent='\(t.top)', state='running', runner='fake', session='s4' WHERE id='\(halted)';
+        UPDATE work SET parent='\(t.top)', state='blocked' WHERE id='\(stuck)';
+        INSERT INTO event (work,kind,body,at) VALUES ('\(halted)','note','stopped without a report: I ran out of room before tagging v2','2026-10-13T12:20:00Z');
+        INSERT INTO event (work,kind,body,at) VALUES ('\(stuck)','report','BLOCKED
+        STATUS: BLOCKED the flag list lives in another repository','2026-10-13T12:21:00Z');
+        """)
+        let served = Dictionary(uniqueKeysWithValues: try await store.goal(t.top).tree.map { ($0.id, $0) })
+        let stopped = try #require(served[halted]), blocked = try #require(served[stuck])
+        #expect(stopped.stopped?.said == "I ran out of room before tagging v2")
+        #expect(stopped.meta() == "fake · Stopped without finishing: I ran out of room before tagging v2")
+        let carryOn = Plan.carryOn(halted)
+        #expect(carryOn.title == "Tell it to carry on" && carryOn.argv == ["send", halted, "Carry on where you left off."])
+        #expect(blocked.blockedBecause == "the flag list lives in another repository")
+        #expect(blocked.meta() == "The flag list lives in another repository", "a blocked row says why")
+        let sent = try await store.run(carryOn)
+        #expect(sent.code == 0, "\(sent.stdout) \(sent.stderr)")
+        #expect(try await store.goal(t.top).tree.first { $0.id == halted }?.stopped == nil, "told to carry on, it no longer reads as stopped")
 
         let here = try await store.record(t.guide)
         #expect(here.entries.contains { $0.kind == "chore" && $0.by == "director" }, "a nested page's record holds what the director did there")
