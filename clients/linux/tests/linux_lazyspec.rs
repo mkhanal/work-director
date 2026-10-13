@@ -935,6 +935,62 @@ fn a_goal_page_shows_what_done_means_what_needs_you_and_its_sub_goals() {
     assert_eq!(record.director_did().iter().map(|e| e.event).collect::<Vec<_>>(), vec![3, 2]);
 }
 
+/// The Conversation Tags Each Turn With Its Sub-Goal And Filters By It
+#[test]
+fn the_conversation_tags_each_turn_with_its_sub_goal_and_filters_by_it() {
+    let event = |id: i64, work: &str, kind: &str, body: &str| {
+        json!({"id": id, "work": work, "kind": kind, "body": body, "at": format!("2026-10-12T01:{id:02}:00Z"),
+            "effective": null, "decision": null})
+    };
+    let rollback = node_json("r", "task", "needs-input", json!({}));
+    let goal = goal_view(json!({
+        "goal": work_json("g", "running"), "tasks": [work_json("t", "done"), work_json("r", "needs-input")],
+        "rollup": {"counts": {}, "done": 1, "total": 2}, "claims": [], "landings": [], "delivery": null,
+        "activity": {}, "reports": {}, "asking": null,
+        "events": [
+            event(1, "g", "decision", "English only"),
+            event(2, "t", "report", "DONE\nSTATUS: DONE"),
+            event(3, "t", "state", "done"),
+            event(4, "r", "question", "down scripts?"),
+            event(5, "g", "supervised", "On course.\nACTIONS:\nWAIT"),
+        ],
+        "tree": [
+            node_json("t", "task", "done", json!({"judged": {"verdict": "met", "why": "tags"}})),
+            node_json("d", "goal", "running", json!({"children": [rollback]})),
+        ],
+        "paths": {"t": "Tagged", "d": "Guide", "r": "Guide › Rollback"},
+    }));
+    assert_eq!(goal.tag("r"), Some("Guide › Rollback"));
+    assert_eq!(goal.tag("g"), None, "the goal's own turns carry no tag");
+    let chips: Vec<(String, usize)> = goal.filters().into_iter().map(|c| (c.label, c.count)).collect();
+    assert_eq!(
+        chips,
+        vec![
+            ("Everything".to_string(), 5),
+            ("You and the director".to_string(), 2),
+            ("Title t".to_string(), 2),
+            ("Title d".to_string(), 1),
+        ]
+    );
+    let ids = |filter: ThreadFilter| goal.items(filter).iter().map(ThreadItem::id).collect::<Vec<_>>();
+    assert_eq!(ids(ThreadFilter::YouAndDirector), vec![1, 5]);
+    assert_eq!(ids(ThreadFilter::SubGoal("d".into())), vec![4], "a sub-goal keeps what happened under it");
+    assert_eq!(ids(ThreadFilter::SubGoal("t".into())), vec![2, 3]);
+    let done = goal.events.iter().find(|e| e.id == 3).expect("the done event");
+    assert_eq!(goal.finished_line(done).as_deref(), Some("Tagged · done · judged met"));
+    assert_eq!(goal.finished_line(&goal.events[0]), None);
+    assert_eq!(
+        goal.addressees(),
+        vec![
+            ("g".to_string(), "whole goal".to_string()),
+            ("t".to_string(), "Tagged".to_string()),
+            ("d".to_string(), "Guide".to_string()),
+            ("r".to_string(), "Guide › Rollback".to_string()),
+        ]
+    );
+    assert_eq!(Plan::send("r", "only redeploy").map(|p| p.argv), Ok(strings(&["send", "r", "only redeploy"])));
+}
+
 /// The Record Lists What Was Decided And Done, Filtered By Kind And Sub-Goal
 #[test]
 fn the_record_lists_what_was_decided_and_done_filtered_by_kind_and_sub_goal() {
@@ -1100,7 +1156,7 @@ fn a_goal_is_read_as_its_overview_its_conversation_or_its_record() {
             "sections": [{"name": "VERIFY", "text": "go test → 0"}]}},
     }));
 
-    let ids = |filter| goal.items(filter).iter().map(ThreadItem::id).collect::<Vec<_>>();
+    let ids = |filter: ThreadFilter| goal.items(filter).iter().map(ThreadItem::id).collect::<Vec<_>>();
     assert_eq!(
         ids(ThreadFilter::All),
         vec![1, 2, 5, 6, 7, 9],
@@ -1108,10 +1164,6 @@ fn a_goal_is_read_as_its_overview_its_conversation_or_its_record() {
     );
     let ThreadItem::Updates(run) = &goal.items(ThreadFilter::All)[1] else { panic!("row 2 is not folded updates") };
     assert_eq!(run.iter().map(ThreadStep::id).collect::<Vec<_>>(), vec![2, 3, 4]);
-    assert_eq!(ids(ThreadFilter::You), vec![1, 7], "a decision, and a question the person answered");
-    assert_eq!(ids(ThreadFilter::Supervisor), vec![6, 7]);
-    assert_eq!(ids(ThreadFilter::Reports), vec![5]);
-    assert_eq!(ids(ThreadFilter::Questions), vec![7]);
 
     let r = &goal.reports["5"];
     assert_eq!(r.verdict, "done");

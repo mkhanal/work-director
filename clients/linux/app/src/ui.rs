@@ -433,7 +433,15 @@ pub fn inline_link(text: &str) -> gtk::Button {
 
 /// A filter chip; chips in one row share a group so one is chosen.
 pub fn fchip(text: &str, chosen: bool, group: Option<&gtk::ToggleButton>) -> gtk::ToggleButton {
-    let chip = gtk::ToggleButton::builder().label(text).active(chosen).build();
+    // A chip is never narrower than its words, up to 32 characters.
+    let chars = text.chars().count().min(32) as i32;
+    let label = gtk::Label::builder()
+        .label(text)
+        .width_chars(chars)
+        .max_width_chars(32)
+        .ellipsize(pango::EllipsizeMode::End)
+        .build();
+    let chip = gtk::ToggleButton::builder().child(&label).active(chosen).tooltip_text(text).build();
     chip.add_css_class("fchip");
     if let Some(group) = group {
         chip.set_group(Some(group));
@@ -441,19 +449,19 @@ pub fn fchip(text: &str, chosen: bool, group: Option<&gtk::ToggleButton>) -> gtk
     chip
 }
 
-/// A row of chips that wraps when the page is narrow.
-pub fn chip_row() -> gtk::FlowBox {
-    let row = gtk::FlowBox::builder()
-        .selection_mode(gtk::SelectionMode::None)
-        .column_spacing(6)
-        .row_spacing(6)
-        .min_children_per_line(1)
-        .max_children_per_line(12)
-        .homogeneous(false)
+/// A row of chips that scrolls sideways when the page is narrow; `row` is
+/// what the chips go in.
+pub fn chip_row() -> (gtk::ScrolledWindow, gtk::Box) {
+    let row = hbox(6);
+    let scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .vscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_width(true)
+        .propagate_natural_height(true)
         .hexpand(true)
+        .child(&row)
         .build();
-    row.add_css_class("chips");
-    row
+    (scroller, row)
 }
 
 /// Done of total as a 120 by 4 bar.

@@ -35,7 +35,7 @@ pub use plan::{Plan, PlanError};
 pub use record::{RecordBy, RecordEntry, RecordFilter, RecordKind, RecordSummary, RecordView};
 pub use send_key::{Chord, ReturnPress, SendKey};
 pub use store::{Change, Feed, FeedState, Spawner, Store, Watch};
-pub use thread::{AskedItem, SupervisorAction, SupervisorReply, ThreadFilter, ThreadItem, ThreadStep};
+pub use thread::{AskedItem, FilterChip, SupervisorAction, SupervisorReply, ThreadFilter, ThreadItem, ThreadStep};
 pub use tree::{
     Course, Finish, FinishLine, FinishSource, Judgement, Link, NeedYou, Node, Owner, PlanStep, Progress, StepState,
     Superseded,

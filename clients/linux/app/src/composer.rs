@@ -25,6 +25,8 @@ pub struct Composer {
     stop: gtk::Button,
     remember: gtk::ToggleButton,
     chips: gtk::Box,
+    /// Who a goal's message goes to: the whole goal or one sub-goal.
+    pub to: gtk::DropDown,
     note: gtk::Label,
     on_send: Rc<RefCell<Option<Sender>>>,
     on_stop: Rc<RefCell<Option<Stopper>>>,
@@ -70,8 +72,15 @@ impl Composer {
         send.add_css_class("send");
         send.add_css_class("circular");
         send.add_css_class("suggested-action");
+        let to = gtk::DropDown::from_strings(&[]);
+        to.add_css_class("flat");
+        to.add_css_class("to-button");
+        to.set_valign(gtk::Align::Center);
+        to.set_tooltip_text(Some("Who this message goes to"));
+        to.set_visible(false);
         let bar = ui::hbox(SPACE_2);
         bar.append(&chips);
+        bar.append(&to);
         bar.append(&remember);
         bar.append(&stop);
         bar.append(&send);
@@ -99,6 +108,7 @@ impl Composer {
             stop,
             remember,
             chips,
+            to,
             note,
             on_send: Rc::new(RefCell::new(None)),
             on_stop: Rc::new(RefCell::new(None)),

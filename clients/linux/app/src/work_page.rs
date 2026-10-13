@@ -86,6 +86,10 @@ struct State {
     /// What the record is narrowed to: a kind, and a sub-goal's path.
     record_filter: RecordFilter,
     record_place: Option<String>,
+    /// The sub-goal a goal's message goes to; none for the whole goal.
+    to: Option<String>,
+    /// Who the composer offers to send to, as last offered.
+    addressees: Vec<(String, String)>,
     /// Where each of your messages is, to jump back to: what you said, and its turn.
     yours: Vec<(String, String)>,
 }
@@ -134,6 +138,8 @@ pub struct WorkPage {
     /// Set while the page marks the view it shows, so the tabs do not take it as a choice.
     syncing: Cell<bool>,
     watch: RefCell<Option<Watch>>,
+    /// The conversation's chips as last shown, and which was chosen.
+    shown_filters: RefCell<Option<(Vec<kit::FilterChip>, ThreadFilter)>>,
     /// What the Pause or Resume button runs, for the work as last read.
     pause_plan: RefCell<Option<Plan>>,
 }
@@ -168,6 +174,14 @@ impl WorkPage {
     }
 
     fn wire(self: &Rc<Self>) {
+        let weak = self.me.clone();
+        self.composer.to.connect_selected_notify(move |d| {
+            let Some(page) = weak.upgrade().filter(|p| !p.syncing.get()) else { return };
+            let mut state = page.state.borrow_mut();
+            let chosen = usize::try_from(d.selected()).ok().and_then(|i| state.addressees.get(i)).map(|a| a.0.clone());
+            state.to = chosen.filter(|id| *id != page.id);
+        });
+
         let weak = self.me.clone();
         *self.watch.borrow_mut() = Some(self.app.store.watch(move |change| {
             let Some(page) = weak.upgrade() else { return };
@@ -452,7 +466,13 @@ impl WorkPage {
         let focus = self.state.borrow().focus.clone();
         match focus {
             Some(card) => self.task(&card.task),
-            None => self.state.borrow().loaded.as_ref().map(|l| l.work().clone()),
+            None => {
+                let state = self.state.borrow();
+                match (&state.loaded, &state.to) {
+                    (Some(Loaded::Goal(g, _)), Some(to)) => g.node(to).map(|n| n.work.clone()),
+                    (loaded, _) => loaded.as_ref().map(|l| l.work().clone()),
+                }
+            }
         }
     }
 
@@ -642,7 +662,7 @@ impl WorkPage {
                     (Loaded::Goal(g, record), Tab::Overview) => {
                         (self.overview_turns(g, record, &state.folds), Vec::new())
                     }
-                    (Loaded::Goal(g, _), Tab::Conversation) => self.goal_turns(g, state.filter),
+                    (Loaded::Goal(g, _), Tab::Conversation) => self.goal_turns(g, state.filter.clone()),
                     (Loaded::Goal(g, record), Tab::Record) => (
                         self.record_view_turns(g, record, state.record_filter, state.record_place.as_deref()),
                         Vec::new(),
@@ -737,6 +757,7 @@ impl WorkPage {
                 h.overview.set_visible(false);
             }
         }
+        h.filters.set_visible(matches!(loaded, Loaded::Goal(..)) && tab == Tab::Conversation);
         let button = match tab {
             Tab::Overview => &h.overview,
             Tab::Conversation => &h.conversation,
@@ -783,6 +804,9 @@ impl WorkPage {
     }
 
     fn set_filter(self: &Rc<Self>, filter: ThreadFilter) {
+        if self.state.borrow().filter == filter {
+            return;
+        }
         self.state.borrow_mut().filter = filter;
         self.render();
     }
@@ -877,13 +901,38 @@ impl WorkPage {
         self.composer.set_placeholder(if continuing {
             "Continue this goal… say what is being worked on; it is planned and started again"
         } else if target.kind.is_goal() {
-            "Tell this goal… its supervisor reads it, and it is kept as a decision"
+            "Message the director about this goal…"
         } else {
             "Message this task… it reads it when it is ready"
         });
         self.composer.set_remember_offered(!continuing);
         self.composer.set_working(!continuing && self.working());
         self.composer.set_chips(&self.chips(&target));
+        self.render_addressees();
+    }
+
+    /// Offers the whole goal and each sub-goal as who a message goes to.
+    fn render_addressees(&self) {
+        let offered = {
+            let state = self.state.borrow();
+            match (&state.loaded, &state.focus) {
+                (Some(Loaded::Goal(g, _)), None) => g.addressees(),
+                _ => Vec::new(),
+            }
+        };
+        self.composer.to.set_visible(offered.len() > 1);
+        if self.state.borrow().addressees == offered {
+            return;
+        }
+        let labels: Vec<String> = offered.iter().map(|(_, path)| format!("to: {path}")).collect();
+        let strs: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let to = self.state.borrow().to.clone();
+        let at = to.and_then(|id| offered.iter().position(|(o, _)| *o == id)).unwrap_or(0);
+        self.syncing.set(true);
+        self.composer.to.set_model(Some(&gtk::StringList::new(&strs)));
+        self.composer.to.set_selected(at as u32);
+        self.syncing.set(false);
+        self.state.borrow_mut().addressees = offered;
     }
 
     /// What a message reaches: runner, model, the folder it works in.
@@ -1050,6 +1099,8 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
             folds: HashMap::new(),
             record_filter: RecordFilter::Everything,
             record_place: None,
+            to: None,
+            addressees: Vec::new(),
             yours: Vec::new(),
         }),
         at_bottom: Cell::new(true),
@@ -1058,6 +1109,7 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
         stale: Cell::new(false),
         syncing: Cell::new(false),
         watch: RefCell::new(None),
+        shown_filters: RefCell::new(None),
         pause_plan: RefCell::new(None),
     }
 }

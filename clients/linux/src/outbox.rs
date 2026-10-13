@@ -34,9 +34,11 @@ pub struct Outgoing {
 }
 
 impl Outgoing {
-    /// Whether the goal's record now holds it: a decision said in so many words.
+    /// Whether the goal's record now holds it: a decision, or a message sent to a sub-goal, said in so many words.
     pub fn arrived_in_goal(&self, goal: &GoalDetail) -> bool {
-        goal.events.iter().any(|e| e.work == self.work && e.kind == "decision" && e.body == self.text)
+        goal.events
+            .iter()
+            .any(|e| e.work == self.work && (e.kind == "decision" || e.kind == "sent") && e.body == self.text)
     }
 
     /// Whether a session's conversation now holds it: a prompt that contains it.

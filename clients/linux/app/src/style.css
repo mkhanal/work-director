@@ -183,7 +183,6 @@ button.fchip {
   background-color: @wd_page; color: @wd_step; box-shadow: none;
 }
 button.fchip:checked { background-color: @wd_text; border-color: @wd_text; color: @wd_page; }
-flowbox.chips > flowboxchild { padding: 0; min-width: 0; }
 .sgtag { font-size: 11px; font-weight: 500; padding: 2px 7px; border-radius: 6px; background-color: @wd_tag_fill; color: @wd_step; border: 1px solid @wd_hairline; }
 .chip-tag { font-size: 12px; padding: 2px 8px; border-radius: 6px; background-color: @wd_tag_fill; color: @wd_step; border: 1px solid @wd_hairline; }
 .tag, .pill:not(button) { border-radius: 6px; padding: 2px 8px; background-color: @wd_tag_fill; }
@@ -220,7 +219,7 @@ progressbar.wd-progress progress { min-height: 4px; border-radius: 2px; backgrou
 .composer-field, .composer-field text { background-color: transparent; font-size: 14px; }
 button.send { min-width: 28px; min-height: 28px; padding: 0; }
 button.jump { min-width: 34px; min-height: 34px; }
-.to-button { font-size: 12px; color: @wd_text3; padding: 2px 4px; min-height: 0; }
+.to-button > button { font-size: 12px; font-weight: normal; color: @wd_text3; padding: 2px 4px; min-height: 0; background: none; box-shadow: none; }
 
 /* Event lines */
 .event-line separator { background-color: @wd_hairline; min-height: 1px; }

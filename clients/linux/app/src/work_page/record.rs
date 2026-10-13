@@ -51,8 +51,8 @@ fn summary(cards: &[(i64, String); 5]) -> gtk::Widget {
 /// The kind chips and the sub-goal picker.
 fn filters(places: &[String], filter: RecordFilter, place: Option<&str>, page: Weak<WorkPage>) -> gtk::Widget {
     let row = ui::hbox(6);
-    let chips = ui::chip_row();
-    row.append(&chips);
+    let (scroller, chips) = ui::chip_row();
+    row.append(&scroller);
     let mut first: Option<gtk::ToggleButton> = None;
     for f in RecordFilter::ALL {
         let chip = ui::fchip(f.label(), f == filter, first.as_ref());
@@ -67,7 +67,7 @@ fn filters(places: &[String], filter: RecordFilter, place: Option<&str>, page: W
                 }
             }
         });
-        chips.insert(&chip, -1);
+        chips.append(&chip);
     }
     let mut names = vec!["Sub-goal: all".to_string()];
     names.extend(places.iter().map(|p| format!("Sub-goal: {p}")));

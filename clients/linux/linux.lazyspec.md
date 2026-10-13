@@ -107,6 +107,12 @@ hold only that product's work; with none, every product's.
 - A sub-goal is added with its outcome and what makes it done.
 - What holds the goal back from done is listed, and a sub-goal's page lists what the director did under it.
 
+## The Conversation Tags Each Turn With Its Sub-Goal And Filters By It
+- Every turn on work under the goal is tagged with that work's path through the tree.
+- It narrows to everything, to the person and the director, or to one sub-goal and everything under it, each choice with how many turns it keeps.
+- A sub-goal finishing reads as one line, with how it was judged.
+- A message goes to the whole goal or to any sub-goal chosen, as `wd send` to it.
+
 ## The Record Lists What Was Decided And Done, Filtered By Kind And Sub-Goal
 - It counts decisions and how many were the person's, course checks and how many corrected course, questions and how many the director answered, chores the director ran, and reports judged.
 - Each entry reads its time, its kind, what it says, where in the tree it was recorded and who made it, newest first, under the day it fell on.
@@ -128,7 +134,6 @@ hold only that product's work; with none, every product's.
 - The question a goal waits on the person for is answered in place, one answer per question, its choices offered as a session's are.
 
 ## A Goal Is Read As Its Overview, Its Conversation Or Its Record
-- The conversation narrows to the person's words, the supervisor, reports or questions.
 - Everything folds each run of two or more updates — looks, state changes, checks, landings and messages told to a task — into one row.
 - A report reads as its verdict, what it said with it, its files and its named sections.
 

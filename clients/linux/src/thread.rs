@@ -4,34 +4,21 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ledger::{Event, GoalDetail};
 
-/// What a goal's conversation is narrowed to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// What a goal's conversation is narrowed to: everything, the person and
+/// the director, or one sub-goal and everything under it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ThreadFilter {
     All,
-    You,
-    Supervisor,
-    Reports,
-    Questions,
+    YouAndDirector,
+    SubGoal(String),
 }
 
-impl ThreadFilter {
-    pub const ALL: [ThreadFilter; 5] = [
-        ThreadFilter::All,
-        ThreadFilter::You,
-        ThreadFilter::Supervisor,
-        ThreadFilter::Reports,
-        ThreadFilter::Questions,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            ThreadFilter::All => "Everything",
-            ThreadFilter::You => "You",
-            ThreadFilter::Supervisor => "Supervisor",
-            ThreadFilter::Reports => "Reports",
-            ThreadFilter::Questions => "Questions",
-        }
-    }
+/// One filter chip: its filter, its label and how many turns it keeps.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FilterChip {
+    pub filter: ThreadFilter,
+    pub label: String,
+    pub count: usize,
 }
 
 /// One row of a goal's conversation as it reads: a step, or a run of
@@ -297,7 +284,7 @@ impl GoalDetail {
             1 => out.push(ThreadItem::Step(Box::new(run.remove(0)))),
             _ => out.push(ThreadItem::Updates(std::mem::take(run))),
         };
-        for step in self.thread().into_iter().filter(|s| self.shows(s, filter)) {
+        for step in self.thread().into_iter().filter(|s| self.shows(s, &filter)) {
             if filter == ThreadFilter::All && is_update(&step) {
                 run.push(step);
                 continue;
@@ -309,17 +296,74 @@ impl GoalDetail {
         out
     }
 
-    fn shows(&self, step: &ThreadStep, filter: ThreadFilter) -> bool {
-        match (filter, step) {
-            (ThreadFilter::All, _) => true,
-            (ThreadFilter::You, ThreadStep::Event(e)) => self.is_yours(e),
-            (ThreadFilter::You, ThreadStep::Exchange(_, Some(a))) => self.is_yours(a),
-            (ThreadFilter::Supervisor, ThreadStep::Supervisor(..)) => true,
-            (ThreadFilter::Supervisor, ThreadStep::Exchange(q, _)) => q.work == self.goal.id,
-            (ThreadFilter::Reports, ThreadStep::Event(e)) => e.kind == "report",
-            (ThreadFilter::Questions, ThreadStep::Exchange(..)) => true,
-            _ => false,
+    fn shows(&self, step: &ThreadStep, filter: &ThreadFilter) -> bool {
+        let e = step.event();
+        match filter {
+            ThreadFilter::All => true,
+            ThreadFilter::YouAndDirector => match step {
+                ThreadStep::Exchange(q, a) => q.work == self.goal.id || a.as_ref().is_some_and(|a| self.is_yours(a)),
+                ThreadStep::Event(e) => self.is_yours(e) || (e.work == self.goal.id && e.kind == "decision"),
+                ThreadStep::Supervisor(..) => true,
+                _ => false,
+            },
+            ThreadFilter::SubGoal(id) => self.node(id).is_some_and(|n| n.holds(&e.work)),
         }
+    }
+
+    /// The chips the conversation is narrowed with: everything, the person
+    /// and the director, and one per sub-goal, each with how many turns it keeps.
+    pub fn filters(&self) -> Vec<FilterChip> {
+        let count = |f: &ThreadFilter| self.thread().iter().filter(|s| self.shows(s, f)).count();
+        let mut chips = vec![
+            FilterChip { filter: ThreadFilter::All, label: "Everything".into(), count: self.thread().len() },
+            FilterChip {
+                filter: ThreadFilter::YouAndDirector,
+                label: "You and the director".into(),
+                count: count(&ThreadFilter::YouAndDirector),
+            },
+        ];
+        for n in self.tree.iter().filter(|n| !n.group) {
+            let filter = ThreadFilter::SubGoal(n.work.id.clone());
+            chips.push(FilterChip { count: count(&filter), filter, label: n.work.title.clone() });
+        }
+        chips
+    }
+
+    /// The sub-goal a turn came from, as its path through the tree; none for
+    /// the goal itself.
+    pub fn tag(&self, work: &str) -> Option<&str> {
+        self.paths.get(work).map(String::as_str)
+    }
+
+    /// A sub-goal finishing, as its event line reads: where, done, how it was
+    /// judged. None for any other event.
+    pub fn finished_line(&self, e: &Event) -> Option<String> {
+        if e.kind != "state" || e.body != "done" || e.work == self.goal.id {
+            return None;
+        }
+        let path = self.tag(&e.work)?;
+        let mut parts = vec![path.to_string(), "done".to_string()];
+        if let Some(j) = self.node(&e.work).and_then(|n| n.judged.as_ref()) {
+            parts.push(format!("judged {}", j.verdict));
+        }
+        Some(parts.join(" · "))
+    }
+
+    /// Who a message can be sent to: the whole goal, or any sub-goal in its
+    /// tree, by path.
+    pub fn addressees(&self) -> Vec<(String, String)> {
+        let mut out = vec![(self.goal.id.clone(), "whole goal".to_string())];
+        fn walk(nodes: &[crate::tree::Node], paths: &HashMap<String, String>, out: &mut Vec<(String, String)>) {
+            for n in nodes {
+                if !n.group {
+                    let path = paths.get(&n.work.id).cloned().unwrap_or_else(|| n.work.title.clone());
+                    out.push((n.work.id.clone(), path));
+                }
+                walk(&n.children, paths, out);
+            }
+        }
+        walk(&self.tree, &self.paths, &mut out);
+        out
     }
 }
 
