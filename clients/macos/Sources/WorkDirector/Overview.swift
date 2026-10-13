@@ -94,8 +94,7 @@ struct GoalOverview: View {
                     .foregroundStyle(goal.doneWhen == nil ? Palette.text3 : Palette.text)
                     .textSelection(.enabled)
             }
-            .canvasCard()
-            .frame(maxHeight: .infinity)
+            .canvasCard(stretch: true)
             if !nested {
                 VStack(alignment: .leading, spacing: 4) {
                     CardLabel("Finishes at")
@@ -106,8 +105,7 @@ struct GoalOverview: View {
                         Text("Not decided yet").font(TypeScale.callout).foregroundStyle(Palette.text3)
                     }
                 }
-                .canvasCard()
-                .frame(maxHeight: .infinity)
+                .canvasCard(stretch: true)
             }
             VStack(alignment: .leading, spacing: 4) {
                 CardLabel("Course")
@@ -117,14 +115,13 @@ struct GoalOverview: View {
                         Text("checked \(agoWords(course.at))").font(TypeScale.caption).foregroundStyle(Palette.text3)
                     }
                     if !course.why.isEmpty {
-                        Text(course.why).font(TypeScale.caption).foregroundStyle(Palette.text3).padding(.top, 2)
+                        Text(course.why.sentence).font(TypeScale.caption).foregroundStyle(Palette.text3).padding(.top, 2)
                     }
                 } else {
                     Text("Not checked yet").font(TypeScale.callout).foregroundStyle(Palette.text3)
                 }
             }
-            .canvasCard()
-            .frame(maxHeight: .infinity)
+            .canvasCard(stretch: true)
         }
         .fixedSize(horizontal: false, vertical: true)
     }

@@ -20,8 +20,7 @@ struct GoalRecordView: View {
                             Text("\(card.number)").font(TypeScale.figure).foregroundStyle(Palette.text).monospacedDigit()
                             Text(card.label).font(TypeScale.caption).foregroundStyle(Palette.text3).fixedSize(horizontal: false, vertical: true)
                         }
-                        .canvasCard(padding: EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
-                        .frame(maxHeight: .infinity)
+                        .canvasCard(padding: EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12), stretch: true)
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)

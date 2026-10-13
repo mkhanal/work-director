@@ -559,15 +559,16 @@ struct QuestionCard: View {
 
     private func optionRow(_ option: QuestionOption, item: QuestionItem, at i: Int, chosen: Bool) -> some View {
         let choice = Choice(option.label)
+        let meaning = change?.kind == .finish ? FinishMeaning.of(choice.label) : nil
         return Button {
             draft.toggle(option.label, item: i)
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(item.multi ? (chosen ? "☑" : "☐") : (chosen ? "◉" : "○")).foregroundStyle(Palette.text)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(choice.label).foregroundStyle(Palette.text)
-                    if !option.description.isEmpty {
-                        Text(option.description).font(TypeScale.caption).foregroundStyle(Palette.text3)
+                    Text(meaning?.title ?? choice.label).foregroundStyle(Palette.text)
+                    if let description = meaning?.meaning ?? (option.description.isEmpty ? nil : option.description) {
+                        Text(description).font(TypeScale.caption).fontWeight(.regular).foregroundStyle(Palette.text2)
                     }
                 }
                 Spacer(minLength: Space.s2)

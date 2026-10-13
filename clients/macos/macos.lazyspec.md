@@ -72,6 +72,10 @@ hold only that product's work; with none, every product's.
 - Sending runs `wd answer <id>` with one answer per item, in the order asked.
 - Letting the director decide answers each item with its recommended choice, or with the director's own judgement where none is recommended.
 
+## The Person Chooses A Light, Dark Or The System's Appearance
+- Settings offers System, Light and Dark, kept as `appearance`; System is the default.
+- Light or Dark sets the whole app's look; every colour takes its value from that column of the design's tokens.
+
 ## The Key That Sends A Message Is The Person's Choice
 - By default Return sends and Shift-Return starts a new line.
 - With ⌘Return or ⌥Return chosen to send, that chord sends and Return starts a new line.
@@ -155,6 +159,7 @@ hold only that product's work; with none, every product's.
 - The overview opens with the goal's done-when, where its top goal finishes and who decided it, and its course with its verdict; a sub-goal's page leaves out where it finishes.
 - Every question below the goal is answered in place, headed by its place in the tree, each level that is a goal a way to its page.
 - Sub-goals are listed as served, each with its state, its line and its badge; a question below a row marks it as needing the person.
+- A sub-goal that is a goal says how many sub-goals it holds and how many are done, with the superseded ones counted apart.
 - A goal row opens its own page; a task row folds its steps open and closed, all closed but the first working row's.
 - Adding a sub-goal runs `wd goal add <id> "<outcome>" --done-when "<done when>"`; both are required.
 - What holds the goal from done is listed as served.
@@ -165,17 +170,19 @@ hold only that product's work; with none, every product's.
 - Kind chips narrow it to decisions, course, questions, reports, chores or delivery; a superseded branch counts as course.
 - A sub-goal picker narrows it to what happened at or under one of the goal's sub-goals.
 - Each row reads its time, its kind as a badge, what it says, where in the tree and by whom, newest first, grouped by day.
+- Ledger text set where a sentence starts begins with a capital letter.
 
 ## The Conversation Tags Each Turn With Its Sub-Goal And Filters By It
 - Every turn said under the goal is tagged with its sub-goal's path; the goal's own turns are not.
-- Chips narrow it to everything, to what passed between the person and the director, or to what was said at or under one sub-goal.
+- Chips narrow it to everything, to what passed between the person and the director, or to what was said at or under one sub-goal; a sub-goal's chip shows its title cut to 28 characters.
+- The decisions the ledger files when a goal is reshaped or settled belong to the record, not the conversation.
 - A sub-goal finishing is a line of its own; an agent's question the director answered reads as one turn.
 - The goal's plan opens it as a card of its sub-goals, each with its state.
-- A message from the goal's page goes to the whole goal, or to one open sub-goal chosen in the composer, as `wd send <id>`.
+- A message from the goal's page goes to the whole goal, or to one open sub-goal chosen in the composer, as `wd send <id>`; a goal's composer is on its Conversation only.
 
 ## A Change Waiting For The Person Shows What Would Change
 - A breakdown waiting for approval shows each proposed sub-goal in order, numbered, with its done-when, what it starts after, and whether one agent takes it or it will be planned further.
 - Approving runs `wd goal approve <id>`; editing, splitting and dropping a sub-goal run `wd goal edit`, `wd goal split` and `wd goal drop <id> "<why>"`, a drop always with why.
 - A course change on the top goal shows the goal, its done-when and its finish line as they are and as they would be, with why, and the plan changes it brings.
-- A plan change shows each change as a sentence; a finish-line question offers each finish line as a choice.
+- A plan change shows each change as a sentence; a finish-line question offers each finish line as a choice, named and explained.
 - Each is answered through the question's own answer path, its recommended choice applying the change.

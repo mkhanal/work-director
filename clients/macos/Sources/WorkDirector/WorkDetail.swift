@@ -115,7 +115,7 @@ struct WorkDetail: View {
                     }
                 }
                 .animation(.easeOut(duration: 0.15), value: atBottom)
-                if let target = messaged(loaded), !target.atRest || (target.kind.isGoal && target.state == .done) {
+                if let target = messaged(loaded), !target.atRest || (target.kind.isGoal && target.state == .done), composes(loaded) {
                     MessageBar(store: store, work: target, working: working(loaded), about: about(target, in: loaded),
                                addressees: focus == nil ? goalDetail(loaded)?.addressees ?? [] : [], sendTo: $sendTo)
                         .id(target.id)
@@ -318,6 +318,13 @@ struct WorkDetail: View {
     }
 
     private func focusedTask(_ card: AgentCard, in loaded: Loaded) -> Work? { task(card.task, in: loaded) }
+
+    /// Whether the page has a composer: a goal's only on its conversation.
+    private func composes(_ loaded: Loaded) -> Bool {
+        if focus != nil { return true }
+        if case .goal = loaded { return goalView.composes }
+        return true
+    }
 
     /// Who a message goes to: the agent in focus's task, else this work.
     private func messaged(_ loaded: Loaded) -> Work? {

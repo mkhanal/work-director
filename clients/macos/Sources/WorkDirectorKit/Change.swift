@@ -54,6 +54,22 @@ public struct PendingChange: Codable, Sendable, Hashable {
     }
 }
 
+/// What each finish line means, as a finish-line question offers it.
+public enum FinishMeaning {
+    /// A finish line's title and what it hands back, or nil for a line outside the set.
+    public static func of(_ line: String) -> (title: String, meaning: String)? {
+        switch line.lowercased().trimmingCharacters(in: .whitespaces) {
+        case "discovery": ("Discovery: the cause found and explained", "A findings report with its proof. No code changes.")
+        case "research": ("Research complete: a written comparison and a pick", "Trade-offs and a recommendation with its reasons. No code changes.")
+        case "local build": ("A local build you can try", "The work on a branch, with how to run it.")
+        case "complete pr": ("A complete PR", "The change with its tests, ready to merge.")
+        case "merged": ("Merged", "The pull request merged into the main branch.")
+        case "released": ("Released", "Merged and published as a release.")
+        default: nil
+        }
+    }
+}
+
 extension QuestionItem {
     /// What it asks, without the lines a change spells out under it.
     public var head: String {

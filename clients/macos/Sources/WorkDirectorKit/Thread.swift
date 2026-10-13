@@ -73,6 +73,8 @@ extension GoalDetail {
 
     private func step(_ e: Event) -> ThreadStep? {
         switch e.kind {
+        case "decision" where e.reshapes:
+            return nil
         case "decision", "report", "sent", "answer", "verify", "pr", "judged":
             return .event(e)
         case "state":
@@ -157,6 +159,18 @@ extension GoalDetail {
 }
 
 extension Event {
+    /// Whether it is a decision the ledger files when a goal is reshaped or
+    /// settled (a sub-goal added, edited, dropped, merged, split or ordered; a
+    /// done-when, finish line, approval or classification), which belongs to
+    /// the record rather than the conversation.
+    public var reshapes: Bool {
+        guard kind == "decision" else { return false }
+        let id = "[0-9a-f]+"
+        let patterns = ["^(added|edited|dropped|split) \(id): ", "^merged \(id) into ", "^\(id) waits on: ",
+                        "^(done when|finishes at|approved): ", "^classified "]
+        return patterns.contains { body.range(of: $0, options: .regularExpression) != nil }
+    }
+
     /// Whether the director gave this answer, from what was decided or by its
     /// judgement, rather than the person.
     public var answeredByDirector: Bool { kind == "answer" && decision?.source == "director" }
@@ -233,9 +247,14 @@ extension GoalDetail {
 
     /// The chips a conversation is narrowed by: everything, you and the
     /// director, then each sub-goal directly under the goal.
-    public var filters: [(filter: ThreadFilter, label: String)] {
-        [(.all, "Everything"), (.yours, "You and the director")]
-            + tree.filter { !$0.group }.map { (.subGoal($0.id), $0.work.title) }
+    public var filters: [(filter: ThreadFilter, label: String, title: String)] {
+        [(.all, "Everything", "Everything"), (.yours, "You and the director", "You and the director")]
+            + tree.filter { !$0.group }.map { (.subGoal($0.id), Self.chip($0.work.title), $0.work.title) }
+    }
+
+    /// A chip's label: a title cut to 28 characters with an ellipsis.
+    static func chip(_ title: String) -> String {
+        title.count <= 28 ? title : title.prefix(27).trimmingCharacters(in: .whitespaces) + "…"
     }
 
     /// Where in the goal's tree work sits, by the titles down to it; nil for

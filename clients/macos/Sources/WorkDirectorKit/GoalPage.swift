@@ -11,6 +11,9 @@ private let supersededPrefix = "superseded: "
 public enum GoalView: String, CaseIterable, Sendable {
     case overview, conversation, record
 
+    /// Whether the view has a composer under it: only the conversation does.
+    public var composes: Bool { self == .conversation }
+
     public var label: String {
         switch self {
         case .overview: "Overview"
@@ -44,8 +47,10 @@ extension TreeNode {
         }
         var parts: [String] = []
         if let plannedInto, work.kind.isGoal || group {
-            parts.append("Planned into \(plannedInto) sub-goal\(plannedInto == 1 ? "" : "s")")
+            let total = progress?.total ?? plannedInto
+            parts.append("Planned into \(total) sub-goal\(total == 1 ? "" : "s")")
             if let progress, progress.total > 0 { parts.append("\(progress.done) of \(progress.total) done") }
+            if let progress, progress.superseded > 0 { parts.append("\(progress.superseded) superseded") }
         } else {
             if work.state == .done, let doneWhen { parts.append("Done when " + doneWhen) }
             if let owner { parts.append(owner.agent ?? owner.runner) }
@@ -138,11 +143,16 @@ extension RecordEntry {
     /// What it says, without the verdict its badge already shows.
     public var text: String {
         guard kind == "course" || kind == "judged", let colon = what.range(of: ": ") else { return what }
-        return String(what[colon.upperBound...])
+        return String(what[colon.upperBound...]).sentence
     }
 
     /// One line for a list of what happened: its kind, then what it says.
     public var sentence: String { "\(badge.text): \(text)" }
+}
+
+extension String {
+    /// Ledger text set in a sentence's place: its first letter capitalised.
+    public var sentence: String { prefix(1).uppercased() + dropFirst() }
 }
 
 extension Course {

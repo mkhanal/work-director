@@ -5,6 +5,7 @@ import WorkDirectorKit
 @main
 struct WorkDirectorApp: App {
     @State private var launch = Launch()
+    @AppStorage("appearance") private var appearance: AppearanceChoice = .system
 
     init() {
         // Run from `swift run` there is no bundle to make the app a regular,
@@ -29,6 +30,7 @@ struct WorkDirectorApp: App {
                 }
             }
             .task { await launch.start() }
+            .onChange(of: appearance, initial: true) { _, choice in choice.apply() }
         }
         .defaultSize(width: 1180, height: 760)
         .commands {
@@ -86,13 +88,25 @@ final class Launch {
     }
 }
 
+extension AppearanceChoice {
+    /// Sets the whole app's look; following the system clears it.
+    @MainActor func apply() {
+        NSApp.appearance = dark.map { NSAppearance(named: $0 ? .darkAqua : .aqua) } ?? nil
+    }
+}
+
 /// What a person can set about how Work Director behaves for them.
 struct Preferences: View {
+    @AppStorage("appearance") private var appearance: AppearanceChoice = .system
     @AppStorage("sendKey") private var sendKey: SendKey = .standard
     @AppStorage("notify") private var notify = true
 
     var body: some View {
         Form {
+            Picker("Appearance", selection: $appearance) {
+                ForEach(AppearanceChoice.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
             Picker("Send a message with", selection: $sendKey) {
                 ForEach(SendKey.allCases) { key in Text(key.title).tag(key) }
             }

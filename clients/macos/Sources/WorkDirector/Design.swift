@@ -348,9 +348,10 @@ extension View {
     }
 
     /// The canvas's card: hairline border, radius 10, padding 14 / 16.
-    func canvasCard(fill: Color = Palette.page, padding: EdgeInsets = EdgeInsets(top: Space.cardV, leading: Space.cardH, bottom: Space.cardV, trailing: Space.cardH)) -> some View {
+    func canvasCard(fill: Color = Palette.page, padding: EdgeInsets = EdgeInsets(top: Space.cardV, leading: Space.cardH, bottom: Space.cardV, trailing: Space.cardH),
+                    stretch: Bool = false) -> some View {
         self.padding(padding)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: stretch ? .infinity : nil, alignment: .topLeading)
             .background(fill, in: RoundedRectangle(cornerRadius: Radius.card))
             .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.hairline))
     }

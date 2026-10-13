@@ -479,6 +479,14 @@ struct SeededTree {
         #expect(throws: PlanError.empty) { try Plan.answer("w1", q, answers: ["teal", "  "]) }
     }
 
+    @Test("The Person Chooses A Light, Dark Or The System's Appearance")
+    func appearanceChosen() {
+        #expect(AppearanceChoice.allCases.map(\.title) == ["System", "Light", "Dark"])
+        #expect(AppearanceChoice(rawValue: "dark")?.dark == true, "`-appearance dark` on the command line forces dark")
+        #expect(AppearanceChoice(rawValue: "light")?.dark == false)
+        #expect(AppearanceChoice.system.dark == nil, "the system's look is followed by default")
+    }
+
     @Test("The Key That Sends A Message Is The Person's Choice")
     func sendKeyIsAChoice() {
         #expect(SendKey.standard == .return)
@@ -931,7 +939,7 @@ struct SeededTree {
         #expect(tagged.mark == .done && tagged.badge == GoalBadge("Done", .settled))
         #expect(tagged.meta() == "Done when Every release is tagged is checked · claude · 2 steps · judged met")
         #expect(guide.mark == .needsYou && guide.badge == GoalBadge("1 needs you", .attention))
-        #expect(guide.meta() == "Planned into 2 sub-goals · 0 of 1 done")
+        #expect(guide.meta() == "Planned into 1 sub-goal · 0 of 1 done · 1 superseded", "superseded ones are counted apart")
         #expect(guide.opensAsGoal && !guide.folds, "a goal row opens its page")
         #expect(note.mark == .working && note.badge == GoalBadge("Working · 1 of 3", .live), "dropped steps are not counted")
         #expect(note.meta() == "claude · now: Write the template")
@@ -959,6 +967,7 @@ struct SeededTree {
         let here = try await store.record(t.guide)
         #expect(here.entries.contains { $0.kind == "chore" && $0.by == "director" }, "a nested page's record holds what the director did there")
         #expect(here.entries.first { $0.kind == "chore" }?.sentence == "Chore: refreshed dependencies")
+        #expect(try await store.record(t.top).entries.first { $0.kind == "course" }?.text == "The tag format suits the rest", "ledger text in a sentence's place starts with a capital")
     }
 
     @Test("The Record Lists What Was Decided And Done, Filtered By Kind And Sub-Goal")
@@ -1033,6 +1042,13 @@ struct SeededTree {
         """
         let goal = try JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
         #expect(goal.filters.map(\.label) == ["Everything", "You and the director", "A", "B"])
+        #expect(GoalDetail.chip("Whoever deploys gets a guide for each release") == "Whoever deploys gets a guid…", "a long title is cut to 28 characters")
+        let reshapes = ["added 1a2b3c4d: X", "done when: y", "dropped 1a2b3c4d: no", "edited 1a2b3c4d: title", "1a2b3c4d waits on: 9f9f9f9f", "finishes at: merged (from goal)"]
+        for body in reshapes {
+            let e = Event(id: 1, work: "g", kind: "decision", body: body, at: "", effective: nil, decision: nil)
+            #expect(e.reshapes, "\(body) belongs to the record, not the conversation")
+        }
+        #expect(!Event(id: 1, work: "g", kind: "decision", body: "keep it small", at: "", effective: nil, decision: nil).reshapes)
         #expect(goal.tag(of: "b1") == "B › B1")
         #expect(goal.tag(of: "g") == nil, "the goal's own turns carry no tag")
         #expect(goal.items(.subGoal("b")).map(\.id) == [4, 7], "a sub-goal's filter holds what was said under it")
@@ -1042,6 +1058,7 @@ struct SeededTree {
         guard case .step(.exchange(_, let answer?)) = goal.items(.all)[3] else { Issue.record("no exchange"); return }
         #expect(answer.answeredByDirector, "an agent's question and the director's answer read as one")
         #expect(goal.addressees.map(\.id) == ["g", "b", "b1"], "the whole goal, then each open sub-goal")
+        #expect(GoalView.allCases.filter(\.composes) == [.conversation], "Overview and Record have no composer")
         #expect(try Plan.send("b1", text: "use forward-only").argv.prefix(2) == ["send", "b1"])
     }
 
@@ -1109,6 +1126,9 @@ struct SeededTree {
         let finish = try #require(pivot.needsYou.first { $0.work == found }?.change)
         #expect(finish.kind == .finish)
         #expect(finish.choices == ["research (recommended)", "complete PR"])
+        #expect(FinishMeaning.of("research")?.title == "Research complete: a written comparison and a pick")
+        #expect(FinishMeaning.of("complete PR")?.title == "A complete PR")
+        #expect(["discovery", "research", "local build", "complete PR", "merged", "released"].allSatisfy { FinishMeaning.of($0) != nil })
         #expect(AnswerDraft(try #require(pivot.needsYou.first { $0.work == found }?.question)).directorDecides == ["research"],
                 "answering goes through the question's own answer path")
     }

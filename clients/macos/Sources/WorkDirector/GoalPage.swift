@@ -36,6 +36,7 @@ struct FilterChips: View {
         FlowLayout(spacing: 6) {
             ForEach(Array(goal.filters.enumerated()), id: \.offset) { _, f in
                 FilterChip(label: f.label, selected: filter == f.filter) { filter = f.filter }
+                    .help(f.title)
             }
         }
     }

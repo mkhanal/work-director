@@ -115,3 +115,25 @@ extension Band {
         }
     }
 }
+
+/// The look the person chose for the app: the system's, or always light or dark.
+public enum AppearanceChoice: String, CaseIterable, Sendable {
+    case system, light, dark
+
+    public var title: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    /// Whether it forces dark (true) or light (false); nil follows the system.
+    public var dark: Bool? {
+        switch self {
+        case .system: nil
+        case .light: false
+        case .dark: true
+        }
+    }
+}

@@ -37,7 +37,7 @@ struct ProposalView: View {
                 Button("Discard") { run(Plan.cancel(goal.goal.id, reason: "the proposed breakdown was discarded")) }.buttonStyle(.canvas)
                 Button("Approve and start") { run(Plan.approve(goal.goal.id)) }.buttonStyle(.canvasPrimary)
             }
-            HStack(alignment: .top, spacing: Space.s3) {
+            SplitRow(spacing: Space.s3) {
                 VStack(alignment: .leading, spacing: 4) {
                     CardLabel("Done when")
                     TextField("What makes this goal done", text: $doneWhen, axis: .vertical)
@@ -45,29 +45,31 @@ struct ProposalView: View {
                         .font(TypeScale.callout)
                         .lineLimit(1...4)
                         .padding(.horizontal, 10).padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Palette.page, in: RoundedRectangle(cornerRadius: Radius.option))
                         .overlay(RoundedRectangle(cornerRadius: Radius.option).strokeBorder(Palette.buttonBorder))
                         .onSubmit {
                             if doneWhen != (goal.doneWhen ?? ""), let plan = try? Plan.editGoal(goal.goal.id, doneWhen: doneWhen) { run(plan) }
                         }
                 }
-                .frame(maxWidth: .infinity)
-                .layoutPriority(2)
                 VStack(alignment: .leading, spacing: 4) {
                     CardLabel("Finishes at")
-                    Text(goal.finishWords?.line ?? "Not decided yet")
-                        .font(TypeScale.calloutStrong)
-                        .foregroundStyle(Palette.text)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10).padding(.vertical, 8)
-                        .background(Palette.page, in: RoundedRectangle(cornerRadius: Radius.option))
-                        .overlay(RoundedRectangle(cornerRadius: Radius.option).strokeBorder(Palette.buttonBorder))
+                    HStack {
+                        Text(goal.finishWords?.line ?? "Not decided yet")
+                            .font(TypeScale.calloutStrong)
+                            .foregroundStyle(Palette.text)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text("▾").font(TypeScale.small).foregroundStyle(Palette.text2)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(Palette.page, in: RoundedRectangle(cornerRadius: Radius.option))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.option).strokeBorder(Palette.buttonBorder))
+                    .help("Where it finishes is decided at planning; tell the director to change it")
                     if let source = goal.finishWords?.source {
-                        Text(source).font(TypeScale.caption).foregroundStyle(Palette.text3)
+                        Text(source).font(TypeScale.caption).foregroundStyle(Palette.text3).fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .layoutPriority(1)
             }
             HStack(spacing: 10) {
                 Text("Proposed sub-goals").font(TypeScale.title).foregroundStyle(Palette.text)
@@ -189,5 +191,32 @@ struct DropSubGoalSheet: View {
         .textFieldStyle(.roundedBorder)
         .padding(Space.s5)
         .frame(width: 460)
+    }
+}
+
+/// Two views side by side, the first twice as wide as the second, both
+/// top-aligned: the canvas's 2:1 grid.
+struct SplitRow: Layout {
+    var spacing: CGFloat = 12
+
+    private func widths(_ total: CGFloat) -> (CGFloat, CGFloat) {
+        let unit = max(0, total - spacing) / 3
+        return (unit * 2, unit)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 600
+        let (a, b) = widths(width)
+        let heights = zip(subviews, [a, b]).map { $0.sizeThatFits(ProposedViewSize(width: $1, height: nil)).height }
+        return CGSize(width: width, height: heights.max() ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let (a, b) = widths(bounds.width)
+        var x = bounds.minX
+        for (view, w) in zip(subviews, [a, b]) {
+            view.place(at: CGPoint(x: x, y: bounds.minY), proposal: ProposedViewSize(width: w, height: nil))
+            x += w + spacing
+        }
     }
 }
