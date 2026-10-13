@@ -68,12 +68,46 @@ event "$S2" note "chore: Refreshed dependencies in the main checkout so the flag
 # The sidebar's other goals.
 W=$("$WD" goal add metariki-eqms "Resolve today's GitHub issues" --json | id)
 state "$W" running 90
+
+# A course change waiting on the person (screen: pivot).
 D=$("$WD" goal add metariki-eqms "Why does sync drop events?" --json | id)
-q "UPDATE work SET finish_line = 'discovery', finish_source = 'goal' WHERE id = '$D'"
-state "$D" running 50
+q "UPDATE work SET done_when = 'The cause is found and explained, with proof', finish_line = 'discovery', finish_source = 'goal' WHERE id = '$D'"
+D1=$(sub "$D" "The cause is found and explained" --done-when "a findings report names the cause, with proof")
+D2=$(sub "$D" "We know which tenants lost events, and how many" --done-when "a list of tenants with lost event counts")
+D3=$(sub "$D" "Compare other sync vendors" --done-when "a comparison of two vendors")
+state "$D1" done 70
+event "$D1" judged "met: the report names the SDK's dropped 429 batches, with logs" 66
+q "UPDATE work SET runner = 'claude', session = 'seed-d2' WHERE id = '$D2'"
+state "$D2" running 50
+state "$D" needs-input 6
+change=$(python3 -c 'import json,sys; d3=sys.argv[1]; g=sys.argv[2]; print(json.dumps({"actions":["GOAL "+g+": A rejected batch is retried until delivered | done when: a 429 batch is retried until delivered","GOAL "+g+": Events lost since March are replayed, once each | done when: every lost event is replayed exactly once","SUPERSEDE "+d3+": no longer needed: the vendor is fine once retried"],"title":"Sync never drops events","done_when":"A 429 batch is retried until delivered, and events lost since March are replayed","finish":"complete PR"}))' "$D3" "$D")
+q "INSERT INTO event (work, kind, body, at, payload) VALUES ('$D', 'question', 'Change course?
+  Now: Why does sync drop events? | done when: The cause is found and explained, with proof | finish: discovery
+  Proposed: Sync never drops events | done when: A 429 batch is retried until delivered, and events lost since March are replayed | finish: complete PR
+  Why: The cause is found and the fix is small: one retry policy plus a replay of what was lost. A separate goal would repeat this context.
+- Change course (recommended)
+- Keep the goal as it is', '$(ago 6)', '$(printf %s "$change" | sed "s/'/''/g")')"
+
+# A breakdown proposed in ask mode (screen: proposal).
+A=$("$WD" goal add metariki-eqms "An inspector can get a full audit trail" --json | id)
+q "UPDATE work SET done_when = 'An org admin exports, for any date range, every record change with who, when, what and why, in a file an inspector accepts.', finish_line = 'complete PR', finish_source = 'taste' WHERE id = '$A'"
+A1=$(sub "$A" "Every record change keeps who, when, what and why" --done-when "a change to any form, template or setting stores its before and after, its author and a reason" --split)
+A2=$(sub "$A" "An admin can export the trail for a date range" --done-when "the export is a signed PDF and a CSV, filtered by range, module and person" --after "$A1")
+A3=$(sub "$A" "The trail cannot be edited or deleted" --done-when "no role, API or migration can change or remove a stored entry, and a test proves it" --after "$A1")
+A4=$(sub "$A" "An inspector's checklist maps to the export" --done-when "each audit-trail clause points to where the export satisfies it" --after "$A2,$A3")
+event "$A" note "proposed: 4 sub-goals" 2
+
+# Where a goal finishes, asked before planning (screen: finishline).
+F=$("$WD" goal add metariki-eqms "Pick a queue library for the event bus" --json | id)
+q "UPDATE work SET detail = 'Compare NATS, Redis Streams and Kafka for the event bus and pick one. We push about 2k events a second at peak.' WHERE id = '$F'"
+state "$F" needs-input 1
+event "$F" question "Where does this goal finish?
+- research (recommended)
+- local build
+- complete PR" 1
 P=$("$WD" goal add metariki-eqms "Printed forms keep every signature" --json | id)
 q "UPDATE work SET finish_line = 'complete PR', finish_source = 'taste' WHERE id = '$P'"
 event "$P" pr "pull-request https://github.com/metariki/metariki-eqms/pull/512" 130
 state "$P" done 120
 
-echo "goal=$G subgoal=$S2 working=$S3 question=$S2c"
+echo "goal=$G subgoal=$S2 working=$S3 question=$S2c pivot=$D proposal=$A finish=$F"
