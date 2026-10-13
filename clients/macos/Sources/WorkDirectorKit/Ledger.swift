@@ -155,42 +155,6 @@ public struct Board: Codable, Sendable, Hashable {
     public func rollup(of id: String) -> Rollup? {
         goals.first { $0.work.id == id }?.rollup
     }
-
-    /// The board as threads: every goal and open standalone item within one
-    /// product when one is named, in one band when one is named, most recently
-    /// active first. Work not started yet is set apart as queued, and work at
-    /// rest as settled.
-    public func threads(project: String? = nil, band: Band? = nil) -> Threads {
-        let all = goals.map { BoardThread(work: $0.work, band: $0.band, rollup: $0.rollup) }
-            + standalone.map { BoardThread(work: $0.work, band: $0.band, rollup: nil) }
-        let shown = all
-            .filter { project == nil || $0.work.project == project }
-            .filter { band == nil || $0.band == band }
-            .sorted { $0.work.updated > $1.work.updated }
-        let waiting: Set<WorkState> = [.queued, .briefed]
-        return Threads(
-            open: shown.filter { $0.band != .atRest && !waiting.contains($0.work.state) },
-            queued: shown.filter { $0.band != .atRest && waiting.contains($0.work.state) },
-            settled: shown.filter { $0.band == .atRest })
-    }
-}
-
-/// The sidebar's three lists.
-public struct Threads: Sendable, Hashable {
-    public let open: [BoardThread]
-    public let queued: [BoardThread]
-    public let settled: [BoardThread]
-
-    public static let none = Threads(open: [], queued: [], settled: [])
-}
-
-/// One goal or standalone item as the sidebar lists it.
-public struct BoardThread: Sendable, Hashable, Identifiable {
-    public let work: Work
-    public let band: Band
-    public let rollup: Rollup?
-
-    public var id: String { work.id }
 }
 
 public struct Claim: Codable, Sendable, Hashable {
@@ -369,15 +333,16 @@ extension Board {
     /// board there is nothing to compare, so nothing has arrived.
     public func arrivals(since earlier: Board?) -> [Arrival] {
         guard let earlier else { return [] }
-        let before = Dictionary(earlier.threads().all.map { ($0.work.id, $0.band) }, uniquingKeysWith: { a, _ in a })
-        return threads().all
+        let before = Dictionary(earlier.placed.map { ($0.work.id, $0.band) }, uniquingKeysWith: { a, _ in a })
+        return placed
             .filter { Board.announced.contains($0.band) && before[$0.work.id] != $0.band }
             .map { Arrival(work: $0.work, band: $0.band) }
     }
-}
 
-extension Threads {
-    var all: [BoardThread] { open + queued + settled }
+    /// Every goal and standalone item with its band.
+    var placed: [Arrival] {
+        goals.map { Arrival(work: $0.work, band: $0.band) } + standalone.map { Arrival(work: $0.work, band: $0.band) }
+    }
 }
 
 /// What `wd doctor` says the host offers: which runners are on PATH.

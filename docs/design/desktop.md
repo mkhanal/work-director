@@ -226,21 +226,22 @@ toolbar; the conversation's own header carries the name.
 
 ### Sidebar
 
-- Top: product switcher (All products / each product) as a borderless menu
-  button with the product's name in `type.callout` semibold; New Goal button
-  beside it (⌘N).
-- Search field, `space.2` below.
-- Sections with `type.micro` headers in text3, `space.4` above each: **Needs
-  you**, **Working**, **Ready**, then folded **Queued** and **Settled**, then
-  **More** (Taste, Archived, Review).
-- A thread row: 2 lines, 8 px vertical / 10 px horizontal padding, selection
-  `radius.card`.
-  - Line 1: state dot (8 px, coloured by band) + title in `type.callout`
-    medium, one line.
-  - Line 2 (`type.meta` text3), indented under the title: product · `3/5` ·
-    `2m`.
-  - Waiting on you: the dot becomes an orange ring and line 2 says what it
-    asks.
+As the canvas (`goal-tree/main`, `subgoal`): 268 wide, `sidebar` fill, a
+hairline on its right, padding 14 / 10.
+
+- Top: the product's name in 13 semibold (a menu: All products, each
+  product, Add Product…) and a "+ New Goal" button beside it (⌘N); under it a
+  rounded "Search goals" field.
+- Bands with micro headers: **Needs you**, **Working**, **Completed**; then a
+  folded **Let go** (dropped, abandoned, superseded) and **More** (Taste,
+  Archived, Review). Top goals and standalone work only; a goal with a
+  question anywhere below it is in Needs you.
+- A row: 8 / 10 padding, radius 10, selected `sidebar selected`; an 8 px dot
+  (orange needs you, accent working, green completed, grey waiting or let go);
+  title 13/18 medium; meta 12/16 text3: `1 of 4 · [1 needs you]`, or where a
+  done goal finished (`Complete PR #512`).
+- With a sub-goal open, its path from the top goal shows under the top goal's
+  row, behind a 2 px rule, each level a way to its page.
 - Context menu: Open, Rename…, Pause/Resume, Archive.
 
 ### Goal header

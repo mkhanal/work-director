@@ -612,31 +612,48 @@ func fakeRunner(_ home: Home) throws {
         try await channel.close()
     }
 
-    @Test("The Sidebar Lists Work As Threads, Most Recently Active First")
-    func sidebarThreads() throws {
+    @Test("The Sidebar Bands Top Goals By Whether They Need You, Work Or Are Completed")
+    func sidebarBands() throws {
         func work(_ id: String, _ state: String, project: String = "demo", updated: String) -> String {
             workJSON(state: state)
                 .replacingOccurrences(of: #""id":"w1""#, with: #""id":"\#(id)""#)
+                .replacingOccurrences(of: #""kind":"task""#, with: #""kind":"goal""#)
                 .replacingOccurrences(of: #""project":"demo""#, with: #""project":"\#(project)""#)
                 .replacingOccurrences(of: #""updated":"u""#, with: #""updated":"\#(updated)""#)
         }
+        func goal(_ id: String, _ state: String, _ band: String, project: String = "demo", updated: String,
+                  done: Int = 0, total: Int = 0, needsYou: Int = 0, finished: String = "null") -> String {
+            #"{"work":\#(work(id, state, project: project, updated: updated)),"rollup":{"counts":{},"done":0,"total":0},"band":"\#(band)","progress":{"done":\#(done),"total":\#(total),"superseded":0},"needs_you":\#(needsYou),"finish":{"line":"discovery","source":"goal"},"finished":\#(finished)}"#
+        }
+        let task = workJSON(state: "running").replacingOccurrences(of: #""id":"w1""#, with: #""id":"fix""#).replacingOccurrences(of: #""updated":"u""#, with: #""updated":"2026-10-05""#)
         let board = try JSONDecoder().decode(Board.self, from: Data("""
         {"goals":[
-          {"work":\(work("old", "running", updated: "2026-10-01")),"rollup":{"counts":{},"done":0,"total":1},"band":"in-flight",\(unplanned)},
-          {"work":\(work("new", "needs-input", updated: "2026-10-09")),"rollup":{"counts":{},"done":0,"total":1},"band":"needs-you",\(unplanned)},
-          {"work":\(work("later", "queued", updated: "2026-10-08")),"rollup":{"counts":{},"done":0,"total":0},"band":"in-flight",\(unplanned)},
-          {"work":\(work("shipped", "done", updated: "2026-10-10")),"rollup":{"counts":{},"done":1,"total":1},"band":"at-rest",\(unplanned)},
-          {"work":\(work("elsewhere", "running", project: "other", updated: "2026-10-11")),"rollup":{"counts":{},"done":0,"total":1},"band":"in-flight",\(unplanned)}
-        ],"standalone":[
-          {"work":\(work("fix", "running", updated: "2026-10-05")),"band":"in-flight"}
-        ]}
+          \(goal("old", "running", "in-flight", updated: "2026-10-01", done: 1, total: 4)),
+          \(goal("asks", "needs-input", "needs-you", updated: "2026-10-09", done: 1, total: 4, needsYou: 1)),
+          \(goal("below", "running", "in-flight", updated: "2026-10-07", needsYou: 2)),
+          \(goal("later", "queued", "in-flight", updated: "2026-10-08")),
+          \(goal("shipped", "done", "at-rest", updated: "2026-10-10", done: 2, total: 2, finished: #""Complete PR #512""#)),
+          \(goal("gone", "dropped", "at-rest", updated: "2026-10-10")),
+          \(goal("elsewhere", "running", "in-flight", project: "other", updated: "2026-10-11"))
+        ],"standalone":[{"work":\(task),"band":"in-flight"}]}
         """.utf8))
-        let t = board.threads(project: "demo")
-        #expect(t.open.map(\.id) == ["new", "fix", "old"])
-        #expect(t.queued.map(\.id) == ["later"])
-        #expect(t.settled.map(\.id) == ["shipped"])
-        #expect(board.threads().open.first?.id == "elsewhere")
-        #expect(board.threads(project: "demo", band: .needsYou).open.map(\.id) == ["new"])
+        let bands = board.sidebar(project: "demo")
+        #expect(bands.needsYou.map(\.id) == ["asks", "below"], "a question below a goal puts it in Needs you")
+        #expect(bands.working.map(\.id) == ["later", "fix", "old"])
+        #expect(bands.completed.map(\.id) == ["shipped"])
+        #expect(bands.letGo.map(\.id) == ["gone"])
+        #expect(board.sidebar().working.first?.id == "elsewhere")
+
+        #expect(bands.needsYou[0].meta == "1 of 4")
+        #expect(bands.needsYou[0].needsYouBadge == "1 needs you")
+        #expect(bands.needsYou[1].needsYouBadge == "2 needs you")
+        #expect(bands.completed[0].meta == "Complete PR #512")
+        #expect(bands.working[0].meta == "Discovery", "an unplanned goal says where it finishes")
+        #expect(bands.working[2].needsYouBadge == nil)
+
+        let chain = [ChainLink(id: "asks", title: "Release notes", state: .needsInput), ChainLink(id: "g2", title: "Whoever deploys gets a guide", state: .needsInput)]
+        #expect(bands.needsYou[0].openPath(chain).map(\.id) == ["g2"])
+        #expect(bands.needsYou[1].openPath(chain).isEmpty)
     }
 
     @Test("The Next Gate Is One Button")

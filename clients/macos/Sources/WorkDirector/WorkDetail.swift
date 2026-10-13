@@ -9,6 +9,8 @@ struct WorkDetail: View {
     let store: Store
     let id: String
     @Binding var plan: Plan?
+    /// Told the open goal's breadcrumb each time it is read.
+    var chained: ([ChainLink]) -> Void = { _ in }
     /// Opens another work item in this pane: a goal's task, a task's goal.
     let open: (String) -> Void
 
@@ -32,10 +34,11 @@ struct WorkDetail: View {
     private static let bottom = "bottom"
     @AppStorage("detail.agents") private var showAgents = true
 
-    init(store: Store, id: String, plan: Binding<Plan?>, open: @escaping (String) -> Void) {
+    init(store: Store, id: String, plan: Binding<Plan?>, chained: @escaping ([ChainLink]) -> Void = { _ in }, open: @escaping (String) -> Void) {
         self.store = store
         self.id = id
         _plan = plan
+        self.chained = chained
         self.open = open
         _feed = State(initialValue: Feed(store: store, id: id))
     }
@@ -394,9 +397,12 @@ struct WorkDetail: View {
             let work = try await store.work(id)
             gate = try await store.gate(of: id)
             if work.kind.isGoal {
-                loaded = .goal(try await store.goal(id))
+                let goal = try await store.goal(id)
+                loaded = .goal(goal)
+                chained(goal.chain)
             } else {
                 loaded = .work(work, try await store.events(of: id))
+                chained([])
             }
             failure = nil
         } catch {

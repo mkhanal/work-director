@@ -115,10 +115,12 @@ hold only that product's work; with none, every product's.
 - Everything folds each run of two or more updates — looks, state changes, checks, landings and messages told to a task — into one row.
 - A report reads as its verdict, what it said with it, its files and its named sections.
 
-## The Sidebar Lists Work As Threads, Most Recently Active First
-- Goals and standalone work in the product in scope are listed most recently updated first.
-- Work not started yet is listed apart as queued, and work at rest apart as settled.
-- Choosing a band shows only the work in it.
+## The Sidebar Bands Top Goals By Whether They Need You, Work Or Are Completed
+- Top goals and standalone work in the product in scope are banded Needs you, Working and Completed, each most recently active first.
+- Needs you holds work in the Needs You band, and goals with a question below them waiting on the person.
+- Completed holds done work; dropped, abandoned and superseded work is kept apart, folded.
+- A row says where a done goal finished, else how many of its sub-goals are done, with how many questions below it need the person.
+- With a sub-goal open, its path from the top goal shows under the top goal's row.
 
 ## Work Is Renamed From Its Page Or Its Menu
 - Renaming runs `wd rename <id> "<title>"` with the title trimmed.

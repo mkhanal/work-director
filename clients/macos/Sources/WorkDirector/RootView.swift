@@ -25,6 +25,8 @@ struct RootView: View {
     @State private var writes: Writes
     @State private var typing = false
     @State private var addingProduct = false
+    /// The open goal's breadcrumb, for the sidebar to show its path.
+    @State private var chain: [ChainLink] = []
 
     init(store: Store) {
         self.store = store
@@ -35,15 +37,15 @@ struct RootView: View {
 
     var body: some View {
         NavigationSplitView {
-            ThreadSidebar(store: store, scopeName: $scopeName, place: $place, plan: $plan, asking: $asking)
-                .navigationSplitViewColumnWidth(min: 240, ideal: 290, max: 380)
+            ThreadSidebar(store: store, scopeName: $scopeName, place: $place, plan: $plan, asking: $asking, chain: chain)
+                .navigationSplitViewColumnWidth(min: 240, ideal: Space.sidebarWidth, max: 380)
         } detail: {
             switch place {
             case .newGoal, nil:
                 NewGoalPage(store: store, scope: scope) { id in place = .work(id) }
                     .id(scopeName)
             case .work(let id):
-                WorkDetail(store: store, id: id, plan: $plan) { place = .work($0) }
+                WorkDetail(store: store, id: id, plan: $plan, chained: { chain = $0 }) { place = .work($0) }
                     .id(id)
             case .archived:
                 ArchivedList(store: store, scope: scope, selected: opened, plan: $plan)
@@ -75,6 +77,7 @@ struct RootView: View {
             if !lastWork.isEmpty { place = .work(lastWork) }
         }
         .onChange(of: place) {
+            if case .work = place {} else { chain = [] }
             if case .work(let id) = place { lastWork = id } else if place == .newGoal { lastWork = "" }
         }
         .onChange(of: scopeName) {
@@ -117,94 +120,75 @@ struct RootView: View {
     private func newGoal() { place = .newGoal }
 }
 
-/// Every goal as a thread: open ones most recently active first, settled ones
-/// folded away, filtered by what they wait on.
+/// Top goals banded by whether they need you, work or are completed, the open
+/// one's path under its row.
 struct ThreadSidebar: View {
     let store: Store
     @Binding var scopeName: String
     @Binding var place: Place?
     @Binding var plan: Plan?
     @Binding var asking: Ask?
-    @AppStorage("sidebar.band") private var bandName = ""
-    @AppStorage("sidebar.settled") private var showSettled = false
-    @AppStorage("sidebar.queued") private var showQueued = false
+    /// The open goal's breadcrumb, top goal first.
+    let chain: [ChainLink]
+    @AppStorage("sidebar.letGo") private var showLetGo = false
     @State private var search = ""
 
     private var scope: String? { scopeName.isEmpty ? nil : scopeName }
-    private var band: Band? { Band(rawValue: bandName) }
+
+    /// The row that is selected: the open goal's top goal, else the open work.
+    private var selected: String? {
+        if let top = chain.first { return top.id }
+        if case .work(let id) = place { return id }
+        return nil
+    }
 
     var body: some View {
-        let threads = store.board?.threads(project: scope, band: band) ?? .none
-        let matching = { (t: BoardThread) in search.isEmpty || t.work.title.localizedCaseInsensitiveContains(search) || t.work.id.hasPrefix(search) }
-        List(selection: $place) {
-            Section {
-                ForEach(threads.open.filter(matching)) { thread in
-                    GoalThreadRow(thread: thread)
-                        .tag(Place.work(thread.work.id))
-                        .contextMenu { WorkMenu(work: thread.work, run: { plan = $0 }, ask: { asking = $0 }) }
-                }
-                if threads.open.filter(matching).isEmpty {
-                    Text(band == nil ? "Nothing open." : "Nothing \(band!.label.lowercased()).")
-                        .font(TypeScale.callout).foregroundStyle(.secondary)
-                        .padding(.vertical, Space.s1)
-                }
-            } header: {
-                HStack {
-                    MicroLabel(band?.label ?? "Open")
-                    Spacer()
-                    Menu {
-                        Picker("Show", selection: $bandName) {
-                            Text("Everything open").tag("")
-                            Divider()
-                            ForEach(Band.allCases.filter { $0 != .atRest }, id: \.self) { b in
-                                let n = store.board?.threads(project: scope, band: b).open.count ?? 0
-                                Text("\(b.label) (\(n))").tag(b.rawValue)
+        let bands = store.board?.sidebar(project: scope) ?? .none
+        let matching = { (r: SidebarRow) in search.isEmpty || r.work.title.localizedCaseInsensitiveContains(search) || r.work.id.hasPrefix(search) }
+        VStack(alignment: .leading, spacing: 0) {
+            top
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    band("Needs you", bands.needsYou.filter(matching), first: true)
+                    band("Working", bands.working.filter(matching))
+                    band("Completed", bands.completed.filter(matching))
+                    let letGo = bands.letGo.filter(matching)
+                    if !letGo.isEmpty {
+                        Button { showLetGo.toggle() } label: {
+                            HStack(spacing: 4) {
+                                MicroLabel("Let go · \(letGo.count)")
+                                Image(systemName: showLetGo ? "chevron.down" : "chevron.right")
+                                    .font(.system(size: IconSize.tiny, weight: .semibold)).foregroundStyle(Palette.text3)
                             }
+                            .contentShape(Rectangle())
                         }
-                        .pickerStyle(.inline)
-                    } label: {
-                        Image(systemName: band == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                        .buttonStyle(.plain)
+                        .padding(EdgeInsets(top: 14, leading: 10, bottom: 6, trailing: 10))
+                        if showLetGo {
+                            ForEach(letGo) { row($0) }
+                        }
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .help("Show only what waits on one thing")
-                }
-            }
-            Section(isExpanded: $showQueued) {
-                ForEach(threads.queued.filter(matching)) { thread in
-                    GoalThreadRow(thread: thread)
-                        .tag(Place.work(thread.work.id))
-                        .contextMenu { WorkMenu(work: thread.work, run: { plan = $0 }, ask: { asking = $0 }) }
-                }
-            } header: {
-                MicroLabel("Queued · \(threads.queued.count)")
-            }
-            Section(isExpanded: $showSettled) {
-                ForEach(threads.settled.filter(matching)) { thread in
-                    GoalThreadRow(thread: thread)
-                        .tag(Place.work(thread.work.id))
-                        .contextMenu { WorkMenu(work: thread.work, run: { plan = $0 }, ask: { asking = $0 }) }
-                }
-            } header: {
-                MicroLabel("Settled · \(threads.settled.count)")
-            }
-            Section {
-                Label("Taste", systemImage: "sparkles").tag(Place.taste)
-                Label("Archived", systemImage: "archivebox").tag(Place.archived)
-                if let scope {
-                    Label("What the loop decided", systemImage: "checklist").tag(Place.review(scope))
-                } else {
-                    ForEach(store.projects) { project in
-                        Label("Review \(project.name)", systemImage: "checklist").tag(Place.review(project.name))
+                    MicroLabel("More").padding(EdgeInsets(top: 14, leading: 10, bottom: 6, trailing: 10))
+                    more("Taste", "sparkles", .taste)
+                    more("Archived", "archivebox", .archived)
+                    if let scope {
+                        more("What the loop decided", "checklist", .review(scope))
+                    } else {
+                        ForEach(store.projects) { p in more("Review \(p.name)", "checklist", .review(p.name)) }
                     }
                 }
-            } header: {
-                MicroLabel("More")
+                .padding(.horizontal, 10)
+                .padding(.bottom, 14)
             }
         }
-        .listStyle(.sidebar)
-        .searchable(text: $search, placement: .sidebar, prompt: "Search goals")
-        .safeAreaInset(edge: .top) {
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Palette.sidebar)
+        .overlay(alignment: .trailing) { Rectangle().fill(Palette.hairline).frame(width: 1) }
+    }
+
+    /// The product switcher, New Goal and the search field.
+    private var top: some View {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Space.s2) {
                 Menu {
                     Picker("Product", selection: $scopeName) {
@@ -216,82 +200,113 @@ struct ThreadSidebar: View {
                     Divider()
                     Button("Add Product…") { NotificationCenter.default.post(name: .addProduct, object: nil) }
                 } label: {
-                    HStack(spacing: Space.s1 + 2) {
-                        Image(systemName: "shippingbox.fill").foregroundStyle(.secondary)
-                        Text(scope ?? "All products").font(TypeScale.calloutStrong).lineLimit(1)
-                        Image(systemName: "chevron.up.chevron.down").font(.system(size: IconSize.tiny, weight: .semibold)).foregroundStyle(.tertiary)
-                    }
+                    Text(scope ?? "All products").font(TypeScale.calloutStrong).foregroundStyle(Palette.text).lineLimit(1)
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .help("Show one product's work, or all of it")
                 Spacer(minLength: 0)
-                Button { place = .newGoal } label: {
-                    Image(systemName: "square.and.pencil").font(.system(size: IconSize.toolbar, weight: .medium))
-                }
-                .buttonStyle(.borderless)
-                .help("New goal (⌘N)")
+                Button("+ New Goal") { place = .newGoal }
+                    .buttonStyle(CanvasButtonStyle())
+                    .controlSize(.small)
+                    .help("New goal (⌘N)")
             }
-            .padding(.horizontal, Space.s4)
-            .padding(.top, Space.s1)
-            .padding(.bottom, Space.s2)
+            .padding(EdgeInsets(top: 4, leading: 6, bottom: 8, trailing: 6))
+            TextField("Search goals", text: $search)
+                .textFieldStyle(.plain)
+                .font(TypeScale.callout)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Palette.search, in: RoundedRectangle(cornerRadius: Radius.option))
+                .padding(EdgeInsets(top: 0, leading: 4, bottom: 10, trailing: 4))
         }
+        .padding(EdgeInsets(top: 14, leading: 10, bottom: 0, trailing: 10))
+    }
+
+    @ViewBuilder private func band(_ title: String, _ rows: [SidebarRow], first: Bool = false) -> some View {
+        if !rows.isEmpty {
+            MicroLabel(title).padding(EdgeInsets(top: first ? 6 : 14, leading: 10, bottom: 6, trailing: 10))
+            ForEach(rows) { row($0) }
+        }
+    }
+
+    private func row(_ r: SidebarRow) -> some View {
+        SidebarRowView(row: r, selected: selected == r.id, path: r.openPath(chain), open: { place = .work($0) })
+            .contextMenu { WorkMenu(work: r.work, run: { plan = $0 }, ask: { asking = $0 }) }
+    }
+
+    private func more(_ title: String, _ symbol: String, _ to: Place) -> some View {
+        Button { place = to } label: {
+            Label(title, systemImage: symbol)
+                .font(TypeScale.callout)
+                .foregroundStyle(Palette.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(place == to ? Palette.sidebarSelected : .clear, in: RoundedRectangle(cornerRadius: Radius.card))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
-/// A goal as one line of the sidebar: where it is, how far, how long ago.
-struct GoalThreadRow: View {
-    let thread: BoardThread
+/// A goal as one row of the sidebar: dot, title, how far it is, and the open
+/// sub-goal's path under it.
+struct SidebarRowView: View {
+    let row: SidebarRow
+    let selected: Bool
+    let path: [ChainLink]
+    let open: (String) -> Void
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
-            StateDot(state: thread.work.state, band: thread.band)
-                .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 4 }
-            VStack(alignment: .leading, spacing: Space.s1) {
-                Text(thread.work.title)
-                    .font(thread.work.kind.isGoal ? TypeScale.calloutMedium : TypeScale.callout)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                HStack(spacing: Space.s1) {
-                    Text(thread.work.project)
-                    if let r = thread.rollup, r.total > 0 {
-                        Text("·")
-                        Text("\(r.done)/\(r.total)").monospacedDigit()
+        HStack(alignment: .top, spacing: 8) {
+            Circle().fill(dot).frame(width: 8, height: 8).padding(.top, 5)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.work.title)
+                    .font(TypeScale.calloutMedium)
+                    .foregroundStyle(Palette.text)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                HStack(spacing: 6) {
+                    Text(row.meta + (row.needsYouBadge == nil ? "" : " ·"))
+                        .font(TypeScale.caption)
+                        .foregroundStyle(Palette.text3)
+                        .lineLimit(1)
+                    if let badge = row.needsYouBadge { Badge(badge, .attention) }
+                }
+                if !path.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(path) { link in
+                            Button(link.title) { open(link.id) }
+                                .buttonStyle(.plain)
+                                .font(TypeScale.meta)
+                                .foregroundStyle(Palette.text)
+                                .lineLimit(1)
+                        }
                     }
-                    Spacer(minLength: Space.s1)
-                    Text(ago(thread.work.updated)).monospacedDigit()
+                    .padding(EdgeInsets(top: 2, leading: 10, bottom: 2, trailing: 0))
+                    .overlay(alignment: .leading) { Rectangle().fill(Color(light: 0xc9c9d1, dark: 0x4a4a50)).frame(width: 2) }
+                    .padding(.top, 6)
                 }
-                .font(TypeScale.small)
-                .foregroundStyle(.tertiary)
             }
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, Space.s1)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(selected ? Palette.sidebarSelected : .clear, in: RoundedRectangle(cornerRadius: Radius.card))
+        .contentShape(Rectangle())
+        .onTapGesture { open(row.work.id) }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
     }
-}
 
-/// Where a thread is, as a dot: waiting on you, working, at a gate, paused,
-/// not started, or settled.
-struct StateDot: View {
-    let state: WorkState
-    let band: Band
-
-    var body: some View {
-        Group {
-            if band == .needsYou {
-                Circle().strokeBorder(Palette.attention, lineWidth: 2).background(Circle().fill(Palette.attention.opacity(0.25)))
-            } else {
-                switch state {
-                case .running: Circle().fill(.green)
-                case .review, .softDone: Circle().fill(.blue)
-                case .paused: Circle().stroke(.secondary, lineWidth: 1.5)
-                case .queued, .briefed: Circle().stroke(.tertiary, lineWidth: 1)
-                default: Circle().fill(.secondary.opacity(0.4))
-                }
-            }
+    private var dot: Color {
+        switch row.work.state {
+        case .done: Palette.green
+        case .dropped, .abandoned, .superseded, .paused, .queued, .briefed: Palette.grey
+        default: row.needsYou > 0 || row.band == .needsYou ? Palette.orange : Palette.accent
         }
-        .frame(width: 8, height: 8)
-        .help(state.look.label)
     }
 }
 
