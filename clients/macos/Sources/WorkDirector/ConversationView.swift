@@ -14,11 +14,11 @@ struct ConversationView: View {
     /// What the director answered this work in its place, so those prompts
     /// read as the director's.
     var directorAnswers: [String] = []
+    /// Steps the person folded or unfolded.
+    @State private var toggled: Set<String> = []
 
     var body: some View {
-        // Lazy: a long session has thousands of steps, and only those on
-        // screen are laid out on each read.
-        LazyVStack(alignment: .leading, spacing: Space.s4) {
+        VStack(alignment: .leading, spacing: Space.s4) {
             if let failure = feed.failure {
                 Label(failure, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(Palette.failure)
@@ -31,17 +31,17 @@ struct ConversationView: View {
                                        systemImage: "bubble.left.and.text.bubble.right",
                                        description: Text(feed.status == .none ? "The conversation starts when the work is spawned." : "The session is starting."))
             }
-            let rows = ThreadRow.rows(feed.steps)
-            ForEach(Array(rows.enumerated()), id: \.element.id) { n, row in
-                let agentsTurn = !isPrompt(row)
-                let opensRun = agentsTurn && (n == 0 || isPrompt(rows[n - 1]))
-                VStack(alignment: .leading, spacing: Space.s2) {
-                    if opensRun {
-                        Turn(speaker: speaker, at: at(row)) { EmptyView() }
-                            .padding(.top, n == 0 ? 0 : Space.s2)
+            // Everything said is one text to select across; only a question
+            // waiting on the person breaks it.
+            ForEach(pieces) { piece in
+                switch piece {
+                case .text(let transcript):
+                    TranscriptText(transcript: transcript, key: "\(work.id)/\(feed.agent ?? "")/\(piece.id)") { id in
+                        toggled.formSymmetricDifference([id])
                     }
-                    rowView(row)
-                        .padding(.leading, agentsTurn ? Space.turnIndent : 0)
+                case .asking(_, let question):
+                    QuestionCard(store: store, workID: work.id, question: question, product: work.project, answered: { Task { await feed.read() } })
+                        .padding(.leading, Space.turnIndent)
                 }
             }
             if feed.agent == nil {
@@ -56,114 +56,19 @@ struct ConversationView: View {
         .task(id: ObjectIdentifier(feed)) { await feed.follow() }
     }
 
-    @ViewBuilder private func rowView(_ row: ThreadRow) -> some View {
-        switch row {
-        case .step(let index, let step):
-            StepView(store: store, work: work, step: step, first: index == 0,
-                     latest: index == feed.steps.count - 1 && feed.status == .running,
-                     directorAnswered: step.kind == .prompt && directorAnswers.contains { (step.text ?? "").contains($0) },
-                     answered: { Task { await feed.read() } })
-        case .tools(_, let calls):
-            ToolGroup(calls: calls, working: feed.status == .running)
-        }
+    private var pieces: [TranscriptPiece] {
+        let answered = Set(feed.steps.indices.filter { i in
+            feed.steps[i].kind == .prompt && directorAnswers.contains { (feed.steps[i].text ?? "").contains($0) }
+        })
+        return Transcript.pieces(feed.steps, speaker: speaker, running: feed.status == .running, directorAnswered: answered,
+                                 toggled: toggled, time: when)
     }
 
-    private var speaker: Speaker {
-        .agent(feed.agent.map { "Subagent \($0)" } ?? work.runner.map { $0.capitalized } ?? "Agent")
-    }
-
-    private func isPrompt(_ row: ThreadRow) -> Bool {
-        if case .step(_, let step) = row { return step.kind == .prompt }
-        return false
-    }
-
-    private func at(_ row: ThreadRow) -> String? {
-        if case .step(_, let step) = row { return step.at }
-        return nil
+    private var speaker: String {
+        feed.agent.map { "Subagent \($0)" } ?? work.runner.map { $0.capitalized } ?? "Agent"
     }
 }
 
-struct StepView: View {
-    let store: Store
-    let work: Work
-    let step: Step
-    /// The first step is the brief the session was spawned with.
-    let first: Bool
-    /// The newest step of a session still working.
-    let latest: Bool
-    /// Whether this prompt is the director answering in the person's place.
-    var directorAnswered = false
-    let answered: () -> Void
-
-    var body: some View {
-        switch step.kind {
-        case .prompt where directorAnswered:
-            Turn(speaker: .director, at: step.at, detail: { Text("answered from what was decided").foregroundStyle(.secondary) }) {
-                Text(step.text ?? "")
-                    .readable()
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .card(Palette.settled, padding: Space.s3)
-                    .copyable(step.text ?? "")
-            }
-        case .prompt:
-            PromptRow(text: step.text ?? "", brief: first, at: step.at)
-        case .text:
-            MarkdownText(step.text ?? "")
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .copyable(markdown: step.text ?? "")
-        case .thinking:
-            ThinkingRow(text: step.text ?? "", open: latest)
-        case .tool:
-            if let tool = step.tool { ToolRow(call: tool, working: latest) }
-        case .question:
-            if let q = step.question {
-                QuestionCard(store: store, workID: work.id, question: q, product: work.project, answered: answered)
-            }
-        }
-    }
-}
-
-/// What the session was told: its brief, folded, or a message after it.
-struct PromptRow: View {
-    let text: String
-    let brief: Bool
-    let at: String?
-    var label: String? = nil
-    @State private var expanded = false
-
-    var body: some View {
-        HStack(alignment: .top, spacing: Space.s3) {
-            Image(systemName: brief ? "doc.text.fill" : "arrow.turn.down.right")
-                .font(.system(size: IconSize.turn))
-                .foregroundStyle(.secondary)
-                .frame(width: Space.avatar, height: 18)
-            VStack(alignment: .leading, spacing: Space.s2) {
-                HStack(spacing: Space.s1 + 2) {
-                    Text(label ?? (brief ? "Brief" : "Told"))
-                    if let at { Text(when(at)).foregroundStyle(.tertiary) }
-                    Spacer()
-                    if folds {
-                        Button(expanded ? "Show less" : "Show all") { expanded.toggle() }
-                            .buttonStyle(.link)
-                    }
-                }
-                .font(TypeScale.meta)
-                Text(text)
-                    .readable()
-                    .foregroundStyle(brief ? .secondary : .primary)
-                    .lineLimit(expanded || !folds ? nil : (brief ? 3 : 6))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .card(padding: Space.s3)
-        }
-        .copyable(text)
-    }
-
-    private var folds: Bool { text.count > 400 || text.split(separator: "\n").count > (brief ? 3 : 6) }
-}
 
 /// What the person said, set apart from everything else said on the work so
 /// it is found again scrolling back: on the right, in the accent colour.
@@ -258,180 +163,6 @@ struct OutgoingBubble: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
-    }
-}
-
-/// The executor's reasoning, as its provider summarises it. Folded unless it
-/// is what the session is doing right now.
-struct ThinkingRow: View {
-    let text: String
-    @State private var expanded: Bool
-
-    init(text: String, open: Bool) {
-        self.text = text
-        _expanded = State(initialValue: open)
-    }
-
-    var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            Text(text)
-                .readable()
-                .italic()
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, Space.s2)
-        } label: {
-            HStack(spacing: Space.s2) {
-                Image(systemName: "brain")
-                Text("Thinking").font(TypeScale.calloutMedium)
-                if !expanded {
-                    Text(firstLine).lineLimit(1).truncationMode(.tail).foregroundStyle(.tertiary)
-                }
-            }
-            .font(TypeScale.callout)
-            .foregroundStyle(.secondary)
-        }
-        .copyable(text)
-    }
-
-    private var firstLine: String {
-        text.split(separator: "\n").first.map(String.init) ?? ""
-    }
-}
-
-/// One tool call: what it acted on in a line, its input and result on demand.
-struct ToolRow: View {
-    let call: ToolCall
-    let working: Bool
-    @State private var expanded = false
-
-    var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: Space.s2) {
-                if !call.input.isEmpty { Mono(title: "Input", text: call.input) }
-                if let result = call.result {
-                    Mono(title: call.failed ? "Failed" : "Result", text: result.isEmpty ? "(no output)" : result, failed: call.failed)
-                }
-            }
-            .padding(.top, Space.s2)
-        } label: {
-            HStack(spacing: Space.s2) {
-                Image(systemName: Self.symbol(call.name)).frame(width: 16).foregroundStyle(.secondary)
-                Text(call.name).font(TypeScale.calloutMedium)
-                Text(call.summary)
-                    .font(TypeScale.codeSmall)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: 4)
-                if call.result == nil {
-                    if working { ProgressView().controlSize(.mini) }
-                } else if call.failed {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.failure)
-                }
-            }
-            .font(TypeScale.callout)
-        }
-        .contextMenu {
-            Button("Copy") { copyText([call.name, call.summary].filter { !$0.isEmpty }.joined(separator: " ")) }
-            if !call.input.isEmpty { Button("Copy Input") { copyText(call.input) } }
-            if let result = call.result, !result.isEmpty { Button("Copy Result") { copyText(result) } }
-        }
-    }
-
-    static func symbol(_ name: String) -> String {
-        switch name {
-        case "Bash": "terminal"
-        case "Read": "doc.text"
-        case "Edit", "MultiEdit", "NotebookEdit": "pencil"
-        case "Write": "square.and.pencil"
-        case "Grep", "Glob": "magnifyingglass"
-        case "WebFetch", "WebSearch": "globe"
-        case "Agent", "Task": "person.2"
-        case "TodoWrite": "checklist"
-        case "Skill": "book"
-        default: "wrench.and.screwdriver"
-        }
-    }
-}
-
-/// A run of tool calls between two things said, folded into one row that
-/// names what they did.
-struct ToolGroup: View {
-    let calls: [ToolCall]
-    let working: Bool
-    @State private var expanded = false
-
-    var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: Space.s2) {
-                ForEach(Array(calls.enumerated()), id: \.offset) { i, call in
-                    ToolRow(call: call, working: working && i == calls.count - 1)
-                }
-            }
-            .padding(.leading, Space.s2)
-            .padding(.top, Space.s2)
-        } label: {
-            HStack(spacing: Space.s2) {
-                Image(systemName: "wrench.and.screwdriver").frame(width: 16)
-                Text(summary).font(TypeScale.calloutMedium)
-                Spacer(minLength: 4)
-                if failed > 0 {
-                    Label("\(failed) failed", systemImage: "xmark.circle.fill").foregroundStyle(Palette.failure).font(TypeScale.meta)
-                }
-                if working && calls.last?.result == nil { ProgressView().controlSize(.mini) }
-            }
-            .font(TypeScale.callout)
-            .foregroundStyle(.secondary)
-        }
-    }
-
-    private var failed: Int { calls.filter(\.failed).count }
-
-    /// "Ran 3 commands, read 2 files" — each kind of call counted once.
-    private var summary: String {
-        var counts: [(String, Int)] = []
-        for call in calls {
-            let noun = Self.noun(call.name)
-            if let i = counts.firstIndex(where: { $0.0 == noun }) { counts[i].1 += 1 } else { counts.append((noun, 1)) }
-        }
-        return counts.map { "\($0.1) \($0.0)\($0.1 == 1 ? "" : "s")" }.joined(separator: ", ")
-    }
-
-    private static func noun(_ name: String) -> String {
-        switch name {
-        case "Bash": "command"
-        case "Read": "read"
-        case "Edit", "MultiEdit", "Write", "NotebookEdit": "edit"
-        case "Grep", "Glob": "search"
-        case "WebFetch", "WebSearch": "web lookup"
-        case "Agent", "Task": "subagent"
-        default: "\(name) call"
-        }
-    }
-}
-
-struct Mono: View {
-    let title: String
-    let text: String
-    var failed = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Space.s1) {
-            MicroLabel(title).foregroundStyle(failed ? Palette.failure : .secondary)
-            ScrollView {
-                Text(text)
-                    .font(TypeScale.codeSmall)
-                    .lineSpacing(TypeScale.codeLeading)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(Space.s3)
-            }
-            .frame(maxHeight: 280)
-            .fixedSize(horizontal: false, vertical: true)
-            .background(Palette.sunken, in: RoundedRectangle(cornerRadius: Radius.card))
-        }
     }
 }
 
@@ -961,111 +692,19 @@ struct ActivityLine: View {
     }
 }
 
-/// Markdown as an executor writes it: headings, lists, code blocks and
-/// paragraphs, each with its inline emphasis, code and links.
+/// Markdown as an executor writes it: headings, lists, quotes, code, rules,
+/// tables and paragraphs, each with its inline emphasis, code and links, as
+/// one native text to select and copy.
 struct MarkdownText: View {
-    let blocks: [Block]
+    let text: String
 
-    enum Block: Hashable {
-        case heading(Int, String)
-        case bullet(String, ordered: String?)
-        case code(String)
-        case paragraph(String)
-    }
-
-    init(_ text: String) {
-        if let parsed = Self.parsed[text] {
-            blocks = parsed
-        } else {
-            blocks = Self.parse(text)
-            Self.parsed[text] = blocks
-        }
-    }
-
-    /// Each text is parsed once: a step is drawn again on every read of its
-    /// conversation, and its text never changes. Bounded, so a long-running
-    /// app does not keep every text it ever showed.
-    @MainActor private static var parsed = BoundedCache<String, [Block]>(limit: 2000)
+    init(_ text: String) { self.text = text }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.s3) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                switch block {
-                case .heading(let level, let text):
-                    inline(text).font(level <= 1 ? .system(size: 17, weight: .semibold) : TypeScale.title).padding(.top, Space.s2)
-                case .bullet(let text, let ordered):
-                    HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
-                        Text(ordered ?? "•").foregroundStyle(.secondary).frame(minWidth: 12, alignment: .trailing)
-                        inline(text)
-                    }
-                case .code(let text):
-                    Text(text)
-                        .font(TypeScale.code)
-                        .lineSpacing(TypeScale.codeLeading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(Space.s3)
-                        .background(Palette.sunken, in: RoundedRectangle(cornerRadius: Radius.card))
-                case .paragraph(let text):
-                    inline(text)
-                }
-            }
-        }
-        .readable()
-    }
-
-    private func inline(_ text: String) -> Text {
-        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        if let attributed = try? AttributedString(markdown: text, options: options) {
-            return Text(attributed)
-        }
-        return Text(text)
-    }
-
-    static func parse(_ text: String) -> [Block] {
-        var out: [Block] = []
-        var paragraph: [String] = []
-        var code: [String]?
-        func flush() {
-            if !paragraph.isEmpty { out.append(.paragraph(paragraph.joined(separator: "\n"))) }
-            paragraph = []
-        }
-        for raw in text.components(separatedBy: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("```") {
-                if let open = code {
-                    out.append(.code(open.joined(separator: "\n")))
-                    code = nil
-                } else {
-                    flush()
-                    code = []
-                }
-                continue
-            }
-            if code != nil {
-                code?.append(raw)
-                continue
-            }
-            if line.isEmpty {
-                flush()
-            } else if let hashes = line.firstIndex(where: { $0 != "#" }), hashes != line.startIndex, line[hashes] == " " {
-                flush()
-                out.append(.heading(line.distance(from: line.startIndex, to: hashes), String(line[hashes...]).trimmingCharacters(in: .whitespaces)))
-            } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
-                flush()
-                out.append(.bullet(String(line.dropFirst(2)), ordered: nil))
-            } else if let dot = line.firstIndex(of: "."), line[..<dot].allSatisfy(\.isNumber), !line[..<dot].isEmpty,
-                      line[line.index(after: dot)...].hasPrefix(" ") {
-                flush()
-                out.append(.bullet(String(line[line.index(dot, offsetBy: 2)...]), ordered: String(line[...dot])))
-            } else {
-                paragraph.append(raw)
-            }
-        }
-        if let open = code { out.append(.code(open.joined(separator: "\n"))) }
-        flush()
-        return out
+        TranscriptText(transcript: .reply(text))
     }
 }
+
 
 /// An ISO time as a reader wants it: the time today, the date otherwise.
 func when(_ iso: String) -> String {
@@ -1075,21 +714,4 @@ func when(_ iso: String) -> String {
     return Calendar.current.isDateInToday(date)
         ? date.formatted(date: .omitted, time: .shortened)
         : date.formatted(date: .abbreviated, time: .shortened)
-}
-
-/// A dictionary that forgets everything once it holds limit entries; enough for
-/// a cache whose entries are cheap to make again.
-struct BoundedCache<Key: Hashable, Value> {
-    let limit: Int
-    private var store: [Key: Value] = [:]
-
-    init(limit: Int) { self.limit = limit }
-
-    subscript(key: Key) -> Value? {
-        get { store[key] }
-        set {
-            if store.count >= limit { store.removeAll(keepingCapacity: true) }
-            store[key] = newValue
-        }
-    }
 }

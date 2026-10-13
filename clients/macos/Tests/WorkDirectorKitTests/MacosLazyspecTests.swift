@@ -1671,4 +1671,106 @@ struct SeededTree {
         #expect(entry("judged", "met: x").badge.text == "Checked: done" && entry("judged", "missed: x").badge.text == "Checked: not done yet")
         #expect(Words.replaced(why: "guides live with each release") == "Replaced by a change of plan: guides live with each release")
     }
+
+    @Test("A Table In A Reply Reads As A Table")
+    func tableReadsAsTable() {
+        let said = """
+        Checks so far:
+
+        | Check | Run? | Result |
+        |---|:---:|---:|
+        | `go test` | **yes** | [passed](https://ci.example/1) |
+        | lint \\| vet | no |
+        > Quoted from the brief
+        > second line
+
+        ---
+        - outer
+          - inner
+            - deepest
+        - [x] done box
+        1. first
+        """
+        let blocks = Markdown.blocks(said)
+        guard case .table(let table) = blocks[1] else { Issue.record("no table in \(blocks)"); return }
+        #expect(table.header == ["Check", "Run?", "Result"])
+        #expect(table.alignments == [.leading, .center, .trailing])
+        #expect(table.rows == [["`go test`", "**yes**", "[passed](https://ci.example/1)"], ["lint | vet", "no", ""]])
+        #expect(blocks[2] == .quote("Quoted from the brief\nsecond line"))
+        #expect(blocks[3] == .rule)
+        #expect(blocks[4] == .bullet("outer", marker: "•", depth: 0, checked: nil))
+        #expect(blocks[5] == .bullet("inner", marker: "•", depth: 1, checked: nil))
+        #expect(blocks[6] == .bullet("deepest", marker: "•", depth: 2, checked: nil))
+        #expect(blocks[7] == .bullet("done box", marker: "", depth: 0, checked: true))
+        #expect(blocks[8] == .bullet("first", marker: "1.", depth: 0, checked: nil))
+        #expect(Markdown.blocks("Title\n---\nbody") == [.heading(level: 2, text: "Title"), .paragraph("body")])
+        #expect(Markdown.blocks("a | b\nnot a table") == [.paragraph("a | b\nnot a table")], "a pipe alone is not a table")
+
+        let reply = Transcript.reply(said)
+        let cells = reply.items[0].paras.compactMap { p -> (Cell, Para)? in
+            if case .cell(let c) = p.box { return (c, p) } else { return nil }
+        }
+        #expect(cells.count == 9)
+        #expect(cells.filter { $0.0.header }.allSatisfy { $0.1.runs.allSatisfy(\.bold) }, "the header row is set apart")
+        #expect(cells[1].0.align == .center && cells[2].0.align == .trailing)
+        let goTest = cells[3].1.runs[0]
+        #expect(goTest.text == "go test" && goTest.chip, "code in a cell reads as code")
+        #expect(cells[5].1.runs.first?.link == "https://ci.example/1", "a link in a cell is a link")
+        #expect(!reply.string.contains("|") || reply.string.contains("lint | vet"), "no pipe marks are shown")
+        #expect(!reply.string.contains("**") && !reply.string.contains("> "))
+
+        let copied = reply.copied(0..<reply.length)
+        #expect(copied.contains("Check\tRun?\tResult\ngo test\tyes\tpassed\nlint | vet\tno\t\n"), "a table copies as tab-separated rows: \(copied)")
+        #expect(copied.contains("• outer\n• inner") && copied.contains("☑ done box") && copied.contains("1. first"))
+        #expect(Clip.plain(markdown: "| a | b |\n|---|---|\n| `1` | 2 |") == "a\tb\n1\t2")
+    }
+
+    @Test("Copying Across The Conversation Keeps Every Line It Spans")
+    func copyingAcrossTheConversation() {
+        func step(_ kind: StepKind, _ text: String? = nil, tool: ToolCall? = nil, question: Question? = nil) -> Step {
+            Step(kind: kind, at: "2026-10-13T10:00:00Z", text: text, tool: tool, question: question)
+        }
+        let bash = ToolCall(id: "t1", name: "Bash", summary: "cd app && make test", input: "{\"command\":\"cd app && make test\"}", result: "ok\n12 passed", failed: false)
+        let steps = [
+            step(.prompt, "Make the tests pass"),
+            step(.thinking, "The tests fail on a missing file.\nI will add it."),
+            step(.tool, tool: bash),
+            step(.text, "All **12** pass:\n\n| Suite | Result |\n|---|---|\n| unit | `ok` |"),
+            step(.question, question: Question(id: "q1", items: [QuestionItem(question: "Ship it?", options: [QuestionOption(label: "Yes"), QuestionOption(label: "No")])])),
+        ]
+        let pieces = Transcript.pieces(steps, speaker: "Claude", running: false, time: { _ in "10:00" })
+        #expect(pieces.count == 2, "the conversation is one text up to the question waiting on the person")
+        guard case .text(let t) = pieces[0], case .asking(4, _) = pieces[1] else { Issue.record("\(pieces)"); return }
+
+        let all = t.copied(0..<t.length)
+        #expect(all == """
+        Brief 10:00
+        Make the tests pass
+        Claude · 10:00
+        Thinking The tests fail on a missing file.
+        Bash cd app && make test
+        All 12 pass:
+        Suite\tResult
+        unit\tok
+        """, "every line reads as shown, with no symbols or marks")
+
+        let start = t.starts
+        let thinking = t.items.firstIndex { $0.id == "s1" }!, reply = t.items.firstIndex { $0.id == "s3" }!
+        let span = (start[thinking] + 2)..<(start[reply] + 6)
+        #expect(t.copied(span) == "Thinking The tests fail on a missing file.\nBash cd app && make test\nAll 12", "one drag spans a thinking line, a step and a reply")
+        #expect(t.markdown(span) == "The tests fail on a missing file.\nI will add it.\n\nBash cd app && make test\n\nAll **12** pass:\n\n| Suite | Result |\n|---|---|\n| unit | `ok` |")
+
+        let open = Transcript.pieces(steps, speaker: "Claude", running: false, toggled: ["s1", "s2"], time: { _ in "10:00" })
+        guard case .text(let o) = open[0] else { return }
+        let unfolded = o.copied(0..<o.length)
+        #expect(unfolded.contains("Thinking\nThe tests fail on a missing file.\nI will add it.\nBash cd app && make test\nINPUT\n{\"command\":\"cd app && make test\"}\nRESULT\nok\n12 passed"),
+                "an unfolded step copies its full text: \(unfolded)")
+        #expect(o.items.first { $0.id == "s2" }?.paras.first?.oneLine == false && t.items.first { $0.id == "s2" }?.paras.first?.oneLine == true,
+                "a folded step is one line")
+
+        let more = Transcript.pieces(steps.prefix(4) + [step(.text, "And one more thing.")], speaker: "Claude", running: true, time: { _ in "10:00" })
+        guard case .text(let m) = more[0] else { return }
+        #expect(Transcript.firstChange(from: t, to: m) == t.items.count, "a new step changes nothing before it")
+        #expect(Transcript.firstChange(from: t, to: t) == nil)
+    }
 }

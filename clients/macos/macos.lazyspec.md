@@ -266,3 +266,14 @@ hold only that product's work; with none, every product's.
 - A state reads the same on a row's badge and its icon: Ready to start, Needs you, To review, Waiting to be confirmed and Replaced among them.
 - A check of a sub-goal's done-when reads Checked: done or Checked: not done yet.
 - A branch a change of plan let go of reads Replaced by a change of plan, with why.
+
+## A Table In A Reply Reads As A Table
+- A pipe table in what an agent says shows as a table: its header row set apart, each column aligned as its dashes row says, code, bold and links in its cells as they read elsewhere.
+- Quotes, rules, lists nested by indentation, task boxes and code blocks read as themselves, never as their marks.
+- Copied, a table reads one row per line with its cells separated by tabs.
+
+## Copying Across The Conversation Keeps Every Line It Spans
+- A session's conversation is one selection: who spoke and when, each step's line, thinking, replies, what it was told and questions already answered; a drag or Select All spans as many of them as it covers, up to a question still waiting on the person.
+- What is copied reads as shown: the words without markdown marks or symbols, a folded step as its one line, an unfolded step with its full text.
+- Copy as Markdown gives each item the selection touches as it was written.
+- Reading the conversation again changes nothing before the first step that changed, so a selection there stays.

@@ -110,6 +110,19 @@ event "$S2" note "chore: Refreshed dependencies in the main checkout so the flag
 # The sidebar's other goals.
 W=$("$WD" goal add metariki-eqms "Resolve today's GitHub issues" --json | id)
 state "$W" running 90
+# With SEED_SESSIONS=1, sessions' conversations too: they live in claude's
+# store under HOME, so the app is run with HOME at $WD_HOME/home to read
+# these invented ones. A waiting question in one changes what needs you, so
+# the design screens are seeded without them.
+L=""
+if [ -n "${SEED_SESSIONS:-}" ]; then
+  sessions=$WD_HOME/home/.claude/projects/seed
+  python3 "$(dirname "$0")/seed-session.py" "$sessions/seed-s3.jsonl"
+  L=$(sub "$W" "Every open issue has an owner" --done-when "each open issue is assigned")
+  q "UPDATE work SET runner = 'claude', session = 'seed-long' WHERE id = '$L'"
+  state "$L" running 20
+  python3 "$(dirname "$0")/seed-session.py" "$sessions/seed-long.jsonl" --long
+fi
 
 # A course change waiting on the person (screen: pivot).
 D=$("$WD" goal add metariki-eqms "Why does sync drop events?" --json | id)
@@ -162,4 +175,4 @@ q "UPDATE work SET finish_line = 'complete PR', finish_source = 'taste' WHERE id
 event "$P" pr "pull-request https://github.com/metariki/metariki-eqms/pull/512" 130
 state "$P" done 120
 
-echo "goal=$G subgoal=$S2 working=$S3 question=$S2c pivot=$D proposal=$A finish=$F"
+echo "home=$WD_HOME/home long=$L goal=$G subgoal=$S2 working=$S3 question=$S2c pivot=$D proposal=$A finish=$F"
