@@ -35,7 +35,7 @@ var valueFlags = map[string]bool{
 	"kind": true, "goal": true, "epic": true, "roadmap": true, "type": true, "reason": true,
 	"question": true, "answer": true, "tokens": true, "effective": true,
 	"since": true, "since-feedback": true, "work": true,
-	"heading": true, "detail": true, "project": true,
+	"heading": true, "detail": true, "project": true, "title": true, "done-when": true, "after": true,
 	"branch": true, "adopt": true, "source": true, "card": true, "only": true,
 	// name labels a workspace. It is a value, not a switch: a workspace is
 	// something a person names, and the label is what they would type back.

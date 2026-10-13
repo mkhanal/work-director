@@ -25,7 +25,7 @@ var help = map[string]commandHelp{
 	"taste":      {"wd taste", "Show the rule cards every brief carries, and what feedback has gathered toward new ones."},
 	"brief":      {"wd brief <id>", "Print the brief an executor would be given for work."},
 	"spawn":      {"wd spawn <id> [--runner r] [--model m] [--worktree]", "Start an executor session on work, with its brief."},
-	"goal":       {"wd goal (start <project> \"<text>\" [--detach] | begin <id> | find <project> \"<text>\" | supervise <id> | add <project> <title> | plan <id> | spawn <id> | run <id> | review <id> | status <id> | continue <id> \"<text>\" | reopen | release | abandon | classify)", "Start, plan, run and look after goals: work broken into tasks."},
+	"goal":       {"wd goal (start <project> \"<text>\" [--detach] | begin <id> | find <project> \"<text>\" | supervise <id> | add <project> <title> | add <goal> \"<outcome>\" --done-when \"<d>\" [--after <id>,<id>] [--split] | plan <id> | approve <id> | edit <id> [--title t] [--done-when d] | drop <id> \"<why>\" | merge <keep> <other> | split <id> | after <id> [<id>,…] | spawn <id> | run <id> | review <id> | status <id> | continue <id> \"<text>\" | reopen | release | abandon | classify)", "Start, plan, reshape, run and look after goals: outcomes broken into sub-goals."},
 	"epic":       {"wd epic (plan | spawn | run | review | status) <id>", "The older spelling of wd goal."},
 	"roadmap":    {"wd roadmap (add <project> <title> | item <roadmap> <title> | plan <roadmap> | show <id> | status)", "Keep a project's roadmap and turn its items into goals."},
 	"drive":      {"wd drive <goal> [--budget …]", "Run a goal's loop until it lands or needs a person."},

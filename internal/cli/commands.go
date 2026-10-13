@@ -658,6 +658,11 @@ func (c *Cli) goalLike(cmd string, rest []string) error {
 	if len(rest) > 0 {
 		sub = rest[0]
 	}
+	if cmd == "goal" {
+		if handled, err := c.goalTree(sub, rest); handled {
+			return err
+		}
+	}
 	if cmd == "goal" && sub == "start" {
 		if len(rest) < 3 {
 			return fail("usage: wd goal start <project> \"<what you want done>\" [--runner <runner>] [--timeout s]")

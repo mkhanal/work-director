@@ -912,6 +912,35 @@ func TestLedger(t *testing.T) {
 		}
 	})
 
+	t.Run("A Task Moves Only Under A Sub-Goal Beside It", func(t *testing.T) {
+		l := newTestLedger(t)
+		goal := add(t, l, "p", "G", AddOptions{Kind: core.WorkGoal})
+		task := add(t, l, "p", "T", AddOptions{Parent: &goal.ID})
+		sub := add(t, l, "p", "S", AddOptions{Kind: core.WorkGoal, Parent: &goal.ID})
+		other := add(t, l, "p", "O", AddOptions{Kind: core.WorkGoal})
+		deep := add(t, l, "p", "D", AddOptions{Kind: core.WorkGoal, Parent: &sub.ID})
+		sibling := add(t, l, "p", "B", AddOptions{Parent: &goal.ID})
+
+		wantErr(t, l.Reparent(sub.ID, other.ID), "only a task moves under a sub-goal; "+sub.ID+" is a goal")
+		wantErr(t, l.Reparent(task.ID, other.ID), other.ID+" is not a goal beside "+task.ID)
+		wantErr(t, l.Reparent(task.ID, sibling.ID), sibling.ID+" is not a goal beside "+task.ID)
+		wantErr(t, l.Reparent(task.ID, deep.ID), deep.ID+" is not a goal beside "+task.ID)
+		wantNoErr(t, l.SetAfter(sibling.ID, []string{task.ID}))
+		wantErr(t, l.Reparent(task.ID, sub.ID), task.ID+" is ordered among its siblings; clear that order first")
+		wantNoErr(t, l.SetAfter(sibling.ID, nil))
+
+		move(t, l, task.ID, core.StateRunning)
+		wantNoErr(t, l.Reparent(task.ID, sub.ID))
+		got, err := l.Get(task.ID)
+		wantNoErr(t, err)
+		if got.Parent == nil || *got.Parent != sub.ID {
+			t.Fatalf("parent = %v, want %s", got.Parent, sub.ID)
+		}
+		if s, err := l.Get(sub.ID); err != nil || s.State != core.StateRunning {
+			t.Fatalf("sub-goal = %s (%v), want it running with the task it took", s.State, err)
+		}
+	})
+
 	t.Run("A Sub-Goal Waits Only On Its Siblings", func(t *testing.T) {
 		l := newTestLedger(t)
 		goal := add(t, l, "p", "G", AddOptions{Kind: core.WorkGoal})

@@ -118,7 +118,11 @@ An epic — one branch, many parallel executors, a goal decomposed into tasks:
 
 ```
 wd add my-app "Move Metabase → Superset" --kind epic   # a goal IS work broken into tasks
-wd epic plan <e>              # a planner session decomposes the goal into headed tasks
+wd goal plan <e>              # a planner session breaks the goal into outcome sub-goals, each with its done-when
+wd goal approve <e>           # in ask mode a breakdown is proposed; approving starts its unblocked sub-goals
+wd goal edit <id> [--title "<t>"] [--done-when "<d>"]   # a working agent is told
+wd goal add <e> "<outcome>" --done-when "<d>" [--after <id>,<id>] [--split]
+wd goal drop <id> "<why>" ; wd goal merge <keep> <other> ; wd goal split <id> ; wd goal after <id> [<id>,…]
 wd epic run <e> --wait        # spawn open tasks on one shared branch; the coordinator answers
                               #   known questions, escalates unknowns to you, harvests DONE reports
 wd epic run <e> --only <id,id> | --heading <label>     # run a slice now; leftover tasks stay open

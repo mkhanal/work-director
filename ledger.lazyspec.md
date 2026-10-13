@@ -58,6 +58,11 @@ recent reopening; work never reopened is judged on all its events.
 - `SetAfter(work, ids)` records what the work waits on, replacing the set before; `After(work)` reads it.
 - Waiting on itself, on work with another parent, or on work that already waits on it at any remove is refused naming the two.
 
+## A Task Moves Only Under A Sub-Goal Beside It
+- `Reparent(id, parent)` moves a task under a goal that sits under the task's own parent, and the state of each sub-goal it leaves or joins rolls up.
+- Moving anything but a task, or under anything but a goal beside it, is refused naming both.
+- A task that waits on a sibling, or that a sibling waits on, is refused until that order is cleared.
+
 ## Dropped Work Is Restored With Everything Dropped Alongside It
 - `Restore(id)` returns dropped work to the state it was dropped from, with every work under it dropped at the same moment.
 - Work under it dropped at another moment stays dropped.

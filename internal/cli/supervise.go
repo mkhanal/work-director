@@ -413,6 +413,12 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 				if t.State != core.StateQueued && t.State != core.StateBriefed {
 					return fmt.Errorf("%s is %s, already under way", t.ID, t.State)
 				}
+				if held, err := c.proposed(*t.Parent); err != nil || held {
+					if err != nil {
+						return err
+					}
+					return fmt.Errorf("%s is in a proposed breakdown; it waits for wd goal approve %s", t.ID, *t.Parent)
+				}
 				if core.IsGoal(t.Kind) {
 					_, err := c.startGoalRow(goal, p, t, true)
 					return err

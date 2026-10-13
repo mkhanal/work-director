@@ -138,6 +138,15 @@ verify event.
 - Each look stores an agent's latest steps when they differ from the ones stored.
 - A SPLIT or OFF-COURSE an agent raised is filed once as a concern on its sub-goal, for the supervisor.
 
+## A Person Reshapes A Goal's Sub-Goals
+- `wd goal edit`, `add`, `drop`, `merge`, `split` and `after` each change the tree as named and record a decision on the goal they change.
+- Dropping supersedes the sub-goal and everything open under it, and stops their sessions.
+- Editing a sub-goal an agent is working on tells the agent.
+
+## A Proposed Breakdown Starts On Approval
+- `wd goal approve` starts a proposed breakdown's unblocked sub-goals and records the approval.
+- Approving a goal with nothing proposed is refused.
+
 ## A Goal Is Named By Its Planner Until A Person Renames It
 - A goal its planner names takes that name as its title, noting it.
 - A goal a person has renamed keeps their name when it is planned.

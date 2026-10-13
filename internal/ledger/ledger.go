@@ -691,6 +691,42 @@ func (l *Ledger) SetAfter(work string, waitsOn []string) error {
 	})
 }
 
+// Reparent moves a task under a goal beside it: a goal whose parent is the
+// task's own. Order among siblings does not survive the move, so a task still
+// ordered is refused until that order is cleared.
+func (l *Ledger) Reparent(id, parent string) error {
+	return l.inTx(func(tx *sql.Tx) error {
+		w, err := getWork(tx, id)
+		if err != nil {
+			return err
+		}
+		if w.Kind != core.WorkTask {
+			return fmt.Errorf("only a task moves under a sub-goal; %s is a %s", id, w.Kind)
+		}
+		p, err := getWork(tx, parent)
+		if err != nil {
+			return err
+		}
+		if !core.IsGoal(p.Kind) || p.ID == id || w.Parent == nil || p.Parent == nil || *p.Parent != *w.Parent {
+			return fmt.Errorf("%s is not a goal beside %s", parent, id)
+		}
+		var n int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM after WHERE work = ? OR waits_on = ?`, id, id).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			return fmt.Errorf("%s is ordered among its siblings; clear that order first", id)
+		}
+		if err := updateWork(tx, id, `UPDATE work SET parent = ? WHERE id = ?`, parent, id); err != nil {
+			return err
+		}
+		if err := rollUp(tx, &parent); err != nil {
+			return err
+		}
+		return rollUp(tx, w.Parent)
+	})
+}
+
 // waitsOnAtAnyRemove reports whether from waits on target, directly or
 // through what it waits on.
 func waitsOnAtAnyRemove(tx *sql.Tx, from, target string) (bool, error) {

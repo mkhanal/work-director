@@ -5326,3 +5326,106 @@ func TestTendingAGoalKeepsEachAgentsSteps(t *testing.T) {
 		t.Fatalf("steps after a message with none = %+v, want them kept", got)
 	}
 }
+
+func TestAPersonReshapesAGoalsSubGoals(t *testing.T) {
+	f := newCLIFixture(t)
+	o := overseenGoal(t, f)
+	work := func(id string) core.Work {
+		t.Helper()
+		w, err := f.work(t, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return w
+	}
+	c := jsonString(t, f.runOK(t, "goal", "add", o.goal, "Deployers get a guide", "--done-when", "a guide covers rollback", "--after", o.b, "--json"), "id")
+	kids, after := f.tree(t, o.goal)
+	if len(kids) != 3 || work(c).DoneWhen == nil || *work(c).DoneWhen != "a guide covers rollback" || !slices.Equal(after[c], []string{o.b}) {
+		t.Fatalf("added = %+v waiting on %v, want a third sub-goal with its done-when, after %s", work(c), after[c], o.b)
+	}
+	if errStr := f.runFail(t, "goal", "add", o.goal, "No done-when"); !strings.Contains(errStr, "--done-when") {
+		t.Errorf("an add with no done-when = %q, want it refused", errStr)
+	}
+
+	f.runOK(t, "goal", "edit", o.a, "--done-when", "the detector runs inside the collector")
+	if w := work(o.a); w.DoneWhen == nil || *w.DoneWhen != "the detector runs inside the collector" {
+		t.Fatalf("edited done-when = %v", w.DoneWhen)
+	}
+	if sent := readFile(t, filepath.Join(o.state, "sent-task-"+o.a)); !strings.Contains(sent, "Your sub-goal changed. done when: the detector runs inside the collector") {
+		t.Fatalf("sent to the agent = %q, want it told of the change", sent)
+	}
+
+	f.runOK(t, "goal", "after", c)
+	if _, after := f.tree(t, o.goal); len(after[c]) != 0 {
+		t.Fatalf("after cleared = %v", after[c])
+	}
+	f.runOK(t, "goal", "after", c, o.a)
+
+	g := jsonString(t, f.runOK(t, "goal", "split", c, "--json"), "id")
+	if w := work(c); w.Parent == nil || *w.Parent != g {
+		t.Fatalf("split task's parent = %v, want %s", w.Parent, g)
+	}
+	if w := work(g); w.Kind != core.WorkGoal || w.Title != "Deployers get a guide" || w.DoneWhen == nil || *w.DoneWhen != "a guide covers rollback" || w.Parent == nil || *w.Parent != o.goal {
+		t.Fatalf("split goal = %+v, want the task's title and done-when under %s", w, o.goal)
+	}
+	if _, after := f.tree(t, o.goal); !slices.Equal(after[g], []string{o.a}) {
+		t.Fatalf("split goal waits on %v, want what the task waited on", after[g])
+	}
+
+	d := jsonString(t, f.runOK(t, "goal", "add", o.goal, "Ops get a guide", "--done-when", "ops know the flags", "--json"), "id")
+	f.runOK(t, "goal", "merge", g, d)
+	if w := work(d); w.State != core.StateSuperseded {
+		t.Fatalf("merged-away sub-goal is %s", w.State)
+	}
+	if w := work(g); w.DoneWhen == nil || *w.DoneWhen != "a guide covers rollback; ops know the flags" {
+		t.Fatalf("kept done-when = %v, want both joined", w.DoneWhen)
+	}
+	if notes := f.bodies(t, d, core.EventNote); !slices.Contains(notes, "superseded: merged into "+g) {
+		t.Errorf("notes on %s = %v", d, notes)
+	}
+
+	f.runOK(t, "goal", "drop", g, "deployers read the wiki instead")
+	if work(g).State != core.StateSuperseded || work(c).State != core.StateSuperseded {
+		t.Fatalf("dropped %s is %s with %s %s, want both superseded", g, work(g).State, c, work(c).State)
+	}
+	f.runOK(t, "goal", "drop", o.a, "the detector moved upstream")
+	if work(o.a).State != core.StateSuperseded {
+		t.Fatalf("dropped %s is %s", o.a, work(o.a).State)
+	}
+	if stopped := readFile(t, filepath.Join(o.state, "stopped")); !strings.Contains(stopped, "overseer task-"+o.a) {
+		t.Fatalf("stopped = %q, want the dropped sub-goal's session stopped", stopped)
+	}
+
+	decisions := strings.Join(f.bodies(t, o.goal, core.EventDecision), "\n")
+	for _, want := range []string{"added " + c, "edited " + o.a, c + " waits on: none", c + " waits on: " + o.a, "split " + c, "merged " + d + " into " + g, "dropped " + g + ": deployers read the wiki instead", "dropped " + o.a} {
+		if !strings.Contains(decisions, want) {
+			t.Errorf("decisions on the goal miss %q:\n%s", want, decisions)
+		}
+	}
+}
+
+func TestAProposedBreakdownStartsOnApproval(t *testing.T) {
+	f := newCLIFixture(t)
+	f.planReply(t, "NAME: Release notes\nFINISH: complete PR | from: taste\n- Every release is tagged\n  done when: each release has a tag\n- Customers read what changed\n  done when: the changelog lists it\n  after: 1\n")
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Release notes", "--json"), "id")
+	f.runOK(t, "goal", "plan", goal, "--runner", "planner")
+	kids, _ := f.tree(t, goal)
+	for _, k := range kids {
+		if k.State != core.StateQueued {
+			t.Fatalf("a proposed sub-goal is %s before approval", k.State)
+		}
+	}
+	f.runOK(t, "goal", "approve", goal)
+	if s := f.stateOf(t, kids[0].ID); s != core.StateRunning {
+		t.Fatalf("first sub-goal is %s after approval, want running", s)
+	}
+	if s := f.stateOf(t, kids[1].ID); s != core.StateQueued {
+		t.Fatalf("the sub-goal waiting on the first is %s, want it left queued", s)
+	}
+	if decisions := f.bodies(t, goal, core.EventDecision); !slices.Contains(decisions, "approved: 2 sub-goals") {
+		t.Errorf("decisions = %v, want the approval recorded", decisions)
+	}
+	if errStr := f.runFail(t, "goal", "approve", goal); !strings.Contains(errStr, "no proposed breakdown") {
+		t.Errorf("approving again = %q, want it refused", errStr)
+	}
+}
