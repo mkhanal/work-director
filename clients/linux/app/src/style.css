@@ -183,6 +183,7 @@ button.fchip {
   background-color: @wd_page; color: @wd_step; box-shadow: none;
 }
 button.fchip:checked { background-color: @wd_text; border-color: @wd_text; color: @wd_page; }
+flowbox.chips > flowboxchild { padding: 0; min-width: 0; }
 .sgtag { font-size: 11px; font-weight: 500; padding: 2px 7px; border-radius: 6px; background-color: @wd_tag_fill; color: @wd_step; border: 1px solid @wd_hairline; }
 .chip-tag { font-size: 12px; padding: 2px 8px; border-radius: 6px; background-color: @wd_tag_fill; color: @wd_step; border: 1px solid @wd_hairline; }
 .tag, .pill:not(button) { border-radius: 6px; padding: 2px 8px; background-color: @wd_tag_fill; }

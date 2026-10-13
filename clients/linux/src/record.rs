@@ -3,6 +3,8 @@
 
 use serde::Deserialize;
 
+use crate::look::Tone;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RecordKind {
@@ -66,4 +68,122 @@ pub struct RecordSummary {
 pub struct RecordView {
     pub summary: RecordSummary,
     pub entries: Vec<RecordEntry>,
+}
+
+/// What the record is narrowed to by kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RecordFilter {
+    Everything,
+    Decisions,
+    Course,
+    Questions,
+    Reports,
+    Chores,
+    Delivery,
+}
+
+impl RecordFilter {
+    pub const ALL: [RecordFilter; 7] = [
+        RecordFilter::Everything,
+        RecordFilter::Decisions,
+        RecordFilter::Course,
+        RecordFilter::Questions,
+        RecordFilter::Reports,
+        RecordFilter::Chores,
+        RecordFilter::Delivery,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            RecordFilter::Everything => "Everything",
+            RecordFilter::Decisions => "Decisions",
+            RecordFilter::Course => "Course",
+            RecordFilter::Questions => "Questions",
+            RecordFilter::Reports => "Reports",
+            RecordFilter::Chores => "Chores",
+            RecordFilter::Delivery => "Delivery",
+        }
+    }
+
+    pub fn holds(self, kind: RecordKind) -> bool {
+        use RecordKind as K;
+        match self {
+            RecordFilter::Everything => true,
+            RecordFilter::Decisions => matches!(kind, K::Decision | K::Finish | K::Asked),
+            RecordFilter::Course => matches!(kind, K::Course | K::Superseded),
+            RecordFilter::Questions => matches!(kind, K::Question | K::Answer),
+            RecordFilter::Reports => matches!(kind, K::Report | K::Judged),
+            RecordFilter::Chores => kind == K::Chore,
+            RecordFilter::Delivery => kind == K::Delivery,
+        }
+    }
+}
+
+impl RecordEntry {
+    /// Whether it was recorded on the sub-goal at `path` or under it.
+    pub fn under(&self, path: &str) -> bool {
+        self.place == path || self.place.strip_prefix(path).is_some_and(|rest| rest.starts_with(" › "))
+    }
+
+    /// Its kind as a badge.
+    pub fn badge(&self) -> (String, Tone) {
+        let verdict = self.what.split(':').next().unwrap_or("");
+        let (text, tone) = match self.kind {
+            RecordKind::Decision => ("Decision", Tone::Decision),
+            RecordKind::Finish => ("Finish line", Tone::Decision),
+            RecordKind::Asked => ("Asked", Tone::Decision),
+            RecordKind::Course => match verdict {
+                "on course" => ("On course", Tone::Settled),
+                "correct" => ("Corrected", Tone::Live),
+                "pivot" => ("Pivot", Tone::Attention),
+                _ => ("Course", Tone::Waiting),
+            },
+            RecordKind::Superseded => ("Superseded", Tone::Waiting),
+            RecordKind::Question => ("Question", Tone::Attention),
+            RecordKind::Answer => ("Answered", Tone::Settled),
+            RecordKind::Judged if verdict == "met" => ("Judged met", Tone::Settled),
+            RecordKind::Judged => ("Judged missed", Tone::Attention),
+            RecordKind::Report => ("Report", Tone::Live),
+            RecordKind::Chore => ("Chore", Tone::Waiting),
+            RecordKind::Delivery => ("Delivered", Tone::Settled),
+        };
+        (text.to_string(), tone)
+    }
+}
+
+impl RecordView {
+    /// The entries of one kind, on one sub-goal or under it when one is
+    /// named, newest first.
+    pub fn shown(&self, filter: RecordFilter, path: Option<&str>) -> Vec<&RecordEntry> {
+        self.entries.iter().filter(|e| filter.holds(e.kind) && path.is_none_or(|p| e.under(p))).collect()
+    }
+}
+
+impl RecordSummary {
+    /// The five summary cards: a number and what it counts.
+    pub fn cards(&self) -> [(i64, String); 5] {
+        let plural = |n: i64, one: &str, many: &str| if n == 1 { one.to_string() } else { many.to_string() };
+        [
+            (self.decisions, format!("{} · {} yours", plural(self.decisions, "decision", "decisions"), self.yours)),
+            (
+                self.course,
+                format!(
+                    "{} · {} {}",
+                    plural(self.course, "course check", "course checks"),
+                    self.corrections,
+                    plural(self.corrections, "correction", "corrections")
+                ),
+            ),
+            (
+                self.questions,
+                format!(
+                    "{} · {} answered by the director",
+                    plural(self.questions, "question", "questions"),
+                    self.answered_by_director
+                ),
+            ),
+            (self.chores, format!("{} the director ran", plural(self.chores, "chore", "chores"))),
+            (self.judged, plural(self.judged, "report judged", "reports judged")),
+        ]
+    }
 }

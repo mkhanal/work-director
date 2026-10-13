@@ -17,8 +17,8 @@ use gtk::{gdk, glib};
 use std::collections::HashMap;
 
 use kit::{
-    follow, AgentCard, AgentRoster, ChannelError, EscapeTaps, Event, Feed, Gate, GoalDetail, Plan, RecordView,
-    SessionStatus, Step, ThreadFilter, Watch, Work, WorkState,
+    follow, AgentCard, AgentRoster, ChannelError, EscapeTaps, Event, Feed, Gate, GoalDetail, Plan, RecordFilter,
+    RecordView, SessionStatus, Step, ThreadFilter, Watch, Work, WorkState,
 };
 
 use self::conversation::director_answers;
@@ -83,6 +83,9 @@ struct State {
     filter: ThreadFilter,
     /// Sub-goal rows whose steps were folded open or closed by hand.
     folds: HashMap<String, bool>,
+    /// What the record is narrowed to: a kind, and a sub-goal's path.
+    record_filter: RecordFilter,
+    record_place: Option<String>,
     /// Where each of your messages is, to jump back to: what you said, and its turn.
     yours: Vec<(String, String)>,
 }
@@ -192,8 +195,13 @@ impl WorkPage {
                 } else if page.at_bottom.get() {
                     // This runs inside the viewport's allocation, which would
                     // not move its child for a value set now; set it after.
-                    let a = a.clone();
-                    glib::idle_add_local_once(move || a.set_value(a.upper() - a.page_size()));
+                    // By then the view shown may no longer follow.
+                    let (a, weak) = (a.clone(), page.me.clone());
+                    glib::idle_add_local_once(move || {
+                        if weak.upgrade().is_some_and(|p| p.following()) {
+                            a.set_value(a.upper() - a.page_size());
+                        }
+                    });
                 } else {
                     page.jump.set_visible(true);
                 }
@@ -635,7 +643,10 @@ impl WorkPage {
                         (self.overview_turns(g, record, &state.folds), Vec::new())
                     }
                     (Loaded::Goal(g, _), Tab::Conversation) => self.goal_turns(g, state.filter),
-                    (Loaded::Goal(g, _), Tab::Record) => (record_turns(&g.events), Vec::new()),
+                    (Loaded::Goal(g, record), Tab::Record) => (
+                        self.record_view_turns(g, record, state.record_filter, state.record_place.as_deref()),
+                        Vec::new(),
+                    ),
                     (Loaded::Work(w, _), Tab::Conversation) if state.feed.is_some() => match &state.feed {
                         Some(feed) => (self.session_turns(w, feed, &director_answers(loaded, &w.id)), Vec::new()),
                         None => (Vec::new(), Vec::new()),
@@ -773,6 +784,16 @@ impl WorkPage {
 
     fn set_filter(self: &Rc<Self>, filter: ThreadFilter) {
         self.state.borrow_mut().filter = filter;
+        self.render();
+    }
+
+    fn set_record_filter(self: &Rc<Self>, filter: RecordFilter) {
+        self.state.borrow_mut().record_filter = filter;
+        self.render();
+    }
+
+    fn set_record_place(self: &Rc<Self>, place: Option<String>) {
+        self.state.borrow_mut().record_place = place;
         self.render();
     }
 
@@ -1027,6 +1048,8 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
             tab: None,
             filter: ThreadFilter::All,
             folds: HashMap::new(),
+            record_filter: RecordFilter::Everything,
+            record_place: None,
             yours: Vec::new(),
         }),
         at_bottom: Cell::new(true),

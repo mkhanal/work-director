@@ -107,6 +107,11 @@ hold only that product's work; with none, every product's.
 - A sub-goal is added with its outcome and what makes it done.
 - What holds the goal back from done is listed, and a sub-goal's page lists what the director did under it.
 
+## The Record Lists What Was Decided And Done, Filtered By Kind And Sub-Goal
+- It counts decisions and how many were the person's, course checks and how many corrected course, questions and how many the director answered, chores the director ran, and reports judged.
+- Each entry reads its time, its kind, what it says, where in the tree it was recorded and who made it, newest first, under the day it fell on.
+- Kind filters keep decisions, course, questions, reports, chores or delivery; a sub-goal filter keeps what was recorded on that sub-goal or under it.
+
 ## The Kit Reads A Goal As A Tree
 - A goal at any depth reads as its breadcrumb, done-when, finish line, progress, what keeps it from done, what needs the person, its course and its sub-goals as a tree.
 - Every work under a goal is named by its path through the tree.

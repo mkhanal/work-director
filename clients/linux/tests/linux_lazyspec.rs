@@ -935,6 +935,60 @@ fn a_goal_page_shows_what_done_means_what_needs_you_and_its_sub_goals() {
     assert_eq!(record.director_did().iter().map(|e| e.event).collect::<Vec<_>>(), vec![3, 2]);
 }
 
+/// The Record Lists What Was Decided And Done, Filtered By Kind And Sub-Goal
+#[test]
+fn the_record_lists_what_was_decided_and_done_filtered_by_kind_and_sub_goal() {
+    let entry = |event: i64, kind: &str, what: &str, place: &str, by: &str| json!({"event": event, "at": format!("2026-10-12T{:02}:00:00Z", event), "kind": kind, "what": what, "where": place, "by": by});
+    let record: RecordView = serde_json::from_value(json!({
+    "summary": {"decisions": 2, "yours": 1, "course": 2, "corrections": 1, "questions": 1,
+        "answered_by_director": 1, "chores": 1, "judged": 1},
+    "entries": [
+        entry(9, "answer", "forward-only", "Guide › Rollback", "director"),
+        entry(8, "course", "on course: the sections match", "Guide", "director"),
+        entry(7, "judged", "met: tags and lists", "Tagged", "director"),
+        entry(6, "chore", "refreshed dependencies", "Guide › Flags", "director"),
+        entry(5, "course", "correct: superseded the wiki", "Guidebook", "director"),
+        entry(4, "question", "down scripts?", "Guide › Rollback", "director"),
+        entry(3, "decision", "English only", "Release notes (top)", "you"),
+        entry(2, "finish", "finishes at: complete PR (from taste)", "Release notes (top)", "director"),
+        entry(1, "delivery", "https://example.com/pull/7", "Release notes (top)", "director"),
+        entry(0, "asked", "Release notes", "Release notes (top)", "you"),
+    ]}))
+    .expect("a record");
+    assert_eq!(
+        record.summary.cards().map(|(n, what)| format!("{n} {what}")),
+        [
+            "2 decisions · 1 yours",
+            "2 course checks · 1 correction",
+            "1 question · 1 answered by the director",
+            "1 chore the director ran",
+            "1 report judged",
+        ]
+        .map(String::from)
+    );
+    let events = |filter, place: Option<&str>| record.shown(filter, place).iter().map(|e| e.event).collect::<Vec<_>>();
+    assert_eq!(events(RecordFilter::Everything, None).len(), 10, "newest first, everything");
+    assert_eq!(events(RecordFilter::Decisions, None), vec![3, 2, 0]);
+    assert_eq!(events(RecordFilter::Course, None), vec![8, 5]);
+    assert_eq!(events(RecordFilter::Questions, None), vec![9, 4]);
+    assert_eq!(events(RecordFilter::Reports, None), vec![7]);
+    assert_eq!(events(RecordFilter::Chores, None), vec![6]);
+    assert_eq!(events(RecordFilter::Delivery, None), vec![1]);
+    assert_eq!(
+        events(RecordFilter::Everything, Some("Guide")),
+        vec![9, 8, 6, 4],
+        "on the sub-goal or under it, not Guidebook"
+    );
+    assert_eq!(events(RecordFilter::Questions, Some("Guide")), vec![9, 4]);
+    let badge = |event: i64| record.entries.iter().find(|e| e.event == event).map(RecordEntry::badge);
+    assert_eq!(badge(8), Some(("On course".to_string(), Tone::Settled)));
+    assert_eq!(badge(5), Some(("Corrected".to_string(), Tone::Live)));
+    assert_eq!(badge(7), Some(("Judged met".to_string(), Tone::Settled)));
+    assert_eq!(badge(3), Some(("Decision".to_string(), Tone::Decision)));
+    assert_eq!(record.entries[1].by, RecordBy::Director);
+    assert_eq!(record.entries[6].place, "Release notes (top)");
+}
+
 /// The Kit Reads A Goal As A Tree
 #[test]
 fn the_kit_reads_a_goal_as_a_tree() {

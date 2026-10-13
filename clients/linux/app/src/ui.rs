@@ -441,6 +441,21 @@ pub fn fchip(text: &str, chosen: bool, group: Option<&gtk::ToggleButton>) -> gtk
     chip
 }
 
+/// A row of chips that wraps when the page is narrow.
+pub fn chip_row() -> gtk::FlowBox {
+    let row = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .column_spacing(6)
+        .row_spacing(6)
+        .min_children_per_line(1)
+        .max_children_per_line(12)
+        .homogeneous(false)
+        .hexpand(true)
+        .build();
+    row.add_css_class("chips");
+    row
+}
+
 /// Done of total as a 120 by 4 bar.
 pub fn progress_bar(done: i64, total: i64) -> gtk::ProgressBar {
     let bar = gtk::ProgressBar::new();

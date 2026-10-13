@@ -32,7 +32,7 @@ pub use new_goal::{NewGoal, NewGoalPhase};
 pub use outbox::{Outgoing, OutgoingState};
 pub use overview::SubGoalRow;
 pub use plan::{Plan, PlanError};
-pub use record::{RecordBy, RecordEntry, RecordKind, RecordSummary, RecordView};
+pub use record::{RecordBy, RecordEntry, RecordFilter, RecordKind, RecordSummary, RecordView};
 pub use send_key::{Chord, ReturnPress, SendKey};
 pub use store::{Change, Feed, FeedState, Spawner, Store, Watch};
 pub use thread::{AskedItem, SupervisorAction, SupervisorReply, ThreadFilter, ThreadItem, ThreadStep};
