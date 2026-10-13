@@ -485,6 +485,48 @@ func TestLedger(t *testing.T) {
 		wantErr(t, err, "work "+task.ID+" is a task, not a goal")
 	})
 
+	t.Run("A Goal Says What Done Means And Where It Finishes", func(t *testing.T) {
+		l := newTestLedger(t)
+		goal := add(t, l, "p", "Release notes", AddOptions{Kind: core.WorkGoal})
+		if goal.DoneWhen != nil || goal.FinishLine != nil || goal.FinishSource != nil {
+			t.Fatalf("new goal = %+v, want done-when and finish line absent", goal)
+		}
+		wantNoErr(t, l.SetDoneWhen(goal.ID, "each release has a tag and a change list"))
+		wantNoErr(t, l.SetFinish(goal.ID, "complete PR", core.FinishFromTaste))
+		got, err := l.Get(goal.ID)
+		wantNoErr(t, err)
+		if got.DoneWhen == nil || *got.DoneWhen != "each release has a tag and a change list" {
+			t.Fatalf("done when = %v, want it stored", got.DoneWhen)
+		}
+		if got.FinishLine == nil || *got.FinishLine != "complete PR" || got.FinishSource == nil || *got.FinishSource != core.FinishFromTaste {
+			t.Fatalf("finish = %v from %v, want complete PR from taste", got.FinishLine, got.FinishSource)
+		}
+		wantNoErr(t, l.SetDoneWhen(goal.ID, ""))
+		if got, err = l.Get(goal.ID); err != nil || got.DoneWhen != nil {
+			t.Fatalf("done when after clearing = %v (%v), want absent", got.DoneWhen, err)
+		}
+		// A finish line says what is handed back, and where that came from.
+		wantErr(t, l.SetFinish(goal.ID, "", core.FinishFromGoal), "a finish line names what is handed back")
+		wantErr(t, l.SetFinish(goal.ID, "merged", ""), `unknown finish source ""`)
+		wantErr(t, l.SetFinish(goal.ID, "merged", "whim"), `unknown finish source "whim"`)
+		if got, err = l.Get(goal.ID); err != nil || *got.FinishLine != "complete PR" {
+			t.Fatalf("finish after refusals = %v (%v), want it unchanged", got.FinishLine, err)
+		}
+		dec := core.EventDecision
+		var bodies []string
+		for _, e := range allEvents(t, l, goal.ID, &dec) {
+			bodies = append(bodies, e.Body)
+		}
+		want := []string{
+			"done when: each release has a tag and a change list",
+			"finishes at: complete PR (from taste)",
+			"done when: not set",
+		}
+		if !slices.Equal(bodies, want) {
+			t.Fatalf("decisions = %q, want %q", bodies, want)
+		}
+	})
+
 	t.Run("Work Can End Abandoned And Says Why", func(t *testing.T) {
 		l := newTestLedger(t)
 		goal := add(t, l, "p", "G", AddOptions{Kind: core.WorkGoal})
@@ -873,10 +915,10 @@ CREATE TABLE feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT,
 
 		// The schema grew in place: five nullable columns and new tables.
 		after := workColumns(t, openDirect(t, path))
-		if len(after) != 18 {
-			t.Fatalf("migrated schema has %d work columns, want 18", len(after))
+		if len(after) != 21 {
+			t.Fatalf("migrated schema has %d work columns, want 21", len(after))
 		}
-		for _, col := range []string{"parent", "heading", "claim", "impact", "goal_type", "archived"} {
+		for _, col := range []string{"parent", "heading", "claim", "impact", "goal_type", "archived", "done_when", "finish_line", "finish_source"} {
 			if _, ok := after[col]; !ok {
 				t.Fatalf("column %s missing after migration", col)
 			}

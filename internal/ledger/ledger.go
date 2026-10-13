@@ -24,7 +24,7 @@ import (
 const schema = `
 CREATE TABLE IF NOT EXISTS work (id TEXT PRIMARY KEY, project TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
   kind TEXT NOT NULL, state TEXT NOT NULL, runner TEXT, session TEXT, ref TEXT, cwd TEXT, created TEXT NOT NULL, updated TEXT NOT NULL,
-  parent TEXT, heading TEXT, claim TEXT, impact TEXT, goal_type TEXT, archived TEXT);
+  parent TEXT, heading TEXT, claim TEXT, impact TEXT, goal_type TEXT, archived TEXT, done_when TEXT, finish_line TEXT, finish_source TEXT);
 CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), kind TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL, effective TEXT, payload TEXT);
 CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT, card TEXT, source TEXT NOT NULL, at TEXT NOT NULL, work TEXT REFERENCES work(id));
 CREATE TABLE IF NOT EXISTS concern (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), text TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, decision TEXT, at TEXT NOT NULL, resolved_at TEXT);
@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS workspace (id TEXT PRIMARY KEY, name TEXT NOT NULL, p
 var addedColumns = []struct{ table, col, decl string }{
 	{"work", "parent", "TEXT"}, {"work", "heading", "TEXT"}, {"work", "claim", "TEXT"}, {"work", "impact", "TEXT"},
 	{"work", "goal_type", "TEXT"}, {"work", "archived", "TEXT"},
+	{"work", "done_when", "TEXT"}, {"work", "finish_line", "TEXT"}, {"work", "finish_source", "TEXT"},
 	{"worktree", "origin", "TEXT NOT NULL DEFAULT 'attached'"},
 	// effective is null on an event whose effective moment is its recorded
 	// moment, and payload is null on an event with no structured claim. Both
@@ -192,7 +193,7 @@ func updateWork(e execer, id, query string, args ...any) error {
 }
 
 const workColumns = `id, project, title, detail, kind, state, runner, session, ref, cwd,
-	created, updated, parent, heading, claim, impact, goal_type, archived`
+	created, updated, parent, heading, claim, impact, goal_type, archived, done_when, finish_line, finish_source`
 
 const eventColumns = `id, work, kind, body, at, effective, payload`
 
@@ -208,10 +209,11 @@ func scanWork(s rowScanner) (core.Work, error) {
 	var w core.Work
 	var kind, state string
 	var runner, session, ref, cwd, parent, heading, claim, impact sql.NullString
-	var goalType, archived sql.NullString
+	var goalType, archived, doneWhen, finishLine, finishSource sql.NullString
 	err := s.Scan(&w.ID, &w.Project, &w.Title, &w.Detail, &kind, &state,
 		&runner, &session, &ref, &cwd, &w.Created, &w.Updated,
-		&parent, &heading, &claim, &impact, &goalType, &archived)
+		&parent, &heading, &claim, &impact, &goalType, &archived,
+		&doneWhen, &finishLine, &finishSource)
 	if err != nil {
 		return core.Work{}, err
 	}
@@ -243,6 +245,15 @@ func scanWork(s rowScanner) (core.Work, error) {
 		w.GoalType = &gt
 	}
 	w.Archived = nullStr(archived)
+	w.DoneWhen = nullStr(doneWhen)
+	w.FinishLine = nullStr(finishLine)
+	if finishSource.Valid {
+		fs, err := core.ParseFinishSource(finishSource.String)
+		if err != nil {
+			return core.Work{}, fmt.Errorf("work %s: %w", w.ID, err)
+		}
+		w.FinishSource = &fs
+	}
 	return w, nil
 }
 
@@ -570,6 +581,44 @@ func (l *Ledger) SetGoalType(id string, gt core.GoalType) (core.Work, error) {
 		return core.Work{}, err
 	}
 	return l.Get(id)
+}
+
+// SetDoneWhen stores what makes the work done; empty text clears it to unset.
+// Either way the change is filed as a decision.
+func (l *Ledger) SetDoneWhen(id, text string) error {
+	text = strings.TrimSpace(text)
+	var stored *string
+	body := "done when: not set"
+	if text != "" {
+		stored = &text
+		body = "done when: " + text
+	}
+	return l.inTx(func(tx *sql.Tx) error {
+		if err := updateWork(tx, id, `UPDATE work SET done_when = ? WHERE id = ?`, stored, id); err != nil {
+			return err
+		}
+		_, err := addEvent(tx, id, core.EventDecision, body, now())
+		return err
+	})
+}
+
+// SetFinish stores what the work hands back and where that was decided, and
+// files the change as a decision.
+func (l *Ledger) SetFinish(id, line string, src core.FinishSource) error {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return fmt.Errorf("a finish line names what is handed back")
+	}
+	if _, err := core.ParseFinishSource(string(src)); err != nil {
+		return err
+	}
+	return l.inTx(func(tx *sql.Tx) error {
+		if err := updateWork(tx, id, `UPDATE work SET finish_line = ?, finish_source = ? WHERE id = ?`, line, string(src), id); err != nil {
+			return err
+		}
+		_, err := addEvent(tx, id, core.EventDecision, fmt.Sprintf("finishes at: %s (from %s)", line, src), now())
+		return err
+	})
 }
 
 // Abandon records that work stopped without shipping and why. The reason is

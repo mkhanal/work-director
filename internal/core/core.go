@@ -162,6 +162,17 @@ const (
 	WorktreeRemoved   WorktreeState = "removed"
 )
 
+// FinishSource says where a goal's finish line came from: the goal's own
+// meaning, the repo it runs in, the person's taste, or the person asked.
+type FinishSource string
+
+const (
+	FinishFromGoal   FinishSource = "goal"
+	FinishFromRepo   FinishSource = "repo"
+	FinishFromTaste  FinishSource = "taste"
+	FinishFromPerson FinishSource = "person"
+)
+
 // WorktreeOrigin says who made a worktree. Only a director-made worktree is
 // ever removed by wd: an attached one belongs to whoever created it.
 type WorktreeOrigin string
@@ -210,6 +221,14 @@ type Work struct {
 	// Archived is when the work was put out of sight, or null while it is on
 	// the board. It is not a state: archived work keeps the state it rests in.
 	Archived *string `json:"archived"`
+	// DoneWhen is what makes the work done, checkable from a report, verify
+	// output or a PR. Nil until set. It and the finish line stay off the work
+	// object's wire schema, whose keys are fixed; views carry them.
+	DoneWhen *string `json:"-"`
+	// FinishLine is what is handed back, and FinishSource where that came
+	// from; both are nil until decided, and set together.
+	FinishLine   *string       `json:"-"`
+	FinishSource *FinishSource `json:"-"`
 }
 
 type Event struct {
@@ -443,6 +462,7 @@ var (
 	WorktreeOrigins = []WorktreeOrigin{OriginDirector, OriginAttached}
 	GoalTypes       = []GoalType{GoalQuery, GoalBuild, GoalFix, GoalChange, GoalReview}
 	AbandonReasons  = []string{AbandonNoPR, AbandonUnmerged}
+	FinishSources   = []FinishSource{FinishFromGoal, FinishFromRepo, FinishFromTaste, FinishFromPerson}
 )
 
 func parse[T ~string](what string, known []T, s string) (T, error) {
@@ -470,6 +490,10 @@ func ParseGoalType(s string) (GoalType, error) { return parse("goal type", GoalT
 // nobody can check is not a reason, so it is not spellable.
 func ParseAbandonReason(s string) (string, error) {
 	return parse("abandon reason", AbandonReasons, s)
+}
+
+func ParseFinishSource(s string) (FinishSource, error) {
+	return parse("finish source", FinishSources, s)
 }
 
 func ParseFeedbackSource(s string) (FeedbackSource, error) {

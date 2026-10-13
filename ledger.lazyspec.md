@@ -90,6 +90,12 @@ two or more feedback entries share the key.
 - A goal never gets a default type.
 - A type on work that is not a goal is refused; a type outside the set is not spellable.
 
+## A Goal Says What Done Means And Where It Finishes
+- `SetDoneWhen` stores a goal's done-when; an empty one clears it, and an unset one reads as absent.
+- `SetFinish` stores its finish line with where it came from: the goal, the repo, taste or the person.
+- A finish line with no source, or a source outside that set, is refused.
+- Each change files a decision event saying what it now is.
+
 ## Work Can End Abandoned And Says Why
 - `Abandon` moves running, needs-input, review, soft-done or blocked work to abandoned.
 - It records an abandon event whose body is the reason and the detail, and the state change.
@@ -125,7 +131,7 @@ For a goal, `SoftDone` also requires every task done or dropped.
 Work added to a file-backed ledger is still there after closing and reopening it.
 
 ## Old Ledgers Stay Readable
-- `New` opens a ledger lacking any later column or table — work without parent, heading, claim, impact, goal_type or archived; event without effective or payload; no concern, worktree, filed or cursor tables.
+- `New` opens a ledger lacking any later column or table — work without parent, heading, claim, impact, goal_type, archived, done_when, finish_line or finish_source; event without effective or payload; no concern, worktree, filed or cursor tables.
 - It reads every existing row, adds what is missing in place, and changes no stored value.
 - A row stored with kind `epic` reads as `goal`.
 - An event stored without effective or payload reads with both absent.
