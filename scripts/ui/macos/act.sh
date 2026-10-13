@@ -16,6 +16,7 @@ out=$(mkdir -p "${1:-$root/ui-shots/macos-act}" && cd "${1:-$root/ui-shots/macos
 work=$(mktemp -d "${TMPDIR:-/tmp}/wd-ui-act.XXXXXX")
 (cd "$root" && go build -o "$work/wd" ./cmd/wd)
 (cd "$root/clients/macos" && swift build -c release -q)
+swiftc -O -o "$work/press" "$root/scripts/ui/macos/press.swift"
 app=$root/clients/macos/.build/release/WorkDirector
 export WD_HOME=$work/home WD_BIN=$work/wd
 eval "$("$root/scripts/ui/seed-goal-tree.sh" "$WD_BIN" | tail -1)"
@@ -33,41 +34,23 @@ open_app() { # work view
     osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid) to count windows" 2>/dev/null | grep -qv '^0$' && break
     sleep 0.2
   done
-  osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid)
-    set frontmost to true
-    set position of window 1 to {40, 60}
-    set size of window 1 to {1280, 900}
-  end tell" >/dev/null
+  # A window just counted can still refuse to be placed for a moment.
+  for _ in $(seq 10); do
+    osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid)
+      set frontmost to true
+      set position of window 1 to {40, 60}
+      set size of window 1 to {1280, 900}
+    end tell" >/dev/null 2>&1 && break
+    sleep 1
+  done
   sleep 2.5
 }
 close_app() { kill "$pid"; wait "$pid" 2>/dev/null || true; sleep 1; }
-# press clicks the first element of a role whose name, title or description
-# contains the text.
+# press clicks the first element of a role whose title or description contains
+# the text, through the accessibility API: System Events reads the names
+# SwiftUI gives its controls as missing value.
 press() { # role text
-  osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid)
-    set hits to {}
-    repeat with e in (entire contents of window 1)
-      try
-        if role of e is \"$1\" then
-          set n to \"\"
-          try
-            set n to n & (name of e as text)
-          end try
-          try
-            set n to n & (title of e as text)
-          end try
-          try
-            set n to n & (description of e as text)
-          end try
-          if n contains \"$2\" then
-            click e
-            return \"clicked\"
-          end if
-        end if
-      end try
-    end repeat
-    return \"missing\"
-  end tell" | grep -q clicked || { echo "no $1 containing '$2'"; return 1; }
+  "$work/press" "$pid" "$1" "$2" | grep -q clicked || { echo "no $1 containing '$2'"; return 1; }
   sleep 3
 }
 shot() { screencapture -x "$out/$1.png"; }
