@@ -433,6 +433,8 @@ struct QuestionCard: View {
     var path: [PathPart] = []
     /// When it was asked.
     var at: String? = nil
+    /// What answering it with its first choice would change.
+    var change: PendingChange? = nil
     let answered: () -> Void
 
     @State private var draft: AnswerDraft
@@ -441,7 +443,7 @@ struct QuestionCard: View {
     @State private var failure: String?
 
     init(store: Store, workID: String, question: Question, title: String? = nil, asker: String? = nil,
-         path: [PathPart] = [], at: String? = nil, answered: @escaping () -> Void) {
+         path: [PathPart] = [], at: String? = nil, change: PendingChange? = nil, answered: @escaping () -> Void) {
         self.store = store
         self.workID = workID
         self.question = question
@@ -449,6 +451,7 @@ struct QuestionCard: View {
         self.asker = asker
         self.path = path
         self.at = at
+        self.change = change
         self.answered = answered
         _draft = State(initialValue: AnswerDraft(question))
     }
@@ -484,8 +487,8 @@ struct QuestionCard: View {
                 if let asker {
                     Text(asker + " ").fontWeight(.semibold).lineLimit(1).truncationMode(.tail).layoutPriority(-1)
                 }
-                Text(title ?? (question.pending ? "Needs you" : "Asked"))
-                if !path.isEmpty {
+                Text(change?.heading ?? title ?? (question.pending ? "Needs you" : "Asked"))
+                if !path.isEmpty && change?.kind != .course && change?.kind != .finish {
                     Text(" · in ")
                     ForEach(Array(path.enumerated()), id: \.offset) { i, part in
                         if i > 0 { Text(" › ") }
@@ -505,7 +508,7 @@ struct QuestionCard: View {
                 Text("\(page + 1) of \(question.items.count)").font(TypeScale.caption).foregroundStyle(Palette.text3).monospacedDigit()
             }
             if let at {
-                Text("asked \(agoWords(at))").font(TypeScale.caption).foregroundStyle(Palette.text3)
+                Text("\(change == nil ? "asked" : "proposed") \(agoWords(at))").font(TypeScale.caption).foregroundStyle(Palette.text3)
             }
         }
     }
@@ -520,13 +523,14 @@ struct QuestionCard: View {
                 }
                 .padding(.top, 6)
             }
-            Text(item.question)
-                .font(TypeScale.bodyMedium)
+            Text(change == nil ? item.question : item.head)
+                .font(change?.kind == .course ? TypeScale.title : TypeScale.bodyMedium)
                 .lineSpacing(TypeScale.bodyLeading)
                 .foregroundStyle(Palette.text)
                 .textSelection(.enabled)
                 .padding(.top, 6)
                 .padding(.bottom, 8)
+            if let change, i == 0 { ChangeBlock(change: change).padding(.bottom, 10) }
             VStack(spacing: 0) {
                 ForEach(item.options, id: \.label) { option in
                     optionRow(option, item: item, at: i, chosen: chosen(option.label, answer: answer, item: i))
@@ -657,6 +661,59 @@ struct QuestionCard: View {
             failure = "\(error)"
         }
         await store.refresh()
+    }
+}
+
+/// What a change would do, inside its question card: a course change as the
+/// goal now and as proposed, then the plan's changes in sentences.
+struct ChangeBlock: View {
+    let change: PendingChange
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let why = change.why, !why.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    CardLabel("Why change course", color: Palette.text2)
+                    Text(why).font(TypeScale.callout).lineSpacing(TypeScale.calloutLeading).foregroundStyle(Palette.text)
+                }
+            }
+            if !change.table.isEmpty {
+                VStack(spacing: 0) {
+                    row("", "Now", "Proposed", header: true)
+                    ForEach(Array(change.table.enumerated()), id: \.offset) { _, r in
+                        Rectangle().fill(Palette.inner).frame(height: 1)
+                        row(r.label, r.now, r.proposed, header: false)
+                    }
+                }
+                .background(Palette.page, in: RoundedRectangle(cornerRadius: Radius.card))
+                .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.questionBorder))
+            }
+            if let lines = change.lines, !lines.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    CardLabel(change.kind == .course ? "The plan after the change" : "What would change", color: Palette.text2)
+                    ForEach(lines, id: \.self) { line in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("•").foregroundStyle(Palette.text3)
+                            Text(line).foregroundStyle(Palette.text)
+                        }
+                        .font(TypeScale.callout)
+                    }
+                }
+            }
+        }
+    }
+
+    private func row(_ label: String, _ now: String, _ proposed: String, header: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).foregroundStyle(Palette.text3).frame(width: 108, alignment: .leading)
+            Text(now).strikethrough(!header).foregroundStyle(header ? Palette.text2 : Palette.text2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(proposed).foregroundStyle(header ? Palette.text2 : Palette.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .font(header ? TypeScale.meta : TypeScale.callout)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 }
 

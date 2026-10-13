@@ -33,7 +33,7 @@ struct GoalOverview: View {
             ForEach(goal.needsYou) { ask in
                 QuestionCard(store: store, workID: ask.work, question: ask.question, title: "Needs you",
                              path: goal.pathParts(of: ask).map { part in PathPart(title: part.title, open: part.opens.map { id in { open(id) } }) },
-                             at: goal.askedAt(ask.question), answered: answered)
+                             at: goal.askedAt(ask.question), change: ask.change, answered: answered)
                     .id(ask.question.id)
             }
             let asked = Set(goal.needsYou.map(\.work))

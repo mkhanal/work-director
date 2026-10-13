@@ -1080,5 +1080,36 @@ struct SeededTree {
 
         try home.sql("INSERT INTO event (work,kind,body,at) VALUES ('\(top)','decision','approved: 3 sub-goals','2026-10-13T10:05:00Z');")
         #expect(try await store.goal(top).proposal == nil, "an approved breakdown is no longer a proposal")
+
+        let why = try home.goal("demo", "Why does sync drop events?")
+        let found = try home.sub(why, "The cause is found and explained")
+        try home.sql("""
+        UPDATE work SET state='needs-input', finish_line='discovery', finish_source='goal', done_when='the cause is found' WHERE id='\(why)';
+        INSERT INTO event (work,kind,body,at,payload) VALUES ('\(why)','question','The cause is found and the fix is small. Turn this into fixing it?
+          Now: Why does sync drop events? | done when: the cause is found | finish: discovery
+          Proposed: Sync never drops events | done when: a 429 batch is retried | finish: complete PR
+          Why: knowing is done and the fix is one retry policy
+        - Change course (recommended)
+        - Keep it a discovery','2026-10-13T11:40:00Z','{"title":"Sync never drops events","done_when":"a 429 batch is retried","finish":"complete PR"}');
+        UPDATE work SET state='needs-input' WHERE id='\(found)';
+        INSERT INTO event (work,kind,body,at) VALUES ('\(found)','question','Where does this goal finish?
+        - research (recommended)
+        - complete PR','2026-10-13T11:41:00Z');
+        """)
+        let pivot = try await store.goal(why)
+        let course = try #require(pivot.needsYou.first { $0.work == why }?.change)
+        #expect(course.kind == .course)
+        #expect(course.heading == "Course change on the top goal · always yours to decide")
+        #expect(course.table.map(\.label) == ["Goal", "Done when", "Finishes at"])
+        #expect(course.table[0].now == "Why does sync drop events?" && course.table[0].proposed == "Sync never drops events")
+        #expect(course.table[2].now == "Discovery" && course.table[2].proposed == "Complete PR")
+        #expect(course.why == "knowing is done and the fix is one retry policy")
+        let item = try #require(pivot.needsYou.first { $0.work == why }?.question.items.first)
+        #expect(item.head == "The cause is found and the fix is small. Turn this into fixing it?", "the card asks only the question; the table says the rest")
+        let finish = try #require(pivot.needsYou.first { $0.work == found }?.change)
+        #expect(finish.kind == .finish)
+        #expect(finish.choices == ["research (recommended)", "complete PR"])
+        #expect(AnswerDraft(try #require(pivot.needsYou.first { $0.work == found }?.question)).directorDecides == ["research"],
+                "answering goes through the question's own answer path")
     }
 }

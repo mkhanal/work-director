@@ -176,3 +176,6 @@ hold only that product's work; with none, every product's.
 ## A Change Waiting For The Person Shows What Would Change
 - A breakdown waiting for approval shows each proposed sub-goal in order, numbered, with its done-when, what it starts after, and whether one agent takes it or it will be planned further.
 - Approving runs `wd goal approve <id>`; editing, splitting and dropping a sub-goal run `wd goal edit`, `wd goal split` and `wd goal drop <id> "<why>"`, a drop always with why.
+- A course change on the top goal shows the goal, its done-when and its finish line as they are and as they would be, with why, and the plan changes it brings.
+- A plan change shows each change as a sentence; a finish-line question offers each finish line as a choice.
+- Each is answered through the question's own answer path, its recommended choice applying the change.

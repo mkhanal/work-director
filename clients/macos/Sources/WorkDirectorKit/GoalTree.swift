@@ -91,6 +91,8 @@ public struct NeedYou: Codable, Sendable, Hashable, Identifiable {
     public let work: String
     public let path: String
     public let question: Question
+    /// What answering it with its first choice would change; nil when nothing by itself.
+    public let change: PendingChange?
 
     public var id: String { question.id }
 }
