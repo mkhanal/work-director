@@ -102,6 +102,11 @@ JSON message per line to stdout:
 - `course` is the latest course event of its top goal read into a verdict, why and when; null before any.
 - `superseded` lists the superseded sub-goals under it with why and when.
 
+## A Proposed Breakdown Is Served As Proposed
+- A goal serves `proposed`: true while its latest breakdown waits for `wd goal approve`, else false.
+- Each queued sub-goal of a proposed goal serves `why_not_moving` `proposed — needs approval`.
+- Once approved, neither holds.
+
 ## A Goal Serves Its Record
 - `GET /api/record/<goal>` and the `record` method return a summary of counts and one entry per decision, finish choice, course check, question, answer, judgement, chore, report, delivery and supersession under the goal, newest first, ending with what the person first asked.
 - Each entry says when, what, where in the tree, and whether the person or the director made it.

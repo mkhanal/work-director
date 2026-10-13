@@ -1145,13 +1145,6 @@ func (c *Cli) pastFinishes(name string) ([]core.FinishLine, error) {
 // leaves on it.
 const finishQuestion = "Where does this goal finish?"
 
-// proposedPrefix opens the note a breakdown awaiting approval leaves, and
-// approvedPrefix the decision that approves it.
-const (
-	proposedPrefix = "proposed: "
-	approvedPrefix = "approved: "
-)
-
 // planGoal asks the project's runner, or --runner, for the goal's outcomes,
 // files each under the goal as a sub-goal with its done-when and order, and
 // returns them. A top goal's finish line is stored, or asked when the planner
@@ -1257,7 +1250,7 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project, propose bool) ([]core
 	}
 	note := fmt.Sprintf("plan: %d sub-goals", len(rows))
 	if propose && p.Mode == project.ModeAsk {
-		note = fmt.Sprintf("%s%d sub-goals", proposedPrefix, len(rows))
+		note = fmt.Sprintf("%s%d sub-goals", core.ProposedPrefix, len(rows))
 	}
 	if _, err := c.Ledger.AddEvent(goal.ID, core.EventNote, note); err != nil {
 		return nil, err

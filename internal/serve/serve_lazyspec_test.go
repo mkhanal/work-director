@@ -50,6 +50,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Goal Serves What Done Means And Why It Is Not Done Yet", aGoalServesWhatDoneMeansAndWhyItIsNotDoneYet)
 	t.Run("A Goal Serves Everything Below It That Needs The Person", aGoalServesEverythingBelowItThatNeedsThePerson)
 	t.Run("A Goal Serves Its Course", aGoalServesItsCourse)
+	t.Run("A Proposed Breakdown Is Served As Proposed", aProposedBreakdownIsServedAsProposed)
 	t.Run("A Goal Serves Its Record", aGoalServesItsRecord)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("A Running Session's Report Moves Its Work On", aRunningSessionsReportMovesItsWorkOn)
@@ -2010,6 +2011,58 @@ type servedSummary struct {
 	AnsweredByDirector int `json:"answered_by_director"`
 	Chores             int `json:"chores"`
 	Judged             int `json:"judged"`
+}
+
+func aProposedBreakdownIsServedAsProposed(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	goal, err := l.Add("p", "Release notes", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var subs []string
+	for _, title := range []string{"Every release is tagged", "Customers read what changed"} {
+		w, err := l.Add("p", title, ledger.AddOptions{Parent: &goal.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		subs = append(subs, w.ID)
+	}
+	if err := l.SetAfter(subs[1], []string{subs[0]}); err != nil {
+		t.Fatal(err)
+	}
+	event(t, l, goal.ID, core.EventNote, core.ProposedPrefix+"2 sub-goals")
+
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	type view struct {
+		Proposed bool       `json:"proposed"`
+		Tree     []treeNode `json:"tree"`
+	}
+	var v view
+	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &v)
+	if !v.Proposed || len(v.Tree) != 2 {
+		t.Fatalf("goal = %+v, want proposed with two sub-goals", v)
+	}
+	for _, n := range v.Tree {
+		if n.WhyNotMoving == nil || *n.WhyNotMoving != "proposed — needs approval" {
+			t.Fatalf("%s why_not_moving = %v, want proposed — needs approval", n.Work.ID, n.WhyNotMoving)
+		}
+	}
+
+	event(t, l, goal.ID, core.EventDecision, core.ApprovedPrefix+"2 sub-goals")
+	walk(t, l, subs[0], core.StateRunning)
+	v = view{}
+	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &v)
+	if v.Proposed {
+		t.Fatal("proposed after approval, want false")
+	}
+	if n := v.Tree[0]; n.WhyNotMoving != nil {
+		t.Fatalf("a started sub-goal's why_not_moving = %q, want none", *n.WhyNotMoving)
+	}
+	if n := v.Tree[1]; n.WhyNotMoving == nil || *n.WhyNotMoving != "waits on Every release is tagged" {
+		t.Fatalf("a waiting sub-goal's why_not_moving = %v, want it waiting on its sibling", n.WhyNotMoving)
+	}
 }
 
 func aGoalServesItsRecord(t *testing.T) {

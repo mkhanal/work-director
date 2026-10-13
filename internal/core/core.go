@@ -578,6 +578,32 @@ func JudgedMet(evs []Event) bool {
 	return false
 }
 
+// ProposedPrefix opens the note a breakdown awaiting approval leaves on its
+// goal, and ApprovedPrefix the decision that approves it.
+const (
+	ProposedPrefix = "proposed: "
+	ApprovedPrefix = "approved: "
+)
+
+// Proposed reports whether goal's latest breakdown, read from events, waits
+// for approval: a proposed note not followed by a plan note or an approval.
+func Proposed(goal string, events []Event) bool {
+	pending := false
+	for _, e := range events {
+		if e.Work != goal {
+			continue
+		}
+		switch {
+		case e.Kind == EventNote && strings.HasPrefix(e.Body, ProposedPrefix):
+			pending = true
+		case e.Kind == EventNote && strings.HasPrefix(e.Body, "plan: "),
+			e.Kind == EventDecision && strings.HasPrefix(e.Body, ApprovedPrefix):
+			pending = false
+		}
+	}
+	return pending
+}
+
 // RollupState is a nested goal's state from its children's: needs-input if
 // any child needs input; else blocked if any is blocked; else running if any
 // is briefed, running, review or soft-done; else done if every child is

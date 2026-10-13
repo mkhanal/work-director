@@ -99,6 +99,8 @@ type goalView struct {
 	// branches a course change let go of.
 	Course     *course          `json:"course"`
 	Superseded []supersededWork `json:"superseded"`
+	// Proposed is whether the goal's breakdown waits for the person's approval.
+	Proposed bool `json:"proposed"`
 }
 
 // waitingTask is a task waiting on the person, and what it waits on.
@@ -260,6 +262,7 @@ func (s *Server) goal(id string) (goalView, error) {
 	}
 	view.NeedsYou = t.needsYou(view.Paths)
 	view.Superseded = t.superseded()
+	view.Proposed = core.Proposed(goal.ID, events)
 	courses := events
 	if len(chain) > 1 {
 		if courses, err = s.ledger.Events(chain[0].ID, nil); err != nil {

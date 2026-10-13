@@ -256,6 +256,9 @@ func (s *Server) node(t tree, w core.Work) (node, error) {
 	return n, nil
 }
 
+// proposedWhy is why a sub-goal of a breakdown awaiting approval is not moving.
+const proposedWhy = "proposed — needs approval"
+
 // whyNotMoving says why work is not moving, or nil when it is or has finished.
 func (t tree) whyNotMoving(w core.Work, waitingOn []string) *string {
 	var why string
@@ -267,6 +270,8 @@ func (t tree) whyNotMoving(w core.Work, waitingOn []string) *string {
 		}
 	case w.State == core.StateNeedsInput:
 		why = "waits for you"
+	case (w.State == core.StateQueued || w.State == core.StateBriefed) && w.Parent != nil && core.Proposed(*w.Parent, t.events):
+		why = proposedWhy
 	case (w.State == core.StateQueued || w.State == core.StateBriefed) && len(waitingOn) > 0:
 		why = "waits on " + strings.Join(waitingOn, ", ")
 	default:

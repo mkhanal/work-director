@@ -393,20 +393,7 @@ func (c *Cli) proposed(goal string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	pending := false
-	for _, e := range events {
-		if e.Work != goal {
-			continue
-		}
-		switch {
-		case e.Kind == core.EventNote && strings.HasPrefix(e.Body, proposedPrefix):
-			pending = true
-		case e.Kind == core.EventNote && strings.HasPrefix(e.Body, "plan: "),
-			e.Kind == core.EventDecision && strings.HasPrefix(e.Body, approvedPrefix):
-			pending = false
-		}
-	}
-	return pending, nil
+	return core.Proposed(goal, events), nil
 }
 
 // topGoal is the goal at the top of w's chain: w itself when no goal is above.
@@ -438,7 +425,7 @@ func (c *Cli) goalApprove(rest []string) error {
 		return err
 	}
 	open := slices.DeleteFunc(slices.Clone(subs), func(w core.Work) bool { return core.AtRest(w.State) })
-	if _, err := c.Ledger.AddEvent(goal.ID, core.EventDecision, fmt.Sprintf("%s%d sub-goals", approvedPrefix, len(open))); err != nil {
+	if _, err := c.Ledger.AddEvent(goal.ID, core.EventDecision, fmt.Sprintf("%s%d sub-goals", core.ApprovedPrefix, len(open))); err != nil {
 		return err
 	}
 	p, err := c.project(goal.Project)
