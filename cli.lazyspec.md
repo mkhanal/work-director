@@ -525,3 +525,4 @@ could not with their work, the bound that ran out, and the work still open.
 - With a file attached, the words may be left out.
 - A missing or unreadable file, or a directory, refuses the command naming it; nothing is sent, copied or recorded.
 - `--json` includes `attachments: [{name, path, size, media_type}]`, `[]` when none.
+- A goal whose supervisor cannot be started still keeps what was sent as a decision, with its files: `wd send` exits 0 saying the supervisor couldn't be told now and reads it when it next starts, and `--json` carries `looked: false` and the reason as `not_told`.

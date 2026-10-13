@@ -6148,6 +6148,42 @@ func TestAPersonCanAttachFilesToWhatTheySend(t *testing.T) {
 	if out := f.runOK(t, "send", t2, "plain", "--json"); !strings.Contains(out, `"attachments": []`) {
 		t.Fatalf("send with no files: %s, want attachments []", out)
 	}
+
+	// A supervisor that cannot start loses nothing: the decision and its files stay.
+	proj := "---\npath: " + f.sample + "\nrunner: claude\nmode: auto\n---\n"
+	if err := os.WriteFile(filepath.Join(f.wdHome, "projects", "overseen.md"), []byte(proj), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := f.env(t, "")
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			env[i] = "PATH=" + t.TempDir() + string(os.PathListSeparator) + "/usr/bin:/bin"
+		}
+	}
+	code, stdout, stderr := f.runEnv(t, env, "send", o.goal, "and the footers", "--attach", notes, "--json")
+	if code != 0 {
+		t.Fatalf("send to a goal whose supervisor cannot start = exit %d: %s", code, stderr)
+	}
+	var unreached struct {
+		Decision    core.Event        `json:"decision"`
+		Looked      bool              `json:"looked"`
+		NotTold     string            `json:"not_told"`
+		Attachments []core.Attachment `json:"attachments"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &unreached); err != nil {
+		t.Fatal(err)
+	}
+	footers := filepath.Join(f.wdHome, "attachments", o.goal, "2-notes")
+	if unreached.Looked || unreached.NotTold == "" || unreached.Decision.Body != "and the footers" || len(unreached.Attachments) != 1 || unreached.Attachments[0].Path != footers {
+		t.Fatalf("send to a goal whose supervisor cannot start = %+v, want the decision and its file kept, not told and why", unreached)
+	}
+	if readFile(t, footers) != "remember the margins\n" {
+		t.Fatalf("the kept decision's file is gone")
+	}
+	_, said, _ := f.runEnv(t, env, "send", o.goal, "and the headers")
+	if !strings.Contains(said, "Kept as a decision on “Release notes for engineers and customers”; its supervisor couldn't be told now") || !strings.Contains(said, "reads it when it next starts") {
+		t.Fatalf("send whose supervisor cannot start printed %q", said)
+	}
 }
 
 func TestWhatAGoalCommandTellsThePersonNamesWorkByItsTitle(t *testing.T) {

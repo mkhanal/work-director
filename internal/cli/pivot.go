@@ -54,7 +54,9 @@ func (c *Cli) send(rest []string) error {
 			return err
 		}
 		text := fmt.Sprintf("Kept as a decision on %s; its supervisor reads it at its next look", quoted(w))
-		if out["looked"] == true {
+		if why, ok := out["not_told"]; ok {
+			text = fmt.Sprintf("Kept as a decision on %s; its supervisor couldn't be told now (%s) and reads it when it next starts", quoted(w), why)
+		} else if out["looked"] == true {
 			text = fmt.Sprintf("Kept as a decision on %s; its supervisor is reading it now", quoted(w))
 		}
 		return c.out(out, text)
@@ -134,7 +136,9 @@ func (c *Cli) tellVia(w core.Work, h runner.Handle, text string) (told, error) {
 
 // tellGoal keeps text as a decision on the goal, which every later brief and
 // judgement reads, and has the goal's supervisor look at once, so it reaches
-// the tasks it is for rather than every task.
+// the tasks it is for rather than every task. Once kept, the decision and its
+// files stay even when the supervisor cannot look: it reads them when it next
+// starts, and not_told says why it was not told now.
 func (c *Cli) tellGoal(goal core.Work, text string, atts []core.Attachment) (map[string]any, error) {
 	if core.Reopenable(goal.State) {
 		return nil, fail("%s is done; a message is not a reason to work on it again — wd reopen %s \"<what is being worked on>\"", goal.ID, goal.ID)
@@ -154,11 +158,14 @@ func (c *Cli) tellGoal(goal core.Work, text string, atts []core.Attachment) (map
 			return nil, err
 		}
 	}
+	out := map[string]any{"decision": decision, "looked": false, "attachments": atts}
 	s, err := c.supervise(goal)
 	if err != nil {
-		return nil, err
+		out["not_told"] = strings.TrimSpace(err.Error())
+		return out, nil
 	}
-	return map[string]any{"decision": decision, "looked": s.Looked, "attachments": atts}, nil
+	out["looked"] = s.Looked
+	return out, nil
 }
 
 // stop interrupts what a task's session is doing and takes back the messages
@@ -506,9 +513,13 @@ func (c *Cli) goalContinue(goal core.Work, text string) error {
 			return fmt.Errorf("goal %s reopened; %w", goal.ID, err)
 		}
 	default:
-		if _, err := c.tellGoal(goal, text, atts); err != nil {
+		told, err := c.tellGoal(goal, text, atts)
+		if err != nil {
 			discard(atts)
 			return err
+		}
+		if why, ok := told["not_told"]; ok {
+			lines = append(lines, fmt.Sprintf("Its supervisor couldn't be told now (%s) and reads it when it next starts", why))
 		}
 	}
 	goal, err = c.Ledger.Get(goal.ID)
