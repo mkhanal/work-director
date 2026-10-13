@@ -2068,6 +2068,21 @@ fn work_under_way_shows_what_it_is_doing_and_for_how_long() {
     store.stop();
 }
 
+/// Any Text The App Shows Can Be Copied
+#[test]
+fn any_text_the_app_shows_can_be_copied() {
+    let said = "## Plan\nRun **all** the `go test` suites & [read the guide](https://x.dev/g).\n\n- one\n2. two\n\n```\nmake <all>\n```";
+    assert_eq!(
+        kit::copy::plain(said),
+        "Plan\n\nRun all the go test suites & read the guide.\n\n• one\n\n2. two\n\nmake <all>",
+        "plain text is the words without the marks that style them"
+    );
+    assert_eq!(kit::copy::plain("snake_case & <tags>"), "snake_case & <tags>");
+    let mut goal = work("ab12", "running");
+    goal.title = "Release notes".into();
+    assert_eq!(kit::copy::work(&goal), "Release notes (ab12)");
+}
+
 /// The Agents Panel Sits Beside The Page, Never Over It
 #[test]
 fn the_agents_panel_sits_beside_the_page_never_over_it() {

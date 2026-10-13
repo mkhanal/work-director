@@ -35,6 +35,7 @@ impl WorkPage {
                 let (detail, at) = (g.goal.detail.clone(), g.goal.created.clone());
                 turns.push(
                     Turn::key("asked", &detail)
+                        .copying(&detail)
                         .with(move || ui::you_bubble(&detail, "You asked", Some(at.as_str()), None).upcast()),
                 );
             }
@@ -85,7 +86,11 @@ impl WorkPage {
             .collect();
         for m in outgoing {
             let app = self.app.clone();
-            turns.push(Turn::key(format!("out{}", m.id), &m.state).with(move || outgoing_bubble(&app, &m, "sent")));
+            turns.push(
+                Turn::key(format!("out{}", m.id), &m.state)
+                    .copying(&m.text)
+                    .with(move || outgoing_bubble(&app, &m, "sent")),
+            );
         }
 
         turns.extend(self.asking_turns(g));
@@ -111,7 +116,9 @@ impl WorkPage {
                 let said = e.decision.as_ref().map(|d| d.answer.clone()).unwrap_or_else(|| e.body.clone());
                 yours.push((said.clone(), id.clone()));
                 let label = if e.kind == "answer" { "You answered" } else { "You" };
-                Turn::key(&id, &e).with(move || ui::you_bubble(&said, label, Some(e.at.as_str()), None).upcast())
+                Turn::key(&id, &e)
+                    .copying(&said)
+                    .with(move || ui::you_bubble(&said, label, Some(e.at.as_str()), None).upcast())
             }
             ThreadStep::Event(e) if g.finished_line(&e).is_some() => {
                 let text = format!("{} · {}", g.finished_line(&e).unwrap_or_default(), kit::time::when(&e.at));
@@ -121,7 +128,9 @@ impl WorkPage {
                 let task = self.named(g, &e.work);
                 let report = g.reports.get(&e.id.to_string()).cloned();
                 let weak = self.me.clone();
-                Turn::key(&id, &(&e, &report)).with(move || event_turn(&e, report.as_ref(), task, weak))
+                Turn::key(&id, &(&e, &report))
+                    .copying(&e.answer_text())
+                    .with(move || event_turn(&e, report.as_ref(), task, weak))
             }
             ThreadStep::Exchange(q, answer) => {
                 // An open question is answered in its needs-you card, shown once.
@@ -141,7 +150,13 @@ impl WorkPage {
                 let weak = self.me.clone();
                 let target = (q.work != g.goal.id).then(|| q.work.clone());
                 let decided = answer.as_ref().map(|a| g.decided_for(a)).unwrap_or_default();
+                let said = [Some(q.body.clone()), answer.as_ref().map(|a| a.answer_text())]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
                 Turn::key(&id, &(&q, &answer, &decided))
+                    .copying(&said)
                     .with(move || exchange_turn(&q, answer.as_ref(), &decided, &asker, target, weak))
             }
             ThreadStep::Look(e) => {
@@ -151,15 +166,17 @@ impl WorkPage {
             ThreadStep::Supervisor(e, reply) => {
                 let tasks = self.told(g, &reply);
                 let (weak, goal) = (self.me.clone(), g.goal.id.clone());
-                Turn::key(&id, &(&e, &reply, &tasks)).with(move || supervisor_turn(&e, &reply, &tasks, &goal, weak))
+                Turn::key(&id, &(&e, &reply, &tasks))
+                    .copying(&e.body)
+                    .with(move || supervisor_turn(&e, &reply, &tasks, &goal, weak))
             }
-            ThreadStep::Declined(e, declined) => {
-                Turn::key(&id, &(&e, &declined)).with(move || declined_turn(&e, &declined))
-            }
+            ThreadStep::Declined(e, declined) => Turn::key(&id, &(&e, &declined))
+                .copying(&format!("{}\n\n{}", declined.question, declined.why))
+                .with(move || declined_turn(&e, &declined)),
             ThreadStep::Stopped(e, said) => {
                 let task = self.named(g, &e.work);
                 let weak = self.me.clone();
-                Turn::key(&id, &(&e, &said)).with(move || stopped_turn(&e, &said, task, weak))
+                Turn::key(&id, &(&e, &said)).copying(&said).with(move || stopped_turn(&e, &said, task, weak))
             }
         })
     }
@@ -270,12 +287,17 @@ impl WorkPage {
                         let text = step.text().to_string();
                         if director.iter().any(|d| text.contains(d.as_str())) {
                             let at = step.at.clone();
-                            turns.push(Turn::key(&id, &step).with(move || director_answer(&text, at.as_deref(), None)));
+                            turns.push(
+                                Turn::key(&id, &step)
+                                    .copying(&text)
+                                    .with(move || director_answer(&text, at.as_deref(), None)),
+                            );
                         } else {
                             let label = if index == 0 { "Brief" } else { "Told" };
                             let at = step.at.clone();
                             turns.push(
                                 Turn::key(&id, &step)
+                                    .copying(&text)
                                     .with(move || ui::you_bubble(&text, label, at.as_deref(), None).upcast()),
                             );
                         }
@@ -300,6 +322,7 @@ impl WorkPage {
                         let open = index == last && running;
                         turns.push(
                             Turn::key(&id, &(&step, open, &head))
+                                .copying(&step_said(&step))
                                 .with(move || agent_turn(head, agent_body(&step, open))),
                         );
                     }
@@ -307,7 +330,9 @@ impl WorkPage {
                 ThreadRow::Tools { calls, .. } => {
                     let working = running && index + calls.len() > last;
                     turns.push(
-                        Turn::key(&id, &(&calls, working, &head)).with(move || agent_turn(head, tool_group(&calls))),
+                        Turn::key(&id, &(&calls, working, &head))
+                            .copying(&calls.iter().map(tool_said).collect::<Vec<_>>().join("\n\n"))
+                            .with(move || agent_turn(head, tool_group(&calls))),
                     );
                 }
             }
@@ -328,6 +353,7 @@ impl WorkPage {
                 let app = self.app.clone();
                 turns.push(
                     Turn::key(format!("out{}", m.id), &(&m.state, waiting))
+                        .copying(&m.text)
                         .with(move || outgoing_bubble(&app, &m, waiting)),
                 );
             }
@@ -763,6 +789,23 @@ pub(super) fn agent_body(step: &Step, open: bool) -> gtk::Widget {
         },
         _ => ui::markdown(step.text()).upcast(),
     }
+}
+
+/// What a step said, as its turn copies it.
+fn step_said(step: &Step) -> String {
+    match &step.tool {
+        Some(call) => tool_said(call),
+        None => step.text().to_string(),
+    }
+}
+
+/// A tool call as copied: its line, then its input and result as code.
+fn tool_said(call: &ToolCall) -> String {
+    let mut parts = vec![[call.name.as_str(), call.summary.as_str()].join(" ").trim().to_string()];
+    for block in [Some(call.input.as_str()), call.result.as_deref()].into_iter().flatten().filter(|b| !b.is_empty()) {
+        parts.push(format!("```\n{block}\n```"));
+    }
+    parts.join("\n\n")
 }
 
 /// One tool call in a line; its input and result on disclosure.

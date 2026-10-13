@@ -187,6 +187,9 @@ fn proposed_card(
     links.append(&drop);
     row.append(&links);
 
+    // A card drags from anywhere on it, so its words are copied from its menu instead.
+    row.add_css_class("draggable");
+    ui::context_menu(&row, &ui::copy_menu(&format!("{}\n{}", card.title, card.meta)));
     let drag = gtk::DragSource::new();
     drag.set_actions(gdk::DragAction::MOVE);
     let id = card.id.clone();

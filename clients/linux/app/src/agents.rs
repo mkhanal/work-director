@@ -86,6 +86,8 @@ impl AgentsPanel {
         for (card, nested) in &flat {
             let row = gtk::ListBoxRow::new();
             row.set_child(Some(&card_view(card, *nested)));
+            let said = [Some(card.title.as_str()), card.line.as_deref()].into_iter().flatten().collect::<Vec<_>>();
+            ui::context_menu(&row, &ui::copy_menu(&said.join("\n")));
             self.list.append(&row);
             if Some(card.id.as_str()) == focused {
                 self.list.select_row(Some(&row));

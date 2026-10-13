@@ -9,18 +9,28 @@ use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 
 use adw::prelude::*;
+use gtk::gio;
+
+use crate::ui;
 
 pub struct Turn {
     key: String,
+    /// What the turn says, as the markdown it was written in, for its menu's Copy.
+    copy: Option<String>,
     build: Box<dyn FnOnce() -> gtk::Widget>,
 }
 
 /// What a turn is named and shows, before it is built.
-pub struct Key(String);
+pub struct Key(String, Option<String>);
 
 impl Key {
+    /// The turn copies as `said`: as plain text, or as the markdown it is.
+    pub fn copying(self, said: &str) -> Key {
+        Key(self.0, Some(said.to_string()))
+    }
+
     pub fn with(self, build: impl FnOnce() -> gtk::Widget + 'static) -> Turn {
-        Turn { key: self.0, build: Box::new(build) }
+        Turn { key: self.0, copy: self.1, build: Box::new(build) }
     }
 }
 
@@ -30,7 +40,7 @@ impl Turn {
     pub fn key(id: impl std::fmt::Display, shown: &impl Debug) -> Key {
         let mut hasher = DefaultHasher::new();
         format!("{shown:?}").hash(&mut hasher);
-        Key(format!("{id}:{:x}", hasher.finish()))
+        Key(format!("{id}:{:x}", hasher.finish()), None)
     }
 
     /// The turn's widget, for a turn shown inside another.
@@ -64,6 +74,11 @@ impl Turns {
             let key = turn.key.clone();
             let widget = (turn.build)();
             widget.set_widget_name(&id);
+            let menus = turn.copy.map(|said| copy_menus(&widget, said));
+            ui::copyable(&widget, menus.as_ref().map(|m| &m.1));
+            if let Some((menu, _)) = &menus {
+                ui::context_menu(&widget, menu);
+            }
             self.widget.append(&widget);
             shown.push((key, widget));
         }
@@ -73,4 +88,29 @@ impl Turns {
     pub fn find(&self, id: &str) -> Option<gtk::Widget> {
         self.shown.borrow().iter().find(|(key, _)| key.split(':').next() == Some(id)).map(|(_, w)| w.clone())
     }
+}
+
+/// The turn's Copy and Copy as Markdown, acting on what it said: its own
+/// menu, and the same beside a label's Copy of what is selected.
+fn copy_menus(widget: &gtk::Widget, said: String) -> (gio::MenuModel, gio::MenuModel) {
+    let actions = gio::SimpleActionGroup::new();
+    let plain = kit::copy::plain(&said);
+    for (name, text) in [("copy", plain), ("copy-markdown", said)] {
+        let action = gio::SimpleAction::new(name, None);
+        let target = widget.downgrade();
+        action.connect_activate(move |_, _| {
+            if let Some(target) = target.upgrade() {
+                ui::copy_text(&target, &text);
+            }
+        });
+        actions.add_action(&action);
+    }
+    widget.insert_action_group("turn", Some(&actions));
+    let menu = |copy: &str, markdown: &str| {
+        let menu = gio::Menu::new();
+        menu.append(Some(copy), Some("turn.copy"));
+        menu.append(Some(markdown), Some("turn.copy-markdown"));
+        menu.upcast()
+    };
+    (menu("Copy", "Copy as Markdown"), menu("Copy Message", "Copy Message as Markdown"))
 }

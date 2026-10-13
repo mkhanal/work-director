@@ -194,6 +194,7 @@ impl Window {
             window.add_action(&action);
         };
         with_id("open", Box::new(|w, id| w.open(Place::Work(id))));
+        with_id("copy-text", Box::new(|w, text| ui::copy_text(&w.app.window, &text)));
         with_id("rename", Box::new(|w, id| w.rename(&id)));
         with_id("decide", Box::new(|w, id| w.ask_about(id, false)));
         with_id("reopen", Box::new(|w, id| w.ask_about(id, true)));

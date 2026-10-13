@@ -109,6 +109,7 @@ impl Sidebar {
             watch: RefCell::new(None),
         });
         sidebar.wire();
+        sidebar.copy_keys();
         sidebar.render_products();
         sidebar.render();
         sidebar
@@ -164,6 +165,38 @@ impl Sidebar {
                 Some(Row::Header) | None => {}
             }
         });
+    }
+
+    /// Ctrl+C on a goal in the list copies its title and id: the row with
+    /// focus, else the one selected.
+    fn copy_keys(&self) {
+        let keys = gtk::EventControllerKey::new();
+        let weak = self.me.clone();
+        keys.connect_key_pressed(move |_, key, _, state| {
+            let copy = state.contains(gdk::ModifierType::CONTROL_MASK) && matches!(key, gdk::Key::c | gdk::Key::C);
+            let Some(sidebar) = weak.upgrade().filter(|_| copy) else { return glib::Propagation::Proceed };
+            let row =
+                sidebar.list.focus_child().and_downcast::<gtk::ListBoxRow>().or_else(|| sidebar.list.selected_row());
+            let chosen =
+                row.and_then(|r| usize::try_from(r.index()).ok()).and_then(|i| sidebar.rows.borrow().get(i).cloned());
+            let Some(Row::Open(Place::Work(id))) = chosen else { return glib::Propagation::Proceed };
+            let work = sidebar.app.store.board().as_ref().and_then(|b| {
+                b.goals
+                    .iter()
+                    .map(|g| &g.work)
+                    .chain(b.standalone.iter().map(|s| &s.work))
+                    .find(|w| w.id == id)
+                    .cloned()
+            });
+            match work {
+                Some(work) => {
+                    ui::copy_text(&sidebar.list, &kit::copy::work(&work));
+                    glib::Propagation::Stop
+                }
+                None => glib::Propagation::Proceed,
+            }
+        });
+        self.list.add_controller(keys);
     }
 
     /// The product in scope; none is all products.

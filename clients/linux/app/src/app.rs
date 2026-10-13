@@ -228,6 +228,7 @@ pub fn work_menu(work: &Work, opened: bool) -> gio::Menu {
     if !opened {
         first.append_item(&id_item("Open", "win.open", &work.id));
     }
+    first.append_item(&id_item("Copy Title and Id", "win.copy-text", &kit::copy::work(work)));
     first.append_item(&id_item("Rename…", "win.rename", &work.id));
     first.append_item(&id_item("Record a Decision…", "win.decide", &work.id));
     menu.append_section(None, &first);

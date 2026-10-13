@@ -49,7 +49,12 @@ fn refill(
 }
 
 fn row(title: &str, subtitle: &str) -> adw::ActionRow {
-    let row = adw::ActionRow::builder().title(title).use_markup(false).build();
+    let row = adw::ActionRow::builder()
+        .title(title)
+        .use_markup(false)
+        .title_selectable(true)
+        .subtitle_selectable(true)
+        .build();
     if !subtitle.is_empty() {
         row.set_subtitle(subtitle);
     }

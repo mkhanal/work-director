@@ -305,7 +305,9 @@ impl WorkPage {
             glib::Propagation::Stop
         });
         self.header.entry.add_controller(keys);
+        // Ahead of the title's own selection, so a double click still renames.
         let click = gtk::GestureClick::new();
+        click.set_propagation_phase(gtk::PropagationPhase::Capture);
         let weak = self.me.clone();
         click.connect_pressed(move |_, presses, _, _| {
             if presses == 2 {
@@ -644,6 +646,7 @@ impl WorkPage {
                 return;
             };
             self.render_header(loaded, &state);
+            ui::copyable(&self.header.widget, None);
             // A read that failed after one that worked keeps the page, and says so.
             self.header.problem.set_label(state.failure.as_deref().unwrap_or(""));
             self.header.problem.set_visible(state.failure.is_some());

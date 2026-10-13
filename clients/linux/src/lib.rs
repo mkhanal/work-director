@@ -4,6 +4,7 @@
 pub mod agents;
 pub mod channel;
 pub mod conversation;
+pub mod copy;
 pub mod escape;
 pub mod follow;
 pub mod ledger;

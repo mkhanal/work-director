@@ -2,7 +2,7 @@
 //! event lines and markdown. Classes are defined in style.css.
 
 use adw::prelude::*;
-use gtk::{glib, pango};
+use gtk::{gdk, gio, glib, pango};
 
 use kit::markdown::{self, Block};
 use kit::{Mark, Tone, WorkState};
@@ -537,4 +537,122 @@ pub fn clear(container: &gtk::Box) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
+}
+
+/// Makes every label under `root` selectable, so its text can be copied,
+/// except where a click on it does something else: inside a button, an
+/// activatable row, an expander's heading or a card that drags. A selectable
+/// label is left out of keyboard focus, so Tab still moves between controls;
+/// `extra` joins each label's own menu.
+pub fn copyable(root: &impl IsA<gtk::Widget>, extra: Option<&gio::MenuModel>) {
+    walk(root.upcast_ref(), false, extra);
+}
+
+/// Whether a click on `widget` does something of its own.
+fn pressable(widget: &gtk::Widget) -> bool {
+    if let Some(row) = widget.downcast_ref::<gtk::ListBoxRow>() {
+        return row.is_activatable();
+    }
+    widget.is::<gtk::Button>()
+        || widget.is::<gtk::MenuButton>()
+        || widget.is::<gtk::CheckButton>()
+        || widget.is::<gtk::DropDown>()
+        || widget.has_css_class("draggable")
+}
+
+fn walk(widget: &gtk::Widget, pressed: bool, extra: Option<&gio::MenuModel>) {
+    if let Some(label) = widget.downcast_ref::<gtk::Label>() {
+        if !pressed && label.can_target() && !label.has_css_class("copyable") {
+            selectable(label);
+            if let Some(extra) = extra {
+                label.set_extra_menu(Some(extra));
+            }
+        }
+        return;
+    }
+    let pressed = pressed || pressable(widget);
+    if let Some(expander) = widget.downcast_ref::<gtk::Expander>() {
+        // Its heading opens and closes it; what it holds is read.
+        if let Some(child) = expander.child() {
+            walk(&child, pressed, extra);
+        }
+        return;
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        walk(&c, pressed, extra);
+        child = c.next_sibling();
+    }
+}
+
+/// Makes a label's text selectable with the pointer and copied with Ctrl+C,
+/// without making it a stop for Tab: it takes focus only from a click, and
+/// gives it up when focus moves on.
+fn selectable(label: &gtk::Label) {
+    label.add_css_class("copyable");
+    label.set_selectable(true);
+    label.set_focusable(false);
+    let press = gtk::GestureClick::new();
+    press.set_button(0);
+    press.set_propagation_phase(gtk::PropagationPhase::Capture);
+    press.connect_pressed(|g, _, _, _| {
+        if let Some(label) = g.widget() {
+            label.set_focusable(true);
+        }
+    });
+    label.add_controller(press);
+    let focus = gtk::EventControllerFocus::new();
+    focus.connect_leave(|f| {
+        if let Some(label) = f.widget().and_downcast::<gtk::Label>() {
+            label.select_region(0, 0);
+            label.set_focusable(false);
+        }
+    });
+    label.add_controller(focus);
+}
+
+/// Puts text on the clipboard.
+pub fn copy_text(widget: &impl IsA<gtk::Widget>, text: &str) {
+    widget.clipboard().set_text(text);
+}
+
+/// A right-click or long-press menu on `widget` with the items `menu` holds.
+pub fn context_menu(widget: &impl IsA<gtk::Widget>, menu: &gio::MenuModel) {
+    let widget = widget.upcast_ref::<gtk::Widget>();
+    let show = {
+        let (weak, menu) = (widget.downgrade(), menu.clone());
+        move |x: f64, y: f64| {
+            let Some(widget) = weak.upgrade() else { return };
+            let popover = gtk::PopoverMenu::from_model(Some(&menu));
+            popover.set_parent(&widget);
+            popover.set_has_arrow(false);
+            popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+            popover.connect_closed(|p| {
+                let p = p.clone();
+                glib::idle_add_local_once(move || p.unparent());
+            });
+            popover.popup();
+        }
+    };
+    let click = gtk::GestureClick::new();
+    click.set_button(gdk::BUTTON_SECONDARY);
+    let shown = show.clone();
+    click.connect_pressed(move |g, _, x, y| {
+        g.set_state(gtk::EventSequenceState::Claimed);
+        shown(x, y);
+    });
+    widget.add_controller(click);
+    let press = gtk::GestureLongPress::new();
+    press.set_touch_only(true);
+    press.connect_pressed(move |_, x, y| show(x, y));
+    widget.add_controller(press);
+}
+
+/// A menu with one Copy that puts `text` on the clipboard.
+pub fn copy_menu(text: &str) -> gio::MenuModel {
+    let menu = gio::Menu::new();
+    let item = gio::MenuItem::new(Some("Copy"), None);
+    item.set_action_and_target_value(Some("win.copy-text"), Some(&text.to_variant()));
+    menu.append_item(&item);
+    menu.upcast()
 }

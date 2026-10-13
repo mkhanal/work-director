@@ -222,6 +222,11 @@ hold only that product's work; with none, every product's.
 - What a session is doing reads from its latest step: the tool it runs, as Running `go test ./...`, Reading, Editing or Searching, else Thinking.
 - A sub-goal on the Overview with a session working under it, and a goal in the sidebar with running work under it, carry a working mark, still when animations are off.
 
+## Any Text The App Shows Can Be Copied
+- Text the app shows can be selected and copied; where a click opens something, its menu has Copy.
+- A turn's menu copies it as plain text, or as the markdown it was written in.
+- Ctrl+C on a goal selected in the sidebar, or its menu's Copy, copies its title and id.
+
 ## The Agents Panel Sits Beside The Page, Never Over It
 - The panel sits beside the page, which narrows to make room for it.
 - Dragging its edge resizes it between 260 and 480 pixels; it opens at 320 until a width is set, and the width set is remembered.

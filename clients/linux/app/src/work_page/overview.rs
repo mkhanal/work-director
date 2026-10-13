@@ -325,6 +325,7 @@ fn sub_goal_row(row: &SubGoalRow, last: bool, app: &App, page: Weak<WorkPage>) -
         steps.append(&hide);
         outer.append(&steps);
     }
+    ui::context_menu(&outer, &ui::copy_menu(&format!("{}\n{}", row.title, row.meta)));
     outer.upcast()
 }
 
