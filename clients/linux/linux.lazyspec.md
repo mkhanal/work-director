@@ -99,6 +99,13 @@ hold only that product's work; with none, every product's.
 - The panel counts settled cards and adds every card's tokens, subagents included.
 - Choosing a subagent shows its own conversation.
 
+## The Kit Reads A Goal As A Tree
+- A goal at any depth reads as its breadcrumb, done-when, finish line, progress, what keeps it from done, what needs the person, its course and its sub-goals as a tree.
+- Every work under a goal is named by its path through the tree.
+- A sub-goal that is a goal opens its own page; a task, and a group of an older plan's tasks, do not.
+- The board reads each top goal's progress, what needs the person, its finish line and, once done, where it finished.
+- A goal's record reads as entries with their kind, place and maker, newest first, with its counts.
+
 ## A Goal Reads As One Conversation With Its Supervisor And Its Agents
 - A goal's thread holds, oldest first, what was decided, said, asked, answered, reported, verified and landed on the goal or its tasks, and the state changes that end work.
 - A supervisor's reply shows what it said without its action lines, then what was done, each with the task it told, started or filed, and then what was refused.

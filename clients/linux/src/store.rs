@@ -20,6 +20,7 @@ use crate::ledger::{
 };
 use crate::outbox::{Outgoing, OutgoingState};
 use crate::plan::Plan;
+use crate::record::RecordView;
 
 /// Runs a future on the thread the store lives on.
 pub type Spawner = Rc<dyn Fn(LocalBoxFuture<'static, ()>)>;
@@ -220,6 +221,10 @@ impl Store {
 
     pub async fn goal(&self, id: &str) -> Result<GoalDetail, ChannelError> {
         self.channel.goal(id).await
+    }
+
+    pub async fn record(&self, id: &str) -> Result<RecordView, ChannelError> {
+        self.channel.record(id).await
     }
 
     pub async fn work(&self, id: &str) -> Result<Work, ChannelError> {

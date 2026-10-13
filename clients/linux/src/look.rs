@@ -55,6 +55,7 @@ impl WorkState {
             WorkState::Dropped => ("Dropped", "list-remove-symbolic", Tint::Gray),
             WorkState::Abandoned => ("Abandoned", "process-stop-symbolic", Tint::Brown),
             WorkState::Paused => ("Paused", "media-playback-pause-symbolic", Tint::Purple),
+            WorkState::Superseded => ("Superseded", "edit-redo-symbolic", Tint::Gray),
         };
         StateLook { label, icon, tint }
     }

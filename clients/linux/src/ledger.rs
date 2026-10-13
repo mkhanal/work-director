@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::conversation::{Activity, Question};
+use crate::tree::{Course, Finish, Link, NeedYou, Node, Progress, Superseded};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -22,10 +23,11 @@ pub enum WorkState {
     Dropped,
     Abandoned,
     Paused,
+    Superseded,
 }
 
 impl WorkState {
-    pub const ALL: [WorkState; 11] = [
+    pub const ALL: [WorkState; 12] = [
         WorkState::Queued,
         WorkState::Briefed,
         WorkState::Running,
@@ -37,6 +39,7 @@ impl WorkState {
         WorkState::Dropped,
         WorkState::Abandoned,
         WorkState::Paused,
+        WorkState::Superseded,
     ];
 }
 
@@ -147,7 +150,7 @@ impl Work {
     }
 
     pub fn at_rest(&self) -> bool {
-        matches!(self.state, WorkState::Done | WorkState::Dropped | WorkState::Abandoned)
+        matches!(self.state, WorkState::Done | WorkState::Dropped | WorkState::Abandoned | WorkState::Superseded)
     }
 
     /// Whether the work has a session whose conversation can be read.
@@ -191,6 +194,12 @@ pub struct BoardGoal {
     pub work: Work,
     pub rollup: Rollup,
     pub band: Band,
+    pub progress: Progress,
+    /// The open questions in the goal's whole tree.
+    pub needs_you: i64,
+    pub finish: Option<Finish>,
+    /// Where a done goal finished, as a person names it.
+    pub finished: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -354,6 +363,34 @@ pub struct GoalDetail {
     pub asking: Option<Question>,
     /// Each report read into its parts, by the id of the event that filed it.
     pub reports: HashMap<String, Report>,
+    /// The breadcrumb, top goal first, ending at this goal.
+    pub chain: Vec<Link>,
+    /// The goal's sub-goals, each with everything under it.
+    pub tree: Vec<Node>,
+    /// Every work under the goal named by its place in the tree.
+    pub paths: HashMap<String, String>,
+    pub done_when: Option<String>,
+    /// Where the top goal finishes, once decided.
+    pub finish: Option<Finish>,
+    pub progress: Progress,
+    /// What holds the goal back from done; empty once done.
+    pub not_done_because: Vec<String>,
+    /// Every open question on the goal or under it, in tree order.
+    pub needs_you: Vec<NeedYou>,
+    pub course: Option<Course>,
+    pub superseded: Vec<Superseded>,
+}
+
+impl GoalDetail {
+    /// Whether this goal is a sub-goal of another.
+    pub fn nested(&self) -> bool {
+        self.chain.len() > 1
+    }
+
+    /// The node with this id anywhere in the tree.
+    pub fn node(&self, id: &str) -> Option<&Node> {
+        self.tree.iter().find_map(|n| n.find(id))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

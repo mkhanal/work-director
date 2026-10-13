@@ -152,6 +152,25 @@ fn work(id: &str, state: &str) -> Work {
     serde_json::from_value(work_json(id, state)).expect("a work")
 }
 
+/// A goal view from the fields a test names, the tree's own left empty.
+fn goal_view(mut v: Value) -> GoalDetail {
+    let empty = json!({"chain": [], "tree": [], "paths": {}, "done_when": null, "finish": null,
+        "progress": {"done": 0, "total": 0, "superseded": 0}, "not_done_because": [], "needs_you": [],
+        "course": null, "superseded": []});
+    for (k, value) in empty.as_object().expect("an object") {
+        if v.get(k).is_none() {
+            v[k] = value.clone();
+        }
+    }
+    serde_json::from_value(v).expect("a goal view")
+}
+
+/// A goal as the board lists it, with nothing of its tree told.
+fn board_goal(work: Value, band: &str) -> Value {
+    json!({"work": work, "rollup": {"counts": {}, "done": 0, "total": 1}, "band": band,
+        "progress": {"done": 0, "total": 1, "superseded": 0}, "needs_you": 0, "finish": null, "finished": null})
+}
+
 fn strings(words: &[&str]) -> Vec<String> {
     words.iter().map(|s| s.to_string()).collect()
 }
@@ -783,7 +802,7 @@ fn a_goal_reads_as_one_conversation_with_its_supervisor_and_its_agents() {
         "asking": {"id": "event-11", "items": [{"header": "", "question": "Tag v1.0.0?", "multi": false,
             "options": [{"label": "yes (recommended)", "description": ""}, {"label": "no", "description": ""}]}], "answers": null, "reply": null},
     });
-    let goal: GoalDetail = serde_json::from_value(detail).expect("a goal");
+    let goal = goal_view(detail);
     assert!(goal.supervised());
     assert_eq!(
         goal.asking.as_ref().map(|q| q.items[0].options.iter().map(|o| o.label.clone()).collect::<Vec<_>>()),
@@ -818,6 +837,80 @@ fn a_goal_reads_as_one_conversation_with_its_supervisor_and_its_agents() {
     assert_eq!(reply.refused, strings(&["START b — b is review, already under way"]));
 }
 
+/// The Kit Reads A Goal As A Tree
+#[test]
+fn the_kit_reads_a_goal_as_a_tree() {
+    let home = Home::new();
+    let top = home.goal("demo", "Release notes");
+    let add = |parent: &str, title: &str, extra: &[&str]| -> String {
+        let mut argv = vec!["goal", "add", parent, title, "--done-when", "it is so", "--json"];
+        argv.extend_from_slice(extra);
+        serde_json::from_str::<Work>(&home.wd(&argv)).expect("a sub-goal").id
+    };
+    let tagged = add(&top, "Tagged", &[]);
+    let guide = add(&top, "Guide", &["--split"]);
+    let after = format!("{tagged},{guide}");
+    let workflow = add(&top, "Workflow", &["--after", &after]);
+    let rollback = add(&guide, "Rollback", &[]);
+    home.wd(&["decide", &top, "keep it small"]);
+
+    let run = Run::new();
+    let store = run.store(home.channel());
+    let g = run.wait(store.goal(&top)).expect("the goal");
+    assert_eq!(g.chain.iter().map(|l| l.id.clone()).collect::<Vec<_>>(), vec![top.clone()]);
+    assert!(!g.nested());
+    assert_eq!(
+        g.tree.iter().map(|n| n.work.id.clone()).collect::<Vec<_>>(),
+        vec![tagged.clone(), guide.clone(), workflow.clone()]
+    );
+    assert_eq!(g.progress, Progress { done: 0, total: 3, superseded: 0 });
+    assert_eq!(g.not_done_because, strings(&["3 sub-goals open"]));
+    assert!(g.needs_you.is_empty() && g.course.is_none() && g.finish.is_none());
+    assert_eq!(g.paths[&rollback], "Guide › Rollback");
+    let guide_node = g.node(&guide).expect("the guide node");
+    assert_eq!(guide_node.opens(), Some(guide.as_str()), "a sub-goal that is a goal opens its page");
+    assert_eq!(guide_node.planned_into, Some(1));
+    assert_eq!(g.node(&rollback).map(|n| n.done_when.clone()), Some(Some("it is so".to_string())));
+    assert_eq!(g.node(&tagged).and_then(Node::opens), None, "a task opens no goal page");
+    let w = g.node(&workflow).expect("the workflow node");
+    assert_eq!(w.waiting_on, strings(&["Tagged", "Guide"]));
+    assert!(w.why_not_moving.is_some());
+
+    let nested = run.wait(store.goal(&guide)).expect("the sub-goal");
+    assert_eq!(nested.chain.iter().map(|l| l.id.clone()).collect::<Vec<_>>(), vec![top.clone(), guide.clone()]);
+    assert!(nested.nested());
+    assert_eq!(nested.done_when.as_deref(), Some("it is so"));
+
+    run.wait(store.refresh());
+    let board = store.board().clone().expect("a board");
+    let listed = board.goals.iter().find(|b| b.work.id == top).expect("the top goal");
+    assert_eq!((listed.progress.total, listed.needs_you, listed.finished.clone()), (3, 0, None));
+    assert!(board.goals.iter().all(|b| b.work.id != guide), "the board lists top goals only");
+
+    let record = run.wait(store.record(&top)).expect("the record");
+    assert_eq!(
+        record.entries.first().map(|e| (e.kind, e.what.as_str(), e.by)),
+        Some((RecordKind::Decision, "keep it small", RecordBy::You))
+    );
+    assert_eq!(record.entries.last().map(|e| e.kind), Some(RecordKind::Asked));
+    assert!(record.entries.iter().any(|e| e.place == "Guide › Rollback"));
+    assert_eq!(
+        record.summary.decisions,
+        record.entries.iter().filter(|e| e.kind == RecordKind::Decision).count() as i64
+    );
+
+    let group: Node = serde_json::from_value(json!({"work": {"id": "group:g:1", "project": "demo", "title": "Old heading",
+        "detail": "", "kind": "goal", "state": "superseded", "runner": null, "session": null, "ref": null, "cwd": null,
+        "created": "c", "updated": "u", "parent": "g", "heading": null, "claim": null, "impact": null, "goal_type": null,
+        "archived": null}, "group": true, "done_when": null, "after": [], "waiting_on": [], "why_not_moving": "superseded",
+        "owner": {"runner": "claude", "agent": null}, "planned_into": null, "progress": null, "doing": "Writing",
+        "steps": [{"n": 1, "text": "Read", "state": "done"}], "judged": {"verdict": "met", "why": "ok"},
+        "needs_you": 0, "children": []}))
+    .expect("a group node");
+    assert_eq!(group.opens(), None, "a group of an older plan's tasks opens no page");
+    store.stop();
+}
+
 /// A Goal Is Read As Its Overview, Its Conversation, Its Tasks Or Its Record
 #[test]
 fn a_goal_is_read_as_its_overview_its_conversation_its_tasks_or_its_record() {
@@ -828,7 +921,7 @@ fn a_goal_is_read_as_its_overview_its_conversation_its_tasks_or_its_record() {
     let person = json!({"question": "q", "answer": "yes", "source": "person", "runner": "", "model": "", "tokens": 0,
         "reverses": 0, "reversed_by": 0});
     let asking = json!({"id": "event-1", "items": [], "answers": null, "reply": null});
-    let goal: GoalDetail = serde_json::from_value(json!({
+    let goal = goal_view(json!({
         "goal": work_json("g", "running"),
         "tasks": [work_json("a", "done"), work_json("b", "blocked"), work_json("c", "running"),
             work_json("d", "queued"), work_json("e", "dropped"), work_json("f", "review")],
@@ -850,8 +943,7 @@ fn a_goal_is_read_as_its_overview_its_conversation_its_tasks_or_its_record() {
         "asking": asking,
         "reports": {"5": {"verdict": "done", "said": "", "files": ["x.ts"], "file_note": "",
             "sections": [{"name": "VERIFY", "text": "go test → 0"}]}},
-    }))
-    .expect("a goal");
+    }));
     let p = goal.progress();
     assert_eq!([p.done, p.working, p.review, p.blocked, p.waiting, p.dropped], [1, 1, 1, 1, 1, 1]);
     assert_eq!(goal.waiting_on_you(), 2, "the goal's own question and task c's");
@@ -884,7 +976,7 @@ fn the_sidebar_lists_work_as_threads_most_recently_active_first() {
         w["updated"] = json!(updated);
         w
     };
-    let goal = |w: Value, band: &str| json!({"work": w, "rollup": {"counts": {}, "done": 0, "total": 1}, "band": band});
+    let goal = |w: Value, band: &str| board_goal(w, band);
     let board: Board = serde_json::from_value(json!({
         "goals": [
             goal(item("old", "running", "demo", "2026-10-01"), "in-flight"),
@@ -926,10 +1018,7 @@ fn the_next_gate_is_one_button() {
 #[test]
 fn work_that_comes_to_wait_on_you_is_announced_once() {
     let board = |rows: &[(&str, &str, &str)]| -> Board {
-        let goals: Vec<Value> = rows
-            .iter()
-            .map(|(id, state, band)| json!({"work": work_json(id, state), "rollup": {"counts": {}, "done": 0, "total": 1}, "band": band}))
-            .collect();
+        let goals: Vec<Value> = rows.iter().map(|(id, state, band)| board_goal(work_json(id, state), band)).collect();
         serde_json::from_value(json!({"goals": goals, "standalone": []})).expect("a board")
     };
     let first =

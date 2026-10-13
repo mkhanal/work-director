@@ -357,7 +357,7 @@ impl GoalDetail {
                 WorkState::Running | WorkState::NeedsInput => p.working += 1,
                 WorkState::Review => p.review += 1,
                 WorkState::Blocked => p.blocked += 1,
-                WorkState::Dropped | WorkState::Abandoned => p.dropped += 1,
+                WorkState::Dropped | WorkState::Abandoned | WorkState::Superseded => p.dropped += 1,
                 WorkState::Queued | WorkState::Briefed | WorkState::Paused => p.waiting += 1,
             }
         }

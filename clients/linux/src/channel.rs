@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::conversation::ConversationPage;
 use crate::ledger::{ActionResult, Board, Event, Gate, GoalDetail, Work};
+use crate::record::RecordView;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChannelError {
@@ -173,6 +174,11 @@ impl Channel {
 
     pub async fn goal(&self, id: &str) -> Result<GoalDetail, ChannelError> {
         self.request("goal", Params { id: Some(id), ..Params::default() }).await
+    }
+
+    /// What was decided and done at every depth under a goal.
+    pub async fn record(&self, id: &str) -> Result<RecordView, ChannelError> {
+        self.request("record", Params { id: Some(id), ..Params::default() }).await
     }
 
     pub async fn work(&self, id: &str) -> Result<Work, ChannelError> {

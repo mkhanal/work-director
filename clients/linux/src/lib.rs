@@ -13,10 +13,12 @@ pub mod markdown;
 pub mod new_goal;
 pub mod outbox;
 pub mod plan;
+pub mod record;
 pub mod send_key;
 pub mod store;
 pub mod thread;
 pub mod time;
+pub mod tree;
 
 pub use agents::{span, token_count, AgentCard, AgentRoster, Phase};
 pub use channel::{Channel, ChannelError};
@@ -28,8 +30,13 @@ pub use look::{StateLook, Tint};
 pub use new_goal::{NewGoal, NewGoalPhase};
 pub use outbox::{Outgoing, OutgoingState};
 pub use plan::{Plan, PlanError};
+pub use record::{RecordBy, RecordEntry, RecordKind, RecordSummary, RecordView};
 pub use send_key::{Chord, ReturnPress, SendKey};
 pub use store::{Change, Feed, FeedState, Spawner, Store, Watch};
 pub use thread::{
     AskedItem, SupervisorAction, SupervisorReply, TaskProgress, ThreadFilter, ThreadItem, ThreadStep, WaitingTask,
+};
+pub use tree::{
+    Course, Finish, FinishLine, FinishSource, Judgement, Link, NeedYou, Node, Owner, PlanStep, Progress, StepState,
+    Superseded,
 };
