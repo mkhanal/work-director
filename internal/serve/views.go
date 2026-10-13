@@ -74,6 +74,12 @@ type goalView struct {
 	// Waiting is each task in needs-input whose session asks nothing, with
 	// what it waits on as a question.
 	Waiting []waitingTask `json:"waiting"`
+	// Chain is the breadcrumb, top goal first, ending at this goal.
+	Chain []link `json:"chain"`
+	// Tree is the goal's sub-goals, and Paths names every work under the
+	// goal by where it sits in that tree.
+	Tree  []node            `json:"tree"`
+	Paths map[string]string `json:"paths"`
 }
 
 // waitingTask is a task waiting on the person, and what it waits on.
@@ -211,6 +217,19 @@ func (s *Server) goal(id string) (goalView, error) {
 		asked := coordinator.AskedQuestion(q)
 		view.Asking = &asked
 	}
+	chain, err := s.chain(goal)
+	if err != nil {
+		return goalView{}, err
+	}
+	view.Chain = links(chain)
+	t, err := s.readTree(goal, events)
+	if err != nil {
+		return goalView{}, err
+	}
+	if view.Tree, err = s.nodes(t, goal.ID); err != nil {
+		return goalView{}, err
+	}
+	view.Paths = t.paths()
 	if dir := goalDir(goal, children); dir != "" {
 		d := delivery.StatusFor(dir, events, goal, children)
 		view.Delivery = &d

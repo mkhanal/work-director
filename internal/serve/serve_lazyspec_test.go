@@ -46,6 +46,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Client Can Hold The Server On Its Standard Streams", aClientCanHoldTheServerOnItsStandardStreams)
 	t.Run("A Work Item Serves Its Session's Conversation", aWorkItemServesItsSessionsConversation)
 	t.Run("A Goal Serves What Each Of Its Tasks Is Doing", aGoalServesWhatEachOfItsTasksIsDoing)
+	t.Run("A Goal Serves Its Sub-Goals As A Tree", aGoalServesItsSubGoalsAsATree)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("A Running Session's Report Moves Its Work On", aRunningSessionsReportMovesItsWorkOn)
 	t.Run("A Running Session That Stops Without A Report Is Noted", aRunningSessionThatStopsWithoutAReportIsNoted)
@@ -1605,5 +1606,175 @@ func aRunningGoalIsSupervisedWhileServing(t *testing.T) {
 	}
 	if len(notes) != 1 || notes[0].Body != "supervising failed: no runner named overseer" {
 		t.Fatalf("notes on the failing goal = %+v, want the failure filed once", notes)
+	}
+}
+
+// releaseTree is a top goal planned into sub-goals at two depths, plus tasks
+// of an older plan that share a heading:
+//
+//	Release notes
+//	├─ Deployment guide (goal, done when: a guide covers rollback)
+//	│  ├─ Collector (running, in a session, on its second step)
+//	│  └─ Rollback (queued, after Collector)
+//	├─ Customer note (needs-input, asking)
+//	├─ Old route (superseded)
+//	├─ Draft (heading Docs)  ┐ one group
+//	├─ Polish (heading Docs) ┘
+//	└─ Loose (heading "(no heading)")
+type releaseTree struct {
+	top, guide, collector, rollback, note, old, draft, polish, loose string
+}
+
+func newReleaseTree(t *testing.T, l *ledger.Ledger) releaseTree {
+	t.Helper()
+	add := func(title string, o ledger.AddOptions) string {
+		t.Helper()
+		w, err := l.Add("p", title, o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return w.ID
+	}
+	var r releaseTree
+	r.top = add("Release notes", ledger.AddOptions{Kind: core.WorkGoal})
+	walk(t, l, r.top, core.StateRunning)
+	r.guide = add("Deployment guide", ledger.AddOptions{Kind: core.WorkGoal, Parent: &r.top})
+	if err := l.SetDoneWhen(r.guide, "a guide covers rollback"); err != nil {
+		t.Fatal(err)
+	}
+	r.collector = add("Collector", ledger.AddOptions{Parent: &r.guide})
+	r.rollback = add("Rollback", ledger.AddOptions{Parent: &r.guide})
+	if err := l.SetAfter(r.rollback, []string{r.collector}); err != nil {
+		t.Fatal(err)
+	}
+	walk(t, l, r.collector, core.StateBriefed, core.StateRunning)
+	if err := l.SetSession(r.collector, ledger.SessionInfo{Runner: "claude", Session: "s-collector"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetSteps(r.collector, []core.Step{{Text: "Read the changes", State: core.StepDone}, {Text: "Write the customer note template", State: core.StepDoing}}); err != nil {
+		t.Fatal(err)
+	}
+	r.note = add("Customer note", ledger.AddOptions{Parent: &r.top})
+	walk(t, l, r.note, core.StateRunning, core.StateNeedsInput)
+	event(t, l, r.note, core.EventQuestion, "Which tone?\n- formal\n- casual")
+	r.old = add("Old route", ledger.AddOptions{Parent: &r.top})
+	if _, err := l.Supersede(r.old, "the guide covers it"); err != nil {
+		t.Fatal(err)
+	}
+	docs, none := "Docs", "(no heading)"
+	r.draft = add("Draft", ledger.AddOptions{Parent: &r.top, Heading: &docs})
+	r.polish = add("Polish", ledger.AddOptions{Parent: &r.top, Heading: &docs})
+	r.loose = add("Loose", ledger.AddOptions{Parent: &r.top, Heading: &none})
+	return r
+}
+
+type treeProgress struct {
+	Done       int `json:"done"`
+	Total      int `json:"total"`
+	Superseded int `json:"superseded"`
+}
+
+type treeNode struct {
+	Work         core.Work `json:"work"`
+	Group        bool      `json:"group"`
+	DoneWhen     *string   `json:"done_when"`
+	After        []string  `json:"after"`
+	WaitingOn    []string  `json:"waiting_on"`
+	WhyNotMoving *string   `json:"why_not_moving"`
+	Owner        *struct {
+		Runner string  `json:"runner"`
+		Agent  *string `json:"agent"`
+	} `json:"owner"`
+	PlannedInto *int          `json:"planned_into"`
+	Progress    *treeProgress `json:"progress"`
+	Doing       *string       `json:"doing"`
+	Steps       []core.Step   `json:"steps"`
+	Judged      *struct {
+		Verdict string `json:"verdict"`
+		Why     string `json:"why"`
+	} `json:"judged"`
+	NeedsYou int        `json:"needs_you"`
+	Children []treeNode `json:"children"`
+}
+
+func aGoalServesItsSubGoalsAsATree(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	r := newReleaseTree(t, l)
+	event(t, l, r.collector, core.EventJudged, "missed: rollback is not covered")
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	var view struct {
+		Chain []struct {
+			ID    string     `json:"id"`
+			Title string     `json:"title"`
+			State core.State `json:"state"`
+		} `json:"chain"`
+		Tree  []treeNode        `json:"tree"`
+		Paths map[string]string `json:"paths"`
+	}
+	getJSON(t, api.URL+"/api/goal/"+r.top, http.StatusOK, &view)
+	if len(view.Chain) != 1 || view.Chain[0].ID != r.top || view.Chain[0].Title != "Release notes" || view.Chain[0].State != core.StateRunning {
+		t.Fatalf("chain of the top goal = %+v", view.Chain)
+	}
+	var titles []string
+	for _, n := range view.Tree {
+		titles = append(titles, n.Work.Title)
+	}
+	if !slices.Equal(titles, []string{"Deployment guide", "Customer note", "Old route", "Docs", "Loose"}) {
+		t.Fatalf("tree = %q, want sub-goals, the Docs group and the loose task", titles)
+	}
+	guide, note, old, group, loose := view.Tree[0], view.Tree[1], view.Tree[2], view.Tree[3], view.Tree[4]
+	if guide.Group || guide.DoneWhen == nil || *guide.DoneWhen != "a guide covers rollback" || guide.PlannedInto == nil || *guide.PlannedInto != 2 || guide.Owner != nil {
+		t.Fatalf("guide = %+v, want its done-when and planned into 2", guide)
+	}
+	if guide.Progress == nil || *guide.Progress != (treeProgress{Total: 2}) || len(guide.Children) != 2 {
+		t.Fatalf("guide progress = %+v, children %d", guide.Progress, len(guide.Children))
+	}
+	collector, rollback := guide.Children[0], guide.Children[1]
+	if collector.Owner == nil || collector.Owner.Runner != "claude" || collector.Owner.Agent != nil || collector.PlannedInto != nil || collector.Progress != nil {
+		t.Fatalf("collector = %+v, want owned by claude", collector)
+	}
+	if collector.Doing == nil || *collector.Doing != "Write the customer note template" || len(collector.Steps) != 2 || collector.WhyNotMoving != nil {
+		t.Fatalf("collector doing %v, steps %+v, why %v", collector.Doing, collector.Steps, collector.WhyNotMoving)
+	}
+	if collector.Judged == nil || collector.Judged.Verdict != "missed" || collector.Judged.Why != "rollback is not covered" {
+		t.Fatalf("collector judged = %+v", collector.Judged)
+	}
+	if !slices.Equal(rollback.After, []string{r.collector}) || !slices.Equal(rollback.WaitingOn, []string{"Collector"}) || rollback.WhyNotMoving == nil || *rollback.WhyNotMoving != "waits on Collector" {
+		t.Fatalf("rollback after %v, waiting on %v, why %v", rollback.After, rollback.WaitingOn, rollback.WhyNotMoving)
+	}
+	if rollback.Owner != nil || rollback.Doing != nil || rollback.Steps == nil || rollback.Judged != nil || rollback.Children == nil {
+		t.Fatalf("rollback = %+v, want no owner, doing or judgement and empty steps and children", rollback)
+	}
+	if note.WhyNotMoving == nil || *note.WhyNotMoving != "waits for you" || note.NeedsYou != 1 || guide.NeedsYou != 0 {
+		t.Fatalf("note why %v needs %d; guide needs %d", note.WhyNotMoving, note.NeedsYou, guide.NeedsYou)
+	}
+	if old.WhyNotMoving == nil || *old.WhyNotMoving != "superseded: the guide covers it" {
+		t.Fatalf("old why = %v", old.WhyNotMoving)
+	}
+	if !group.Group || group.Work.ID != "group:"+r.top+":1" || group.Work.Kind != core.WorkGoal || group.Work.State != core.StateQueued || group.DoneWhen != nil || len(group.Children) != 2 || group.Children[0].Work.ID != r.draft || group.Children[1].Work.ID != r.polish {
+		t.Fatalf("group = %+v, want Draft and Polish under one grouped node", group)
+	}
+	if loose.Group || loose.Work.ID != r.loose {
+		t.Fatalf("loose = %+v, want the task itself", loose)
+	}
+	if view.Paths[r.rollback] != "Deployment guide › Rollback" || view.Paths[r.guide] != "Deployment guide" || view.Paths[r.draft] != "Draft" || len(view.Paths) != 8 {
+		t.Fatalf("paths = %v", view.Paths)
+	}
+
+	var nested struct {
+		Chain []struct {
+			ID string `json:"id"`
+		} `json:"chain"`
+		Tree  []treeNode        `json:"tree"`
+		Paths map[string]string `json:"paths"`
+	}
+	getJSON(t, api.URL+"/api/goal/"+r.guide, http.StatusOK, &nested)
+	if len(nested.Chain) != 2 || nested.Chain[0].ID != r.top || nested.Chain[1].ID != r.guide {
+		t.Fatalf("chain of the nested goal = %+v, want the top goal first", nested.Chain)
+	}
+	if len(nested.Tree) != 2 || nested.Paths[r.rollback] != "Rollback" || len(nested.Paths) != 2 {
+		t.Fatalf("nested tree %d nodes, paths %v", len(nested.Tree), nested.Paths)
 	}
 }

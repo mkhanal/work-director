@@ -86,6 +86,11 @@ JSON message per line to stdout:
 - A session that cannot be read carries `error` instead.
 - With no task that has a session, `activity` is `{}`.
 
+## A Goal Serves Its Sub-Goals As A Tree
+- `GET /api/goal/<id>` serves `chain`, `tree` and `paths` for any goal, top or nested.
+- Each node carries its work, done-when, what it waits on and why it is not moving, its owner or how many sub-goals it was planned into, its progress, its current step and steps, its judgement and how many things under it need the person.
+- Tasks of an older plan that share a heading are served as one grouped node with no done-when.
+
 ## A Running Session's Question Puts Its Work In Needs You
 - While serving, a running work item whose session ends on a question has the question filed as a `question` event and moves to needs-input within seconds.
 - A question already filed at that point of the conversation is not filed again.
