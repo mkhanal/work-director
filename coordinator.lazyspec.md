@@ -36,6 +36,11 @@ are specified in `ledger.lazyspec.md`.
 - `FINISH: ?` with listed choices reads as unsure, keeping the choices in order.
 - A line or source outside its set reads as no finish at all.
 
+## An Unsure Finish Line Says What Each Source Said
+- A top goal's brief asks an unsure planner for a `SOURCES: goal: <…> | repo: <…> | taste: <…>` line after its choices.
+- `ParseFinish` reads it, any of the three, into what the goal, the repo and taste said; one not named is null.
+- A sure finish, or an unsure one with no `SOURCES:` line, has no sources.
+
 ## A Plan Reply Says Why It Is Broken Down So
 - `GoalPlanBrief` asks, after the outcomes, for `WHY:`, `LEFT OUT:` and `JUDGE BY:` lines.
 - `ParseReasoning(texts)` reads the last of each into why, left out and judge by; a part not given is null.

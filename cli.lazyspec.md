@@ -126,7 +126,7 @@ verify event.
 
 ## Planning Files Sub-Goals With Their Done-When And Order
 - `wd goal plan` files each outcome under the goal: a task, or a goal when it is to be split, each with its done-when and what it waits on.
-- A top goal's finish line is stored with where it came from; an unsure one is asked as a question with its choices, and the goal waits on it.
+- A top goal's finish line is stored with where it came from; an unsure one is asked as a question with its choices and what each source said, and the goal waits on it.
 - Answering that question with one of its finish lines stores it, from the person.
 - In ask mode the breakdown is proposed and nothing starts until `wd goal approve`.
 - The planner's why, left out and judge by are filed on the goal as one `reasoning:` note carrying them.

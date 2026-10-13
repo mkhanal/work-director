@@ -117,6 +117,7 @@ JSON message per line to stdout:
 - A plan change serves `kind` `plan`, its `actions` as written and `lines`, each action as a sentence naming work by its title.
 - A top-goal change serves `kind` `course`, `now` and `proposed` each with `title`, `done_when` and `finish`, and `why`; asked together with a plan change, it also serves that change's `actions` and `lines`.
 - The finish-line question serves `kind` `finish` and the `choices` offered, in order.
+- It serves `sources` `{goal, repo, taste}`, what each said, a source that said nothing null; `sources` is null when the planner gave none.
 
 ## A Goal Serves Its Record
 - `GET /api/record/<goal>` and the `record` method return a summary of counts and one entry per decision, finish choice, course check, question, answer, judgement, chore, report, delivery and supersession under the goal, newest first, ending with what the person first asked.

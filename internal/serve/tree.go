@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -417,6 +418,21 @@ type change struct {
 	Proposed *shape   `json:"proposed,omitempty"`
 	Why      string   `json:"why,omitempty"`
 	Choices  []string `json:"choices,omitempty"`
+	// Sources is what each source of a finish line said, served on a
+	// finish-line question and null there when the planner gave none.
+	Sources *core.FinishSaid `json:"-"`
+}
+
+// MarshalJSON serves the fields a kind always carries, null when unknown.
+func (c change) MarshalJSON() ([]byte, error) {
+	type fields change
+	if c.Kind == changeFinish {
+		return json.Marshal(struct {
+			fields
+			Sources *core.FinishSaid `json:"sources"`
+		}{fields(c), c.Sources})
+	}
+	return json.Marshal(fields(c))
 }
 
 // changeOf is what answering q, the question w waits on, would change, or
@@ -451,6 +467,9 @@ func (s *Server) changeOf(t tree, w core.Work, q runner.Question) (*change, erro
 			continue
 		}
 		ch := &change{Kind: changeFinish, Choices: []string{}}
+		if ok && e.Change != nil {
+			ch.Sources = e.Change.Sources
+		}
 		for _, o := range it.Options {
 			ch.Choices = append(ch.Choices, o.Label)
 		}

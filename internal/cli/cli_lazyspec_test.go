@@ -5384,6 +5384,22 @@ func (f *cliFixture) planReply(t *testing.T, text string) {
 	}
 }
 
+// ledgerEvents are work's own events read from the ledger, with the payloads
+// the wire leaves off.
+func (f *cliFixture) ledgerEvents(t *testing.T, id string) []core.Event {
+	t.Helper()
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	evs, err := l.Events(id, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return evs
+}
+
 // setMode rewrites the fixture project's mode.
 func (f *cliFixture) setMode(t *testing.T, mode string) {
 	t.Helper()
@@ -5493,17 +5509,8 @@ func TestPlanningFilesSubGoalsWithTheirDoneWhenAndOrder(t *testing.T) {
 	if notes := f.bodies(t, auto, core.EventNote); !slices.Contains(notes, "plan: 3 sub-goals") {
 		t.Errorf("notes = %v, want the plan filed", notes)
 	}
-	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	evs, err := l.Events(auto, nil)
-	l.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
 	var reasons []core.Reasoning
-	for _, e := range evs {
+	for _, e := range f.ledgerEvents(t, auto) {
 		if e.Kind == core.EventNote && strings.HasPrefix(e.Body, core.ReasoningPrefix) && e.Reasoning != nil {
 			reasons = append(reasons, *e.Reasoning)
 		}
@@ -5514,11 +5521,19 @@ func TestPlanningFilesSubGoalsWithTheirDoneWhenAndOrder(t *testing.T) {
 
 	// An unsure finish line is asked, with its choices, and the goal waits.
 	unsure := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Look into the cache", "--json"), "id")
-	f.planReply(t, "NAME: Cache findings\nFINISH: ?\n- research (recommended)\n- local build\n- The cache's misses are explained\n  done when: a report names each miss's cause\n")
+	f.planReply(t, "NAME: Cache findings\nFINISH: ?\n- research (recommended)\n- local build\nSOURCES: goal: \"look into\" reads as research | repo: No finished goals yet to learn from\n- The cache's misses are explained\n  done when: a report names each miss's cause\n")
 	f.runOK(t, "goal", "plan", unsure, "--runner", "planner")
 	questions := f.bodies(t, unsure, core.EventQuestion)
 	if len(questions) != 1 || !strings.Contains(questions[0], "\n- research (recommended)\n- local build") {
 		t.Fatalf("questions = %q, want where it finishes asked with its choices", questions)
+	}
+	for _, e := range f.ledgerEvents(t, unsure) {
+		if e.Kind != core.EventQuestion {
+			continue
+		}
+		if s := e.Change; s == nil || s.Sources == nil || s.Sources.Goal == nil || *s.Sources.Goal != `"look into" reads as research` || s.Sources.Repo == nil || *s.Sources.Repo != "No finished goals yet to learn from" || s.Sources.Taste != nil {
+			t.Errorf("finish question change = %+v, want what the goal and the repo said", s)
+		}
 	}
 	if s := f.stateOf(t, unsure); s != core.StateNeedsInput {
 		t.Errorf("goal state = %s, want needs-input", s)

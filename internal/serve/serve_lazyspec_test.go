@@ -2217,7 +2217,16 @@ func aChangeWaitingForThePersonIsServedWithWhatWouldChange(t *testing.T) {
 	walk(t, l, finish.ID, core.StateRunning, core.StateNeedsInput)
 	ask = coordinator.Action{Kind: coordinator.ActAsk, Text: coordinator.FinishQuestion, Options: []string{"research (recommended)", "complete PR"}}
 	event(t, l, finish.ID, core.EventQuestion, coordinator.QuestionBody([]coordinator.Action{ask}))
-	same("finish change", changeOn(finish.ID, finish.ID), `{"choices":["research (recommended)","complete PR"],"kind":"finish"}`)
+	same("finish change", changeOn(finish.ID, finish.ID), `{"choices":["research (recommended)","complete PR"],"kind":"finish","sources":null}`)
+
+	// With what each source said.
+	said := add("Compare and pick one", ledger.AddOptions{Kind: core.WorkGoal})
+	walk(t, l, said.ID, core.StateRunning, core.StateNeedsInput)
+	goalSaid, tasteSaid := `"Compare and pick one" reads as research`, "In auto mode, a complete PR is done"
+	if _, err := l.Ask(said.ID, coordinator.QuestionBody([]coordinator.Action{ask}), core.Change{Sources: &core.FinishSaid{Goal: &goalSaid, Taste: &tasteSaid}}); err != nil {
+		t.Fatal(err)
+	}
+	same("finish sources", changeOn(said.ID, said.ID)["sources"], `{"goal":"\"Compare and pick one\" reads as research","repo":null,"taste":"In auto mode, a complete PR is done"}`)
 }
 
 func aGoalServesWhyItWasBrokenDownSo(t *testing.T) {

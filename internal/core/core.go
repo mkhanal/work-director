@@ -375,6 +375,17 @@ type Change struct {
 	Title    string     `json:"title,omitempty"`
 	DoneWhen string     `json:"done_when,omitempty"`
 	Finish   FinishLine `json:"finish,omitempty"`
+	// Sources is what each source of a finish line said, on the question a
+	// planner unsure where a goal finishes leaves.
+	Sources *FinishSaid `json:"sources,omitempty"`
+}
+
+// FinishSaid is what the goal's wording, the repository and the person's
+// taste each said about where a goal finishes; one that said nothing is nil.
+type FinishSaid struct {
+	Goal  *string `json:"goal"`
+	Repo  *string `json:"repo"`
+	Taste *string `json:"taste"`
 }
 
 // Decision is a decision with its parts, so a review can show what was asked,

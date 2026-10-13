@@ -1268,7 +1268,12 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project, propose bool) ([]core
 	switch {
 	case finish.Unsure:
 		asked := coordinator.Action{Kind: coordinator.ActAsk, Text: coordinator.FinishQuestion, Options: finish.Choices}
-		if _, err := c.Ledger.AddEvent(goal.ID, core.EventQuestion, coordinator.QuestionBody([]coordinator.Action{asked})); err != nil {
+		body := coordinator.QuestionBody([]coordinator.Action{asked})
+		if finish.Sources != nil {
+			if _, err := c.Ledger.Ask(goal.ID, body, core.Change{Sources: finish.Sources}); err != nil {
+				return nil, err
+			}
+		} else if _, err := c.Ledger.AddEvent(goal.ID, core.EventQuestion, body); err != nil {
 			return nil, err
 		}
 		if err := c.awaitPerson(goal.ID); err != nil {

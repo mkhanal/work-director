@@ -208,6 +208,31 @@ func TestCoordinator(t *testing.T) {
 		}
 	})
 
+	t.Run("An Unsure Finish Line Says What Each Source Said", func(t *testing.T) {
+		brief, err := GoalPlanBrief(core.Work{Title: "Compare and pick one"}, Chain{}, &project.Project{Name: "wd", Path: "/repo", Mode: project.ModeAuto}, project.Toolkit{}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(brief, "SOURCES: goal: <") {
+			t.Fatalf("plan brief does not ask for sources:\n%s", brief)
+		}
+		f, ok := ParseFinish([]string{"NAME: x\nFINISH: ?\n- research (recommended)\n- complete PR\n**SOURCES:** goal: \"Compare and pick one\" reads as research | taste: In auto mode, a complete PR is done\n- An outcome\n  done when: y"})
+		if !ok || !f.Unsure || f.Sources == nil {
+			t.Fatalf("finish = %+v, %v; want unsure with sources", f, ok)
+		}
+		if f.Sources.Goal == nil || *f.Sources.Goal != `"Compare and pick one" reads as research` || f.Sources.Repo != nil || f.Sources.Taste == nil || *f.Sources.Taste != "In auto mode, a complete PR is done" {
+			t.Fatalf("sources = %+v, want the goal and taste, no repo", *f.Sources)
+		}
+		if !slices.Equal(f.Choices, []string{"research (recommended)", "complete PR"}) {
+			t.Fatalf("choices = %v, want the two lines", f.Choices)
+		}
+		for _, reply := range []string{"FINISH: ?\n- research (recommended)\n- merged", "FINISH: merged | from: goal\nSOURCES: goal: ship it"} {
+			if f, _ := ParseFinish([]string{reply}); f.Sources != nil {
+				t.Fatalf("%q read sources %+v", reply, *f.Sources)
+			}
+		}
+	})
+
 	t.Run("A Plan Reply Says Why It Is Broken Down So", func(t *testing.T) {
 		brief, err := GoalPlanBrief(core.Work{Title: "Release notes"}, Chain{}, &project.Project{Name: "wd", Path: "/repo", Mode: project.ModeAsk}, project.Toolkit{}, nil)
 		if err != nil {

@@ -66,7 +66,7 @@ func GoalPlanBrief(goal core.Work, chain Chain, p *project.Project, kit project.
 		}
 		finishShape = "FINISH: <discovery | research | local build | complete PR | merged | released> | from: <goal | repo | taste>\n"
 		finishRule = fmt.Sprintf(`
-FINISH says what the goal hands back and where that came from: the goal's own wording ("investigate…", "ship…"), else the repository (its mode, its finish setting: %s; past goals finished at: %s), else the person's taste. If these disagree or none applies, write FINISH: ? instead, followed by one "- <line>" per choice, your recommendation first and marked (recommended).`, setting, pastLines)
+FINISH says what the goal hands back and where that came from: the goal's own wording ("investigate…", "ship…"), else the repository (its mode, its finish setting: %s; past goals finished at: %s), else the person's taste. If these disagree or none applies, write FINISH: ? instead, followed by one "- <line>" per choice, your recommendation first and marked (recommended), then one line SOURCES: goal: <what the goal's wording says> | repo: <what the repository says> | taste: <what the person's taste says>, leaving out a source that says nothing.`, setting, pastLines)
 	} else {
 		var b strings.Builder
 		b.WriteString("\nThis goal serves the goals above it, top first:\n")
@@ -263,10 +263,42 @@ type PlanFinish struct {
 	// offers, its recommendation first.
 	Unsure  bool
 	Choices []string
+	// Sources is what each source said, from the SOURCES line an unsure
+	// planner gives; nil when it gave none.
+	Sources *core.FinishSaid
 }
 
-// ParseFinish reads the last FINISH line of the planner's reply. A line or
-// source outside its set is no finish at all.
+var planSourcesRe = regexp.MustCompile(`^\s*\**SOURCES:\**\s*(.*)`)
+
+// parseSources reads "goal: <…> | repo: <…> | taste: <…>", any of the
+// three; a part naming no source is not read.
+func parseSources(text string) (*core.FinishSaid, bool) {
+	var s core.FinishSaid
+	ok := false
+	for _, part := range strings.Split(text, "|") {
+		name, said, found := strings.Cut(part, ":")
+		said = strings.TrimSpace(said)
+		if !found || said == "" {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "goal":
+			s.Goal = &said
+		case "repo":
+			s.Repo = &said
+		case "taste":
+			s.Taste = &said
+		default:
+			continue
+		}
+		ok = true
+	}
+	return &s, ok
+}
+
+// ParseFinish reads the last FINISH line of the planner's reply, and an
+// unsure one's SOURCES line. A line or source outside its set is no finish
+// at all.
 func ParseFinish(texts []string) (PlanFinish, bool) {
 	var found PlanFinish
 	ok := false
@@ -300,6 +332,13 @@ func ParseFinish(texts []string) (PlanFinish, bool) {
 			continue
 		}
 		found, ok = PlanFinish{Line: fl, Source: fs}, true
+	}
+	if found.Unsure {
+		if at := lastLine(lines, planSourcesRe); at >= 0 {
+			if s, said := parseSources(planSourcesRe.FindStringSubmatch(lines[at])[1]); said {
+				found.Sources = s
+			}
+		}
 	}
 	return found, ok
 }
