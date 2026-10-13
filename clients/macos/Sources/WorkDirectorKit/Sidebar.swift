@@ -20,6 +20,8 @@ public struct SidebarRow: Sendable, Hashable, Identifiable {
     public let needsYou: Int
     public let finish: FinishLine?
     public let finished: String?
+    /// Whether its breakdown waits for the person's approval.
+    public let proposed: Bool
 
     public var id: String { work.id }
 
@@ -27,6 +29,7 @@ public struct SidebarRow: Sendable, Hashable, Identifiable {
     /// its sub-goals have come, else where it is meant to finish.
     public var meta: String {
         if work.state == .done { return finished ?? "Done" }
+        if proposed, let progress { return "\(progress.total) sub-goal\(progress.total == 1 ? "" : "s")" }
         if let progress, progress.total > 0 { return "\(progress.done) of \(progress.total)" }
         if let finish { return finish.line.prefix(1).uppercased() + finish.line.dropFirst() }
         return work.kind.isGoal ? "Not planned yet" : work.state.look.label
@@ -34,6 +37,9 @@ public struct SidebarRow: Sendable, Hashable, Identifiable {
 
     /// The badge after the meta line while questions below it wait on the person.
     public var needsYouBadge: String? { needsYou > 0 ? "\(needsYou) needs you" : nil }
+
+    /// The badge before the meta line while its breakdown waits for approval.
+    public var proposedBadge: String? { proposed ? "Proposed" : nil }
 
     /// The goals under this row down to the open one, when the open goal's
     /// breadcrumb starts here.
@@ -46,8 +52,8 @@ extension Board {
     /// The sidebar within one product when one is named, each band most
     /// recently active first.
     public func sidebar(project: String? = nil) -> SidebarBands {
-        let rows = goals.map { SidebarRow(work: $0.work, band: $0.band, progress: $0.progress, needsYou: $0.needsYou, finish: $0.finish, finished: $0.finished) }
-            + standalone.map { SidebarRow(work: $0.work, band: $0.band, progress: nil, needsYou: 0, finish: nil, finished: nil) }
+        let rows = goals.map { SidebarRow(work: $0.work, band: $0.band, progress: $0.progress, needsYou: $0.needsYou, finish: $0.finish, finished: $0.finished, proposed: $0.proposed) }
+            + standalone.map { SidebarRow(work: $0.work, band: $0.band, progress: nil, needsYou: 0, finish: nil, finished: nil, proposed: false) }
         let shown = rows
             .filter { project == nil || $0.work.project == project }
             .sorted { $0.work.updated > $1.work.updated }

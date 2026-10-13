@@ -97,7 +97,7 @@ func executable(_ url: URL, _ script: String) throws {
 let treeless = #""chain":[],"tree":[],"paths":{},"done_when":null,"finish":null,"progress":{"done":0,"total":0,"superseded":0},"not_done_because":[],"needs_you":[],"course":null,"superseded":[],"proposed":false"#
 
 /// A board goal's summary fields for a goal with no sub-goals yet.
-let unplanned = #""progress":{"done":0,"total":0,"superseded":0},"needs_you":0,"finish":null,"finished":null"#
+let unplanned = #""progress":{"done":0,"total":0,"superseded":0},"needs_you":0,"finish":null,"finished":null,"proposed":false"#
 
 func workJSON(state: String) -> String {
     """
@@ -665,14 +665,15 @@ struct SeededTree {
                 .replacingOccurrences(of: #""updated":"u""#, with: #""updated":"\#(updated)""#)
         }
         func goal(_ id: String, _ state: String, _ band: String, project: String = "demo", updated: String,
-                  done: Int = 0, total: Int = 0, needsYou: Int = 0, finished: String = "null") -> String {
-            #"{"work":\#(work(id, state, project: project, updated: updated)),"rollup":{"counts":{},"done":0,"total":0},"band":"\#(band)","progress":{"done":\#(done),"total":\#(total),"superseded":0},"needs_you":\#(needsYou),"finish":{"line":"discovery","source":"goal"},"finished":\#(finished)}"#
+                  done: Int = 0, total: Int = 0, needsYou: Int = 0, finished: String = "null", proposed: Bool = false) -> String {
+            #"{"work":\#(work(id, state, project: project, updated: updated)),"rollup":{"counts":{},"done":0,"total":0},"band":"\#(band)","progress":{"done":\#(done),"total":\#(total),"superseded":0},"needs_you":\#(needsYou),"finish":{"line":"discovery","source":"goal"},"finished":\#(finished),"proposed":\#(proposed)}"#
         }
         let task = workJSON(state: "running").replacingOccurrences(of: #""id":"w1""#, with: #""id":"fix""#).replacingOccurrences(of: #""updated":"u""#, with: #""updated":"2026-10-05""#)
         let board = try JSONDecoder().decode(Board.self, from: Data("""
         {"goals":[
           \(goal("old", "running", "in-flight", updated: "2026-10-01", done: 1, total: 4)),
           \(goal("asks", "needs-input", "needs-you", updated: "2026-10-09", done: 1, total: 4, needsYou: 1)),
+          \(goal("planned", "queued", "needs-you", updated: "2026-10-08T12", total: 4, proposed: true)),
           \(goal("below", "running", "in-flight", updated: "2026-10-07", needsYou: 2)),
           \(goal("later", "queued", "in-flight", updated: "2026-10-08")),
           \(goal("shipped", "done", "at-rest", updated: "2026-10-10", done: 2, total: 2, finished: #""Complete PR #512""#)),
@@ -681,7 +682,10 @@ struct SeededTree {
         ],"standalone":[{"work":\(task),"band":"in-flight"}]}
         """.utf8))
         let bands = board.sidebar(project: "demo")
-        #expect(bands.needsYou.map(\.id) == ["asks", "below"], "a question below a goal puts it in Needs you")
+        #expect(bands.needsYou.map(\.id) == ["asks", "planned", "below"], "a question below a goal, or a breakdown to approve, puts it in Needs you")
+        let planned = bands.needsYou[1]
+        #expect(planned.proposedBadge == "Proposed" && planned.meta == "4 sub-goals")
+        #expect(bands.needsYou[0].proposedBadge == nil)
         #expect(bands.working.map(\.id) == ["later", "fix", "old"])
         #expect(bands.completed.map(\.id) == ["shipped"])
         #expect(bands.letGo.map(\.id) == ["gone"])
@@ -689,14 +693,14 @@ struct SeededTree {
 
         #expect(bands.needsYou[0].meta == "1 of 4")
         #expect(bands.needsYou[0].needsYouBadge == "1 needs you")
-        #expect(bands.needsYou[1].needsYouBadge == "2 needs you")
+        #expect(bands.needsYou[2].needsYouBadge == "2 needs you")
         #expect(bands.completed[0].meta == "Complete PR #512")
         #expect(bands.working[0].meta == "Discovery", "an unplanned goal says where it finishes")
         #expect(bands.working[2].needsYouBadge == nil)
 
         let chain = [ChainLink(id: "asks", title: "Release notes", state: .needsInput), ChainLink(id: "g2", title: "Whoever deploys gets a guide", state: .needsInput)]
         #expect(bands.needsYou[0].openPath(chain).map(\.id) == ["g2"])
-        #expect(bands.needsYou[1].openPath(chain).isEmpty)
+        #expect(bands.needsYou[2].openPath(chain).isEmpty)
     }
 
     @Test("The Next Gate Is One Button")

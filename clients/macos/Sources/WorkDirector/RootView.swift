@@ -269,6 +269,7 @@ struct SidebarRowView: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                 HStack(spacing: 6) {
+                    if let proposed = row.proposedBadge { Badge(proposed, .attention) }
                     Text(row.meta + (row.needsYouBadge == nil ? "" : " ·"))
                         .font(TypeScale.caption)
                         .foregroundStyle(Palette.text3)
@@ -302,7 +303,8 @@ struct SidebarRowView: View {
     }
 
     private var dot: Color {
-        switch row.work.state {
+        if !row.work.atRest && (row.needsYou > 0 || row.band == .needsYou) { return Palette.orange }
+        return switch row.work.state {
         case .done: Palette.green
         case .dropped, .abandoned, .superseded, .paused, .queued, .briefed: Palette.grey
         default: row.needsYou > 0 || row.band == .needsYou ? Palette.orange : Palette.accent

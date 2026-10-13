@@ -122,9 +122,11 @@ public struct BoardGoal: Codable, Sendable, Hashable {
     public let finish: FinishLine?
     /// Where a done goal finished, nil before.
     public let finished: String?
+    /// Whether its breakdown waits for the person's approval.
+    public let proposed: Bool
 
     enum CodingKeys: String, CodingKey {
-        case work, rollup, band, progress, finish, finished
+        case work, rollup, band, progress, finish, finished, proposed
         case needsYou = "needs_you"
     }
 }

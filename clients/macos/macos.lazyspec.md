@@ -122,6 +122,7 @@ hold only that product's work; with none, every product's.
 - Needs you holds work in the Needs You band, and goals with a question below them waiting on the person.
 - Completed holds done work; dropped, abandoned and superseded work is kept apart, folded.
 - A row says where a done goal finished, else how many of its sub-goals are done, with how many questions below it need the person.
+- A goal whose breakdown waits for approval is marked Proposed, with how many sub-goals it proposes.
 - With a sub-goal open, its path from the top goal shows under the top goal's row.
 
 ## Work Is Renamed From Its Page Or Its Menu
