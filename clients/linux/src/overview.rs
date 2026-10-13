@@ -2,9 +2,12 @@
 //! and each sub-goal as a row. Every fact comes from the goal view; this only
 //! words it.
 
+use std::collections::HashSet;
+
 use crate::conversation::Question;
 use crate::ledger::{GoalDetail, WorkState};
 use crate::look::{Mark, Tone};
+use crate::plan::{Plan, PlanError};
 use crate::record::{RecordBy, RecordEntry, RecordView};
 use crate::tree::{ChangeKind, Course, FinishLine, NeedYou, Node, PlanStep, Shape, StepState};
 
@@ -195,6 +198,16 @@ pub struct ProposedCard {
     pub chips: Vec<String>,
     /// Whether it can be split: a task can, a goal already is.
     pub splits: bool,
+    /// What it waits on before it starts.
+    pub after: Vec<String>,
+}
+
+impl ProposedCard {
+    /// Folds two cards into one: the earlier is kept.
+    pub fn merge(&self, other: &ProposedCard) -> Plan {
+        let (keep, gone) = if self.number < other.number { (self, other) } else { (other, self) };
+        Plan::merge(&keep.id, &gone.id)
+    }
 }
 
 fn numbers(ns: &[usize]) -> String {
@@ -205,21 +218,39 @@ fn numbers(ns: &[usize]) -> String {
     }
 }
 
+/// Each node after every sibling it waits on, else in the order served; a
+/// cycle cannot be ordered and keeps the order served.
+fn wait_order(nodes: Vec<&Node>) -> Vec<&Node> {
+    let ids: HashSet<&str> = nodes.iter().map(|n| n.work.id.as_str()).collect();
+    let mut placed: Vec<&Node> = Vec::new();
+    let mut done: HashSet<&str> = HashSet::new();
+    let mut left = nodes;
+    while !left.is_empty() {
+        let ready =
+            left.iter().position(|n| n.after.iter().all(|a| !ids.contains(a.as_str()) || done.contains(a.as_str())));
+        let next = left.remove(ready.unwrap_or(0));
+        done.insert(next.work.id.as_str());
+        placed.push(next);
+    }
+    placed
+}
+
 impl GoalDetail {
-    /// The breakdown waiting for approval, numbered in plan order; none once approved.
+    /// The breakdown waiting for approval, numbered in wait order; none once approved.
     pub fn proposal(&self) -> Option<Vec<ProposedCard>> {
         if !self.proposed {
             return None;
         }
-        let shown: Vec<&Node> =
-            self.tree.iter().filter(|n| !n.group && n.work.state != WorkState::Superseded).collect();
+        let shown =
+            wait_order(self.tree.iter().filter(|n| !n.group && n.work.state != WorkState::Superseded).collect());
         let number = |id: &str| shown.iter().position(|n| n.work.id == id).map(|i| i + 1);
         Some(
             shown
                 .iter()
                 .enumerate()
                 .map(|(i, n)| {
-                    let after: Vec<usize> = n.after.iter().filter_map(|a| number(a)).collect();
+                    let mut after: Vec<usize> = n.after.iter().filter_map(|a| number(a)).collect();
+                    after.sort_unstable();
                     let start = if after.is_empty() {
                         "Starts first".to_string()
                     } else {
@@ -236,10 +267,37 @@ impl GoalDetail {
                             .map_or_else(|| "Done when: not set".to_string(), |d| format!("Done when {d}")),
                         chips: vec![start, who.to_string()],
                         splits: !n.work.kind.is_goal(),
+                        after: n.after.clone(),
                     }
                 })
                 .collect(),
         )
+    }
+
+    /// The writes that put the proposal in the order a card was dropped in,
+    /// moving `id` to `index`: each sub-goal waits on the one before it and
+    /// the first on none. Only waits that change are written, from the top,
+    /// so no write makes a cycle.
+    pub fn reorder(&self, id: &str, index: usize) -> Vec<Plan> {
+        let Some(mut cards) = self.proposal() else { return Vec::new() };
+        let Some(from) = cards.iter().position(|c| c.id == id) else { return Vec::new() };
+        let moved = cards.remove(from);
+        cards.insert(index.min(cards.len()), moved);
+        cards
+            .iter()
+            .enumerate()
+            .filter_map(|(i, card)| {
+                let wants: Vec<String> = if i == 0 { Vec::new() } else { vec![cards[i - 1].id.clone()] };
+                let has: HashSet<&String> = card.after.iter().collect();
+                (has != wants.iter().collect()).then(|| Plan::after(&card.id, &wants))
+            })
+            .collect()
+    }
+
+    /// The finish line a top goal's pick shows, none until decided; a
+    /// sub-goal has no pick.
+    pub fn finish_pick(&self) -> Option<Option<FinishLine>> {
+        (!self.nested()).then(|| self.finish.map(|f| f.line))
     }
 }
 
@@ -295,5 +353,71 @@ impl NeedYou {
             ("Done when", done(now), done(proposed)),
             ("Finishes at", finish(now), finish(proposed)),
         ]
+    }
+
+    /// What each source of a finish line said, in the order the question
+    /// card lists them; a source that said nothing is left out.
+    pub fn sources(&self) -> Vec<(&'static str, String)> {
+        let Some(said) = self.change.as_ref().and_then(|c| c.sources.as_ref()) else {
+            return Vec::new();
+        };
+        [("The goal", &said.goal), ("Your taste", &said.taste), ("This repo", &said.repo)]
+            .into_iter()
+            .filter_map(|(who, said)| {
+                said.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| (who, capitalised(s)))
+            })
+            .collect()
+    }
+
+    /// The box that keeps a finish-line answer as the product's setting; a
+    /// finish-line question's only.
+    pub fn remember_label(&self, project: &str) -> Option<String> {
+        (self.change.as_ref().map(|c| c.kind) == Some(ChangeKind::Finish))
+            .then(|| format!("Finish goals in {project} this way from now on"))
+    }
+
+    /// A change's first choice, which makes it, and its second, which keeps
+    /// things as they are; none without both.
+    fn choices(&self) -> Option<(String, String)> {
+        let options = &self.question.items.first()?.options;
+        let [change, keep, ..] = options.as_slice() else { return None };
+        let bare = |o: &crate::conversation::QuestionOption| crate::conversation::unmarked(&o.label).to_string();
+        Some((bare(change), bare(keep)))
+    }
+
+    /// The keep choice, which labels the button that answers with it.
+    pub fn keep_label(&self) -> Option<String> {
+        self.choices().map(|(_, keep)| keep)
+    }
+
+    /// The change answered by its keep choice.
+    pub fn keep(&self) -> Option<Plan> {
+        Plan::answer(&self.work, &self.question, &[self.choices()?.1]).ok()
+    }
+
+    /// The change answered by its first choice, which makes it.
+    pub fn change_course(&self) -> Option<Plan> {
+        Plan::answer(&self.work, &self.question, &[self.choices()?.0]).ok()
+    }
+
+    /// The change made with its proposed title, done-when and finish line
+    /// edited: answered by its first choice, then whatever differs from the
+    /// proposal set on the goal.
+    pub fn edit_change(&self, title: &str, done_when: &str, finish: FinishLine) -> Result<Vec<Plan>, PlanError> {
+        let proposed = self.change.as_ref().and_then(|c| c.proposed.as_ref()).ok_or(PlanError::Empty)?;
+        if title.trim().is_empty() {
+            return Err(PlanError::ReasonRequired("a goal's title"));
+        }
+        let mut plans = vec![self.change_course().ok_or(PlanError::Empty)?];
+        let was_done = proposed.done_when.as_deref().unwrap_or("");
+        let title = (title.trim() != proposed.title).then_some(title);
+        let done_when = (done_when.trim() != was_done).then_some(done_when);
+        if title.is_some() || done_when.is_some() {
+            plans.push(Plan::edit_sub_goal(&self.work, title, done_when)?);
+        }
+        if proposed.finish != Some(finish) {
+            plans.push(Plan::finish(&self.work, finish));
+        }
+        Ok(plans)
     }
 }

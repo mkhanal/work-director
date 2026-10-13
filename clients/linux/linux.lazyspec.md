@@ -101,7 +101,7 @@ hold only that product's work; with none, every product's.
 
 ## A Goal Page Shows What Done Means, What Needs You And Its Sub-Goals
 - A top goal's page shows its done-when, where it finishes and where that came from, and its course; a sub-goal's page shows its done-when and its course.
-- Each question waiting on the person anywhere under the goal is answered in place, or left to the director, which answers each item with the option it recommends.
+- Each question waiting on the person anywhere under the goal is answered in place, or left to the director.
 - Each sub-goal reads its state, then what makes it done, what it is doing, or what it waits on, and a badge; a superseded one is struck through with why.
 - A sub-goal that is a goal opens its own page; a task's steps fold open and closed, closed except the first working task's.
 - A sub-goal is added with its outcome and what makes it done.
@@ -124,6 +124,37 @@ hold only that product's work; with none, every product's.
 - A course change shows the top goal now and as proposed — its title, done-when and finish line — and why; a plan change shows each change it makes in a sentence.
 - A question on where the goal finishes offers each finish line with what it means.
 - Each is answered through the question's own answer.
+
+## A Proposal Says Why It Is Broken Down So
+- Beside the proposal, Why this breakdown, Left out and How you'd judge it read the planner's reasoning, each only when the planner said it.
+- With no reasoning, nothing shows beside it.
+
+## A Proposal Is Reordered, Merged And Planned Again From Its Cards
+- Proposed sub-goals show each after the siblings it waits on, otherwise in the order served.
+- Dragging a card sets the order as dropped: each sub-goal waits on the one before it, the first on none; until a drag the planned waits stay.
+- A drag writes only the waits that change, from the top, each as `wd goal after <id> <id|none>`.
+- Merging two cards runs `wd goal merge <earlier> <later>`: the earlier card is kept.
+- Re-planning with a note runs `wd decide <goal> "<note>"`, then `wd goal plan <goal>`; an empty note is not sent.
+
+## A Person Changes Where A Top Goal Finishes
+- The proposal's and the Overview's Finishes at offer the six finish lines, named as a finish-line question names them.
+- Choosing one runs `wd goal finish <goal> "<line>"`.
+- A sub-goal's page offers none.
+
+## A Course Change Shows What Was Found And What Happens To Each Sub-Goal
+- What was found and why change course show side by side.
+- Each sub-goal after the change is a row badged Kept · done, Kept · working, Kept · not started, New, or Superseded with why.
+- Keep answers with the keep choice and is labelled with it; Change course answers with the first choice.
+- Editing the change answers with the first choice, then runs `wd goal edit <goal>` for a title or done-when and `wd goal finish <goal> "<line>"` for a finish line the person changed from the proposal; what they left is not written.
+
+## A Finish-Line Question Says Why It Asks And Can Be Remembered
+- Under its choices, Why I'm asking: these disagree lists what The goal, Your taste and This repo said, only those that said something.
+- A checkbox, Finish goals in <product> this way from now on, sends the answer with `--remember`; unchecked, the answer is sent without it.
+
+## Letting The Director Decide Shows What It Decided Or Why It Declined
+- Letting the director decide runs `wd answer <id> --director --json`.
+- An answer the director gave reads as its turn, each part with its answer and why.
+- When it declines any part nothing is answered: a note says why for each part, and the question stays open.
 
 ## The Kit Reads A Goal As A Tree
 - A goal at any depth reads as its breadcrumb, done-when, finish line, progress, what keeps it from done, what needs the person, its course and its sub-goals as a tree.

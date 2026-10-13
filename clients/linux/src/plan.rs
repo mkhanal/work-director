@@ -2,11 +2,36 @@
 
 use std::fmt;
 
-use crate::conversation::{unmarked, Question};
-use crate::ledger::{Gate, Work};
+use serde::Deserialize;
 
-/// What an item the director decides with no option recommended is answered.
-pub const LEFT_TO_THE_DIRECTOR: &str = "Your call: decide as you judge best.";
+use crate::conversation::Question;
+use crate::ledger::{Gate, Work};
+use crate::tree::FinishLine;
+
+/// One item of a question as the director judged it: its answer and why, or
+/// no answer and why it declined.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+pub struct DirectorChoice {
+    pub question: String,
+    #[serde(default)]
+    pub answer: Option<String>,
+    pub why: String,
+}
+
+/// What `wd answer <id> --director --json` printed: answered only when no
+/// item was declined.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+pub struct DirectorAnswer {
+    pub answered: bool,
+    pub decided: Vec<DirectorChoice>,
+    pub declined: Vec<DirectorChoice>,
+}
+
+impl DirectorAnswer {
+    pub fn read(stdout: &str) -> Result<DirectorAnswer, serde_json::Error> {
+        serde_json::from_str(stdout)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanError {
@@ -145,21 +170,32 @@ impl Plan {
         Ok(plan("Answer", [words(&["answer", id]), answers].concat()))
     }
 
-    /// Leaves a question to the director: each item answered with the option
-    /// it recommends, or left to its judgement when it recommends none.
-    pub fn director_decides(id: &str, question: &Question) -> Result<Plan, PlanError> {
-        let answers: Vec<String> = question
-            .items
-            .iter()
-            .map(|item| {
-                item.options
-                    .iter()
-                    .map(|o| o.label.as_str())
-                    .find(|l| unmarked(l).len() != l.len())
-                    .map_or_else(|| LEFT_TO_THE_DIRECTOR.to_string(), |l| unmarked(l).to_string())
-            })
-            .collect();
-        Plan::answer(id, question, &answers).map(|p| Plan { title: "Let the director decide".into(), ..p })
+    /// The same answer, a finish-line choice also kept as the product's setting.
+    pub fn remembering(mut self) -> Plan {
+        self.argv.push("--remember".into());
+        self
+    }
+
+    /// Leaves a question to the director's judgement, which answers all of
+    /// it or none; what it printed is read with `DirectorAnswer::read`.
+    pub fn director_decides(id: &str) -> Plan {
+        plan("Let the director decide", words(&["answer", id, "--director", "--json"]))
+    }
+
+    /// Sets where a top goal finishes.
+    pub fn finish(goal: &str, line: FinishLine) -> Plan {
+        plan("Finishes at", words(&["goal", "finish", goal, line.wire()]))
+    }
+
+    /// Folds one sub-goal into another, which keeps both done-whens.
+    pub fn merge(keep: &str, other: &str) -> Plan {
+        plan("Merge", words(&["goal", "merge", keep, other]))
+    }
+
+    /// What a sub-goal waits on before it starts; none starts it first.
+    pub fn after(id: &str, waits_on: &[String]) -> Plan {
+        let waits = if waits_on.is_empty() { "none".to_string() } else { waits_on.join(",") };
+        plan("Reorder", vec!["goal".into(), "after".into(), id.into(), waits])
     }
 
     /// A sub-goal added to a goal, with what makes it done.
@@ -180,6 +216,12 @@ impl Plan {
     /// Plans a goal again.
     pub fn replan(goal: &str) -> Plan {
         plan("Re-plan", words(&["goal", "plan", goal]))
+    }
+
+    /// Plans a goal again with a note the planner reads as a decision.
+    pub fn replan_with(goal: &str, note: &str) -> Result<Vec<Plan>, PlanError> {
+        let note = required(note, "re-planning")?;
+        Ok(vec![plan("Note for planning", vec!["decide".into(), goal.into(), note]), Plan::replan(goal)])
     }
 
     /// A sub-goal's title and done-when changed; a field left as it was is not sent.

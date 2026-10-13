@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 use crate::conversation::Question;
 use crate::ledger::{Work, WorkState};
+use crate::look::{Mark, Tone};
 
 /// One level of a goal's breadcrumb.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
@@ -114,6 +115,28 @@ pub enum FinishLine {
 }
 
 impl FinishLine {
+    /// Every finish line, nearest first.
+    pub const ALL: [FinishLine; 6] = [
+        FinishLine::Discovery,
+        FinishLine::Research,
+        FinishLine::LocalBuild,
+        FinishLine::CompletePr,
+        FinishLine::Merged,
+        FinishLine::Released,
+    ];
+
+    /// The finish line as wd reads and writes it.
+    pub fn wire(self) -> &'static str {
+        match self {
+            FinishLine::Discovery => "discovery",
+            FinishLine::Research => "research",
+            FinishLine::LocalBuild => "local build",
+            FinishLine::CompletePr => "complete PR",
+            FinishLine::Merged => "merged",
+            FinishLine::Released => "released",
+        }
+    }
+
     /// The finish line as a card names it.
     pub fn title(self) -> &'static str {
         match self {
@@ -128,15 +151,7 @@ impl FinishLine {
 
     /// The finish line a choice's words name.
     pub fn from_label(label: &str) -> Option<FinishLine> {
-        let all = [
-            FinishLine::Discovery,
-            FinishLine::Research,
-            FinishLine::LocalBuild,
-            FinishLine::CompletePr,
-            FinishLine::Merged,
-            FinishLine::Released,
-        ];
-        all.into_iter().find(|f| f.name().eq_ignore_ascii_case(label.trim()))
+        FinishLine::ALL.into_iter().find(|f| f.name().eq_ignore_ascii_case(label.trim()))
     }
 
     /// The finish line as a choice reads it: its title and what it hands back.
@@ -253,6 +268,80 @@ pub struct GoalChange {
     pub why: String,
     #[serde(default)]
     pub choices: Vec<String>,
+    /// What each source of a finish line said; a finish-line question's only.
+    #[serde(default)]
+    pub sources: Option<FinishSaid>,
+    /// What was found that calls for a plan or course change.
+    #[serde(default)]
+    pub found: Option<String>,
+    /// Each sub-goal as a plan or course change would leave it.
+    #[serde(default)]
+    pub sub_goals: Vec<SubGoalFate>,
+}
+
+/// What the goal, the repo and taste each said of where a goal finishes; a
+/// source that said nothing is none.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+pub struct FinishSaid {
+    pub goal: Option<String>,
+    pub repo: Option<String>,
+    pub taste: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Fate {
+    Kept,
+    New,
+    Superseded,
+}
+
+/// One sub-goal as a change would leave it: an existing one kept or
+/// superseded with its state, or a new one with no work yet.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+pub struct SubGoalFate {
+    pub work: Option<String>,
+    pub title: String,
+    pub status: Fate,
+    pub state: Option<WorkState>,
+    pub why: Option<String>,
+}
+
+impl SubGoalFate {
+    /// What the change does to it, with its state when it is kept.
+    pub fn badge(&self) -> (String, Tone) {
+        match (self.status, self.state) {
+            (Fate::New, _) => ("New".to_string(), Tone::Live),
+            (Fate::Superseded, _) => ("Superseded".to_string(), Tone::Waiting),
+            (Fate::Kept, Some(state)) if state.mark() == Mark::Done => ("Kept · done".to_string(), Tone::Settled),
+            (Fate::Kept, None | Some(WorkState::Queued)) => ("Kept · not started".to_string(), Tone::Waiting),
+            (Fate::Kept, Some(_)) => ("Kept · working".to_string(), Tone::Live),
+        }
+    }
+
+    /// Superseded: struck through, with why.
+    pub fn struck(&self) -> bool {
+        self.status == Fate::Superseded
+    }
+}
+
+/// Why a goal's latest planning broke it down so; a part the planner did not
+/// give is none.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+pub struct Reasoning {
+    pub why: Option<String>,
+    pub left_out: Option<String>,
+    pub judge_by: Option<String>,
+}
+
+impl Reasoning {
+    /// Each part given, headed as the proposal's panel heads it.
+    pub fn parts(&self) -> Vec<(&'static str, &str)> {
+        [("Why this breakdown", &self.why), ("Left out", &self.left_out), ("How you'd judge it", &self.judge_by)]
+            .into_iter()
+            .filter_map(|(head, said)| said.as_deref().filter(|s| !s.trim().is_empty()).map(|s| (head, s)))
+            .collect()
+    }
 }
 
 /// A supervisor's latest verdict on whether its goal is on course.

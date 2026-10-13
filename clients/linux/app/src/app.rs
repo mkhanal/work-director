@@ -120,6 +120,30 @@ impl App {
         });
     }
 
+    /// Runs writes one after another, showing each command it ran and
+    /// stopping at the first refused; whether every one ran.
+    pub async fn run_in_turn(&self, plans: &[Plan]) -> bool {
+        let mut all = true;
+        for plan in plans {
+            match self.store.run(plan).await {
+                Ok(result) if result.code == 0 => self.toast(&plan.command_line()),
+                Ok(result) => {
+                    self.complain(&format!("{} failed: {}", plan.command_line(), result.complaint()));
+                    all = false;
+                }
+                Err(e) => {
+                    self.complain(&format!("{} failed: {e}", plan.command_line()));
+                    all = false;
+                }
+            }
+            if !all {
+                break;
+            }
+        }
+        self.store.refresh().await;
+        all
+    }
+
     /// Asks for the words a write needs, then runs it.
     pub fn ask(
         &self,

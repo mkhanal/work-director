@@ -135,7 +135,9 @@ impl WorkPage {
                 };
                 let weak = self.me.clone();
                 let target = (q.work != g.goal.id).then(|| q.work.clone());
-                Turn::key(&id, &(&q, &answer)).with(move || exchange_turn(&q, answer.as_ref(), &asker, target, weak))
+                let decided = answer.as_ref().map(|a| g.decided_for(a)).unwrap_or_default();
+                Turn::key(&id, &(&q, &answer, &decided))
+                    .with(move || exchange_turn(&q, answer.as_ref(), &decided, &asker, target, weak))
             }
             ThreadStep::Look(e) => {
                 let text = format!("Supervisor looking · {} · {}", e.body, kit::time::when(&e.at));
@@ -145,6 +147,9 @@ impl WorkPage {
                 let tasks = self.told(g, &reply);
                 let (weak, goal) = (self.me.clone(), g.goal.id.clone());
                 Turn::key(&id, &(&e, &reply, &tasks)).with(move || supervisor_turn(&e, &reply, &tasks, &goal, weak))
+            }
+            ThreadStep::Declined(e, declined) => {
+                Turn::key(&id, &(&e, &declined)).with(move || declined_turn(&e, &declined))
             }
             ThreadStep::Stopped(e, said) => {
                 let task = self.named(g, &e.work);
@@ -274,10 +279,14 @@ impl WorkPage {
                         let Some(q) = step.question.clone() else { continue };
                         if q.pending() {
                             let (app, work_id, answered) = (self.app.clone(), work.id.clone(), self.reload_feed(feed));
-                            turns.push(
-                                Turn::key(&id, &q)
-                                    .with(move || question::pending(&app, &work_id, &q, "Needs you", None, answered)),
+                            let (heard, declined) = (
+                                self.heard(&work.id),
+                                self.director_said.borrow().get(&work.id).filter(|s| !s.answered).cloned(),
                             );
+                            turns.push(Turn::key(&id, &(&q, &declined)).with(move || {
+                                let card = question::Card { declined, ..question::Card::headed("Needs you") };
+                                question::pending(&app, &work_id, &q, card, answered, heard)
+                            }));
                         } else {
                             turns.push(Turn::key(&id, &q).with(move || question::answered(&q)));
                         }
@@ -505,11 +514,21 @@ pub(super) fn director_answer(text: &str, at: Option<&str>, on: Option<&str>) ->
     ui::turn(Some(&ui::avatar("emblem-ok-symbolic", &["settled-text"])), None, &card).upcast()
 }
 
+/// The director leaving a part of a question to the person, and why.
+fn declined_turn(e: &Event, declined: &kit::DirectorChoice) -> gtk::Widget {
+    let card = ui::vbox(SPACE_1);
+    card.append(&ui::meta(&ui::speaker("Director"), Some(e.at.as_str()), Some("left it to you")));
+    card.append(&ui::said(&declined.question, &["callout", "medium"]));
+    card.append(&ui::said(&kit::sentence(&declined.why), &["callout", "text2"]));
+    ui::turn(Some(&ui::avatar("dialog-question-symbolic", &["attention-text"])), None, &card).upcast()
+}
+
 /// A question and its answer in one card: the director's answer set apart
 /// in green, the person's as their bubble.
 pub(super) fn exchange_turn(
     q: &Event,
     answer: Option<&Event>,
+    decided: &[kit::DirectorChoice],
     asker: &str,
     task: Option<String>,
     page: Weak<WorkPage>,
@@ -541,6 +560,14 @@ pub(super) fn exchange_turn(
             said.set_hexpand(true);
             answered.append(&said);
             card.append(&answered);
+            for part in decided.iter().filter(|d| !d.why.is_empty()) {
+                let why = if decided.len() > 1 {
+                    format!("{} · {}: {}", part.question, part.answer.as_deref().unwrap_or(""), part.why)
+                } else {
+                    format!("Why: {}", part.why)
+                };
+                card.append(&ui::said(&kit::sentence(&why), &["meta", "text2"]));
+            }
         }
         Some(a) => card.append(&ui::you_bubble(&a.answer_text(), "You answered", Some(a.at.as_str()), None)),
         None => card.append(&ui::line("Not answered yet", &["meta", "text3"])),

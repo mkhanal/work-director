@@ -31,12 +31,12 @@ pub use look::{Mark, StateLook, Tint, Tone};
 pub use new_goal::{NewGoal, NewGoalPhase};
 pub use outbox::{Outgoing, OutgoingState};
 pub use overview::{sentence, ProposedCard, SubGoalRow};
-pub use plan::{Plan, PlanError};
+pub use plan::{DirectorAnswer, DirectorChoice, Plan, PlanError};
 pub use record::{RecordBy, RecordEntry, RecordFilter, RecordKind, RecordSummary, RecordView};
 pub use send_key::{Chord, ReturnPress, SendKey};
 pub use store::{Change, Feed, FeedState, Spawner, Store, Watch};
 pub use thread::{AskedItem, FilterChip, SupervisorAction, SupervisorReply, ThreadFilter, ThreadItem, ThreadStep};
 pub use tree::{
-    ChangeKind, Course, Finish, FinishLine, FinishSource, GoalChange, Judgement, Link, NeedYou, Node, Owner, PlanStep,
-    Progress, Shape, StepState, Superseded,
+    ChangeKind, Course, Fate, Finish, FinishLine, FinishSaid, FinishSource, GoalChange, Judgement, Link, NeedYou, Node,
+    Owner, PlanStep, Progress, Reasoning, Shape, StepState, SubGoalFate, Superseded,
 };

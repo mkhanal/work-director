@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use crate::conversation::{Activity, Question};
-use crate::tree::{Course, Finish, Link, NeedYou, Node, Progress, Superseded};
+use crate::tree::{Course, Finish, Link, NeedYou, Node, Progress, Reasoning, Superseded};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -429,6 +429,8 @@ pub struct GoalDetail {
     pub superseded: Vec<Superseded>,
     /// Whether the goal's breakdown waits for the person's approval.
     pub proposed: bool,
+    /// Why its latest planning broke it down so, when that planning said.
+    pub reasoning: Option<Reasoning>,
 }
 
 impl GoalDetail {

@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ledger::{Event, GoalDetail};
+use crate::plan::DirectorChoice;
 
 /// What a goal's conversation is narrowed to: everything, the person and
 /// the director, or one sub-goal and everything under it.
@@ -53,6 +54,8 @@ pub enum ThreadStep {
     Stopped(Event, String),
     /// A question asked on the goal or a task, with its answer once it has one.
     Exchange(Event, Option<Event>),
+    /// The director declined to answer part of a question put to the person, and why.
+    Declined(Event, DirectorChoice),
 }
 
 impl ThreadStep {
@@ -62,7 +65,8 @@ impl ThreadStep {
             | ThreadStep::Look(e)
             | ThreadStep::Supervisor(e, _)
             | ThreadStep::Stopped(e, _)
-            | ThreadStep::Exchange(e, _) => e,
+            | ThreadStep::Exchange(e, _)
+            | ThreadStep::Declined(e, _) => e,
         }
     }
 
@@ -97,6 +101,8 @@ pub struct AskedItem {
 }
 
 const STOPPED_PREFIX: &str = "stopped without a report: ";
+const DECIDED_PREFIX: &str = "the director decided ";
+const DECLINED_PREFIX: &str = "the director declined ";
 const SUPERVISE_PREFIX: &str = "supervise ";
 const ENDING_STATES: [&str; 5] = ["done", "dropped", "abandoned", "paused", "blocked"];
 
@@ -117,7 +123,10 @@ impl GoalDetail {
         let mut events: Vec<&Event> = self.events.iter().collect();
         events.sort_by(|a, b| a.at.cmp(&b.at).then(a.id.cmp(&b.id)));
         for e in events {
-            if e.kind == "sent" && answers.contains(&(e.work.as_str(), e.body.as_str())) || e.reshapes() {
+            if e.kind == "sent" && answers.contains(&(e.work.as_str(), e.body.as_str()))
+                || e.reshapes()
+                || e.director_decided()
+            {
                 continue;
             }
             if e.kind == "question" {
@@ -150,7 +159,12 @@ impl GoalDetail {
             "state" => ENDING_STATES.contains(&e.body.as_str()).then(|| ThreadStep::Event(e.clone())),
             "look" => Some(ThreadStep::Look(e.clone())),
             "supervised" => Some(ThreadStep::Supervisor(e.clone(), self.reply(&e.body))),
-            "note" => e.body.strip_prefix(STOPPED_PREFIX).map(|said| ThreadStep::Stopped(e.clone(), said.to_string())),
+            "note" => match e.director_declined() {
+                Some(declined) => Some(ThreadStep::Declined(e.clone(), declined)),
+                None => {
+                    e.body.strip_prefix(STOPPED_PREFIX).map(|said| ThreadStep::Stopped(e.clone(), said.to_string()))
+                }
+            },
             _ => None,
         }
     }
@@ -237,7 +251,53 @@ impl GoalDetail {
     }
 }
 
+impl GoalDetail {
+    /// Each part the director decided for an answer it gave, with why: its
+    /// decisions on the same work after the answer, before the next question.
+    pub fn decided_for(&self, answer: &Event) -> Vec<DirectorChoice> {
+        let next = self
+            .events
+            .iter()
+            .filter(|e| e.work == answer.work && e.kind == "question" && e.id > answer.id)
+            .map(|e| e.id)
+            .min()
+            .unwrap_or(i64::MAX);
+        self.events
+            .iter()
+            .filter(|e| e.work == answer.work && e.director_decided() && e.id > answer.id && e.id < next)
+            .filter_map(|e| {
+                let d = e.decision.as_ref()?;
+                let mark = format!(": {}, because ", d.answer);
+                let why = e.body.split_once(&mark).map_or("", |(_, why)| why);
+                Some(DirectorChoice {
+                    question: d.question.clone(),
+                    answer: Some(d.answer.clone()),
+                    why: why.to_string(),
+                })
+            })
+            .collect()
+    }
+}
+
 impl Event {
+    /// Whether it is the director's decision on one part of a question it
+    /// answered in the person's place, which is read with that answer.
+    pub fn director_decided(&self) -> bool {
+        self.kind == "decision"
+            && self.decision.as_ref().is_some_and(|d| d.source == "director")
+            && self.body.starts_with(DECIDED_PREFIX)
+    }
+
+    /// The part of a question the director declined to answer, and why.
+    pub fn director_declined(&self) -> Option<DirectorChoice> {
+        if self.kind != "note" {
+            return None;
+        }
+        let (question, rest) = go_quoted(self.body.strip_prefix(DECLINED_PREFIX)?)?;
+        let why = rest.strip_prefix(": ")?;
+        Some(DirectorChoice { question, answer: None, why: why.to_string() })
+    }
+
     /// Whether it is a decision the ledger files when a goal is reshaped or
     /// settled (a sub-goal added, edited, dropped, merged, split or ordered; a
     /// done-when, finish line, approval or classification), which belongs to
@@ -319,7 +379,7 @@ impl GoalDetail {
             ThreadFilter::YouAndDirector => match step {
                 ThreadStep::Exchange(q, a) => q.work == self.goal.id || a.as_ref().is_some_and(|a| self.is_yours(a)),
                 ThreadStep::Event(e) => self.is_yours(e) || (e.work == self.goal.id && e.kind == "decision"),
-                ThreadStep::Supervisor(..) => true,
+                ThreadStep::Supervisor(..) | ThreadStep::Declined(..) => true,
                 _ => false,
             },
             ThreadFilter::SubGoal(id) => self.node(id).is_some_and(|n| n.holds(&e.work)),
@@ -395,4 +455,23 @@ fn is_update(step: &ThreadStep) -> bool {
         ThreadStep::Event(e) => ["state", "verify", "pr", "sent"].contains(&e.kind.as_str()),
         _ => false,
     }
+}
+
+/// A Go-quoted string at the start of text, and what follows it.
+fn go_quoted(text: &str) -> Option<(String, &str)> {
+    let rest = text.strip_prefix('"')?;
+    let mut out = String::new();
+    let mut chars = rest.char_indices();
+    while let Some((i, ch)) = chars.next() {
+        match ch {
+            '"' => return Some((out, &rest[i + 1..])),
+            '\\' => match chars.next()?.1 {
+                'n' => out.push('\n'),
+                't' => out.push('\t'),
+                other => out.push(other),
+            },
+            other => out.push(other),
+        }
+    }
+    None
 }

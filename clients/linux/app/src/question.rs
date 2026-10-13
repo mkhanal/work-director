@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 
-use kit::{AnswerDraft, Plan, Question, QuestionItem, Tone};
+use kit::{AnswerDraft, DirectorAnswer, Plan, Question, QuestionItem, Tone};
 
 use crate::app::App;
 use crate::ui::{self, SPACE_1, SPACE_2};
@@ -18,20 +18,39 @@ fn shown(label: &str) -> (&str, bool) {
     (bare, bare.len() != label.len())
 }
 
-/// The question waiting on the person, answered in place; `label` heads the
-/// card, `extra` sits between the first question and its options, and `answered`
-/// runs once wd has taken the answer.
+/// What a question card carries beyond the question: the line heading it,
+/// what sits between the first question and its options, what sits under the
+/// options, the from-now-on box of a finish-line question, and what the
+/// director last said of it when it declined.
+#[derive(Default)]
+pub struct Card {
+    pub label: String,
+    pub extra: Option<gtk::Widget>,
+    pub after: Option<gtk::Widget>,
+    pub remember: Option<String>,
+    pub declined: Option<DirectorAnswer>,
+}
+
+impl Card {
+    pub fn headed(label: &str) -> Card {
+        Card { label: label.to_string(), ..Card::default() }
+    }
+}
+
+/// The question waiting on the person, answered in place. `answered` runs
+/// once wd has taken the answer; `director` gets whatever the director said
+/// when left to decide, answered or declined.
 pub fn pending(
     app: &App,
     work: &str,
     question: &Question,
-    label: &str,
-    extra: Option<gtk::Widget>,
+    card_says: Card,
     answered: Rc<dyn Fn()>,
+    director: Rc<dyn Fn(DirectorAnswer)>,
 ) -> gtk::Widget {
     let card = ui::vbox(SPACE_2);
     card.add_css_class("question");
-    let head = ui::label(label);
+    let head = ui::label(&card_says.label);
     head.add_css_class("attention-text");
     card.append(&head);
     let draft = Rc::new(RefCell::new(AnswerDraft::new(question.clone())));
@@ -42,29 +61,54 @@ pub fn pending(
     let decide = ui::button("Let the director decide", false);
     let failure = ui::text("", &["callout", "failure"]);
     failure.set_visible(false);
+    let remember = card_says.remember.as_deref().map(gtk::CheckButton::with_label);
 
-    let refresh: Rc<dyn Fn()> = {
-        let (draft, answer, work, q) = (draft.clone(), answer.clone(), work.to_string(), question.clone());
+    let answer_plan: Rc<dyn Fn() -> Option<Plan>> = {
+        let (draft, work, q, remember) = (draft.clone(), work.to_string(), question.clone(), remember.clone());
         Rc::new(move || {
-            let plan = draft.borrow().answers().and_then(|a| Plan::answer(&work, &q, &a).ok());
+            let plan = draft.borrow().answers().and_then(|a| Plan::answer(&work, &q, &a).ok())?;
+            Some(if remember.as_ref().is_some_and(|r| r.is_active()) { plan.remembering() } else { plan })
+        })
+    };
+    let refresh: Rc<dyn Fn()> = {
+        let (answer, answer_plan) = (answer.clone(), answer_plan.clone());
+        Rc::new(move || {
+            let plan = answer_plan();
             answer.set_sensitive(plan.is_some());
             answer.set_tooltip_text(plan.map(|p| p.command_line()).as_deref());
         })
     };
 
     let count = question.items.len();
+    let mut extra = card_says.extra;
     for (i, item) in question.items.iter().enumerate() {
-        let shows = if i == 0 { extra.as_ref() } else { None };
-        let page = item_page(item, i, count, shows, &draft, &refresh);
+        let page = item_page(item, i, count, extra.take().as_ref(), &draft, &refresh);
         pages.add_named(&page, Some(&i.to_string()));
     }
     card.append(&pages);
+    if let Some(after) = &card_says.after {
+        card.append(after);
+    }
+    if let Some(declined) = &card_says.declined {
+        card.append(&declined_note(declined));
+    }
 
     let footer = ui::hbox(SPACE_2);
     footer.set_margin_top(6);
-    let spacer = ui::hbox(0);
-    spacer.set_hexpand(true);
-    footer.append(&spacer);
+    match &remember {
+        Some(check) => {
+            check.add_css_class("callout");
+            check.set_hexpand(true);
+            let r = refresh.clone();
+            check.connect_toggled(move |_| r());
+            footer.append(check);
+        }
+        None => {
+            let spacer = ui::hbox(0);
+            spacer.set_hexpand(true);
+            footer.append(&spacer);
+        }
+    }
     if count > 1 {
         let at = Rc::new(Cell::new(0usize));
         let back = ui::button("Back", false);
@@ -97,20 +141,40 @@ pub fn pending(
             for b in &buttons {
                 b.set_sensitive(false);
             }
-            let (app, failure, answered) = (app.clone(), failure.clone(), answered.clone());
+            let (app, failure, answered, director) = (app.clone(), failure.clone(), answered.clone(), director.clone());
             app.clone().spawn(async move {
-                let refused = match app.store.run(&plan).await {
-                    Ok(result) if result.code == 0 => None,
-                    Ok(result) => Some(result.complaint().to_string()),
-                    Err(e) => Some(e.to_string()),
-                };
-                match refused {
-                    None => {
-                        failure.set_visible(false);
-                        app.toast(&plan.command_line());
-                        answered();
+                let leaves_it = plan.argv.iter().any(|w| w == "--director");
+                let outcome = match app.store.run(&plan).await {
+                    Ok(result) if result.code != 0 => Err(result.complaint().to_string()),
+                    Ok(result) if leaves_it => {
+                        DirectorAnswer::read(&result.stdout).map(Some).map_err(|e| e.to_string())
                     }
-                    Some(why) => {
+                    Ok(_) => Ok(None),
+                    Err(e) => Err(e.to_string()),
+                };
+                match outcome {
+                    Ok(said) => {
+                        failure.set_visible(false);
+                        match said {
+                            Some(said) if !said.answered => {
+                                app.toast("The director left it to you");
+                                for b in &buttons {
+                                    b.set_sensitive(true);
+                                }
+                                director(said);
+                            }
+                            Some(said) => {
+                                app.toast("The director decided it");
+                                director(said);
+                                answered();
+                            }
+                            None => {
+                                app.toast(&plan.command_line());
+                                answered();
+                            }
+                        }
+                    }
+                    Err(why) => {
                         failure.set_label(&why);
                         failure.set_visible(true);
                         for b in &buttons {
@@ -122,21 +186,46 @@ pub fn pending(
             });
         })
     };
-    let (s, work_id, q, pair) = (send.clone(), work.to_string(), question.clone(), [answer.clone(), decide.clone()]);
+    let (s, pair) = (send.clone(), [answer.clone(), decide.clone()]);
     answer.connect_clicked(move |_| {
-        if let Some(plan) = draft.borrow().answers().and_then(|a| Plan::answer(&work_id, &q, &a).ok()) {
+        if let Some(plan) = answer_plan() {
             s(plan, pair.clone());
         }
     });
-    let (work_id, q, pair) = (work.to_string(), question.clone(), [answer.clone(), decide.clone()]);
-    match Plan::director_decides(&work_id, &q) {
-        Ok(plan) => {
-            decide.set_tooltip_text(Some(&plan.command_line()));
-            decide.connect_clicked(move |_| send(plan.clone(), pair.clone()));
-        }
-        Err(_) => decide.set_visible(false),
-    }
+    let pair = [answer.clone(), decide.clone()];
+    let plan = Plan::director_decides(work);
+    decide.set_tooltip_text(Some(&plan.command_line()));
+    decide.connect_clicked(move |_| send(plan.clone(), pair.clone()));
     card.upcast()
+}
+
+/// Why the director would not decide: each item it declined, with why. The
+/// question stays open.
+fn declined_note(said: &DirectorAnswer) -> gtk::Widget {
+    let note = ui::wd_card(SPACE_1);
+    note.add_css_class("declined");
+    note.append(&ui::label("The director left this to you"));
+    for item in &said.declined {
+        note.append(&ui::said(&item.question, &["callout", "medium"]));
+        note.append(&ui::said(&kit::sentence(&item.why), &["meta", "text2"]));
+    }
+    note.upcast()
+}
+
+/// What the director decided when left to: each item with its answer and why.
+pub fn director_decided(said: &DirectorAnswer) -> gtk::Widget {
+    let card = ui::card("settled");
+    card.append(&ui::meta(&ui::speaker("Director decided"), None, None));
+    for item in &said.decided {
+        let column = ui::vbox(2);
+        column.append(&ui::said(&item.question, &["callout", "text2"]));
+        column.append(&ui::said(item.answer.as_deref().unwrap_or(""), &["body", "medium"]));
+        if !item.why.is_empty() {
+            column.append(&ui::said(&format!("Why: {}", item.why), &["meta", "text3"]));
+        }
+        card.append(&column);
+    }
+    ui::turn(Some(&ui::avatar("emblem-ok-symbolic", &["settled-text"])), None, &card).upcast()
 }
 
 fn item_page(

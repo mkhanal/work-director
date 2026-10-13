@@ -3,8 +3,10 @@
 //! session's conversation, its record one toggle away. The agents inspector
 //! sits beside it, and choosing an agent shows its conversation in the centre.
 
+mod change;
 mod conversation;
 mod overview;
+mod proposal;
 mod record;
 
 use std::cell::{Cell, RefCell};
@@ -142,6 +144,9 @@ pub struct WorkPage {
     shown_filters: RefCell<Option<(Vec<kit::FilterChip>, ThreadFilter)>>,
     /// What the Pause or Resume button runs, for the work as last read.
     pause_plan: RefCell<Option<Plan>>,
+    /// What the director last said of each question left to it, by the work
+    /// asking: what it decided, or why it declined.
+    director_said: RefCell<HashMap<String, kit::DirectorAnswer>>,
 }
 
 impl WorkPage {
@@ -957,6 +962,18 @@ impl WorkPage {
         chips
     }
 
+    /// Keeps what the director said of the question `work` asks, then reads
+    /// the page again to show it.
+    fn heard(&self, work: &str) -> Rc<dyn Fn(kit::DirectorAnswer)> {
+        let (weak, work) = (self.me.clone(), work.to_string());
+        Rc::new(move |said| {
+            if let Some(page) = weak.upgrade() {
+                page.director_said.borrow_mut().insert(work.clone(), said);
+                page.app.spawn(Rc::clone(&page).load());
+            }
+        })
+    }
+
     fn reload(&self) -> Rc<dyn Fn()> {
         let weak = self.me.clone();
         Rc::new(move || {
@@ -1111,6 +1128,7 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
         watch: RefCell::new(None),
         shown_filters: RefCell::new(None),
         pause_plan: RefCell::new(None),
+        director_said: RefCell::new(HashMap::new()),
     }
 }
 

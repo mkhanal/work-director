@@ -156,7 +156,7 @@ fn work(id: &str, state: &str) -> Work {
 fn goal_view(mut v: Value) -> GoalDetail {
     let empty = json!({"chain": [], "tree": [], "paths": {}, "done_when": null, "finish": null,
         "progress": {"done": 0, "total": 0, "superseded": 0}, "not_done_because": [], "needs_you": [],
-        "course": null, "superseded": [], "proposed": false});
+        "course": null, "superseded": [], "proposed": false, "reasoning": null});
     for (k, value) in empty.as_object().expect("an object") {
         if v.get(k).is_none() {
             v[k] = value.clone();
@@ -910,16 +910,6 @@ fn a_goal_page_shows_what_done_means_what_needs_you_and_its_sub_goals() {
     nested.chain.push(Link { id: "d".into(), title: "Guide".into(), state: WorkState::Running });
     assert!(nested.nested() && nested.finish_card().is_none(), "a sub-goal finishes where its top goal does");
 
-    let q: Question = serde_json::from_value(json!({"id": "q", "items": [
-        {"header": "", "question": "Rollback?", "multi": false, "options": [
-            {"label": "Redeploy only (recommended)", "description": ""}, {"label": "Both", "description": ""}]},
-        {"header": "", "question": "Notes in English?", "multi": false, "options": []}],
-        "answers": null, "reply": null}))
-    .expect("a question");
-    assert_eq!(
-        Plan::director_decides("r", &q).map(|p| p.argv),
-        Ok(strings(&["answer", "r", "Redeploy only", kit::plan::LEFT_TO_THE_DIRECTOR]))
-    );
     assert_eq!(
         Plan::add_sub_goal("g", " Guides for each release ", "a guide per release").map(|p| p.argv),
         Ok(strings(&["goal", "add", "g", "Guides for each release", "--done-when", "a guide per release"]))
@@ -1165,6 +1155,316 @@ fn a_change_waiting_for_the_person_shows_what_would_change() {
         Plan::answer(&course.work, &course.question, &strings(&["Change course"])).map(|p| p.argv),
         Ok(strings(&["answer", "g", "Change course"])),
         "a change is answered as its question"
+    );
+}
+
+/// A Proposal Says Why It Is Broken Down So
+#[test]
+fn a_proposal_says_why_it_is_broken_down_so() {
+    let home = Home::new();
+    let top = home.goal("demo", "An inspector can get a full audit trail");
+    home.wd(&["goal", "add", &top, "Every change is kept", "--done-when", "it is so"]);
+    let run = Run::new();
+    let store = run.store(home.channel());
+    let g = run.wait(store.goal(&top)).expect("the goal");
+    assert_eq!(g.reasoning, None, "with no reasoning, nothing shows");
+    let reasoning: Reasoning = serde_json::from_value(
+        json!({"why": "An inspector checks three things.", "left_out": " ", "judge_by": "Export last month for one org."}),
+    )
+    .expect("a reasoning");
+    assert_eq!(
+        reasoning.parts(),
+        vec![
+            ("Why this breakdown", "An inspector checks three things."),
+            ("How you'd judge it", "Export last month for one org.")
+        ],
+        "a part the planner did not say is left out"
+    );
+    store.stop();
+}
+
+/// A Proposal Is Reordered, Merged And Planned Again From Its Cards
+#[test]
+fn a_proposal_is_reordered_merged_and_planned_again_from_its_cards() {
+    let home = Home::new();
+    let top = home.goal("demo", "An inspector can get a full audit trail");
+    let add = |title: &str, after: &str| -> String {
+        let mut argv = vec!["goal", "add", top.as_str(), title, "--done-when", "it is so", "--json"];
+        if !after.is_empty() {
+            argv.extend_from_slice(&["--after", after]);
+        }
+        serde_json::from_str::<Work>(&home.wd(&argv)).expect("a sub-goal").id
+    };
+    let a = add("Every record change keeps who and why", "");
+    let b = add("An admin can export the trail", &a);
+    let c = add("The trail cannot be edited", &a);
+    let d = add("A checklist maps to the export", "");
+    home.wd(&["goal", "after", &a, &d]);
+    let run = Run::new();
+    let store = run.store(home.channel());
+    let proposed = || {
+        let mut g = run.wait(store.goal(&top)).expect("the goal");
+        g.proposed = true;
+        g
+    };
+    let ids = |g: &GoalDetail| g.proposal().expect("a proposal").into_iter().map(|c| c.id).collect::<Vec<_>>();
+    let g = proposed();
+    assert_eq!(
+        ids(&g),
+        vec![d.clone(), a.clone(), b.clone(), c.clone()],
+        "each after what it waits on, else as served"
+    );
+
+    let argv = |plans: Vec<Plan>| plans.into_iter().map(|p| p.argv).collect::<Vec<_>>();
+    let moves = g.reorder(&c, 1);
+    assert_eq!(
+        argv(moves.clone()),
+        vec![strings(&["goal", "after", &c, &d]), strings(&["goal", "after", &a, &c])],
+        "each waits on the one before it; only waits that change are written, from the top"
+    );
+    assert_eq!(
+        argv(g.reorder(&d, 0)),
+        vec![strings(&["goal", "after", &c, &b])],
+        "a drop in place still sets the order as shown"
+    );
+    for plan in &moves {
+        home.wd(&plan.argv.iter().map(String::as_str).collect::<Vec<_>>());
+    }
+    let g = proposed();
+    assert_eq!(ids(&g), vec![d.clone(), c.clone(), a.clone(), b.clone()]);
+    assert_eq!(
+        g.reorder(&a, 0).first().map(|p| p.argv.clone()),
+        Some(strings(&["goal", "after", &a, "none"])),
+        "the first waits on none"
+    );
+
+    let cards = g.proposal().expect("a proposal");
+    let merge = cards[3].merge(&cards[2]);
+    assert_eq!(merge.argv, strings(&["goal", "merge", &a, &b]), "the earlier card is kept");
+    home.wd(&merge.argv.iter().map(String::as_str).collect::<Vec<_>>());
+    assert_eq!(ids(&proposed()), vec![d.clone(), c.clone(), a.clone()]);
+
+    assert_eq!(
+        Plan::replan_with(&top, " keep the export read-only ").map(argv),
+        Ok(vec![strings(&["decide", &top, "keep the export read-only"]), strings(&["goal", "plan", &top])])
+    );
+    assert!(Plan::replan_with(&top, "  ").is_err(), "an empty note is not sent");
+    store.stop();
+}
+
+/// A Person Changes Where A Top Goal Finishes
+#[test]
+fn a_person_changes_where_a_top_goal_finishes() {
+    let home = Home::new();
+    let top = home.goal("demo", "Why does sync drop events?");
+    let under = serde_json::from_str::<Work>(&home.wd(&[
+        "goal",
+        "add",
+        &top,
+        "The cause is found",
+        "--done-when",
+        "found",
+        "--split",
+        "--json",
+    ]))
+    .expect("a sub-goal")
+    .id;
+    let named: Vec<&str> = FinishLine::ALL.iter().map(|f| f.choice().0).collect();
+    assert_eq!(
+        named,
+        vec![
+            "Discovery: the cause found and explained",
+            "Research complete: a written comparison and a pick",
+            "A local build you can try",
+            "A complete PR",
+            "Merged",
+            "Released"
+        ],
+        "each is named as a finish-line question names it"
+    );
+    let plan = Plan::finish(&top, FinishLine::CompletePr);
+    assert_eq!(plan.argv, strings(&["goal", "finish", &top, "complete PR"]));
+    home.wd(&plan.argv.iter().map(String::as_str).collect::<Vec<_>>());
+    let run = Run::new();
+    let store = run.store(home.channel());
+    let g = run.wait(store.goal(&top)).expect("the goal");
+    assert_eq!(g.finish, Some(Finish { line: FinishLine::CompletePr, source: FinishSource::Person }));
+    assert_eq!(g.finish_pick(), Some(Some(FinishLine::CompletePr)));
+    let nested = run.wait(store.goal(&under)).expect("the sub-goal");
+    assert_eq!(nested.finish_pick(), None, "a sub-goal's page offers none");
+    store.stop();
+}
+
+/// A Course Change Shows What Was Found And What Happens To Each Sub-Goal
+#[test]
+fn a_course_change_shows_what_was_found_and_what_happens_to_each_sub_goal() {
+    let need: NeedYou = serde_json::from_value(json!({"work": "g", "path": "Why does sync drop events?",
+        "question": {"id": "q", "items": [{"header": "", "question": "Change course?\n  Now: …", "multi": false, "options": [
+            {"label": "Change course (recommended)", "description": ""}, {"label": "Keep the goal as it is", "description": ""}]}],
+            "answers": null, "reply": null},
+        "change": {"kind": "course", "actions": [], "lines": [],
+            "now": {"title": "Why does sync drop events?", "done_when": "The cause is found", "finish": "discovery"},
+            "proposed": {"title": "Sync never drops events", "done_when": "A 429 batch is retried", "finish": "complete PR"},
+            "why": "The fix is small.", "found": "The SDK drops a batch on 429.",
+            "sub_goals": [
+                {"work": "d1", "title": "The cause is found", "status": "kept", "state": "done", "why": null},
+                {"work": "d2", "title": "Tenants are counted", "status": "kept", "state": "running", "why": null},
+                {"work": "d4", "title": "Old notes", "status": "kept", "state": "queued", "why": null},
+                {"work": null, "title": "A batch is retried", "status": "new", "state": null, "why": null},
+                {"work": "d3", "title": "Compare vendors", "status": "superseded", "state": "running", "why": "no longer needed"}]}}))
+    .expect("a course change");
+    let change = need.change.as_ref().expect("a change");
+    assert_eq!(change.found.as_deref(), Some("The SDK drops a batch on 429."));
+    let rows: Vec<((String, Tone), bool)> = change.sub_goals.iter().map(|s| (s.badge(), s.struck())).collect();
+    assert_eq!(
+        rows,
+        vec![
+            (("Kept · done".to_string(), Tone::Settled), false),
+            (("Kept · working".to_string(), Tone::Live), false),
+            (("Kept · not started".to_string(), Tone::Waiting), false),
+            (("New".to_string(), Tone::Live), false),
+            (("Superseded".to_string(), Tone::Waiting), true),
+        ]
+    );
+    assert_eq!(need.keep_label().as_deref(), Some("Keep the goal as it is"), "keep is labelled with the keep choice");
+    let argv = |p: Option<Plan>| p.map(|p| p.argv);
+    assert_eq!(argv(need.keep()), Some(strings(&["answer", "g", "Keep the goal as it is"])));
+    assert_eq!(argv(need.change_course()), Some(strings(&["answer", "g", "Change course"])));
+    let edited = need
+        .edit_change("Sync never drops events", " A batch is retried, and lost events replayed ", FinishLine::Merged)
+        .expect("an edited change");
+    assert_eq!(
+        edited.into_iter().map(|p| p.argv).collect::<Vec<_>>(),
+        vec![
+            strings(&["answer", "g", "Change course"]),
+            strings(&["goal", "edit", "g", "--done-when", "A batch is retried, and lost events replayed"]),
+            strings(&["goal", "finish", "g", "merged"]),
+        ],
+        "only what was edited is set after the answer"
+    );
+    let as_proposed = need.edit_change("Sync never drops events", "A 429 batch is retried", FinishLine::CompletePr);
+    assert_eq!(as_proposed.map(|p| p.len()), Ok(1), "an edit that edits nothing is the change as proposed");
+    assert!(need.edit_change(" ", "x", FinishLine::Merged).is_err(), "a goal keeps a title");
+
+    let home = Home::new();
+    let goal = home.goal("demo", "Why does sync drop events?");
+    home.wd(&["goal", "edit", &goal, "--done-when", "A batch is retried"]);
+    let run = Run::new();
+    let store = run.store(home.channel());
+    assert_eq!(
+        run.wait(store.goal(&goal)).ok().and_then(|g| g.done_when),
+        Some("A batch is retried".to_string()),
+        "a top goal's done-when is set by the edit an edited change runs"
+    );
+    store.stop();
+}
+
+/// A Finish-Line Question Says Why It Asks And Can Be Remembered
+#[test]
+fn a_finish_line_question_says_why_it_asks_and_can_be_remembered() {
+    let need: NeedYou = serde_json::from_value(json!({"work": "f", "path": "Pick a queue",
+        "question": {"id": "q", "items": [{"header": "", "question": "Where does this goal finish?", "multi": false, "options": [
+            {"label": "research (recommended)", "description": ""}, {"label": "local build", "description": ""}]}],
+            "answers": null, "reply": null},
+        "change": {"kind": "finish", "choices": ["research (recommended)", "local build"],
+            "sources": {"goal": "\"Compare and pick one\" reads as research", "repo": null, "taste": "In auto mode, a complete PR is done"}}}))
+    .expect("a finish-line question");
+    assert_eq!(
+        need.sources(),
+        vec![
+            ("The goal", "\"Compare and pick one\" reads as research".to_string()),
+            ("Your taste", "In auto mode, a complete PR is done".to_string()),
+        ],
+        "a source that said nothing is left out"
+    );
+    assert_eq!(need.remember_label("event-bus").as_deref(), Some("Finish goals in event-bus this way from now on"));
+    assert_eq!(
+        Plan::answer(&need.work, &need.question, &strings(&["research"])).map(|p| p.remembering().argv),
+        Ok(strings(&["answer", "f", "research", "--remember"]))
+    );
+    let plain: NeedYou = serde_json::from_value(json!({"work": "r", "path": "Rollback",
+        "question": {"id": "q", "items": [], "answers": null, "reply": null}, "change": null}))
+    .expect("a question");
+    assert_eq!((plain.sources(), plain.remember_label("p")), (vec![], None), "only a finish-line question");
+    let unsaid: NeedYou = serde_json::from_value(json!({"work": "f", "path": "P",
+        "question": {"id": "q", "items": [], "answers": null, "reply": null},
+        "change": {"kind": "finish", "choices": [], "sources": null}}))
+    .expect("a finish-line question");
+    assert!(unsaid.sources().is_empty());
+}
+
+/// Letting The Director Decide Shows What It Decided Or Why It Declined
+#[test]
+fn letting_the_director_decide_shows_what_it_decided_or_why_it_declined() {
+    assert_eq!(Plan::director_decides("r").argv, strings(&["answer", "r", "--director", "--json"]));
+    let decided = DirectorAnswer::read(
+        r#"{"ok": true, "answered": true, "told": "session", "answer": "Redeploy only", "applied": [],
+            "decided": [{"question": "Rollback?", "answer": "Redeploy only", "why": "down-migrations are rare"}], "declined": []}"#,
+    )
+    .expect("a decided answer");
+    assert!(decided.answered);
+    assert_eq!(
+        decided.decided,
+        vec![DirectorChoice {
+            question: "Rollback?".into(),
+            answer: Some("Redeploy only".into()),
+            why: "down-migrations are rare".into()
+        }]
+    );
+    let declined = DirectorAnswer::read(
+        r#"{"ok": true, "answered": false, "told": null, "answer": null, "applied": [],
+            "decided": [{"question": "Rollback?", "answer": "Both", "why": "safer"}],
+            "declined": [{"question": "Notes in English?", "why": "a business fact only you know"}]}"#,
+    )
+    .expect("a declined answer");
+    assert!(!declined.answered, "a decline answers nothing");
+    assert_eq!(
+        declined.declined,
+        vec![DirectorChoice {
+            question: "Notes in English?".into(),
+            answer: None,
+            why: "a business fact only you know".into()
+        }]
+    );
+    assert!(DirectorAnswer::read("the director decided").is_err(), "only what --json prints is read");
+
+    let event = |id: i64, kind: &str, body: &str, decision: Value| {
+        json!({"id": id, "work": "g", "kind": kind, "body": body, "at": format!("2026-10-13T10:00:0{id}Z"),
+            "effective": null, "decision": decision})
+    };
+    let by_director = |question: &str, answer: &str| {
+        json!({"question": question, "answer": answer, "source": "director", "runner": "claude", "model": "m",
+            "tokens": 0, "reverses": 0, "reversed_by": 0})
+    };
+    let g = goal_view(json!({
+        "goal": work_json("g", "running"), "tasks": [], "rollup": {"counts": {}, "done": 0, "total": 0},
+        "claims": [], "landings": [], "delivery": null, "activity": {}, "reports": {}, "asking": null,
+        "events": [
+            event(1, "question", "Rollback?\n- Redeploy only (recommended)\n- Both", Value::Null),
+            event(2, "note", "the director declined \"Rollback?\": a business fact only you know", Value::Null),
+            event(3, "answer", "Redeploy only", by_director("Rollback?", "Redeploy only")),
+            event(4, "decision", "the director decided \"Rollback?\": Redeploy only, because down-migrations are rare",
+                by_director("Rollback?", "Redeploy only")),
+        ],
+    }));
+    let steps = g.thread();
+    assert!(
+        matches!(&steps[..], [ThreadStep::Exchange(_, Some(_)), ThreadStep::Declined(_, _)]),
+        "the answer is read with its question, the decline as a note, the decision with the answer: {steps:?}"
+    );
+    let ThreadStep::Declined(_, declined) = &steps[1] else { unreachable!() };
+    assert_eq!(
+        declined,
+        &DirectorChoice { question: "Rollback?".into(), answer: None, why: "a business fact only you know".into() }
+    );
+    let ThreadStep::Exchange(_, Some(answer)) = &steps[0] else { unreachable!() };
+    assert_eq!(
+        g.decided_for(answer),
+        vec![DirectorChoice {
+            question: "Rollback?".into(),
+            answer: Some("Redeploy only".into()),
+            why: "down-migrations are rare".into()
+        }]
     );
 }
 
