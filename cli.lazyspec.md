@@ -506,3 +506,12 @@ could not with their work, the bound that ran out, and the work still open.
 
 ## A Goal Is Declared Done Only When Every Part Of Done Holds
 - A supervisor's DONE is refused naming the first of: a sub-goal not settled, a finished sub-goal not judged met, the finish line not reached.
+
+## A Person Can Attach Files To What They Send
+- `--attach <path>`, repeatable, on `wd send`, `wd answer`, `wd goal start` and `wd goal continue` copies each file, leaving it in place, to `$WD_HOME/attachments/<work>/<n>-<name>`, n counting up per work and the name kept to letters, digits, `.`, `-` and `_`.
+- Each copy is an `attachment` event on the work: its body the copy's absolute path, its payload the file's name, path, size and media type.
+- What reaches the agent, or a new goal's planner, or a goal's supervisor, ends with `Attached files (read them from these paths):` and one `- <path> (<media type>, <size> bytes)` line per file.
+- The message, answer or decision recorded keeps only the person's words.
+- With a file attached, the words may be left out.
+- A missing or unreadable file, or a directory, refuses the command naming it; nothing is sent, copied or recorded.
+- `--json` includes `attachments: [{name, path, size, media_type}]`, `[]` when none.

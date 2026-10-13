@@ -67,6 +67,70 @@ func TestServe(t *testing.T) {
 	t.Run("A Client That Stops Reading Never Delays The Others", aClientThatStopsReadingNeverDelaysTheOthers)
 	t.Run("Empty Collections Serialize As Empty Arrays", emptyCollectionsSerializeAsEmptyArrays)
 	t.Run("Errors Return JSON", errorsReturnJSON)
+	t.Run("A Goal Serves The Files Attached Under It", aGoalServesTheFilesAttachedUnderIt)
+}
+
+func aGoalServesTheFilesAttachedUnderIt(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	goal, err := l.Add("p", "Goal", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := l.Add("p", "Task", ledger.AddOptions{Parent: &goal.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	var bare map[string]json.RawMessage
+	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &bare)
+	if string(bare["attachments"]) != "[]" {
+		t.Fatalf("attachments = %s, want [] before any file", bare["attachments"])
+	}
+	mock := core.Attachment{Name: "mock.png", Path: "/wd/attachments/" + goal.ID + "/1-mock.png", Size: 12, MediaType: "image/png"}
+	notes := core.Attachment{Name: "notes.txt", Path: "/wd/attachments/" + task.ID + "/1-notes.txt", Size: 21, MediaType: "text/plain"}
+	decided, err := l.AddEvent(goal.ID, core.EventDecision, "match this", mock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answered, err := l.Answer(task.ID, core.Decision{Question: "Which margins?", Answer: "these", Source: core.AnsweredByPerson}, notes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type served struct {
+		Event     int    `json:"event"`
+		Work      string `json:"work"`
+		At        string `json:"at"`
+		Name      string `json:"name"`
+		Path      string `json:"path"`
+		Size      int64  `json:"size"`
+		MediaType string `json:"media_type"`
+	}
+	var view struct {
+		Attachments []served `json:"attachments"`
+	}
+	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &view)
+	if len(view.Attachments) != 2 {
+		t.Fatalf("attachments = %+v, want the goal's and its task's", view.Attachments)
+	}
+	for i, w := range []struct {
+		with core.Event
+		att  core.Attachment
+	}{{decided, mock}, {answered, notes}} {
+		got := view.Attachments[i]
+		if got.Event == 0 || got.Work != w.with.Work || got.At != w.with.At || got.Name != w.att.Name || got.Path != w.att.Path || got.Size != w.att.Size || got.MediaType != w.att.MediaType {
+			t.Fatalf("attachment %d = %+v, want %+v on the work and moment of %+v", i, got, w.att, w.with)
+		}
+	}
+	resp, err := http.Get(api.URL + "/api/attachment/" + strconv.Itoa(view.Attachments[0].Event))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("a file's bytes were served over HTTP: %d", resp.StatusCode)
+	}
 }
 
 func serverBindsToLoopback(t *testing.T) {

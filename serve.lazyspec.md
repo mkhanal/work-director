@@ -184,3 +184,8 @@ A command that returns no rows emits `[]` for the collection, never null.
 An unknown path returns 404 with `{"error": "not found"}`. A bad
 request returns 400 with `{"error": "..."}`, and a wrong method 405. An unknown work id returns 404
 with `{"error": "no work <id>"}`.
+
+## A Goal Serves The Files Attached Under It
+- The goal view's `attachments` is every `attachment` event on the goal and its tasks, oldest first, each as `{event, work, at, name, path, size, media_type}`; `[]` when none.
+- A file sent with a decision or an answer has that event's `work` and `at`, so a client shows it with that message.
+- A file is served by its path only; no route returns its bytes.

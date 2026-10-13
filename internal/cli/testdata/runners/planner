@@ -6,6 +6,7 @@ case "$1" in
     n=$(cat "$state/planner-n" 2>/dev/null || echo 0)
     n=$((n + 1))
     echo "$n" > "$state/planner-n"
+    printf '%s' "$2" > "$state/planner-brief-$n"
     printf 'session=planner-s%05x\n' "$n"
     ;;
   export)

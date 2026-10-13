@@ -103,6 +103,9 @@ const (
 	// EventJudged is the director's judgement of a sub-goal's done-when:
 	// "met: <why>" or "missed: <what is missing>".
 	EventJudged EventKind = "judged"
+	// EventAttachment is a file a person attached to what they sent: the body
+	// is the stored copy's absolute path, the payload its Attachment.
+	EventAttachment EventKind = "attachment"
 )
 
 type FeedbackSource string
@@ -353,6 +356,45 @@ type Event struct {
 	// Reasoning is why a planner broke a goal down as it did, on the note
 	// planning files; nil on any other event.
 	Reasoning *Reasoning `json:"-"`
+	// Attachment is the file an attachment event stored; nil on any other
+	// event.
+	Attachment *Attachment `json:"-"`
+}
+
+// Attachment is one file a person attached, as copied into the director's
+// own store: the name it was given, the copy's absolute path, its size in
+// bytes and its media type.
+type Attachment struct {
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	Size      int64  `json:"size"`
+	MediaType string `json:"media_type"`
+}
+
+// AttachedBlock is what an agent reads after a message that carried files:
+// each stored path with its media type and size. Without files it is "".
+func AttachedBlock(atts []Attachment) string {
+	if len(atts) == 0 {
+		return ""
+	}
+	lines := []string{"Attached files (read them from these paths):"}
+	for _, a := range atts {
+		lines = append(lines, fmt.Sprintf("- %s (%s, %d bytes)", a.Path, a.MediaType, a.Size))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// WithAttached is text as an agent reads it: the person's words, then the
+// block naming what they attached.
+func WithAttached(text string, atts []Attachment) string {
+	block := AttachedBlock(atts)
+	switch {
+	case block == "":
+		return text
+	case strings.TrimSpace(text) == "":
+		return block
+	}
+	return text + "\n\n" + block
 }
 
 // Reasoning is a planner's account of a breakdown: why it is broken down so,
@@ -676,7 +718,7 @@ const (
 
 var (
 	WorkKinds       = []WorkKind{WorkTask, WorkEvolution, WorkWorkflow, WorkGoal, WorkRoadmap, WorkItem}
-	EventKinds      = []EventKind{EventState, EventReport, EventVerify, EventPr, EventNote, EventSent, EventSpawn, EventAttach, EventQuestion, EventAnswer, EventDecision, EventAbandon, EventLook, EventSupervised, EventCourse, EventJudged}
+	EventKinds      = []EventKind{EventState, EventReport, EventVerify, EventPr, EventNote, EventSent, EventSpawn, EventAttach, EventQuestion, EventAnswer, EventDecision, EventAbandon, EventLook, EventSupervised, EventCourse, EventJudged, EventAttachment}
 	FeedbackSources = []FeedbackSource{FeedbackDirector, FeedbackNote, FeedbackAttached}
 	LandingKinds    = []LandingKind{LandingCommit, LandingPullRequest}
 	WorktreeKinds   = []WorktreeKind{WorktreeShared, WorktreePrivate}

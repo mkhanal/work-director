@@ -6008,3 +6008,143 @@ func TestAProposedBreakdownStartsOnApproval(t *testing.T) {
 		t.Errorf("approving again = %q, want it refused", errStr)
 	}
 }
+
+// attachedEvents are work's attachment events, read through the ledger.
+func attachedEvents(t *testing.T, f *cliFixture, work string) []core.Event {
+	t.Helper()
+	return eventsOfKind(t, f, work, core.EventAttachment)
+}
+
+func eventsOfKind(t *testing.T, f *cliFixture, work string, kind core.EventKind) []core.Event {
+	t.Helper()
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	evs, err := l.Events(work, &kind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return evs
+}
+
+func TestAPersonCanAttachFilesToWhatTheySend(t *testing.T) {
+	f := newCLIFixture(t)
+	state := liveClaude(t, f)
+	t2 := f.ids["t2"]
+	shot := filepath.Join(f.dir, "shot one.png")
+	png := "\x89PNG\r\n\x1a\ndata"
+	notes := filepath.Join(f.dir, "notes")
+	if err := os.WriteFile(shot, []byte(png), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(notes, []byte("remember the margins\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := filepath.Join(f.wdHome, "attachments", t2)
+	first, second := filepath.Join(store, "1-shot_one.png"), filepath.Join(store, "2-notes")
+	block := "Attached files (read them from these paths):\n- " + first + " (image/png, 12 bytes)\n- " + second + " (text/plain, 21 bytes)"
+
+	var sent struct {
+		Told        string            `json:"told"`
+		Attachments []core.Attachment `json:"attachments"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "send", t2, "look at this", "--attach", "shot one.png", "--attach", notes, "--json")), &sent); err != nil {
+		t.Fatal(err)
+	}
+	if got := sends(t, state); len(got) != 1 || got[0] != "look at this\n\n"+block {
+		t.Fatalf("sends = %q, want the words then the attached block", got)
+	}
+	want := []core.Attachment{{Name: "shot one.png", Path: first, Size: 12, MediaType: "image/png"}, {Name: "notes", Path: second, Size: 21, MediaType: "text/plain"}}
+	if !slices.Equal(sent.Attachments, want) {
+		t.Fatalf("--json attachments = %+v, want %+v", sent.Attachments, want)
+	}
+	if readFile(t, first) != png || readFile(t, shot) != png {
+		t.Fatalf("the file was not copied, leaving the original in place")
+	}
+	evs := attachedEvents(t, f, t2)
+	if len(evs) != 2 || evs[0].Body != first || evs[0].Attachment == nil || *evs[0].Attachment != want[0] || evs[1].Attachment == nil || *evs[1].Attachment != want[1] {
+		t.Fatalf("attachment events = %+v, want one per file with the stored path and its facts", evs)
+	}
+
+	// Words may be left out; n counts on, so names never clash.
+	f.runOK(t, "send", t2, "--attach", shot)
+	third := filepath.Join(store, "3-shot_one.png")
+	if got := sends(t, state); len(got) != 2 || got[1] != "Attached files (read them from these paths):\n- "+third+" (image/png, 12 bytes)" {
+		t.Fatalf("sends = %q, want the block alone", got)
+	}
+
+	// A bad file refuses everything, naming it.
+	locked := filepath.Join(f.dir, "locked.txt")
+	if err := os.WriteFile(locked, []byte("x"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{filepath.Join(f.dir, "missing.png"), f.sample, locked} {
+		if errStr := f.runFail(t, "send", t2, "and this", "--attach", shot, "--attach", bad); !strings.Contains(errStr, bad) {
+			t.Fatalf("attaching %s: %q, want a refusal naming it", bad, errStr)
+		}
+	}
+	if got := sends(t, state); len(got) != 2 {
+		t.Fatalf("a refused send reached the session: %q", got)
+	}
+	if evs := attachedEvents(t, f, t2); len(evs) != 3 {
+		t.Fatalf("a refused send recorded attachments: %+v", evs)
+	}
+	if entries, _ := os.ReadDir(store); len(entries) != 3 {
+		t.Fatalf("a refused send left copies: %d files", len(entries))
+	}
+
+	// An answer in words carries the files; the answer keeps only the words.
+	f.runOK(t, "set", t2, "needs-input")
+	out := f.runOK(t, "answer", t2, "use postgres", "--attach", notes, "--json")
+	fourth := filepath.Join(store, "4-notes")
+	if got := sends(t, state); len(got) != 3 || got[2] != "use postgres\n\nAttached files (read them from these paths):\n- "+fourth+" (text/plain, 21 bytes)" {
+		t.Fatalf("sends = %q, want the answer then the attached block", got)
+	}
+	if !strings.Contains(out, `"media_type": "text/plain"`) {
+		t.Fatalf("answer --json lacks its attachments:\n%s", out)
+	}
+	if answers := eventsOfKind(t, f, t2, core.EventAnswer); len(answers) != 1 || answers[0].Body != "use postgres" {
+		t.Fatalf("answers = %+v, want the words alone", answers)
+	}
+
+	// A new goal's planner reads the files; the goal keeps the words.
+	var started struct {
+		Goal        core.Work         `json:"goal"`
+		Attachments []core.Attachment `json:"attachments"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "goal", "start", "sample-app", "Match this mock", "--attach", shot, "--runner", "planner", "--json")), &started); err != nil {
+		t.Fatal(err)
+	}
+	mock := filepath.Join(f.wdHome, "attachments", started.Goal.ID, "1-shot_one.png")
+	if started.Goal.Detail != "Match this mock" || len(started.Attachments) != 1 || started.Attachments[0].Path != mock {
+		t.Fatalf("goal start = %+v, want the words as the goal and the file stored under it", started)
+	}
+	if brief := readFile(t, filepath.Join(state, "planner-brief-1")); !strings.Contains(brief, "Match this mock\n\nAttached files (read them from these paths):\n- "+mock+" (image/png, 12 bytes)") {
+		t.Fatalf("the planner's brief lacks the attached block:\n%s", brief)
+	}
+	if out := f.runOK(t, "goal", "start", "sample-app", "--attach", notes, "--detach", "--runner", "finder", "--json"); !strings.Contains(out, `"title": "notes"`) || !strings.Contains(out, `"name": "notes"`) {
+		t.Fatalf("a goal of files alone: %s, want it titled by them", out)
+	}
+
+	// A goal's supervisor reads the files with the decision they came with.
+	o := overseenGoal(t, f)
+	var told struct {
+		Decision    core.Event        `json:"decision"`
+		Attachments []core.Attachment `json:"attachments"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "send", o.goal, "keep the margins", "--attach", notes, "--json")), &told); err != nil {
+		t.Fatal(err)
+	}
+	kept := filepath.Join(f.wdHome, "attachments", o.goal, "1-notes")
+	if told.Decision.Body != "keep the margins" || len(told.Attachments) != 1 || told.Attachments[0].Path != kept {
+		t.Fatalf("send to a goal = %+v, want the words as the decision and the file stored", told)
+	}
+	if brief := readFile(t, filepath.Join(o.state, "brief-"+supervisor)); !strings.Contains(brief, "keep the margins\n\nAttached files (read them from these paths):\n- "+kept+" (text/plain, 21 bytes)") {
+		t.Fatalf("the supervisor's brief lacks the files with the decision:\n%s", brief)
+	}
+	if out := f.runOK(t, "send", t2, "plain", "--json"); !strings.Contains(out, `"attachments": []`) {
+		t.Fatalf("send with no files: %s, want attachments []", out)
+	}
+}

@@ -106,6 +106,29 @@ type goalView struct {
 	// Reasoning is why its latest planning broke it down so, or nil when
 	// that planning gave none.
 	Reasoning *core.Reasoning `json:"reasoning"`
+	// Attachments are the files attached anywhere under the goal, oldest
+	// first; each was attached with the message filed at the same moment on
+	// the same work. A client reads the file at its path.
+	Attachments []attachment `json:"attachments"`
+}
+
+// attachment is one attachment event as a client shows it.
+type attachment struct {
+	Event int    `json:"event"`
+	Work  string `json:"work"`
+	At    string `json:"at"`
+	core.Attachment
+}
+
+// attachmentsIn are the attachment events among events.
+func attachmentsIn(events []core.Event) []attachment {
+	out := []attachment{}
+	for _, e := range events {
+		if e.Kind == core.EventAttachment && e.Attachment != nil {
+			out = append(out, attachment{Event: e.ID, Work: e.Work, At: e.At, Attachment: *e.Attachment})
+		}
+	}
+	return out
 }
 
 // waitingTask is a task waiting on the person, and what it waits on.
@@ -271,6 +294,7 @@ func (s *Server) goal(id string) (goalView, error) {
 	view.Superseded = t.superseded()
 	view.Proposed = core.Proposed(goal.ID, events)
 	view.Reasoning = reasoningOf(goal.ID, events)
+	view.Attachments = attachmentsIn(events)
 	courses := events
 	if len(chain) > 1 {
 		if courses, err = s.ledger.Events(chain[0].ID, nil); err != nil {

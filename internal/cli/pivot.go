@@ -28,16 +28,29 @@ const resumeText = "Resume where you left off."
 // its supervisor routes it; a task gets it now when its session is idle,
 // and when it is ready otherwise.
 func (c *Cli) send(rest []string) error {
-	if len(rest) < 2 {
-		return fail("usage: wd send <id> <text>")
+	files, err := c.attachedFiles()
+	if err != nil {
+		return err
+	}
+	if len(rest) < 2 && (len(rest) != 1 || len(files) == 0) {
+		return fail("usage: wd send <id> <text> [--attach <path>]...")
+	}
+	text := ""
+	if len(rest) > 1 {
+		text = rest[1]
 	}
 	w, err := c.Ledger.Get(rest[0])
 	if err != nil {
 		return err
 	}
+	atts, err := c.store(w.ID, files)
+	if err != nil {
+		return err
+	}
 	if core.IsGoal(w.Kind) {
-		out, err := c.tellGoal(w, rest[1])
+		out, err := c.tellGoal(w, text, atts)
 		if err != nil {
+			discard(atts)
 			return err
 		}
 		text := fmt.Sprintf("kept as a decision on %s; its supervisor reads it at its next look", w.ID)
@@ -46,15 +59,19 @@ func (c *Cli) send(rest []string) error {
 		}
 		return c.out(out, text)
 	}
-	where, err := c.tellTask(w, rest[1])
+	where, err := c.tellTask(w, core.WithAttached(text, atts))
 	if err != nil {
+		discard(atts)
 		return err
 	}
-	text := "delivered"
-	if where == toldQueued {
-		text = fmt.Sprintf("queued: %s is busy and reads this when it is ready; the next wd drive or wd goal review pass delivers it", w.ID)
+	if _, err := c.Ledger.Attach(w.ID, atts); err != nil {
+		return err
 	}
-	return c.out(map[string]any{"ok": true, "told": where}, text)
+	said := "delivered"
+	if where == toldQueued {
+		said = fmt.Sprintf("queued: %s is busy and reads this when it is ready; the next wd drive or wd goal review pass delivers it", w.ID)
+	}
+	return c.out(map[string]any{"ok": true, "told": where, "attachments": atts}, said)
 }
 
 // sendTo is send for one task, for callers that only need to know it worked.
@@ -118,14 +135,16 @@ func (c *Cli) tellVia(w core.Work, h runner.Handle, text string) (told, error) {
 // tellGoal keeps text as a decision on the goal, which every later brief and
 // judgement reads, and has the goal's supervisor look at once, so it reaches
 // the tasks it is for rather than every task.
-func (c *Cli) tellGoal(goal core.Work, text string) (map[string]any, error) {
+func (c *Cli) tellGoal(goal core.Work, text string, atts []core.Attachment) (map[string]any, error) {
 	if core.Reopenable(goal.State) {
 		return nil, fail("%s is done; a message is not a reason to work on it again — wd reopen %s \"<what is being worked on>\"", goal.ID, goal.ID)
 	}
 	if core.AtRest(goal.State) {
 		return nil, fail("goal %s is %s: there is nothing running to tell", goal.ID, goal.State)
 	}
-	decision, err := c.Ledger.AddEvent(goal.ID, core.EventDecision, text)
+	// The files follow the decision they came with, which is how the
+	// supervisor reads them as part of it.
+	decision, err := c.Ledger.AddEvent(goal.ID, core.EventDecision, text, atts...)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +158,7 @@ func (c *Cli) tellGoal(goal core.Work, text string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"decision": decision, "looked": s.Looked}, nil
+	return map[string]any{"decision": decision, "looked": s.Looked, "attachments": atts}, nil
 }
 
 // stop interrupts what a task's session is doing and takes back the messages
@@ -421,14 +440,27 @@ func (c *Cli) stopSession(w core.Work) (bool, error) {
 func (c *Cli) goalContinue(goal core.Work, text string) error {
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return fail("usage: wd goal continue <id> \"<what is being worked on>\"")
+		return fail("usage: wd goal continue <id> \"<what is being worked on>\" [--attach <path>]...")
+	}
+	files, err := c.attachedFiles()
+	if err != nil {
+		return err
+	}
+	if goal.State == core.StateDropped || goal.State == core.StateAbandoned || goal.State == core.StateSuperseded {
+		return fail("goal %s is %s and is not picked up again; start a new one: wd goal start %s \"<what you want done>\"", goal.ID, goal.State, goal.Project)
+	}
+	atts, err := c.store(goal.ID, files)
+	if err != nil {
+		return err
 	}
 	var lines []string
 	switch {
-	case goal.State == core.StateDropped || goal.State == core.StateAbandoned || goal.State == core.StateSuperseded:
-		return fail("goal %s is %s and is not picked up again; start a new one: wd goal start %s \"<what you want done>\"", goal.ID, goal.State, goal.Project)
 	case goal.State == core.StatePaused:
-		if _, err := c.resumeWork(goal, text); err != nil {
+		if _, err := c.resumeWork(goal, core.WithAttached(text, atts)); err != nil {
+			discard(atts)
+			return err
+		}
+		if _, err := c.Ledger.Attach(goal.ID, atts); err != nil {
 			return err
 		}
 	case core.Reopenable(goal.State):
@@ -439,6 +471,10 @@ func (c *Cli) goalContinue(goal core.Work, text string) error {
 		}
 		reopened, err := c.Ledger.Reopen(goal.ID, text)
 		if err != nil {
+			discard(atts)
+			return err
+		}
+		if _, err := c.Ledger.Attach(goal.ID, atts); err != nil {
 			return err
 		}
 		p, err := c.project(goal.Project)
@@ -449,11 +485,12 @@ func (c *Cli) goalContinue(goal core.Work, text string) error {
 			return fmt.Errorf("goal %s reopened; %w", goal.ID, err)
 		}
 	default:
-		if _, err := c.tellGoal(goal, text); err != nil {
+		if _, err := c.tellGoal(goal, text, atts); err != nil {
+			discard(atts)
 			return err
 		}
 	}
-	goal, err := c.Ledger.Get(goal.ID)
+	goal, err = c.Ledger.Get(goal.ID)
 	if err != nil {
 		return err
 	}
@@ -461,6 +498,6 @@ func (c *Cli) goalContinue(goal core.Work, text string) error {
 	if err != nil {
 		return err
 	}
-	return c.out(map[string]any{"goal": goal, "tasks": tasks},
+	return c.out(map[string]any{"goal": goal, "tasks": tasks, "attachments": atts},
 		strings.TrimSpace(fmt.Sprintf("goal %s continued: %s (%s)\n%s", goal.ID, goal.Title, goal.State, strings.Join(lines, "\n"))))
 }

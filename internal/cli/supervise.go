@@ -324,11 +324,26 @@ func (c *Cli) picture(goal core.Work, p *project.Project) (coordinator.Picture, 
 	if err != nil {
 		return pic, err
 	}
+	// Files are read with what they came with: those filed before any
+	// decision with the goal's own words, the rest with the decision or
+	// answer they follow.
+	var lead []core.Attachment
+	with := map[int][]core.Attachment{}
 	for _, e := range events {
-		if e.Kind == core.EventDecision || e.Kind == core.EventAnswer {
+		switch {
+		case e.Kind == core.EventDecision || e.Kind == core.EventAnswer:
 			pic.Decisions = append(pic.Decisions, e.Body)
+		case e.Kind == core.EventAttachment && e.Attachment != nil && len(pic.Decisions) == 0:
+			lead = append(lead, *e.Attachment)
+		case e.Kind == core.EventAttachment && e.Attachment != nil:
+			i := len(pic.Decisions) - 1
+			with[i] = append(with[i], *e.Attachment)
 		}
 	}
+	for i, atts := range with {
+		pic.Decisions[i] = core.WithAttached(pic.Decisions[i], atts)
+	}
+	pic.Goal.Detail = core.WithAttached(pic.Goal.Detail, lead)
 	if pic.Subs, err = c.subPictures(goal.ID, &pic.Superseded); err != nil {
 		return pic, err
 	}

@@ -24,8 +24,12 @@ func (c *Cli) answer(rest []string) error {
 	if director && len(rest) != 1 {
 		return fail("usage: wd answer <id> --director; the director decides every item of the question")
 	}
-	if !director && len(rest) < 2 {
-		return fail("usage: wd answer <id> <answer> [<answer>...], one answer per question asked, in order")
+	files, err := c.attachedFiles()
+	if err != nil {
+		return err
+	}
+	if !director && len(rest) < 2 && (len(rest) != 1 || len(files) == 0) {
+		return fail("usage: wd answer <id> <answer> [<answer>...] [--attach <path>]..., one answer per question asked, in order")
 	}
 	w, err := c.Ledger.Get(rest[0])
 	if err != nil {
@@ -85,7 +89,7 @@ func (c *Cli) answer(rest []string) error {
 		if e, ok := coordinator.OpenQuestion(events, w.ID); ok {
 			filed = &e
 			asked = e.Body
-			if q := coordinator.AskedQuestion(e); len(answers) > 1 || len(q.Items) == 1 {
+			if q := coordinator.AskedQuestion(e); len(answers) > 1 || (len(answers) == 1 && len(q.Items) == 1) {
 				if text, err = runner.AnswerText(q, answers); err != nil {
 					return fail("%s: %v", w.ID, err)
 				}
@@ -101,7 +105,12 @@ func (c *Cli) answer(rest []string) error {
 		}
 	}
 	by.Question, by.Answer = asked, text
-	if _, err := c.Ledger.Answer(w.ID, by); err != nil {
+	atts, err := c.store(w.ID, files)
+	if err != nil {
+		return err
+	}
+	if _, err := c.Ledger.Answer(w.ID, by, atts...); err != nil {
+		discard(atts)
 		return err
 	}
 	for _, d := range decided {
@@ -130,7 +139,7 @@ func (c *Cli) answer(rest []string) error {
 			return err
 		}
 	}
-	where, err := c.deliverAnswer(w, h, has, text)
+	where, err := c.deliverAnswer(w, h, has, core.WithAttached(text, atts))
 	if err != nil {
 		return err
 	}
@@ -141,7 +150,7 @@ func (c *Cli) answer(rest []string) error {
 	if len(applied) > 0 {
 		human += "\n" + strings.Join(applied, "\n")
 	}
-	out := map[string]any{"ok": true, "told": where, "answer": text, "applied": applied}
+	out := map[string]any{"ok": true, "told": where, "answer": text, "applied": applied, "attachments": atts}
 	if director {
 		out["answered"], out["decided"], out["declined"] = true, decided, []directorChoice{}
 		for _, d := range decided {

@@ -49,11 +49,16 @@ var valueFlags = map[string]bool{
 	"deadline": true,
 }
 
-// Args is one parsed command line: positionals, value flags (never empty)
-// and switches.
+// listFlags are the --key value flags that may be given more than once; each
+// value is kept, in order.
+var listFlags = map[string]bool{"attach": true}
+
+// Args is one parsed command line: positionals, value flags (never empty),
+// repeatable value flags and switches.
 type Args struct {
 	Positional []string
 	Values     map[string]string
+	Lists      map[string][]string
 	Switches   map[string]bool
 }
 
@@ -77,7 +82,7 @@ func normalize(argv []string) []string {
 // parse splits argv into positionals, value flags and switches. A value flag
 // with no value, or an empty one, and a switch given a value both fail.
 func parse(argv []string) (Args, error) {
-	a := Args{Values: map[string]string{}, Switches: map[string]bool{}}
+	a := Args{Values: map[string]string{}, Lists: map[string][]string{}, Switches: map[string]bool{}}
 	after := false
 	toks := normalize(argv)
 	for i := 0; i < len(toks); i++ {
@@ -95,7 +100,7 @@ func parse(argv []string) (Args, error) {
 			continue
 		}
 		key, val, hasVal := strings.Cut(t[2:], "=")
-		if !valueFlags[key] {
+		if !valueFlags[key] && !listFlags[key] {
 			if hasVal {
 				return Args{}, fail("--%s takes no value", key)
 			}
@@ -108,6 +113,10 @@ func parse(argv []string) (Args, error) {
 		}
 		if val == "" {
 			return Args{}, fail("--%s needs a value", key)
+		}
+		if listFlags[key] {
+			a.Lists[key] = append(a.Lists[key], val)
+			continue
 		}
 		a.Values[key] = val
 	}

@@ -664,10 +664,14 @@ func (c *Cli) goalLike(cmd string, rest []string) error {
 		}
 	}
 	if cmd == "goal" && sub == "start" {
-		if len(rest) < 3 {
-			return fail("usage: wd goal start <project> \"<what you want done>\" [--runner <runner>] [--timeout s]")
+		if len(rest) < 3 && (len(rest) != 2 || len(c.Args.Lists["attach"]) == 0) {
+			return fail("usage: wd goal start <project> \"<what you want done>\" [--attach <path>]... [--runner <runner>] [--timeout s]")
 		}
-		return c.goalStart(rest[1], rest[2])
+		text := ""
+		if len(rest) > 2 {
+			text = rest[2]
+		}
+		return c.goalStart(rest[1], text)
 	}
 	if cmd == "goal" && sub == "begin" {
 		if len(rest) != 2 {
@@ -788,19 +792,38 @@ func (c *Cli) goalStart(name, text string) error {
 	if err != nil {
 		return err
 	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return fail("usage: wd goal start <project> \"<what you want done>\"")
-	}
-	goal, err := c.Ledger.Add(name, goalTitle(text), ledger.AddOptions{Kind: core.WorkGoal, Detail: text})
+	files, err := c.attachedFiles()
 	if err != nil {
+		return err
+	}
+	text = strings.TrimSpace(text)
+	title := text
+	if text == "" {
+		if len(files) == 0 {
+			return fail("usage: wd goal start <project> \"<what you want done>\" [--attach <path>]...")
+		}
+		names := make([]string, len(files))
+		for i, f := range files {
+			names[i] = filepath.Base(f)
+		}
+		title = strings.Join(names, ", ")
+	}
+	goal, err := c.Ledger.Add(name, goalTitle(title), ledger.AddOptions{Kind: core.WorkGoal, Detail: text})
+	if err != nil {
+		return err
+	}
+	atts, err := c.store(goal.ID, files)
+	if err != nil {
+		return err
+	}
+	if _, err := c.Ledger.Attach(goal.ID, atts); err != nil {
 		return err
 	}
 	if flag(c.Args, "detach") {
 		if err := c.beginElsewhere(goal); err != nil {
 			return err
 		}
-		return c.out(map[string]any{"goal": goal, "tasks": []core.Work{}},
+		return c.out(map[string]any{"goal": goal, "tasks": []core.Work{}, "attachments": atts},
 			fmt.Sprintf("goal %s filed; it is planned and started in the background — wd goal status %s", goal.ID, goal.ID))
 	}
 	return c.begin(goal, p)
@@ -858,7 +881,11 @@ func (c *Cli) begin(goal core.Work, p *project.Project) error {
 		}
 		return fmt.Errorf("goal %s filed; %w", goal.ID, err)
 	}
-	return c.out(map[string]any{"goal": goal, "tasks": tasks}, fmt.Sprintf("goal %s started: %s\n%s", goal.ID, goal.Title, strings.Join(lines, "\n")))
+	atts, err := c.attachmentsOf(goal.ID)
+	if err != nil {
+		return err
+	}
+	return c.out(map[string]any{"goal": goal, "tasks": tasks, "attachments": atts}, fmt.Sprintf("goal %s started: %s\n%s", goal.ID, goal.Title, strings.Join(lines, "\n")))
 }
 
 // planAsked is a planner that replied with a question instead of tasks.
@@ -1181,7 +1208,13 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project, propose bool) ([]core
 			return nil, err
 		}
 	}
-	planBrief, err := coordinator.GoalPlanBrief(goal, chain, p, kit, past)
+	atts, err := c.attachmentsOf(goal.ID)
+	if err != nil {
+		return nil, err
+	}
+	briefed := goal
+	briefed.Detail = core.WithAttached(goal.Detail, atts)
+	planBrief, err := coordinator.GoalPlanBrief(briefed, chain, p, kit, past)
 	if err != nil {
 		return nil, fail("%v", err)
 	}

@@ -298,6 +298,12 @@ func scanEvent(s rowScanner) (core.Event, error) {
 			return core.Event{}, fmt.Errorf("event %d: reasoning payload: %w", e.ID, err)
 		}
 		e.Reasoning = &r
+	} else if payload.Valid && payload.String != "" && e.Kind == core.EventAttachment {
+		var a core.Attachment
+		if err := json.Unmarshal([]byte(payload.String), &a); err != nil {
+			return core.Event{}, fmt.Errorf("event %d: attachment payload: %w", e.ID, err)
+		}
+		e.Attachment = &a
 	} else if payload.Valid && payload.String != "" {
 		var d core.Decision
 		if err := json.Unmarshal([]byte(payload.String), &d); err != nil {
@@ -1557,13 +1563,22 @@ func marshalDecision(d *core.Decision) any {
 	return string(raw)
 }
 
-// AddEvent records an event on work and returns it as stored.
-func (l *Ledger) AddEvent(work string, kind core.EventKind, body string) (core.Event, error) {
+// AddEvent records an event on work and returns it as stored, followed at the
+// same moment by the files attached to it.
+func (l *Ledger) AddEvent(work string, kind core.EventKind, body string, atts ...core.Attachment) (core.Event, error) {
 	var e core.Event
 	err := l.inTx(func(tx *sql.Tx) error {
+		at := now()
 		var err error
-		e, err = addEvent(tx, work, kind, body, now())
-		return err
+		if e, err = addEvent(tx, work, kind, body, at); err != nil {
+			return err
+		}
+		for _, a := range atts {
+			if _, err := addAttachment(tx, work, at, a); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return core.Event{}, err
@@ -1593,18 +1608,59 @@ func (l *Ledger) Decide(work, body string, d core.Decision, effective *string) (
 }
 
 // Answer records an answer on work with what it answered and who answered it,
-// so the work's record reads as the question and its answer.
-func (l *Ledger) Answer(work string, d core.Decision) (core.Event, error) {
-	if d.Answer == "" || d.Source == "" {
-		return core.Event{}, fmt.Errorf("an answer needs its words and who gave it")
+// so the work's record reads as the question and its answer, followed by the
+// files attached to it. An answer of files alone has no words.
+func (l *Ledger) Answer(work string, d core.Decision, atts ...core.Attachment) (core.Event, error) {
+	if (d.Answer == "" && len(atts) == 0) || d.Source == "" {
+		return core.Event{}, fmt.Errorf("an answer needs its words or files, and who gave it")
 	}
 	var e core.Event
 	err := l.inTx(func(tx *sql.Tx) error {
+		at := now()
 		var err error
-		e, err = addClaim(tx, work, core.EventAnswer, d.Answer, now(), nil, &d)
-		return err
+		if e, err = addClaim(tx, work, core.EventAnswer, d.Answer, at, nil, &d); err != nil {
+			return err
+		}
+		for _, a := range atts {
+			if _, err := addAttachment(tx, work, at, a); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	return e, err
+}
+
+// Attach records each file attached to work as its own event, in order.
+func (l *Ledger) Attach(work string, atts []core.Attachment) ([]core.Event, error) {
+	var out []core.Event
+	err := l.inTx(func(tx *sql.Tx) error {
+		at := now()
+		if err := updateWork(tx, work, `UPDATE work SET updated = ? WHERE id = ?`, at, work); err != nil {
+			return err
+		}
+		for _, a := range atts {
+			e, err := addAttachment(tx, work, at, a)
+			if err != nil {
+				return err
+			}
+			out = append(out, e)
+		}
+		return nil
+	})
+	return out, err
+}
+
+func addAttachment(tx *sql.Tx, work, at string, a core.Attachment) (core.Event, error) {
+	if a.Path == "" || a.Name == "" || a.MediaType == "" {
+		return core.Event{}, fmt.Errorf("an attachment needs its name, path and media type")
+	}
+	raw, err := json.Marshal(a)
+	if err != nil {
+		return core.Event{}, err
+	}
+	return scanEvent(tx.QueryRow(`INSERT INTO event (work, kind, body, at, payload) VALUES (?, ?, ?, ?, ?)
+		RETURNING id, work, kind, body, at, effective, payload`, work, string(core.EventAttachment), a.Path, at, string(raw)))
 }
 
 // Ask records a question on work that carries out change when answered with
