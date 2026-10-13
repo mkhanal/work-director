@@ -50,6 +50,13 @@ for scheme in light dark; do
     name=$screen; [ "$scheme" = dark ] && name=$screen-dark
     screencapture -x -R "$bounds" "$out/$name.png"
     sips -z 900 1280 "$out/$name.png" >/dev/null
+    if [ "$view" = overview ]; then
+      IFS=, read -r bx by _ _ <<<"$bounds"
+      swift "$root/scripts/ui/macos/scroll.swift" $((bx + 760)) $((by + 600)) 200
+      sleep 1
+      screencapture -x -R "$bounds" "$out/$name-bottom.png"
+      sips -z 900 1280 "$out/$name-bottom.png" >/dev/null
+    fi
     kill "$pid"; wait "$pid" 2>/dev/null || true
   done
 done
