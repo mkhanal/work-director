@@ -267,7 +267,7 @@ func (s *Server) node(t tree, w core.Work) (node, error) {
 }
 
 // proposedWhy is why a sub-goal of a breakdown awaiting approval is not moving.
-const proposedWhy = "proposed — needs approval"
+const proposedWhy = "Proposed, waiting for your approval"
 
 // whyNotMoving says why work is not moving, or nil when it is or has finished.
 func (t tree) whyNotMoving(w core.Work, waitingOn []string) *string {
@@ -333,9 +333,9 @@ func (s *Server) notDoneBecause(t tree, top bool) ([]string, error) {
 	switch open {
 	case 0:
 	case 1:
-		out = append(out, "1 sub-goal open")
+		out = append(out, "1 sub-goal is still open")
 	default:
-		out = append(out, fmt.Sprintf("%d sub-goals open", open))
+		out = append(out, fmt.Sprintf("%d sub-goals are still open", open))
 	}
 	run, err := s.ledger.CurrentRun(goal.ID)
 	if err != nil {
@@ -350,15 +350,49 @@ func (s *Server) notDoneBecause(t tree, top bool) ([]string, error) {
 			met = met || (e.Kind == core.EventReport && strings.HasPrefix(e.Body, "DONE"))
 		}
 		if !met {
-			out = append(out, "done-when not judged met yet")
+			out = append(out, "It hasn't been checked against what done means yet")
 		}
 	}
 	if top && goal.FinishLine != nil {
 		if ok, missing := core.FinishReached(*goal.FinishLine, run); !ok {
-			out = append(out, fmt.Sprintf("finish line (%s) not reached: %s", *goal.FinishLine, missing))
+			out = append(out, "Not finished yet: "+missingWords(missing))
 		}
 	}
 	return out, nil
+}
+
+// missingPlain says each part core.FinishReached finds missing as the person
+// would: what has not happened to the work yet.
+var missingPlain = map[string]string{
+	"DONE report":    "the work isn't reported done",
+	"passing verify": "its checks haven't passed",
+	"pull request":   "there's no pull request",
+	"commit landing": "it isn't merged",
+	"released note":  "it isn't released",
+}
+
+// missingWords lists what core.FinishReached finds missing as one clause.
+func missingWords(missing string) string {
+	parts := strings.Split(missing, ", ")
+	for i, m := range parts {
+		if plain, ok := missingPlain[m]; ok {
+			parts[i] = plain
+		}
+	}
+	return andList(parts)
+}
+
+// andList joins phrases as a sentence lists them: "a, b, and c".
+func andList(parts []string) string {
+	switch len(parts) {
+	case 0:
+		return ""
+	case 1:
+		return parts[0]
+	case 2:
+		return parts[0] + " and " + parts[1]
+	}
+	return strings.Join(parts[:len(parts)-1], ", ") + ", and " + parts[len(parts)-1]
 }
 
 // needYou is a question on work in the tree that waits on the person, and
@@ -573,7 +607,7 @@ func (s *Server) planLines(t tree, actions []string) ([]string, error) {
 		}
 		known, err := s.ledger.Has(id)
 		if err != nil || !known {
-			return id, err
+			return "a sub-goal that no longer exists", err
 		}
 		w, err := s.ledger.Get(id)
 		return w.Title, err

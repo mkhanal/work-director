@@ -104,7 +104,7 @@ JSON message per line to stdout:
 
 ## A Proposed Breakdown Is Served As Proposed
 - A goal serves `proposed`: true while its latest breakdown waits for `wd goal approve`, else false.
-- Each queued sub-goal of a proposed goal serves `why_not_moving` `proposed — needs approval`.
+- Each queued sub-goal of a proposed goal serves `why_not_moving` `Proposed, waiting for your approval`.
 - Its board entry serves `proposed` the same way, and sits in `needs-you`.
 - Once approved, none of these holds.
 
@@ -128,6 +128,12 @@ JSON message per line to stdout:
 - `GET /api/record/<goal>` and the `record` method return a summary of counts and one entry per decision, finish choice, course check, question, answer, judgement, chore, report, delivery and supersession under the goal, newest first, ending with what the person first asked.
 - Each entry says when, what, where in the tree, and whether the person or the director made it.
 - A decision filed with its maker is by that maker: a reshape or done-when a person made reads `you`, one the supervisor made reads `director`.
+
+## Sentences A Goal Serves Are Free Of Internal Terms
+- The sentences wd writes for the person — `not_done_because`, each node's `why_not_moving`, `finished`, a change's `lines`, a gate's `why`, and a record entry's `what` for what the director filed — name work by its title, never its id.
+- None says a report status, verify, soft-done, supersede as a verb, claim, judged, ACTIONS, STEPS, payload or worktree, or carries a session id.
+- A goal short of its finish line reads `Not finished yet: ` and what has not happened, as in `the work isn't reported done, its checks haven't passed, and there's no pull request`; one not yet checked against its done-when reads `It hasn't been checked against what done means yet`.
+- A finish line set reads in the record as `Finishes at a complete pull request, as your taste says`; a report as `Reported finished`, `Reported stuck` or `Asked for your input` with what it said.
 
 ## A Running Session's Question Puts Its Work In Needs You
 - While serving, a running work item whose session ends on a question has the question filed as a `question` event and moves to needs-input within seconds.

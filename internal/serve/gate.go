@@ -27,7 +27,7 @@ func (s *Server) gate(id string) (gateView, error) {
 	view := gateView{Work: w.ID, Argv: []string{}}
 	switch w.State {
 	case core.StateSoftDone:
-		view.Gate, view.Title, view.Argv, view.Why = "done", "Done", []string{"done", w.ID}, "it passed every gate; done closes it"
+		view.Gate, view.Title, view.Argv, view.Why = "done", "Done", []string{"done", w.ID}, "its checks passed and it is delivered; marking it done closes it"
 		return view, nil
 	case core.StateReview:
 	default:
@@ -50,11 +50,11 @@ func (s *Server) gate(id string) (gateView, error) {
 	}
 	switch {
 	case !verified:
-		view.Gate, view.Title, view.Argv, view.Why = "verify", "Verify", []string{"verify", w.ID}, "its report has no passing verify yet"
+		view.Gate, view.Title, view.Argv, view.Why = "verify", "Verify", []string{"verify", w.ID}, "its checks haven't passed since it was reported finished"
 	case !landed:
-		view.Gate, view.Title, view.Argv, view.Why = "land", "Land", []string{"pr", w.ID}, "it is verified and has not landed anywhere"
+		view.Gate, view.Title, view.Argv, view.Why = "land", "Land", []string{"pr", w.ID}, "its checks passed, and it isn't delivered as a pull request or a commit yet"
 	default:
-		view.Gate, view.Title, view.Argv, view.Why = "soft-done", "Soft-Done", []string{"soft-done", w.ID}, "it is verified and landed"
+		view.Gate, view.Title, view.Argv, view.Why = "soft-done", "Soft-Done", []string{"soft-done", w.ID}, "its checks passed and it is delivered; next, confirm it is finished"
 	}
 	return view, nil
 }

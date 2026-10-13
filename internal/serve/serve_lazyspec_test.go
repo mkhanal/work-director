@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -56,6 +57,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Change Waiting For The Person Is Served With What Would Change", aChangeWaitingForThePersonIsServedWithWhatWouldChange)
 	t.Run("A Course Change Serves What Was Found And What Happens To Each Sub-Goal", aCourseChangeServesWhatWasFoundAndWhatHappensToEachSubGoal)
 	t.Run("A Goal Serves Its Record", aGoalServesItsRecord)
+	t.Run("Sentences A Goal Serves Are Free Of Internal Terms", sentencesAGoalServesAreFreeOfInternalTerms)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("A Running Session's Report Moves Its Work On", aRunningSessionsReportMovesItsWorkOn)
 	t.Run("A Running Session That Stops Without A Report Is Noted", aRunningSessionThatStopsWithoutAReportIsNoted)
@@ -1941,7 +1943,7 @@ func aGoalServesWhatDoneMeansAndWhyItIsNotDoneYet(t *testing.T) {
 	if top.Progress != (treeProgress{Done: 0, Total: 5, Superseded: 1}) {
 		t.Fatalf("top progress = %+v, want 0 of 5 with 1 superseded apart", top.Progress)
 	}
-	want := []string{"5 sub-goals open", "done-when not judged met yet", "finish line (complete PR) not reached: DONE report, passing verify, pull request"}
+	want := []string{"5 sub-goals are still open", "It hasn't been checked against what done means yet", "Not finished yet: the work isn't reported done, its checks haven't passed, and there's no pull request"}
 	if !slices.Equal(top.NotDoneBecause, want) {
 		t.Fatalf("top not done because %q, want %q", top.NotDoneBecause, want)
 	}
@@ -1951,7 +1953,7 @@ func aGoalServesWhatDoneMeansAndWhyItIsNotDoneYet(t *testing.T) {
 	if guide.DoneWhen == nil || *guide.DoneWhen != "a guide covers rollback" || guide.Finish == nil || guide.Finish.Line != core.FinishPR {
 		t.Fatalf("nested done-when %v, finish %+v; want its own done-when and its top goal's finish", guide.DoneWhen, guide.Finish)
 	}
-	if want := []string{"2 sub-goals open", "done-when not judged met yet"}; !slices.Equal(guide.NotDoneBecause, want) {
+	if want := []string{"2 sub-goals are still open", "It hasn't been checked against what done means yet"}; !slices.Equal(guide.NotDoneBecause, want) {
 		t.Fatalf("nested not done because %q, want %q", guide.NotDoneBecause, want)
 	}
 
@@ -2113,8 +2115,8 @@ func aProposedBreakdownIsServedAsProposed(t *testing.T) {
 		t.Fatalf("goal = %+v, want proposed with two sub-goals", v)
 	}
 	for _, n := range v.Tree {
-		if n.WhyNotMoving == nil || *n.WhyNotMoving != "proposed — needs approval" {
-			t.Fatalf("%s why_not_moving = %v, want proposed — needs approval", n.Work.ID, n.WhyNotMoving)
+		if n.WhyNotMoving == nil || *n.WhyNotMoving != "Proposed, waiting for your approval" {
+			t.Fatalf("%s why_not_moving = %v, want Proposed, waiting for your approval", n.Work.ID, n.WhyNotMoving)
 		}
 	}
 
@@ -2453,15 +2455,15 @@ func aGoalServesItsRecord(t *testing.T) {
 	for _, c := range []struct{ kind, what, where, by string }{
 		{"asked", "Release notes", "Release notes (top)", "you"},
 		{"decision", "use the changelog as the source", "Release notes (top)", "you"},
-		{"finish", "finishes at: complete PR (from person)", "Release notes (top)", "you"},
+		{"finish", "Finishes at a complete pull request, as you chose", "Release notes (top)", "you"},
 		{"decision", "done when: a guide covers rollback", "Deployment guide", "director"},
 		{"decision", "done when: customers read what changed", "Customer note", "you"},
-		{"decision", "added " + r.note + ": Customer note", "Release notes (top)", "director"},
+		{"decision", "Added the sub-goal “Customer note”", "Release notes (top)", "director"},
 		{"decision", "group by type", "Deployment guide › Collector", "director"},
 		{"course", "correct: narrow it to rollback", "Release notes (top)", "director"},
 		{"answer", "formal", "Customer note", "you"},
 		{"answer", "staging and production", "Deployment guide › Rollback", "director"},
-		{"report", "done: the collector groups changes", "Deployment guide › Collector", "director"},
+		{"report", "Reported finished: the collector groups changes", "Deployment guide › Collector", "director"},
 		{"judged", "met: changes are grouped", "Deployment guide › Collector", "director"},
 		{"chore", "refresh the lockfile", "Release notes (top)", "director"},
 		{"delivery", "https://github.com/o/r/pull/9", "Release notes (top)", "director"},
@@ -2486,4 +2488,244 @@ func aGoalServesItsRecord(t *testing.T) {
 	}
 	var missing map[string]string
 	getJSON(t, api.URL+"/api/record/"+r.collector, http.StatusNotFound, &missing)
+}
+
+// internalTerms are words of wd's own, and of its agents' protocol, that no
+// sentence written for the person may carry.
+var internalTerms = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bDONE report\b`),
+	regexp.MustCompile(`(?i)\bverif(y|ied|ies)\b`),
+	regexp.MustCompile(`(?i)\bsoft-done\b`),
+	regexp.MustCompile(`(?i)\bsupersed(e|es|ing)\b|\b(is|was|were|be|been|are|got) superseded\b|\bsuperseded (by|it|them)\b`),
+	regexp.MustCompile(`(?i)\bclaim(s|ed)?\b`),
+	regexp.MustCompile(`(?i)\bjudged\b`),
+	regexp.MustCompile(`\bACTIONS\b|\bSTEPS\b`),
+	regexp.MustCompile(`(?i)\bpayload\b`),
+	regexp.MustCompile(`(?i)\bworktree\b`),
+	regexp.MustCompile(`(?i)\bses_[A-Za-z0-9]+|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-`),
+	regexp.MustCompile(`\b[0-9a-f]{8}\b`),
+}
+
+func sentencesAGoalServesAreFreeOfInternalTerms(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	add := func(title string, o ledger.AddOptions) string {
+		t.Helper()
+		w, err := l.Add("metariki-eqms", title, o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return w.ID
+	}
+	sub := func(parent, title, doneWhen string, kind core.WorkKind) string {
+		t.Helper()
+		id := add(title, ledger.AddOptions{Kind: kind, Parent: &parent})
+		if err := l.SetDoneWhen(id, doneWhen, core.AnsweredByDirector); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	reshape := func(on, body, by string) {
+		t.Helper()
+		if _, err := l.Decide(on, body, core.Decision{Question: "the sub-goals of " + on, Answer: body, Source: by}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The goal on the main screen, as scripts/ui/seed-goal-tree.sh seeds it.
+	g := add("Release notes for every release", ledger.AddOptions{Kind: core.WorkGoal})
+	if err := l.SetDoneWhen(g, "For every release, whoever deploys gets a guide and customers get a plain-language note", core.AnsweredByDirector); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetFinish(g, core.FinishPR, core.FinishFromTaste); err != nil {
+		t.Fatal(err)
+	}
+	s1 := sub(g, "Every release is tagged and records what changed since the last one", "each release has a version tag and a change list grouped by type", core.WorkTask)
+	s2 := sub(g, "Whoever deploys gets a guide for each release", "a release's guide lists its migrations, flags and how to roll it back", core.WorkGoal)
+	s3 := sub(g, "Customers get a plain-language release note", "a customer note in plain language is produced for each release", core.WorkTask)
+	s4 := sub(g, "Any agent can produce the notes from the documented workflow", "a fresh agent following the workflow produces both notes", core.WorkTask)
+	if err := l.SetAfter(s4, []string{s2, s3}); err != nil {
+		t.Fatal(err)
+	}
+	s2a := sub(s2, "The guide lists migrations and env changes", "every migration since the last tag is listed", core.WorkTask)
+	s2b := sub(s2, "The guide lists feature flags", "every flag change is listed", core.WorkTask)
+	s2c := sub(s2, "The guide says how to roll back", "the guide has rollback steps", core.WorkTask)
+	s2d := sub(s2, "Guides are published to the team wiki", "the guide is on the wiki", core.WorkTask)
+	if _, err := l.Supersede(s2d, "guides live with each release in the docs"); err != nil {
+		t.Fatal(err)
+	}
+	reshape(g, "added "+s4+": Any agent can produce the notes from the documented workflow", core.AnsweredByPerson)
+	reshape(g, "edited "+s3+": title: Customers get a plain-language release note; done when: a customer note is produced", core.AnsweredByPerson)
+	reshape(s2, "dropped "+s2d+": guides live with each release in the docs", core.AnsweredByPerson)
+	reshape(g, s4+" waits on: "+s2+", "+s3, core.AnsweredByDirector)
+	reshape(s2, "merged "+s2d+" into "+s2c, core.AnsweredByPerson)
+	reshape(g, "split "+s1+": "+s2+" is now a sub-goal holding it", core.AnsweredByPerson)
+	reshape(g, core.ApprovedPrefix+"4 sub-goals", core.AnsweredByPerson)
+	event(t, l, g, core.EventDecision, "Release notes are written in English only for now")
+	walk(t, l, g, core.StateRunning)
+	for _, done := range []string{s1, s2a} {
+		event(t, l, done, core.EventReport, "DONE\nSTATUS: DONE the change list is grouped by type")
+		walk(t, l, done, core.StateDone)
+		event(t, l, done, core.EventJudged, "met: the change list is grouped by type")
+	}
+	walk(t, l, s3, core.StateRunning)
+	if err := l.SetSteps(s3, []core.Step{{N: 1, Text: "Read how past releases were announced", State: core.StepDone}, {N: 2, Text: "Write the customer note template", State: core.StepDoing}}); err != nil {
+		t.Fatal(err)
+	}
+	walk(t, l, s2b, core.StateRunning, core.StateBlocked)
+	event(t, l, s2b, core.EventReport, "BLOCKED\nSTATUS: BLOCKED the flag list lives in another repository")
+	walk(t, l, s2c, core.StateRunning, core.StateNeedsInput)
+	event(t, l, s2c, core.EventQuestion, "Should rollback cover database changes, or only redeploying the previous build?\n- Only redeploying the previous build (recommended)\n- Redeploy and undo database changes")
+	walk(t, l, s4, core.StateRunning, core.StateNeedsInput)
+	event(t, l, s4, core.EventReport, "NEEDS-INPUT\nSTATUS: NEEDS-INPUT which environments does a guide cover?")
+	event(t, l, g, core.EventCourse, "correct: guides live with each release, not in the wiki")
+	event(t, l, g, core.EventNote, "chore: Refreshed dependencies so the flags agent could run its checks")
+
+	// A course change waiting on the person.
+	d := add("Why does sync drop events?", ledger.AddOptions{Kind: core.WorkGoal})
+	if err := l.SetFinish(d, core.FinishDiscovery, core.FinishFromGoal); err != nil {
+		t.Fatal(err)
+	}
+	d1 := sub(d, "The cause is found and explained", "a findings report names the cause, with proof", core.WorkTask)
+	d3 := sub(d, "Compare other sync vendors", "a comparison of two vendors", core.WorkTask)
+	walk(t, l, d1, core.StateDone)
+	reshape(d, "changed course: Sync never drops events | done when: every event lands | finish: complete PR", core.AnsweredByPerson)
+	walk(t, l, d, core.StateRunning, core.StateNeedsInput)
+	actions := []string{
+		coordinator.Action{Kind: coordinator.ActGoal, Work: d, Title: "A rejected batch is retried until delivered", DoneWhen: "a throttled batch is retried until delivered", After: []string{d1}}.Line(),
+		coordinator.Action{Kind: coordinator.ActSupersede, Work: d3, Text: "no longer needed: the vendor is fine once retried"}.Line(),
+		coordinator.Action{Kind: coordinator.ActEdit, Work: d1, DoneWhen: "the report names the cause"}.Line(),
+		coordinator.Action{Kind: coordinator.ActAfter, Work: d3, After: []string{"0badf00d"}}.Line(),
+		coordinator.Action{Kind: coordinator.ActStart, Work: d3}.Line(),
+	}
+	asks := []coordinator.Action{
+		{Kind: coordinator.ActAsk, Text: "Change course?\nNow: Why does sync drop events? | done when: not set | finish: discovery\nProposed: Sync never drops events | done when: every event lands | finish: complete PR\nWhy: the fix is small", Options: []string{"Change course (recommended)", "Keep the goal as it is"}},
+		{Kind: coordinator.ActAsk, Text: "Change the plan?\n" + strings.Join(actions, "\n"), Options: []string{"Apply these changes (recommended)", "Keep the plan as it is"}},
+	}
+	if _, err := l.Ask(d, coordinator.QuestionBody(asks), core.Change{Actions: actions, Title: "Sync never drops events", DoneWhen: "every event lands", Finish: core.FinishPR}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A breakdown proposed in ask mode.
+	a := add("An inspector can get a full audit trail", ledger.AddOptions{Kind: core.WorkGoal})
+	a1 := sub(a, "Every record change keeps who, when, what and why", "a change stores its before and after", core.WorkTask)
+	a2 := sub(a, "An admin can export the trail for a date range", "the export is a PDF and a spreadsheet", core.WorkTask)
+	if err := l.SetAfter(a2, []string{a1}); err != nil {
+		t.Fatal(err)
+	}
+	event(t, l, a, core.EventNote, core.ProposedPrefix+"2 sub-goals")
+
+	// A goal finished at a pull request.
+	p := add("Printed forms keep every signature", ledger.AddOptions{Kind: core.WorkGoal})
+	if err := l.SetFinish(p, core.FinishPR, core.FinishFromPerson); err != nil {
+		t.Fatal(err)
+	}
+	event(t, l, p, core.EventPr, "pull-request https://github.com/metariki/metariki-eqms/pull/512")
+	walk(t, l, p, core.StateDone)
+
+	ids := []string{g, s1, s2, s3, s4, s2a, s2b, s2c, s2d, d, d1, d3, a, a1, a2, p, "0badf00d"}
+	var seen []string
+	check := func(where, sentence string) {
+		t.Helper()
+		seen = append(seen, sentence)
+		for _, id := range ids {
+			if strings.Contains(sentence, id) {
+				t.Errorf("%s names the id %s: %q", where, id, sentence)
+			}
+		}
+		for _, re := range internalTerms {
+			if m := re.FindString(sentence); m != "" {
+				t.Errorf("%s says %q: %q", where, m, sentence)
+			}
+		}
+	}
+
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	var board struct {
+		Goals []struct {
+			Finished *string `json:"finished"`
+		} `json:"goals"`
+	}
+	getJSON(t, api.URL+"/api/board", http.StatusOK, &board)
+	for _, bg := range board.Goals {
+		if bg.Finished != nil {
+			check("finished", *bg.Finished)
+		}
+	}
+	var walkTree func(nodes []treeNode)
+	walkTree = func(nodes []treeNode) {
+		for _, n := range nodes {
+			if n.WhyNotMoving != nil && n.Work.State != core.StateSuperseded {
+				check("why_not_moving of "+n.Work.Title, *n.WhyNotMoving)
+			}
+			walkTree(n.Children)
+		}
+	}
+	for _, goal := range []string{g, s2, d, a, p} {
+		var v struct {
+			NotDoneBecause []string   `json:"not_done_because"`
+			Tree           []treeNode `json:"tree"`
+			NeedsYou       []struct {
+				Change *struct {
+					Lines []string `json:"lines"`
+				} `json:"change"`
+			} `json:"needs_you"`
+		}
+		getJSON(t, api.URL+"/api/goal/"+goal, http.StatusOK, &v)
+		for _, why := range v.NotDoneBecause {
+			check("not_done_because", why)
+		}
+		walkTree(v.Tree)
+		for _, n := range v.NeedsYou {
+			if n.Change != nil {
+				for _, line := range n.Change.Lines {
+					check("a change line", line)
+				}
+			}
+		}
+		var rec struct {
+			Entries []servedEntry `json:"entries"`
+		}
+		getJSON(t, api.URL+"/api/record/"+goal, http.StatusOK, &rec)
+		for _, e := range rec.Entries {
+			if e.Kind != "delivery" {
+				check("the record's "+e.Kind, e.What)
+			}
+		}
+	}
+
+	for _, want := range []string{
+		"Not finished yet: the work isn't reported done, its checks haven't passed, and there's no pull request",
+		"It hasn't been checked against what done means yet",
+		"Proposed, waiting for your approval",
+		"Compare other sync vendors waits on a sub-goal that no longer exists",
+		"Finishes at a complete pull request, as your taste says",
+		"Merged “Guides are published to the team wiki” into “The guide says how to roll back”",
+		"“Any agent can produce the notes from the documented workflow” waits on “Whoever deploys gets a guide for each release” and “Customers get a plain-language release note”",
+		"Reported stuck: the flag list lives in another repository",
+	} {
+		if !slices.Contains(seen, want) {
+			t.Errorf("no sentence %q among %q", want, seen)
+		}
+	}
+
+	gated := add("Gated", ledger.AddOptions{})
+	gate := func() {
+		t.Helper()
+		var v gateView
+		getJSON(t, api.URL+"/api/work/"+gated+"/gate", http.StatusOK, &v)
+		check("the "+v.Gate+" gate", v.Why)
+	}
+	walk(t, l, gated, core.StateRunning, core.StateReview)
+	event(t, l, gated, core.EventReport, "DONE\nSTATUS: DONE")
+	gate()
+	event(t, l, gated, core.EventVerify, "pass\ngo test → 0")
+	gate()
+	event(t, l, gated, core.EventPr, "commit https://example.test/c/1")
+	gate()
+	if _, err := l.SoftDone(gated, false); err != nil {
+		t.Fatal(err)
+	}
+	gate()
 }
