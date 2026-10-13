@@ -121,7 +121,7 @@ two or more feedback entries share the key.
 - `SetDoneWhen` stores a goal's done-when; an empty one clears it, and an unset one reads as absent.
 - `SetFinish` stores its finish line with where it came from: the goal, the repo, taste or the person.
 - A finish line outside discovery, research, local build, complete PR, merged and released, or with no source or a source outside its set, is refused.
-- Each change files a decision event saying what it now is.
+- Each change files a decision event saying what it now is; a done-when's decision carries who set it, the person or the director.
 
 ## Work Can End Abandoned And Says Why
 - `Abandon` moves running, needs-input, review, soft-done or blocked work to abandoned.

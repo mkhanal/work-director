@@ -763,20 +763,21 @@ func (l *Ledger) After(work string) ([]string, error) {
 }
 
 // SetDoneWhen stores what makes the work done; empty text clears it to unset.
-// Either way the change is filed as a decision.
-func (l *Ledger) SetDoneWhen(id, text string) error {
+// Either way the change is filed as a decision made by by.
+func (l *Ledger) SetDoneWhen(id, text, by string) error {
 	text = strings.TrimSpace(text)
 	var stored *string
-	body := "done when: not set"
+	answer := "not set"
 	if text != "" {
 		stored = &text
-		body = "done when: " + text
+		answer = text
 	}
 	return l.inTx(func(tx *sql.Tx) error {
 		if err := updateWork(tx, id, `UPDATE work SET done_when = ? WHERE id = ?`, stored, id); err != nil {
 			return err
 		}
-		_, err := addEvent(tx, id, core.EventDecision, body, now())
+		d := core.Decision{Question: "what makes " + id + " done", Answer: answer, Source: by}
+		_, err := addClaim(tx, id, core.EventDecision, "done when: "+answer, now(), nil, &d)
 		return err
 	})
 }

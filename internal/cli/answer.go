@@ -152,7 +152,7 @@ func (c *Cli) answered(w core.Work, e core.Event, answers []string) ([]string, e
 					return nil, err
 				}
 			}
-			if err := c.Ledger.SetDoneWhen(w.ID, ch.DoneWhen); err != nil {
+			if err := c.Ledger.SetDoneWhen(w.ID, ch.DoneWhen, core.AnsweredByPerson); err != nil {
 				return nil, err
 			}
 			if err := c.Ledger.SetFinish(w.ID, ch.Finish, core.FinishFromPerson); err != nil {

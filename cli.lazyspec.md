@@ -144,6 +144,7 @@ verify event.
 
 ## A Person Reshapes A Goal's Sub-Goals
 - `wd goal edit`, `add`, `drop`, `merge`, `split` and `after` each change the tree as named and record a decision on the goal they change.
+- Each such decision, and each done-when they set, is recorded as made by the person.
 - Dropping supersedes the sub-goal and everything open under it, and stops their sessions.
 - Editing a sub-goal an agent is working on tells the agent.
 
@@ -454,6 +455,7 @@ could not with their work, the bound that ran out, and the work still open.
 ## Wd Goal Supervise Carries Out What The Supervisor Decided
 - A supervisor that has replied since it was last read, and is not working, has the reply's actions carried out once.
 - `SEND` tells a sub-goal's agent as `wd send` does; `GOAL` files a sub-goal under the goal or one of its sub-goals and starts it unless it waits; `START` starts a sub-goal not yet started; `SUPERSEDE` supersedes a sub-goal with why and stops its sessions; `EDIT` and `AFTER` change a sub-goal and tell its agent; `RESOLVE` resolves a concern.
+- The decisions `GOAL`, `SUPERSEDE`, `EDIT` and `AFTER` record, and each done-when they set, are recorded as made by the director.
 - `ASK` files a `question` on the goal, each question with its choices, and moves it to needs-input; `wd answer <goal>` reaches the supervisor.
 - `DONE` files the summary as the goal's `report` and moves the goal to review.
 - `DONE` is refused while a task of the goal is working or not yet started, naming that task.

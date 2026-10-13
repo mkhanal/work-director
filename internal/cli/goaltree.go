@@ -39,9 +39,9 @@ func (c *Cli) goalTree(sub string, rest []string) (bool, error) {
 	return false, nil
 }
 
-// reshaped records text as a decision on the goal w sits under, or on w when
-// it sits under no goal.
-func (c *Cli) reshaped(w core.Work, text string) error {
+// reshaped records text as a decision made by by on the goal w sits under, or
+// on w when it sits under no goal.
+func (c *Cli) reshaped(w core.Work, text, by string) error {
 	on := w.ID
 	if w.Parent != nil {
 		p, err := c.Ledger.Get(*w.Parent)
@@ -52,7 +52,7 @@ func (c *Cli) reshaped(w core.Work, text string) error {
 			on = p.ID
 		}
 	}
-	_, err := c.Ledger.AddEvent(on, core.EventDecision, text)
+	_, err := c.Ledger.Decide(on, text, core.Decision{Question: "the sub-goals of " + on, Answer: text, Source: by}, nil)
 	return err
 }
 
@@ -95,7 +95,7 @@ func (c *Cli) goalEdit(rest []string) error {
 	if err != nil {
 		return err
 	}
-	what, told, err := c.editSubGoal(w, title, doneWhen)
+	what, told, err := c.editSubGoal(w, title, doneWhen, core.AnsweredByPerson)
 	if err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func (c *Cli) goalEdit(rest []string) error {
 // editSubGoal changes open work's title, done-when or both (nil is
 // unchanged), records it on its goal and tells every agent working under it.
 // It returns what changed and who was told.
-func (c *Cli) editSubGoal(w core.Work, title, doneWhen *string) (string, []string, error) {
+func (c *Cli) editSubGoal(w core.Work, title, doneWhen *string, by string) (string, []string, error) {
 	if core.AtRest(w.State) {
 		return "", nil, fail("%s is %s; only open work is edited", w.ID, w.State)
 	}
@@ -128,13 +128,13 @@ func (c *Cli) editSubGoal(w core.Work, title, doneWhen *string) (string, []strin
 		changes = append(changes, "title: "+t)
 	}
 	if doneWhen != nil {
-		if err := c.Ledger.SetDoneWhen(w.ID, *doneWhen); err != nil {
+		if err := c.Ledger.SetDoneWhen(w.ID, *doneWhen, by); err != nil {
 			return "", nil, err
 		}
 		changes = append(changes, "done when: "+textOr(doneWhen, "not set"))
 	}
 	what := strings.Join(changes, "; ")
-	if err := c.reshaped(w, fmt.Sprintf("edited %s: %s", w.ID, what)); err != nil {
+	if err := c.reshaped(w, fmt.Sprintf("edited %s: %s", w.ID, what), by); err != nil {
 		return "", nil, err
 	}
 	told, err := c.tellWorking(w.ID, "Your sub-goal changed. "+what)
@@ -166,7 +166,7 @@ func (c *Cli) goalAddSub(parent core.Work, rest []string) error {
 	if len(rest) != 3 || strings.TrimSpace(rest[2]) == "" || doneWhen == nil || strings.TrimSpace(*doneWhen) == "" {
 		return fail("usage: wd goal add <parent goal> \"<title>\" --done-when \"<done when>\" [--after <id>,<id>] [--split]")
 	}
-	w, err := c.addSubGoal(parent, rest[2], *doneWhen, idList(strOr(c.Args, "after", "")), flag(c.Args, "split"))
+	w, err := c.addSubGoal(parent, rest[2], *doneWhen, idList(strOr(c.Args, "after", "")), flag(c.Args, "split"), core.AnsweredByPerson)
 	if err != nil {
 		return err
 	}
@@ -175,7 +175,7 @@ func (c *Cli) goalAddSub(parent core.Work, rest []string) error {
 
 // addSubGoal files a sub-goal under parent with its done-when and what it
 // waits on, as a goal to plan further when split, and records it.
-func (c *Cli) addSubGoal(parent core.Work, title, doneWhen string, after []string, split bool) (core.Work, error) {
+func (c *Cli) addSubGoal(parent core.Work, title, doneWhen string, after []string, split bool, by string) (core.Work, error) {
 	if !core.IsGoal(parent.Kind) {
 		return core.Work{}, fail("%s is a %s; a sub-goal goes under a goal", parent.ID, parent.Kind)
 	}
@@ -190,7 +190,7 @@ func (c *Cli) addSubGoal(parent core.Work, title, doneWhen string, after []strin
 	if err != nil {
 		return w, err
 	}
-	if err := c.Ledger.SetDoneWhen(w.ID, doneWhen); err != nil {
+	if err := c.Ledger.SetDoneWhen(w.ID, doneWhen, by); err != nil {
 		return w, err
 	}
 	if len(after) > 0 {
@@ -198,7 +198,7 @@ func (c *Cli) addSubGoal(parent core.Work, title, doneWhen string, after []strin
 			return w, fail("%v", err)
 		}
 	}
-	if err := c.reshaped(w, fmt.Sprintf("added %s: %s", w.ID, w.Title)); err != nil {
+	if err := c.reshaped(w, fmt.Sprintf("added %s: %s", w.ID, w.Title), by); err != nil {
 		return w, err
 	}
 	return c.Ledger.Get(w.ID)
@@ -212,7 +212,7 @@ func (c *Cli) goalDrop(rest []string) error {
 	if err != nil {
 		return err
 	}
-	gone, err := c.supersedeSubGoal(w, strings.Join(rest[2:], " "))
+	gone, err := c.supersedeSubGoal(w, strings.Join(rest[2:], " "), core.AnsweredByPerson)
 	if err != nil {
 		return err
 	}
@@ -221,7 +221,7 @@ func (c *Cli) goalDrop(rest []string) error {
 
 // supersedeSubGoal stops every session under w, supersedes it and what is open
 // under it with why, and records it. It returns the work superseded.
-func (c *Cli) supersedeSubGoal(w core.Work, why string) ([]core.Work, error) {
+func (c *Cli) supersedeSubGoal(w core.Work, why, by string) ([]core.Work, error) {
 	why = strings.TrimSpace(why)
 	if err := c.stopUnder(w.ID); err != nil {
 		return nil, err
@@ -230,7 +230,7 @@ func (c *Cli) supersedeSubGoal(w core.Work, why string) ([]core.Work, error) {
 	if err != nil {
 		return nil, fail("%v", err)
 	}
-	return gone, c.reshaped(w, fmt.Sprintf("dropped %s: %s", w.ID, why))
+	return gone, c.reshaped(w, fmt.Sprintf("dropped %s: %s", w.ID, why), by)
 }
 
 func (c *Cli) goalMerge(rest []string) error {
@@ -266,10 +266,10 @@ func (c *Cli) goalMerge(rest []string) error {
 			parts = append(parts, *d)
 		}
 	}
-	if err := c.Ledger.SetDoneWhen(keep.ID, strings.Join(parts, "; ")); err != nil {
+	if err := c.Ledger.SetDoneWhen(keep.ID, strings.Join(parts, "; "), core.AnsweredByPerson); err != nil {
 		return err
 	}
-	if err := c.reshaped(keep, fmt.Sprintf("merged %s into %s", other.ID, keep.ID)); err != nil {
+	if err := c.reshaped(keep, fmt.Sprintf("merged %s into %s", other.ID, keep.ID), core.AnsweredByPerson); err != nil {
 		return err
 	}
 	if keep, err = c.Ledger.Get(keep.ID); err != nil {
@@ -326,7 +326,7 @@ func (c *Cli) goalSplit(rest []string) error {
 		return err
 	}
 	if t.DoneWhen != nil {
-		if err := c.Ledger.SetDoneWhen(g.ID, *t.DoneWhen); err != nil {
+		if err := c.Ledger.SetDoneWhen(g.ID, *t.DoneWhen, core.AnsweredByPerson); err != nil {
 			return err
 		}
 	}
@@ -346,7 +346,7 @@ func (c *Cli) goalSplit(rest []string) error {
 	if err := c.Ledger.Reparent(t.ID, g.ID); err != nil {
 		return err
 	}
-	if err := c.reshaped(t, fmt.Sprintf("split %s: %s is now a sub-goal holding it", t.ID, g.ID)); err != nil {
+	if err := c.reshaped(t, fmt.Sprintf("split %s: %s is now a sub-goal holding it", t.ID, g.ID), core.AnsweredByPerson); err != nil {
 		return err
 	}
 	if g, err = c.Ledger.Get(g.ID); err != nil {
@@ -367,7 +367,7 @@ func (c *Cli) goalAfter(rest []string) error {
 	if len(rest) == 3 {
 		waits = idList(rest[2])
 	}
-	what, err := c.orderSubGoal(w, waits)
+	what, err := c.orderSubGoal(w, waits, core.AnsweredByPerson)
 	if err != nil {
 		return err
 	}
@@ -376,7 +376,7 @@ func (c *Cli) goalAfter(rest []string) error {
 
 // orderSubGoal replaces what w waits on and records it; it returns the order
 // as read.
-func (c *Cli) orderSubGoal(w core.Work, waits []string) (string, error) {
+func (c *Cli) orderSubGoal(w core.Work, waits []string, by string) (string, error) {
 	if err := c.Ledger.SetAfter(w.ID, waits); err != nil {
 		return "", fail("%v", err)
 	}
@@ -384,7 +384,7 @@ func (c *Cli) orderSubGoal(w core.Work, waits []string) (string, error) {
 	if len(waits) > 0 {
 		what = strings.Join(waits, ", ")
 	}
-	return what, c.reshaped(w, fmt.Sprintf("%s waits on: %s", w.ID, what))
+	return what, c.reshaped(w, fmt.Sprintf("%s waits on: %s", w.ID, what), by)
 }
 
 // proposed reports whether goal's latest breakdown waits for approval.

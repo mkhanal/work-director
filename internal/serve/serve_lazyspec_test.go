@@ -1702,7 +1702,7 @@ func newReleaseTree(t *testing.T, l *ledger.Ledger) releaseTree {
 	r.top = add("Release notes", ledger.AddOptions{Kind: core.WorkGoal})
 	walk(t, l, r.top, core.StateRunning)
 	r.guide = add("Deployment guide", ledger.AddOptions{Kind: core.WorkGoal, Parent: &r.top})
-	if err := l.SetDoneWhen(r.guide, "a guide covers rollback"); err != nil {
+	if err := l.SetDoneWhen(r.guide, "a guide covers rollback", core.AnsweredByDirector); err != nil {
 		t.Fatal(err)
 	}
 	r.collector = add("Collector", ledger.AddOptions{Parent: &r.guide})
@@ -1856,7 +1856,7 @@ func aGoalServesWhatDoneMeansAndWhyItIsNotDoneYet(t *testing.T) {
 	s := newTestServer(t)
 	l := s.ledger
 	r := newReleaseTree(t, l)
-	if err := l.SetDoneWhen(r.top, "the notes are out"); err != nil {
+	if err := l.SetDoneWhen(r.top, "the notes are out", core.AnsweredByDirector); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.SetFinish(r.top, core.FinishPR, core.FinishFromTaste); err != nil {
@@ -2017,6 +2017,12 @@ func aGoalServesItsRecord(t *testing.T) {
 	l := s.ledger
 	r := newReleaseTree(t, l)
 	event(t, l, r.top, core.EventDecision, "use the changelog as the source")
+	if err := l.SetDoneWhen(r.note, "customers read what changed", core.AnsweredByPerson); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Decide(r.top, "added "+r.note+": Customer note", core.Decision{Question: "the sub-goals of " + r.top, Answer: "added " + r.note + ": Customer note", Source: core.AnsweredByDirector}, nil); err != nil {
+		t.Fatal(err)
+	}
 	if err := l.SetFinish(r.top, core.FinishPR, core.FinishFromPerson); err != nil {
 		t.Fatal(err)
 	}
@@ -2044,7 +2050,7 @@ func aGoalServesItsRecord(t *testing.T) {
 		Entries []servedEntry `json:"entries"`
 	}
 	getJSON(t, api.URL+"/api/record/"+r.top, http.StatusOK, &rec)
-	want := servedSummary{Decisions: 4, Yours: 2, Course: 1, Corrections: 1, Questions: 2, AnsweredByDirector: 1, Chores: 1, Judged: 1}
+	want := servedSummary{Decisions: 6, Yours: 3, Course: 1, Corrections: 1, Questions: 2, AnsweredByDirector: 1, Chores: 1, Judged: 1}
 	if rec.Summary != want {
 		t.Fatalf("summary = %+v, want %+v", rec.Summary, want)
 	}
@@ -2052,7 +2058,7 @@ func aGoalServesItsRecord(t *testing.T) {
 	for _, e := range rec.Entries {
 		kinds = append(kinds, e.Kind)
 	}
-	wantKinds := []string{"delivery", "chore", "judged", "report", "answer", "question", "answer", "course", "decision", "finish", "decision", "superseded", "question", "decision", "asked"}
+	wantKinds := []string{"delivery", "chore", "judged", "report", "answer", "question", "answer", "course", "decision", "finish", "decision", "decision", "decision", "superseded", "question", "decision", "asked"}
 	if !slices.Equal(kinds, wantKinds) {
 		t.Fatalf("kinds newest first = %q, want %q", kinds, wantKinds)
 	}
@@ -2071,6 +2077,8 @@ func aGoalServesItsRecord(t *testing.T) {
 		{"decision", "use the changelog as the source", "Release notes (top)", "you"},
 		{"finish", "finishes at: complete PR (from person)", "Release notes (top)", "you"},
 		{"decision", "done when: a guide covers rollback", "Deployment guide", "director"},
+		{"decision", "done when: customers read what changed", "Customer note", "you"},
+		{"decision", "added " + r.note + ": Customer note", "Release notes (top)", "director"},
 		{"decision", "group by type", "Deployment guide › Collector", "director"},
 		{"course", "correct: narrow it to rollback", "Release notes (top)", "director"},
 		{"answer", "formal", "Customer note", "you"},

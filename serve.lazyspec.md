@@ -105,6 +105,7 @@ JSON message per line to stdout:
 ## A Goal Serves Its Record
 - `GET /api/record/<goal>` and the `record` method return a summary of counts and one entry per decision, finish choice, course check, question, answer, judgement, chore, report, delivery and supersession under the goal, newest first, ending with what the person first asked.
 - Each entry says when, what, where in the tree, and whether the person or the director made it.
+- A decision filed with its maker is by that maker: a reshape or done-when a person made reads `you`, one the supervisor made reads `director`.
 
 ## A Running Session's Question Puts Its Work In Needs You
 - While serving, a running work item whose session ends on a question has the question filed as a `question` event and moves to needs-input within seconds.

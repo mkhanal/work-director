@@ -1237,7 +1237,7 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project, propose bool) ([]core
 			return nil, err
 		}
 		if o.DoneWhen != "" {
-			if err := c.Ledger.SetDoneWhen(w.ID, o.DoneWhen); err != nil {
+			if err := c.Ledger.SetDoneWhen(w.ID, o.DoneWhen, core.AnsweredByDirector); err != nil {
 				return nil, err
 			}
 		}

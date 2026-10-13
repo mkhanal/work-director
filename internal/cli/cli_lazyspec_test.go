@@ -4777,6 +4777,20 @@ func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
 	if decided := f.bodies(t, o.goal, core.EventDecision); !slices.Contains(decided, "dropped "+unneeded.ID+": the skill already does it") {
 		t.Fatalf("decisions on the goal = %q, want the supersede recorded", decided)
 	}
+	// What the supervisor reshaped is the director's decision.
+	reshapes := 0
+	for _, e := range append(f.events(t, o.goal), f.events(t, added.ID)...) {
+		if e.Kind != core.EventDecision || !(strings.HasPrefix(e.Body, "added ") || strings.HasPrefix(e.Body, "dropped ") || strings.HasPrefix(e.Body, "done when: ")) {
+			continue
+		}
+		reshapes++
+		if e.Decision == nil || e.Decision.Source != core.AnsweredByDirector {
+			t.Errorf("decision %q = %+v, want it made by the director", e.Body, e.Decision)
+		}
+	}
+	if reshapes != 3 {
+		t.Errorf("%d reshape decisions, want the add, its done-when and the supersede", reshapes)
+	}
 
 	// A started sub-goal is superseded too, its agent stopped; edits and order reach the agent.
 	o.say(t, supervisor, "ACTIONS:", "EDIT "+o.a+": done when: impacts are listed per release", "AFTER "+o.a+": "+o.b)
@@ -5550,7 +5564,7 @@ func TestAnAgentsBriefCarriesWhyItsSubGoalExists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := l.SetDoneWhen(goal, "the team knows why the cache misses"); err != nil {
+	if err := l.SetDoneWhen(goal, "the team knows why the cache misses", core.AnsweredByDirector); err != nil {
 		t.Fatal(err)
 	}
 	l.Close()
@@ -5687,6 +5701,17 @@ func TestAPersonReshapesAGoalsSubGoals(t *testing.T) {
 	for _, want := range []string{"added " + c, "edited " + o.a, c + " waits on: none", c + " waits on: " + o.a, "split " + c, "merged " + d + " into " + g, "dropped " + g + ": deployers read the wiki instead", "dropped " + o.a} {
 		if !strings.Contains(decisions, want) {
 			t.Errorf("decisions on the goal miss %q:\n%s", want, decisions)
+		}
+	}
+	// Each reshape and each done-when it set is the person's decision.
+	for _, id := range []string{o.goal, o.a, c, g, d} {
+		for _, e := range f.events(t, id) {
+			if e.Kind != core.EventDecision {
+				continue
+			}
+			if e.Decision == nil || e.Decision.Source != core.AnsweredByPerson {
+				t.Errorf("decision %q on %s = %+v, want it made by the person", e.Body, id, e.Decision)
+			}
 		}
 	}
 }

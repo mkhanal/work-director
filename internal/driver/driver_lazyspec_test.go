@@ -714,7 +714,7 @@ func TestARunJudgesEachFinishedSubGoalAgainstItsDoneWhen(t *testing.T) {
 	h := newHarness(t, 4)
 	met, missed, unjudged, plain := h.tasks[0], h.tasks[1], h.tasks[2], h.tasks[3]
 	for _, w := range []core.Work{met, missed, unjudged} {
-		if err := h.l.SetDoneWhen(w.ID, "the tag "+w.Title+" exists"); err != nil {
+		if err := h.l.SetDoneWhen(w.ID, "the tag "+w.Title+" exists", core.AnsweredByDirector); err != nil {
 			t.Fatalf("done-when: %v", err)
 		}
 	}

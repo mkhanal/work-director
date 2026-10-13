@@ -551,7 +551,7 @@ func (c *Cli) applyAction(goal core.Work, p *project.Project, a coordinator.Acti
 				return err
 			}
 		}
-		w, err := c.addSubGoal(parent, a.Title, a.DoneWhen, a.After, a.Split)
+		w, err := c.addSubGoal(parent, a.Title, a.DoneWhen, a.After, a.Split, core.AnsweredByDirector)
 		if err != nil {
 			return err
 		}
@@ -587,7 +587,7 @@ func (c *Cli) applyAction(goal core.Work, p *project.Project, a coordinator.Acti
 		if err != nil {
 			return err
 		}
-		_, err = c.supersedeSubGoal(t, a.Text)
+		_, err = c.supersedeSubGoal(t, a.Text, core.AnsweredByDirector)
 		return err
 	case coordinator.ActEdit:
 		t, err := child(a.Work)
@@ -601,14 +601,14 @@ func (c *Cli) applyAction(goal core.Work, p *project.Project, a coordinator.Acti
 		if a.DoneWhen != "" {
 			doneWhen = &a.DoneWhen
 		}
-		_, _, err = c.editSubGoal(t, title, doneWhen)
+		_, _, err = c.editSubGoal(t, title, doneWhen, core.AnsweredByDirector)
 		return err
 	case coordinator.ActAfter:
 		t, err := child(a.Work)
 		if err != nil {
 			return err
 		}
-		what, err := c.orderSubGoal(t, a.After)
+		what, err := c.orderSubGoal(t, a.After, core.AnsweredByDirector)
 		if err != nil {
 			return err
 		}

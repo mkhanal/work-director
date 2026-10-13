@@ -505,7 +505,7 @@ func TestLedger(t *testing.T) {
 		if goal.DoneWhen != nil || goal.FinishLine != nil || goal.FinishSource != nil {
 			t.Fatalf("new goal = %+v, want done-when and finish line absent", goal)
 		}
-		wantNoErr(t, l.SetDoneWhen(goal.ID, "each release has a tag and a change list"))
+		wantNoErr(t, l.SetDoneWhen(goal.ID, "each release has a tag and a change list", core.AnsweredByDirector))
 		wantNoErr(t, l.SetFinish(goal.ID, "complete PR", core.FinishFromTaste))
 		got, err := l.Get(goal.ID)
 		wantNoErr(t, err)
@@ -515,7 +515,7 @@ func TestLedger(t *testing.T) {
 		if got.FinishLine == nil || *got.FinishLine != "complete PR" || got.FinishSource == nil || *got.FinishSource != core.FinishFromTaste {
 			t.Fatalf("finish = %v from %v, want complete PR from taste", got.FinishLine, got.FinishSource)
 		}
-		wantNoErr(t, l.SetDoneWhen(goal.ID, ""))
+		wantNoErr(t, l.SetDoneWhen(goal.ID, "", core.AnsweredByPerson))
 		if got, err = l.Get(goal.ID); err != nil || got.DoneWhen != nil {
 			t.Fatalf("done when after clearing = %v (%v), want absent", got.DoneWhen, err)
 		}
@@ -528,9 +528,12 @@ func TestLedger(t *testing.T) {
 			t.Fatalf("finish after refusals = %v (%v), want it unchanged", got.FinishLine, err)
 		}
 		dec := core.EventDecision
-		var bodies []string
+		var bodies, makers []string
 		for _, e := range allEvents(t, l, goal.ID, &dec) {
 			bodies = append(bodies, e.Body)
+			if e.Decision != nil {
+				makers = append(makers, e.Decision.Source)
+			}
 		}
 		want := []string{
 			"done when: each release has a tag and a change list",
@@ -539,6 +542,10 @@ func TestLedger(t *testing.T) {
 		}
 		if !slices.Equal(bodies, want) {
 			t.Fatalf("decisions = %q, want %q", bodies, want)
+		}
+		// A done-when decision carries who set it.
+		if !slices.Equal(makers, []string{core.AnsweredByDirector, core.AnsweredByPerson}) {
+			t.Fatalf("done-when makers = %q, want director then person", makers)
 		}
 	})
 
