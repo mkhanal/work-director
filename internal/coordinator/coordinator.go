@@ -7,6 +7,8 @@ package coordinator
 import (
 	"fmt"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 
 	"wd/internal/core"
@@ -15,9 +17,19 @@ import (
 	"wd/internal/runner"
 )
 
+// Chain is a goal with what it serves: its ancestors, top first, and its
+// siblings.
+type Chain struct {
+	// Ancestors are the goals above it, top goal first; empty for a top goal.
+	Ancestors []core.Work
+	// Siblings are the goal's siblings, with their states and done-whens.
+	Siblings []core.Work
+}
+
 // GoalPlanBrief is the planning model's brief: analyse the goal and reply
-// with only a headed task list, editing nothing.
-func GoalPlanBrief(goal core.Work, p *project.Project, kit project.Toolkit) (string, error) {
+// with only its outcomes, one level down, editing nothing. Only a top goal is
+// asked where it finishes; a sub-goal finishes where its top goal does.
+func GoalPlanBrief(goal core.Work, chain Chain, p *project.Project, kit project.Toolkit, past []core.FinishLine) (string, error) {
 	checks, err := project.Checks(p, kit)
 	if err != nil {
 		return "", err
@@ -30,29 +42,77 @@ func GoalPlanBrief(goal core.Work, p *project.Project, kit project.Toolkit) (str
 		}
 		verify = strings.Join(quoted, ", ")
 	}
-	specs := "none; no task adds a specification convention"
+	specs := "none; no outcome adds a specification convention"
 	if len(kit.Specs) > 0 {
-		specs = strings.Join(kit.Specs, ", ") + "; a task changing what the software does changes its specification the repository's own way"
+		specs = strings.Join(kit.Specs, ", ") + "; an outcome changing what the software does changes its specification the repository's own way"
 	}
 	detail := ""
 	if goal.Detail != "" {
 		detail = "\n" + goal.Detail
 	}
-	return fmt.Sprintf(`You are the director's planning model for the project %s (%s).
+	finishShape, finishRule, serves := "", "", ""
+	if len(chain.Ancestors) == 0 {
+		setting := "not set"
+		if p.Finish != nil {
+			setting = string(*p.Finish)
+		}
+		pastLines := "none yet"
+		if len(past) > 0 {
+			names := make([]string, len(past))
+			for i, f := range past {
+				names[i] = string(f)
+			}
+			pastLines = strings.Join(names, ", ")
+		}
+		finishShape = "FINISH: <discovery | research | local build | complete PR | merged | released> | from: <goal | repo | taste>\n"
+		finishRule = fmt.Sprintf(`
+FINISH says what the goal hands back and where that came from: the goal's own wording ("investigate…", "ship…"), else the repository (its mode, its finish setting: %s; past goals finished at: %s), else the person's taste. If these disagree or none applies, write FINISH: ? instead, followed by one "- <line>" per choice, your recommendation first and marked (recommended).`, setting, pastLines)
+	} else {
+		var b strings.Builder
+		b.WriteString("\nThis goal serves the goals above it, top first:\n")
+		for i, a := range chain.Ancestors {
+			b.WriteString("- " + a.Title + "; done when: " + orNotSet(a.DoneWhen))
+			if i == 0 {
+				finish := "not set"
+				if a.FinishLine != nil {
+					finish = string(*a.FinishLine)
+				}
+				b.WriteString("; finishes at: " + finish)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("Its siblings:\n")
+		if len(chain.Siblings) == 0 {
+			b.WriteString("- none\n")
+		}
+		for _, sib := range chain.Siblings {
+			b.WriteString(fmt.Sprintf("- [%s] %s; done when: %s\n", sib.State, sib.Title, orNotSet(sib.DoneWhen)))
+		}
+		serves = b.String()
+	}
+	return fmt.Sprintf(`You are the director's planning model for the project %s (%s). Mode: %s.
 
-Analyse this goal and decompose it into concrete, independent tasks. Read the repo to ground yourself, but do NOT edit, create or open any files; analysis only. Reply with ONLY the task list in exactly this shape — one line per task, grouped under a heading:
+Analyse this goal and break it into the outcomes that make it done, one level down. Read the repo to ground yourself, but do NOT edit, create or open any files; analysis only. Reply with ONLY this shape:
 
-## <heading>
-- [ ] <task title>
-- [ ] <task title>
+NAME: <the goal's name in a few words>
+%s- <an outcome a person would say, never a file or a code verb>
+  done when: <one or two sentences checkable from a report, verify output or a PR>
+  after: <numbers of earlier outcomes it waits on>      (optional)
+  split: yes                                             (optional: too big for one agent)
 
-Each task is a change to the repository, small enough that one session can finish it. The director runs the checks itself after each task reports: %s. So no task only runs checks, plans, sets up a worktree or finds out what the goal is.
-Specifications this repository keeps: %s.
-Open the plan with one line NAME: <the goal's name in a few words, as a person would title it>.
-If the goal does not say what should change, reply with only one line, ASK: <the question that would settle it>, and no tasks.
-
+Each title is an outcome, not a change. Every outcome has a done-when. Give 1 to 7 outcomes, each about one agent session; a goal one agent can finish gets exactly one outcome. No outcome may only set up, install, land, tag or run checks: the director does those itself, and runs the checks after each outcome reports: %s.
+Specifications this repository keeps: %s.%s
+If the goal does not say what should change, reply with only one line, ASK: <the question that would settle it>, and no outcomes.
+%s
 The goal: %s%s`,
-		p.Name, p.Path, verify, specs, goal.Title, detail), nil
+		p.Name, p.Path, p.Mode, finishShape, verify, specs, finishRule, serves, goal.Title, detail), nil
+}
+
+func orNotSet(s *string) string {
+	if s == nil || *s == "" {
+		return "not set"
+	}
+	return *s
 }
 
 // PlanName is the name a planner gave the goal, if it gave one.
@@ -83,36 +143,131 @@ func PlanQuestion(texts []string) (string, bool) {
 	return "", false
 }
 
-// PlanTask is one parsed planner reply line: the heading group it sits
-// under and its title.
-type PlanTask struct {
-	Heading string
-	Title   string
-}
-
-var headingRe = regexp.MustCompile(`^##\s+(.+)`)
 var planAskRe = regexp.MustCompile(`^\s*ASK:\s*(\S.*)`)
 var planNameRe = regexp.MustCompile(`^\s*\**NAME:\**\s*(\S.*)`)
-var taskRe = regexp.MustCompile(`^[-*]\s+\[[ xX]\]\s*(.+)`)
+var planFinishRe = regexp.MustCompile(`^\s*\**FINISH:\**\s*(.*)`)
+var outcomeRe = regexp.MustCompile(`^[-*]\s+(?:\[[ xX]\]\s*)?(\S.*)`)
+var outcomeFieldRe = regexp.MustCompile(`(?i)^\s*(done when|after|split):\s*(.*)`)
+var numberRe = regexp.MustCompile(`\d+`)
 
-// ParsePlan parses the planner session's reply into tasks. Heading lines
-// open a group; `- [ ]` lines are tasks.
-func ParsePlan(texts []string) []PlanTask {
-	const noHeading = "(no heading)"
-	var out []PlanTask
-	heading := noHeading
-	for _, text := range texts {
-		for _, line := range strings.Split(text, "\n") {
-			if h := headingRe.FindStringSubmatch(line); h != nil {
-				heading = strings.TrimSpace(h[1])
-				continue
+// PlanOutcome is one outcome of a plan reply: a sub-goal to file.
+type PlanOutcome struct {
+	Title    string
+	DoneWhen string
+	// After are the 1-based positions of earlier outcomes in the same reply
+	// that this one waits on.
+	After []int
+	// Split is an outcome to be planned further before an agent takes it.
+	Split bool
+}
+
+// ParseOutcomes reads the outcomes of the planner's reply, from its last
+// NAME line on when it has one. A FINISH: ? line's choices are not outcomes.
+func ParseOutcomes(texts []string) []PlanOutcome {
+	reply := strings.Join(texts, "\n")
+	lines := strings.Split(reply, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if planNameRe.MatchString(lines[i]) {
+			lines = lines[i+1:]
+			break
+		}
+	}
+	var out []PlanOutcome
+	choosing := false
+	for _, line := range lines {
+		if m := planFinishRe.FindStringSubmatch(line); m != nil {
+			choosing = strings.HasPrefix(strings.TrimSpace(m[1]), "?")
+			continue
+		}
+		if m := outcomeRe.FindStringSubmatch(line); m != nil {
+			title := strings.Trim(strings.TrimSpace(m[1]), "*")
+			if choosing {
+				if _, ok := finishChoice(title); ok {
+					continue
+				}
 			}
-			if t := taskRe.FindStringSubmatch(line); t != nil {
-				out = append(out, PlanTask{Heading: heading, Title: strings.TrimSpace(t[1])})
+			choosing = false
+			out = append(out, PlanOutcome{Title: title})
+			continue
+		}
+		f := outcomeFieldRe.FindStringSubmatch(line)
+		if f == nil || len(out) == 0 {
+			continue
+		}
+		o := &out[len(out)-1]
+		value := strings.TrimSpace(f[2])
+		switch strings.ToLower(f[1]) {
+		case "done when":
+			o.DoneWhen = value
+		case "split":
+			o.Split = strings.EqualFold(value, "yes") || strings.EqualFold(value, "true")
+		case "after":
+			for _, n := range numberRe.FindAllString(value, -1) {
+				i, err := strconv.Atoi(n)
+				if err != nil || i < 1 || i >= len(out) || slices.Contains(o.After, i) {
+					continue
+				}
+				o.After = append(o.After, i)
 			}
 		}
 	}
 	return out
+}
+
+// finishChoice reads one offered finish line, marked (recommended) or not.
+func finishChoice(text string) (core.FinishLine, bool) {
+	bare := strings.TrimSpace(strings.Replace(text, "(recommended)", "", 1))
+	f, err := core.ParseFinishLine(bare)
+	return f, err == nil
+}
+
+// PlanFinish is where the planner says a top goal finishes.
+type PlanFinish struct {
+	Line   core.FinishLine
+	Source core.FinishSource
+	// Unsure is a planner that could not settle it; Choices are the lines it
+	// offers, its recommendation first.
+	Unsure  bool
+	Choices []string
+}
+
+// ParseFinish reads the last FINISH line of the planner's reply. A line or
+// source outside its set is no finish at all.
+func ParseFinish(texts []string) (PlanFinish, bool) {
+	var found PlanFinish
+	ok := false
+	lines := strings.Split(strings.Join(texts, "\n"), "\n")
+	for i, line := range lines {
+		m := planFinishRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		value := strings.TrimSpace(m[1])
+		if strings.HasPrefix(value, "?") {
+			found, ok = PlanFinish{Unsure: true, Choices: []string{}}, true
+			for _, next := range lines[i+1:] {
+				c := outcomeRe.FindStringSubmatch(next)
+				if c == nil {
+					break
+				}
+				if _, isLine := finishChoice(c[1]); !isLine {
+					break
+				}
+				found.Choices = append(found.Choices, strings.TrimSpace(c[1]))
+			}
+			continue
+		}
+		lineText, from, _ := strings.Cut(value, "|")
+		fl, lerr := core.ParseFinishLine(lineText)
+		src, hasFrom := strings.CutPrefix(strings.TrimSpace(from), "from:")
+		fs, serr := core.ParseFinishSource(strings.ToLower(strings.TrimSpace(src)))
+		if lerr != nil || !hasFrom || serr != nil || fs == core.FinishFromPerson {
+			found, ok = PlanFinish{}, false
+			continue
+		}
+		found, ok = PlanFinish{Line: fl, Source: fs}, true
+	}
+	return found, ok
 }
 
 var nonTokenRe = regexp.MustCompile(`[^a-z0-9\s-]`)

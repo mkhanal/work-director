@@ -1089,7 +1089,7 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 	if err != nil {
 		return nil, err
 	}
-	planBrief, err := coordinator.GoalPlanBrief(goal, p, kit)
+	planBrief, err := coordinator.GoalPlanBrief(goal, coordinator.Chain{}, p, kit, nil)
 	if err != nil {
 		return nil, fail("%v", err)
 	}
@@ -1106,7 +1106,7 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 	if _, err := c.Ledger.AddEvent(goal.ID, core.EventSpawn, coordinator.PlanEvent(h)); err != nil {
 		return nil, err
 	}
-	tasks, name, err := awaitPlan(rn, h, time.Duration(wait)*time.Second)
+	outcomes, name, err := awaitPlan(rn, h, time.Duration(wait)*time.Second)
 	// The planning session answers once; whatever it said, it is not left running.
 	if serr := runner.Dismiss(rn, h); serr != nil && err == nil {
 		err = serr
@@ -1114,18 +1114,15 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 	if err != nil {
 		return nil, err
 	}
-	if tasks == nil {
-		return nil, fail("plan session %s produced no task list", h.Session)
+	if outcomes == nil {
+		return nil, fail("plan session %s produced no outcomes", h.Session)
 	}
 	if err := c.nameGoal(goal, name); err != nil {
 		return nil, err
 	}
-	rows := make([]core.Work, 0, len(tasks))
-	for _, t := range tasks {
-		w, err := c.Ledger.Add(goal.Project, t.Title, ledger.AddOptions{
-			Parent:  &goal.ID,
-			Heading: &t.Heading,
-		})
+	rows := make([]core.Work, 0, len(outcomes))
+	for _, o := range outcomes {
+		w, err := c.Ledger.Add(goal.Project, o.Title, ledger.AddOptions{Parent: &goal.ID})
 		if err != nil {
 			return nil, err
 		}
@@ -1142,16 +1139,16 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 	return rows, nil
 }
 
-// awaitPlan reads the planning session until it lists tasks or asks a
-// question; nil tasks is a wait that ran out.
-func awaitPlan(rn runner.Runner, h runner.Handle, wait time.Duration) ([]coordinator.PlanTask, string, error) {
+// awaitPlan reads the planning session until it lists outcomes or asks a
+// question; nil outcomes is a wait that ran out.
+func awaitPlan(rn runner.Runner, h runner.Handle, wait time.Duration) ([]coordinator.PlanOutcome, string, error) {
 	deadline := time.Now().Add(wait)
 	for time.Now().Before(deadline) {
 		texts, err := runner.Transcript(rn, h)
 		if err != nil {
 			return nil, "", err
 		}
-		if ts := coordinator.ParsePlan(texts); len(ts) > 0 {
+		if ts := coordinator.ParseOutcomes(texts); len(ts) > 0 {
 			name, _ := coordinator.PlanName(texts)
 			return ts, name, nil
 		}

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"wd/internal/core"
 	"wd/internal/taste"
 )
 
@@ -24,18 +25,21 @@ const (
 // Project is one managed repo: where it is, which runner drives it, and how
 // it is verified.
 type Project struct {
-	Name             string   `json:"name"`
-	Path             string   `json:"path"`
-	Runner           string   `json:"runner"`
-	Agent            *string  `json:"agent,omitempty"`
-	Model            *string  `json:"model,omitempty"`
-	Mode             Mode     `json:"mode"`
-	Stack            []string `json:"stack"`
-	Workflows        []string `json:"workflows"`
-	Verify           []string `json:"verify"`
-	InstructionsFile string   `json:"instructionsFile"`
-	DefaultBranch    string   `json:"defaultBranch"`
-	Roadmap          string   `json:"roadmap"`
+	Name   string  `json:"name"`
+	Path   string  `json:"path"`
+	Runner string  `json:"runner"`
+	Agent  *string `json:"agent,omitempty"`
+	Model  *string `json:"model,omitempty"`
+	Mode   Mode    `json:"mode"`
+	// Finish is where this repository's goals finish unless a goal says
+	// otherwise; nil when the file does not say.
+	Finish           *core.FinishLine `json:"finish,omitempty"`
+	Stack            []string         `json:"stack"`
+	Workflows        []string         `json:"workflows"`
+	Verify           []string         `json:"verify"`
+	InstructionsFile string           `json:"instructionsFile"`
+	DefaultBranch    string           `json:"defaultBranch"`
+	Roadmap          string           `json:"roadmap"`
 	// Policy restricts which runners each role may reach for this project, keyed
 	// by role name. It narrows the machine's global policy and never widens it:
 	// a project that forbids a provider cannot re-allow it here, or closing it
@@ -144,6 +148,13 @@ func ParseProject(text, path string) (*Project, error) {
 	if model != "" {
 		p.Model = &model
 	}
+	if raw := fields["finish"]; raw != "" {
+		f, err := core.ParseFinishLine(raw)
+		if err != nil {
+			return nil, &ProjectError{Path: path, Detail: err.Error()}
+		}
+		p.Finish = &f
+	}
 	return p, nil
 }
 
@@ -169,6 +180,7 @@ path: %s
 runner: %s
 mode: %s
 model: %s
+finish: %s
 stack: %s
 workflows: %s
 verify: %s
@@ -176,7 +188,7 @@ instructions_file: %s
 default_branch: %s
 ---
 %s
-`, path, orDefault(o.Runner, "claude"), orDefault(o.Mode, "auto"), orDefault(o.Model, ""),
+`, path, orDefault(o.Runner, "claude"), orDefault(o.Mode, "auto"), orDefault(o.Model, ""), orDefault(o.Finish, ""),
 		listv(orDefaultSlice(o.Stack)), listv(orDefaultSlice(o.Workflows)), listv(orDefaultSlice(o.Verify)),
 		orDefault(o.InstructionsFile, "AGENTS.md"), orDefault(o.DefaultBranch, "main"),
 		orDefault(o.Roadmap, "Roadmap, most important first. The director reads this file; it never edits the repo it describes."))
@@ -188,6 +200,7 @@ type NewProjectOptions struct {
 	Runner           string
 	Mode             string
 	Model            string
+	Finish           string
 	Stack            []string
 	Workflows        []string
 	Verify           []string

@@ -176,6 +176,28 @@ const (
 	FinishFromPerson FinishSource = "person"
 )
 
+// FinishLine is what a goal hands back when it is done.
+type FinishLine string
+
+const (
+	// FinishDiscovery is a findings report; no code changes.
+	FinishDiscovery FinishLine = "discovery"
+	// FinishResearch is a written comparison and a pick; no code changes.
+	FinishResearch FinishLine = "research"
+	// FinishLocalBuild is built and runnable, with how to run it; no PR.
+	FinishLocalBuild FinishLine = "local build"
+	// FinishPR is a PR open with checks green and the done-when met.
+	FinishPR       FinishLine = "complete PR"
+	FinishMerged   FinishLine = "merged"
+	FinishReleased FinishLine = "released"
+)
+
+// ChangesCode reports whether reaching f changes the repository's code.
+func (f FinishLine) ChangesCode() bool { return f != FinishDiscovery && f != FinishResearch }
+
+// NeedsPR reports whether reaching f takes a pull request.
+func (f FinishLine) NeedsPR() bool { return f == FinishPR || f == FinishMerged || f == FinishReleased }
+
 // StepState is where one of an agent's own steps stands.
 type StepState string
 
@@ -248,7 +270,7 @@ type Work struct {
 	DoneWhen *string `json:"-"`
 	// FinishLine is what is handed back, and FinishSource where that came
 	// from; both are nil until decided, and set together.
-	FinishLine   *string       `json:"-"`
+	FinishLine   *FinishLine   `json:"-"`
 	FinishSource *FinishSource `json:"-"`
 }
 
@@ -525,6 +547,7 @@ var (
 	AbandonReasons  = []string{AbandonNoPR, AbandonUnmerged}
 	FinishSources   = []FinishSource{FinishFromGoal, FinishFromRepo, FinishFromTaste, FinishFromPerson}
 	StepStates      = []StepState{StepTodo, StepDoing, StepDone, StepDropped}
+	FinishLines     = []FinishLine{FinishDiscovery, FinishResearch, FinishLocalBuild, FinishPR, FinishMerged, FinishReleased}
 )
 
 func parse[T ~string](what string, known []T, s string) (T, error) {
@@ -555,6 +578,21 @@ func ParseAbandonReason(s string) (string, error) {
 }
 
 func ParseStepState(s string) (StepState, error) { return parse("step state", StepStates, s) }
+
+// ParseFinishLine reads a finish line in any case, trimmed, and names the
+// known lines when it refuses one.
+func ParseFinishLine(s string) (FinishLine, error) {
+	for _, f := range FinishLines {
+		if strings.EqualFold(strings.TrimSpace(s), string(f)) {
+			return f, nil
+		}
+	}
+	names := make([]string, len(FinishLines))
+	for i, f := range FinishLines {
+		names[i] = string(f)
+	}
+	return "", fmt.Errorf("unknown finish line %q: one of %s", s, strings.Join(names, ", "))
+}
 
 func ParseFinishSource(s string) (FinishSource, error) {
 	return parse("finish source", FinishSources, s)

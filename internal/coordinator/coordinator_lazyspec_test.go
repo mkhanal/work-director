@@ -119,35 +119,92 @@ func resolveFake(fr *fakeRunner) func(name string) (runner.Runner, error) {
 var proj = &project.Project{Name: "proj", Path: "/repo/proj", Runner: "project-runner"}
 
 func TestCoordinator(t *testing.T) {
-	t.Run("The Goal Plan Brief Asks For Changes, Not Checks", func(t *testing.T) {
-		goal := core.Work{ID: "e1", Title: "Rewrite the core", Detail: "in Go", Kind: core.WorkEpic}
-		p := &project.Project{Name: "wd", Path: "/repo"}
+	t.Run("The Goal Plan Brief Asks For Outcomes, Not Changes", func(t *testing.T) {
+		goal := core.Work{ID: "g1", Title: "Release notes", Detail: "for engineers and customers", Kind: core.WorkGoal}
+		finish := core.FinishPR
+		p := &project.Project{Name: "wd", Path: "/repo", Mode: project.ModeAuto, Finish: &finish}
 		kit := project.Toolkit{PackageManager: "npm", Lockfile: "package-lock.json", Checks: []string{"npm run lint", "npm run validate"}, Specs: []string{"SPEC.md"}}
-		brief, err := GoalPlanBrief(goal, p, kit)
+		brief, err := GoalPlanBrief(goal, Chain{}, p, kit, []core.FinishLine{core.FinishMerged, core.FinishResearch})
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, want := range []string{
-			"wd (/repo)", "`npm run lint`", "`npm run validate`", "Rewrite the core", "in Go",
-			"## <heading>", "- [ ] <task title>",
-			"director runs the checks itself", "no task only runs checks, plans, sets up a worktree or finds out what the goal is",
-			"Specifications this repository keeps: SPEC.md", "ASK: <", "NAME: <",
+			"wd (/repo)", "Release notes", "for engineers and customers",
+			"NAME: <", "- <an outcome a person would say", "done when: <", "after: <", "split: yes",
+			"set up, install, land, tag or run checks", "`npm run lint`", "`npm run validate`",
+			"Specifications this repository keeps: SPEC.md", "ASK: <", "1 to 7 outcomes", "exactly one outcome",
+			"FINISH: <discovery | research | local build | complete PR | merged | released> | from: <goal | repo | taste>",
+			"FINISH: ?", "(recommended)", "Mode: auto", "finish setting: complete PR", "past goals finished at: merged, research",
 		} {
 			if !strings.Contains(brief, want) {
 				t.Fatalf("brief missing %q:\n%s", want, brief)
 			}
 		}
-		bare, err := GoalPlanBrief(goal, p, project.Toolkit{})
+		bare, err := GoalPlanBrief(goal, Chain{}, &project.Project{Name: "wd", Path: "/repo", Mode: project.ModeAsk}, project.Toolkit{}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, want := range []string{"none: the repository defines no checks", "Specifications this repository keeps: none; no task adds"} {
+		for _, want := range []string{"none: the repository defines no checks", "Specifications this repository keeps: none", "finish setting: not set", "past goals finished at: none yet"} {
 			if !strings.Contains(bare, want) {
 				t.Fatalf("brief for a bare repository missing %q:\n%s", want, bare)
 			}
 		}
-		if _, err := GoalPlanBrief(goal, &project.Project{Name: "wd", Verify: []string{"pnpm lint"}}, kit); err == nil {
+		top := core.Work{ID: "g0", Title: "Ship v2", DoneWhen: ptrTo("v2 is tagged and released"), FinishLine: &finish, Kind: core.WorkGoal}
+		mid := core.Work{ID: "g1", Title: "Release notes", DoneWhen: ptrTo("every release lists its changes"), Kind: core.WorkGoal}
+		sub := core.Work{ID: "g2", Title: "Every release is tagged", Kind: core.WorkGoal}
+		sib := core.Work{ID: "t3", Title: "Deployers get a guide", DoneWhen: ptrTo("a guide covers rollback"), State: core.StateRunning, Kind: core.WorkTask}
+		nested, err := GoalPlanBrief(sub, Chain{Ancestors: []core.Work{top, mid}, Siblings: []core.Work{sib}}, p, kit, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"Ship v2", "v2 is tagged and released", "complete PR", "Release notes", "every release lists its changes", "[running] Deployers get a guide", "a guide covers rollback", "Every release is tagged"} {
+			if !strings.Contains(nested, want) {
+				t.Fatalf("sub-goal brief missing %q:\n%s", want, nested)
+			}
+		}
+		if strings.Contains(nested, "FINISH: <") {
+			t.Fatalf("a sub-goal's brief asks for a finish line:\n%s", nested)
+		}
+		if _, err := GoalPlanBrief(goal, Chain{}, &project.Project{Name: "wd", Verify: []string{"pnpm lint"}}, kit, nil); err == nil {
 			t.Fatalf("a pnpm check in an npm repository was planned with")
+		}
+	})
+
+	t.Run("An Outcome Line Is A Sub-Goal With Its Done-When And Order", func(t *testing.T) {
+		reply := []string{
+			"Reading the repo.\n- a stray bullet",
+			"NAME: Release notes\nFINISH: ?\n- complete PR (recommended)\n- merged\n" +
+				"- Every release is tagged\n  done when: each release has a vX.Y.Z tag\n" +
+				"- Whoever deploys gets a guide\n  done when: a guide covers rollback\n  after: 1, 3, 2\n  split: yes\n" +
+				"- [ ] Customers read what changed\n  after: 1",
+		}
+		got := ParseOutcomes(reply)
+		want := []PlanOutcome{
+			{Title: "Every release is tagged", DoneWhen: "each release has a vX.Y.Z tag"},
+			{Title: "Whoever deploys gets a guide", DoneWhen: "a guide covers rollback", After: []int{1}, Split: true},
+			{Title: "Customers read what changed", After: []int{1}},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("outcomes = %+v\nwant %+v", got, want)
+		}
+		if got := ParseOutcomes([]string{"I looked; nothing to plan."}); len(got) != 0 {
+			t.Fatalf("a reply with no outcomes = %+v", got)
+		}
+	})
+
+	t.Run("A Plan Reply Says Where The Goal Finishes", func(t *testing.T) {
+		f, ok := ParseFinish([]string{"NAME: x\n**FINISH:** Complete PR | from: taste\n- outcome"})
+		if !ok || f.Line != core.FinishPR || f.Source != core.FinishFromTaste || f.Unsure {
+			t.Fatalf("finish = %+v, %v; want complete PR from taste", f, ok)
+		}
+		f, ok = ParseFinish([]string{"FINISH: ?\n- research (recommended)\n- local build\n- Investigate the cache\n  done when: a report"})
+		if !ok || !f.Unsure || !slices.Equal(f.Choices, []string{"research (recommended)", "local build"}) {
+			t.Fatalf("unsure finish = %+v, %v; want research then local build", f, ok)
+		}
+		for _, bad := range []string{"FINISH: shipped | from: goal", "FINISH: merged | from: whim", "FINISH: merged", "no finish here"} {
+			if f, ok := ParseFinish([]string{bad}); ok {
+				t.Fatalf("%q read as %+v", bad, f)
+			}
 		}
 	})
 
@@ -274,36 +331,6 @@ func TestCoordinator(t *testing.T) {
 		}
 		if q, ok := PlanQuestion([]string{"## Core\n- [ ] port the ledger"}); ok {
 			t.Fatalf("a plan read as a question: %q", q)
-		}
-	})
-
-	t.Run("A Heading Line Opens A Group", func(t *testing.T) {
-		tasks := ParsePlan([]string{"## Core\n- [ ] port the ledger"})
-		if len(tasks) != 1 || tasks[0].Heading != "Core" || tasks[0].Title != "port the ledger" {
-			t.Fatalf("tasks = %+v, want one Core/port the ledger task", tasks)
-		}
-	})
-
-	t.Run("A Task Line Is A Task", func(t *testing.T) {
-		tasks := ParsePlan([]string{"- [ ] one\n- [x] two\n* [X] three\nnot a task\n- four"})
-		want := []PlanTask{
-			{Heading: "(no heading)", Title: "one"},
-			{Heading: "(no heading)", Title: "two"},
-			{Heading: "(no heading)", Title: "three"},
-		}
-		if !slices.Equal(tasks, want) {
-			t.Fatalf("tasks = %+v, want %+v", tasks, want)
-		}
-	})
-
-	t.Run("Tasks Before Any Heading Fall Under A Default Heading", func(t *testing.T) {
-		tasks := ParsePlan([]string{"- [ ] early\n## Late\n- [ ] after"})
-		want := []PlanTask{
-			{Heading: "(no heading)", Title: "early"},
-			{Heading: "Late", Title: "after"},
-		}
-		if !slices.Equal(tasks, want) {
-			t.Fatalf("tasks = %+v, want %+v", tasks, want)
 		}
 	})
 
@@ -987,3 +1014,5 @@ func TestCoordinator(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+func ptrTo(s string) *string { return &s }

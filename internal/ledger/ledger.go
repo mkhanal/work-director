@@ -257,7 +257,13 @@ func scanWork(s rowScanner) (core.Work, error) {
 	}
 	w.Archived = nullStr(archived)
 	w.DoneWhen = nullStr(doneWhen)
-	w.FinishLine = nullStr(finishLine)
+	if finishLine.Valid {
+		fl, err := core.ParseFinishLine(finishLine.String)
+		if err != nil {
+			return core.Work{}, fmt.Errorf("work %s: %w", w.ID, err)
+		}
+		w.FinishLine = &fl
+	}
 	if finishSource.Valid {
 		fs, err := core.ParseFinishSource(finishSource.String)
 		if err != nil {
@@ -735,16 +741,19 @@ func (l *Ledger) SetDoneWhen(id, text string) error {
 
 // SetFinish stores what the work hands back and where that was decided, and
 // files the change as a decision.
-func (l *Ledger) SetFinish(id, line string, src core.FinishSource) error {
-	line = strings.TrimSpace(line)
-	if line == "" {
+func (l *Ledger) SetFinish(id string, line core.FinishLine, src core.FinishSource) error {
+	if strings.TrimSpace(string(line)) == "" {
 		return fmt.Errorf("a finish line names what is handed back")
+	}
+	line, err := core.ParseFinishLine(string(line))
+	if err != nil {
+		return err
 	}
 	if _, err := core.ParseFinishSource(string(src)); err != nil {
 		return err
 	}
 	return l.inTx(func(tx *sql.Tx) error {
-		if err := updateWork(tx, id, `UPDATE work SET finish_line = ?, finish_source = ? WHERE id = ?`, line, string(src), id); err != nil {
+		if err := updateWork(tx, id, `UPDATE work SET finish_line = ?, finish_source = ? WHERE id = ?`, string(line), string(src), id); err != nil {
 			return err
 		}
 		_, err := addEvent(tx, id, core.EventDecision, fmt.Sprintf("finishes at: %s (from %s)", line, src), now())

@@ -11,13 +11,12 @@ parser, the known-answer lookup and one coordination pass over a goal's
 children. The ledger's claims, impacts, conflicts, concerns and worktrees
 are specified in `ledger.lazyspec.md`.
 
-## The Goal Plan Brief Asks For Changes, Not Checks
-- `GoalPlanBrief(goal, p, kit)` names the project and its path, carries the goal's title and detail, and demands the headed task-list shape.
-- It lists the project's checks in backticks as what the director runs after each task, or says there are none.
-- It forbids tasks that only run checks, plan, set up a worktree or find out what the goal is.
-- It names the specifications the repository keeps, or says it keeps none and no task adds any.
-- It asks for `ASK: <question>` alone when the goal does not say what should change.
-- It asks the plan to open with `NAME: <name>`, naming the goal in a few words.
+## The Goal Plan Brief Asks For Outcomes, Not Changes
+- `GoalPlanBrief` names the project and its path, carries the goal's title and detail, and demands the outcome shape: a title, a done-when, and optional order and split lines.
+- It forbids outcomes that only set up, install, land, tag or run checks, and lists the project's checks as what the director runs.
+- It names the specifications the repository keeps, or says it keeps none.
+- A sub-goal's brief carries its top goal with its done-when and finish line, each ancestor, and its siblings with their states.
+- A top goal's brief asks for a FINISH line and gives the repository's finish setting and its past goals' finish lines.
 
 ## A Plan Reply Names Its Goal
 - `PlanName(texts)` returns the name of a `NAME:` line in the planner's reply, without surrounding quotes, cut at a word to at most 72 characters.
@@ -27,16 +26,15 @@ are specified in `ledger.lazyspec.md`.
 - `PlanQuestion(texts)` returns the question of an `ASK:` line in the planner's reply.
 - A reply with no `ASK:` line has no question.
 
-## A Heading Line Opens A Group
-In `ParsePlan`, a `## <heading>` line sets the heading for the task lines
-that follow it.
+## An Outcome Line Is A Sub-Goal With Its Done-When And Order
+- `ParseOutcomes` reads each `- <title>` line with its indented `done when:`, `after:` and `split:` lines.
+- An outcome without a done-when is still read, with an empty one.
+- `after:` numbers that are not earlier outcomes are dropped.
 
-## A Task Line Is A Task
-`- [ ] <title>` (and `- [x]`/`* [X]`) lines parse into tasks with their
-title trimmed; other lines are ignored.
-
-## Tasks Before Any Heading Fall Under A Default Heading
-Task lines before any heading line parse under the heading `(no heading)`.
+## A Plan Reply Says Where The Goal Finishes
+- `ParseFinish` reads `FINISH: <line> | from: <source>` into a finish line and its source.
+- `FINISH: ?` with listed choices reads as unsure, keeping the choices in order.
+- A line or source outside its set reads as no finish at all.
 
 ## A Resolved Concern's Decision Can Answer
 `KnownAnswer` finds a resolved concern's decision on the goal or one of its

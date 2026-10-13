@@ -115,7 +115,7 @@ two or more feedback entries share the key.
 ## A Goal Says What Done Means And Where It Finishes
 - `SetDoneWhen` stores a goal's done-when; an empty one clears it, and an unset one reads as absent.
 - `SetFinish` stores its finish line with where it came from: the goal, the repo, taste or the person.
-- A finish line with no source, or a source outside that set, is refused.
+- A finish line outside discovery, research, local build, complete PR, merged and released, or with no source or a source outside its set, is refused.
 - Each change files a decision event saying what it now is.
 
 ## Work Can End Abandoned And Says Why

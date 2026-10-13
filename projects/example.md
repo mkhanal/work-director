@@ -3,6 +3,7 @@ path: ~/work/example-app
 runner: claude
 mode: auto
 model:
+finish:
 stack: [ts, biome, vitest]
 workflows: [/lazyspec, /lazyspec-validate]
 verify: [pnpm check, pnpm test]

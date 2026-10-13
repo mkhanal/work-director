@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"wd/internal/core"
 )
 
 func knownRunners() ([]string, error) { return []string{"claude", "opencode", "codex"}, nil }
@@ -71,6 +73,22 @@ func TestProject(t *testing.T) {
 		}
 	})
 
+	t.Run("A Project's Finish Setting Is A Known Finish Line", func(t *testing.T) {
+		p, err := ParseProject("---\npath: /repo\nrunner: claude\nfinish: Complete PR\n---\n", "/home/proj.md")
+		if err != nil || p.Finish == nil || *p.Finish != core.FinishPR {
+			t.Fatalf("finish = %v (%v), want complete PR", p, err)
+		}
+		for _, text := range []string{"---\npath: /repo\nrunner: claude\n---\n", "---\npath: /repo\nrunner: claude\nfinish: \n---\n"} {
+			if p, err := ParseProject(text, "/home/proj.md"); err != nil || p.Finish != nil {
+				t.Fatalf("finish of %q = %v (%v), want unset", text, p.Finish, err)
+			}
+		}
+		_, err = ParseProject("---\npath: /repo\nrunner: claude\nfinish: shipped\n---\n", "/home/proj.md")
+		if pe, ok := err.(*ProjectError); !ok || !strings.Contains(pe.Detail, `"shipped"`) {
+			t.Fatalf("err = %v, want a ProjectError naming shipped", err)
+		}
+	})
+
 	t.Run("The Project Template Writes Concrete Frontmatter", func(t *testing.T) {
 		got := ProjectTemplate("proj", "/repo", NewProjectOptions{})
 		want := `---
@@ -78,6 +96,7 @@ path: /repo
 runner: claude
 mode: auto
 model: 
+finish: 
 stack: []
 workflows: []
 verify: []

@@ -27,6 +27,11 @@ fails with a ProjectError naming the file and what is missing.
 ## An Unknown Mode Fails
 A mode other than ask or auto fails with a ProjectError naming the mode.
 
+## A Project's Finish Setting Is A Known Finish Line
+- `finish:` reads into one of the finish lines, in any case.
+- An absent or empty `finish:` is unset.
+- Any other value fails with a ProjectError naming it.
+
 ## The Project Template Writes Concrete Frontmatter
 `ProjectTemplate` writes the file `wd projects add` creates: every field
 filled, no lazyspec claim.

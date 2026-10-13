@@ -15,10 +15,17 @@ case "$1" in
       echo 'ASK: What should change in the new worktree?'
       exit 0
     fi
+    # A test gives the planner its own reply in $state/planner-reply.
+    if [ -f "$state/planner-reply" ]; then
+      cat "$state/planner-reply"
+      exit 0
+    fi
     echo 'NAME: Config parsing and schema'
-    echo '## Analysis'
-    echo '- [ ] parse the config into a domain type'
-    echo '- [ ] wire the decision into the schema'
+    echo 'FINISH: complete PR | from: taste'
+    echo '- The config is read into one checked shape'
+    echo '  done when: a bad config is refused naming the field'
+    echo '- The decision is kept in the schema'
+    echo '  done when: the schema holds the decision'
     ;;
   stop) echo "planner $2" >> "$WD_FAKE_STATE/stopped"; echo stopped;;
   status) echo 'state: waiting';;

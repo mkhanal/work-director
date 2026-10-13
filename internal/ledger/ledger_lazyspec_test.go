@@ -523,6 +523,7 @@ func TestLedger(t *testing.T) {
 		wantErr(t, l.SetFinish(goal.ID, "", core.FinishFromGoal), "a finish line names what is handed back")
 		wantErr(t, l.SetFinish(goal.ID, "merged", ""), `unknown finish source ""`)
 		wantErr(t, l.SetFinish(goal.ID, "merged", "whim"), `unknown finish source "whim"`)
+		wantErr(t, l.SetFinish(goal.ID, "shipped somewhere", core.FinishFromGoal), `unknown finish line "shipped somewhere": one of discovery, research, local build, complete PR, merged, released`)
 		if got, err = l.Get(goal.ID); err != nil || *got.FinishLine != "complete PR" {
 			t.Fatalf("finish after refusals = %v (%v), want it unchanged", got.FinishLine, err)
 		}
