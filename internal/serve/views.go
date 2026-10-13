@@ -87,6 +87,12 @@ type goalView struct {
 	Progress progress `json:"progress"`
 	// NotDoneBecause is what holds the goal back from done, empty once done.
 	NotDoneBecause []string `json:"not_done_because"`
+	// NeedsYou is every open question on the goal or under it.
+	NeedsYou []needYou `json:"needs_you"`
+	// Course is its top goal's supervisor's latest verdict; Superseded the
+	// branches a course change let go of.
+	Course     *course          `json:"course"`
+	Superseded []supersededWork `json:"superseded"`
 }
 
 // waitingTask is a task waiting on the person, and what it waits on.
@@ -243,6 +249,15 @@ func (s *Server) goal(id string) (goalView, error) {
 	if view.NotDoneBecause, err = s.notDoneBecause(t, len(chain) == 1); err != nil {
 		return goalView{}, err
 	}
+	view.NeedsYou = t.needsYou(view.Paths)
+	view.Superseded = t.superseded()
+	courses := events
+	if len(chain) > 1 {
+		if courses, err = s.ledger.Events(chain[0].ID, nil); err != nil {
+			return goalView{}, err
+		}
+	}
+	view.Course = courseOf(courses, chain[0].ID)
 	if dir := goalDir(goal, children); dir != "" {
 		d := delivery.StatusFor(dir, events, goal, children)
 		view.Delivery = &d

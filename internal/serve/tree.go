@@ -346,6 +346,75 @@ func (s *Server) notDoneBecause(t tree, top bool) ([]string, error) {
 	return out, nil
 }
 
+// needYou is a question on work in the tree that waits on the person.
+type needYou struct {
+	Work     string          `json:"work"`
+	Path     string          `json:"path"`
+	Question runner.Question `json:"question"`
+}
+
+// needsYou lists every open question in the tree, in tree order; the root's
+// own path is its title.
+func (t tree) needsYou(paths map[string]string) []needYou {
+	out := []needYou{}
+	for _, w := range t.order {
+		q, ok := t.question[w.ID]
+		if !ok {
+			continue
+		}
+		path, ok := paths[w.ID]
+		if !ok {
+			path = w.Title
+		}
+		out = append(out, needYou{Work: w.ID, Path: path, Question: q})
+	}
+	return out
+}
+
+// course is a supervisor's latest verdict on whether its goal is on course.
+type course struct {
+	Verdict string `json:"verdict"`
+	Why     string `json:"why"`
+	At      string `json:"at"`
+}
+
+// courseOf reads the latest course event on goal in events, or nil.
+func courseOf(events []core.Event, goal string) *course {
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		if e.Kind != core.EventCourse || e.Work != goal {
+			continue
+		}
+		verdict, why, _ := strings.Cut(e.Body, ": ")
+		return &course{Verdict: verdict, Why: why, At: e.At}
+	}
+	return nil
+}
+
+// supersededWork is a branch of the tree a course change superseded.
+type supersededWork struct {
+	Work  string `json:"work"`
+	Title string `json:"title"`
+	Why   string `json:"why"`
+	At    string `json:"at"`
+}
+
+// superseded lists the roots of the superseded branches under the root.
+func (t tree) superseded() []supersededWork {
+	out := []supersededWork{}
+	for _, w := range t.order[1:] {
+		if w.State != core.StateSuperseded || t.byID[*w.Parent].State == core.StateSuperseded {
+			continue
+		}
+		sw := supersededWork{Work: w.ID, Title: w.Title}
+		if e, ok := t.last(w.ID, core.EventNote, "superseded: "); ok {
+			sw.Why, sw.At = strings.TrimPrefix(e.Body, "superseded: "), e.At
+		}
+		out = append(out, sw)
+	}
+	return out
+}
+
 // last is the latest event of kind on work whose body opens with prefix.
 func (t tree) last(work string, kind core.EventKind, prefix string) (core.Event, bool) {
 	for i := len(t.events) - 1; i >= 0; i-- {

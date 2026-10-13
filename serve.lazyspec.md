@@ -95,6 +95,13 @@ JSON message per line to stdout:
 - `done_when`, `finish` with its source, and `progress` with superseded counted apart; a nested goal's `finish` is its top goal's.
 - `not_done_because` names, in order, the open sub-goals, a done-when not yet judged met, and a finish line not reached; empty once done.
 
+## A Goal Serves Everything Below It That Needs The Person
+- `needs_you` lists each open question on the goal or under it, with the work it is on and its path.
+
+## A Goal Serves Its Course
+- `course` is the latest course event of its top goal read into a verdict, why and when; null before any.
+- `superseded` lists the superseded sub-goals under it with why and when.
+
 ## A Running Session's Question Puts Its Work In Needs You
 - While serving, a running work item whose session ends on a question has the question filed as a `question` event and moves to needs-input within seconds.
 - A question already filed at that point of the conversation is not filed again.

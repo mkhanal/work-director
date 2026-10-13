@@ -48,6 +48,8 @@ func TestServe(t *testing.T) {
 	t.Run("A Goal Serves What Each Of Its Tasks Is Doing", aGoalServesWhatEachOfItsTasksIsDoing)
 	t.Run("A Goal Serves Its Sub-Goals As A Tree", aGoalServesItsSubGoalsAsATree)
 	t.Run("A Goal Serves What Done Means And Why It Is Not Done Yet", aGoalServesWhatDoneMeansAndWhyItIsNotDoneYet)
+	t.Run("A Goal Serves Everything Below It That Needs The Person", aGoalServesEverythingBelowItThatNeedsThePerson)
+	t.Run("A Goal Serves Its Course", aGoalServesItsCourse)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("A Running Session's Report Moves Its Work On", aRunningSessionsReportMovesItsWorkOn)
 	t.Run("A Running Session That Stops Without A Report Is Noted", aRunningSessionThatStopsWithoutAReportIsNoted)
@@ -1834,5 +1836,98 @@ func aGoalServesWhatDoneMeansAndWhyItIsNotDoneYet(t *testing.T) {
 	getJSON(t, api.URL+"/api/goal/"+r.guide, http.StatusOK, &guide)
 	if guide.NotDoneBecause == nil || len(guide.NotDoneBecause) != 0 || guide.Progress != (treeProgress{Done: 2, Total: 2}) {
 		t.Fatalf("a done sub-goal: not done because %q, progress %+v; want [] and 2 of 2", guide.NotDoneBecause, guide.Progress)
+	}
+}
+
+type needsYouView struct {
+	NeedsYou []struct {
+		Work     string          `json:"work"`
+		Path     string          `json:"path"`
+		Question runner.Question `json:"question"`
+	} `json:"needs_you"`
+}
+
+func aGoalServesEverythingBelowItThatNeedsThePerson(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	r := newReleaseTree(t, l)
+	walk(t, l, r.rollback, core.StateRunning, core.StateNeedsInput)
+	event(t, l, r.rollback, core.EventReport, "NEEDS-INPUT\nSTATUS: NEEDS-INPUT which environments roll back?")
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	var top needsYouView
+	getJSON(t, api.URL+"/api/goal/"+r.top, http.StatusOK, &top)
+	if len(top.NeedsYou) != 2 {
+		t.Fatalf("needs you = %+v, want the note and the rollback", top.NeedsYou)
+	}
+	note, rollback := top.NeedsYou[0], top.NeedsYou[1]
+	if note.Work != r.note || note.Path != "Customer note" || len(note.Question.Items) != 1 || note.Question.Items[0].Question != "Which tone?" || len(note.Question.Items[0].Options) != 2 {
+		t.Fatalf("note = %+v", note)
+	}
+	if rollback.Work != r.rollback || rollback.Path != "Deployment guide › Rollback" || rollback.Question.Items[0].Question != "which environments roll back?" {
+		t.Fatalf("rollback = %+v", rollback)
+	}
+	var guide needsYouView
+	getJSON(t, api.URL+"/api/goal/"+r.guide, http.StatusOK, &guide)
+	if len(guide.NeedsYou) != 1 || guide.NeedsYou[0].Work != r.rollback || guide.NeedsYou[0].Path != "Rollback" {
+		t.Fatalf("nested needs you = %+v, want only the rollback", guide.NeedsYou)
+	}
+	if _, err := l.Answer(r.note, core.Decision{Question: "Which tone?", Answer: "formal", Source: core.AnsweredByPerson}); err != nil {
+		t.Fatal(err)
+	}
+	var none map[string]json.RawMessage
+	getJSON(t, api.URL+"/api/goal/"+r.top, http.StatusOK, &top)
+	if len(top.NeedsYou) != 1 || top.NeedsYou[0].Work != r.rollback {
+		t.Fatalf("after the answer needs you = %+v", top.NeedsYou)
+	}
+	quiet, err := l.Add("p", "Quiet", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	getJSON(t, api.URL+"/api/goal/"+quiet.ID, http.StatusOK, &none)
+	if string(none["needs_you"]) != "[]" || string(none["superseded"]) != "[]" || string(none["course"]) != "null" {
+		t.Fatalf("a quiet goal: needs_you %s, superseded %s, course %s", none["needs_you"], none["superseded"], none["course"])
+	}
+}
+
+func aGoalServesItsCourse(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	r := newReleaseTree(t, l)
+	event(t, l, r.top, core.EventCourse, "pivot: the guide replaces the old route")
+	event(t, l, r.top, core.EventCourse, "on course: the guide is half written")
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	type courseView struct {
+		Course *struct {
+			Verdict string `json:"verdict"`
+			Why     string `json:"why"`
+			At      string `json:"at"`
+		} `json:"course"`
+		Superseded []struct {
+			Work  string `json:"work"`
+			Title string `json:"title"`
+			Why   string `json:"why"`
+			At    string `json:"at"`
+		} `json:"superseded"`
+	}
+	for _, id := range []string{r.top, r.guide} {
+		var v courseView
+		getJSON(t, api.URL+"/api/goal/"+id, http.StatusOK, &v)
+		if v.Course == nil || v.Course.Verdict != "on course" || v.Course.Why != "the guide is half written" || v.Course.At == "" {
+			t.Fatalf("course of %s = %+v, want the latest verdict", id, v.Course)
+		}
+		if id == r.top && (len(v.Superseded) != 1 || v.Superseded[0].Work != r.old || v.Superseded[0].Title != "Old route" || v.Superseded[0].Why != "the guide covers it" || v.Superseded[0].At == "") {
+			t.Fatalf("superseded = %+v, want the old route with why", v.Superseded)
+		}
+		if id == r.guide && len(v.Superseded) != 0 {
+			t.Fatalf("nested superseded = %+v, want none", v.Superseded)
+		}
+	}
+	event(t, l, r.top, core.EventCourse, "unstated")
+	var v courseView
+	getJSON(t, api.URL+"/api/goal/"+r.top, http.StatusOK, &v)
+	if v.Course == nil || v.Course.Verdict != "unstated" || v.Course.Why != "" {
+		t.Fatalf("an unstated course = %+v", v.Course)
 	}
 }
