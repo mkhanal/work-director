@@ -14,6 +14,7 @@ use super::WorkPage;
 use crate::app::{App, Place};
 use crate::turns::Turn;
 use crate::ui::{self, SPACE_1, SPACE_2, SPACE_3};
+use crate::working;
 
 /// What the cards above a goal show: its done-when, where it finishes and
 /// whether that can be picked, its course, and whether it is proposed.
@@ -284,6 +285,12 @@ fn sub_goal_row(row: &SubGoalRow, last: bool, app: &App, page: Weak<WorkPage>) -
         words.append(&meta);
     }
     top.append(&words);
+    if row.working {
+        let mark = working::mark();
+        mark.set_valign(gtk::Align::Start);
+        mark.set_margin_top(3);
+        top.append(&mark);
+    }
     let (text, tone) = &row.badge;
     let badge = ui::badge(text, *tone);
     badge.set_valign(gtk::Align::Start);

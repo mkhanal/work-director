@@ -21,6 +21,7 @@ use crate::ledger::{
 use crate::outbox::{Outgoing, OutgoingState};
 use crate::plan::Plan;
 use crate::record::RecordView;
+use crate::working::{InFlight, Write};
 
 /// Runs a future on the thread the store lives on.
 pub type Spawner = Rc<dyn Fn(LocalBoxFuture<'static, ()>)>;
@@ -31,6 +32,8 @@ pub enum Change {
     Board,
     Projects,
     Outbox,
+    /// A write the person waits on started or finished.
+    Writes,
     Failure,
 }
 
@@ -50,6 +53,9 @@ pub struct Store {
     /// Messages sent to work, oldest first, from the moment they are sent.
     outbox: RefCell<Vec<Outgoing>>,
     next_message: Cell<u64>,
+    /// Writes the person waits on, from when each started until `wd` answers.
+    in_flight: RefCell<Vec<InFlight>>,
+    next_write: Cell<u64>,
     refreshing: Cell<bool>,
     stale: Cell<bool>,
     watchers: RefCell<Vec<(u64, Watcher)>>,
@@ -99,6 +105,8 @@ impl Store {
             reads: Cell::new(0),
             outbox: RefCell::new(Vec::new()),
             next_message: Cell::new(1),
+            in_flight: RefCell::new(Vec::new()),
+            next_write: Cell::new(1),
             refreshing: Cell::new(false),
             stale: Cell::new(false),
             watchers: RefCell::new(Vec::new()),
@@ -125,6 +133,11 @@ impl Store {
 
     pub fn outbox(&self) -> Ref<'_, Vec<Outgoing>> {
         self.outbox.borrow()
+    }
+
+    /// The writes the person waits on that `wd` has not answered yet, oldest first.
+    pub fn in_flight(&self) -> Ref<'_, Vec<InFlight>> {
+        self.in_flight.borrow()
     }
 
     /// Calls `f` after each change until the returned watch is dropped.
@@ -296,9 +309,18 @@ impl Store {
         Ok(stopped.withdrawn.join("\n\n"))
     }
 
-    /// Runs a plan: its argv, unchanged.
+    /// Runs a plan: its argv, unchanged. A write the person waits on is in
+    /// flight until `wd` answers it.
     pub async fn run(&self, plan: &Plan) -> Result<ActionResult, ChannelError> {
-        self.channel.action(&plan.argv).await
+        let Some((write, work)) = Write::of(plan) else { return self.channel.action(&plan.argv).await };
+        let id = self.next_write.get();
+        self.next_write.set(id + 1);
+        self.in_flight.borrow_mut().push(InFlight { id, write, work, at: Utc::now() });
+        self.changed(Change::Writes);
+        let result = self.channel.action(&plan.argv).await;
+        self.in_flight.borrow_mut().retain(|w| w.id != id);
+        self.changed(Change::Writes);
+        result
     }
 
     async fn run_argv(&self, argv: &[&str]) -> Result<ActionResult, ChannelError> {

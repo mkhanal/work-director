@@ -28,6 +28,8 @@ pub struct SubGoalRow {
     pub steps: Vec<PlanStep>,
     /// Whether its steps start shown.
     pub open: bool,
+    /// Whether a session works on it or under it now.
+    pub working: bool,
 }
 
 /// Ledger text read as a sentence: its first letter capitalised.
@@ -127,6 +129,7 @@ impl Node {
             struck: self.work.state == WorkState::Superseded,
             steps: self.steps.clone(),
             open: false,
+            working: false,
         }
     }
 }
@@ -147,7 +150,8 @@ impl GoalDetail {
     /// Each sub-goal as a row, in plan order. A task's steps are folded,
     /// except the first working task's.
     pub fn sub_goal_rows(&self) -> Vec<SubGoalRow> {
-        let mut rows: Vec<SubGoalRow> = self.tree.iter().map(Node::row).collect();
+        let mut rows: Vec<SubGoalRow> =
+            self.tree.iter().map(|n| SubGoalRow { working: self.under_way(&n.work.id), ..n.row() }).collect();
         if let Some(first) =
             rows.iter_mut().find(|r| r.opens.is_none() && r.mark == Mark::Working && !r.steps.is_empty())
         {

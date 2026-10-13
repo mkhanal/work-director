@@ -7,7 +7,7 @@ use adw::prelude::*;
 
 use kit::{
     Event, Feed, FilterChip, GoalDetail, Mark, Outgoing, OutgoingState, Phase, Report, SessionStatus, Step, StepKind,
-    ThreadFilter, ThreadItem, ThreadRow, ThreadStep, ToolCall, Work, WorkState,
+    ThreadFilter, ThreadItem, ThreadRow, ThreadStep, ToolCall, Work, WorkState, WorkUnderWay, WorkingRow,
 };
 
 use super::{Loaded, WorkPage, MERGE_SECONDS};
@@ -16,6 +16,7 @@ use crate::app::{App, Place};
 use crate::question;
 use crate::turns::Turn;
 use crate::ui::{self, SPACE_1, SPACE_2, SPACE_3};
+use crate::working;
 
 impl WorkPage {
     /// A goal as one conversation: what was asked, the plan, what its
@@ -88,6 +89,10 @@ impl WorkPage {
         }
 
         turns.extend(self.asking_turns(g));
+        let under_way = g.work_under_way(&self.app.store.in_flight());
+        if !under_way.rows.is_empty() {
+            turns.push(Turn::key("under-way", &under_way).with(move || working::rows(&under_way)));
+        }
         (turns, yours)
     }
 
@@ -327,10 +332,43 @@ impl WorkPage {
                 );
             }
         }
-        if running {
-            turns.push(Turn::key("working", &()).with(|| ui::waiting("Working…").upcast()));
+        let under_way = self.session_under_way(work, feed);
+        if !under_way.rows.is_empty() {
+            turns.push(Turn::key("under-way", &under_way).with(move || working::rows(&under_way)));
         }
         turns
+    }
+
+    /// A session's own work under way: what it is doing while it works,
+    /// and each write on it the app started and waits on.
+    fn session_under_way(&self, work: &Work, feed: &Feed) -> WorkUnderWay {
+        let f = feed.state();
+        let session = (f.status == SessionStatus::Running).then(|| {
+            let last = f.steps.last();
+            WorkingRow {
+                key: work.id.clone(),
+                who: work.title.clone(),
+                doing: kit::doing(last.map(|s| s.kind), last.map(Step::line).as_deref()),
+                since: last.and_then(|s| s.at.as_deref()).and_then(kit::time::instant),
+            }
+        });
+        let writes = self
+            .app
+            .store
+            .in_flight()
+            .iter()
+            .filter(|w| w.work == work.id)
+            .map(|w| WorkingRow {
+                key: format!("write-{}", w.id),
+                who: if w.write == kit::Write::Send { work.title.clone() } else { "Director".to_string() },
+                doing: w.write.doing().to_string(),
+                since: Some(w.at),
+            })
+            .collect::<Vec<_>>();
+        let mut rows: Vec<WorkingRow> = writes.into_iter().chain(session).collect();
+        let more = rows.len().saturating_sub(kit::working::SHOWN);
+        rows.truncate(kit::working::SHOWN);
+        WorkUnderWay { rows, more }
     }
 
     pub(super) fn reload_feed(&self, feed: &Rc<Feed>) -> Rc<dyn Fn()> {

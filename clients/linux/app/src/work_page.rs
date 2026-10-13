@@ -195,7 +195,7 @@ impl WorkPage {
             let Some(page) = weak.upgrade() else { return };
             match change {
                 kit::Change::Board => page.app.spawn(Rc::clone(&page).load()),
-                kit::Change::Outbox => page.render(),
+                kit::Change::Outbox | kit::Change::Writes => page.render(),
                 kit::Change::Projects | kit::Change::Failure => {}
             }
         }));

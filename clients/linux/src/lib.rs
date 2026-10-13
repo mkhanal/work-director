@@ -22,6 +22,7 @@ pub mod store;
 pub mod thread;
 pub mod time;
 pub mod tree;
+pub mod working;
 
 pub use agents::{span, token_count, AgentCard, AgentRoster, Phase};
 pub use channel::{Channel, ChannelError};
@@ -43,3 +44,4 @@ pub use tree::{
     ChangeKind, Course, Fate, Finish, FinishLine, FinishSaid, FinishSource, GoalChange, Judgement, Link, NeedYou, Node,
     Owner, PlanStep, Progress, Reasoning, Shape, StepState, SubGoalFate, Superseded,
 };
+pub use working::{doing, InFlight, WorkUnderWay, WorkingRow, Write};

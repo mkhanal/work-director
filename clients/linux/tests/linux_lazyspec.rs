@@ -1838,6 +1838,103 @@ fn work_is_renamed_from_its_page_or_its_menu() {
     store.stop();
 }
 
+/// Work Under Way Shows What It Is Doing And For How Long
+#[test]
+fn work_under_way_shows_what_it_is_doing_and_for_how_long() {
+    let session = |status: &str, kind: &str, now: &str, at: &str| {
+        json!({"now": now, "kind": kind, "at": at, "asking": null, "error": null, "status": status,
+            "usage": null, "subagents": null})
+    };
+    let titled = |id: &str, title: &str| {
+        let mut w = work_json(id, "running");
+        w["title"] = json!(title);
+        w
+    };
+    let leaf = node_json("t", "task", "running", json!({}));
+    let goal = goal_view(json!({
+        "goal": titled("g", "Release notes"),
+        "tasks": [titled("a", "Tag releases"), titled("b", "Write the guide"), titled("c", "Check links"),
+            titled("d", "Draft the note"), titled("t", "Leaf")],
+        "rollup": {"counts": {}, "done": 0, "total": 5},
+        "events": [], "claims": [], "landings": [], "delivery": null, "reports": {}, "asking": null,
+        "activity": {
+            "g": session("running", "thinking", "Weighing the plan", "2026-10-12T10:00:00Z"),
+            "a": session("running", "tool", "Bash · go test ./...", "2026-10-12T10:03:00Z"),
+            "b": session("running", "tool", "Read · docs/guide.md", "2026-10-12T10:02:00Z"),
+            "c": session("idle", "text", "Done for now", "2026-10-12T10:04:00Z"),
+            "d": session("waiting", "question", "Which tone?", "2026-10-12T10:05:00Z"),
+            "t": session("running", "text", "Looking at it", "2026-10-12T09:00:00Z"),
+        },
+        "tree": [node_json("s", "goal", "running", json!({"children": [leaf]})), node_json("q", "goal", "queued", json!({}))],
+    }));
+
+    let quiet = goal.work_under_way(&[]);
+    assert_eq!(
+        quiet.rows.iter().map(|r| (r.who.as_str(), r.doing.as_str())).collect::<Vec<_>>(),
+        vec![
+            ("Tag releases", "Running `go test ./...`"),
+            ("Write the guide", "Reading docs/guide.md"),
+            ("Director", "Thinking")
+        ],
+        "only sessions that work, newest first, the goal's own as Director, three shown"
+    );
+    assert_eq!(quiet.more, 1, "the rest are counted");
+
+    let at = |s: &str| kit::time::instant(s).expect("a time");
+    let sending = InFlight { id: 7, write: Write::Send, work: "g".into(), at: at("2026-10-12T10:06:00Z") };
+    let elsewhere = InFlight { id: 8, write: Write::Plan, work: "other".into(), at: at("2026-10-12T10:07:00Z") };
+    let busy = goal.work_under_way(&[sending, elsewhere]);
+    assert_eq!(busy.rows[0].who, "Director");
+    assert_eq!(busy.rows[0].doing, "Sending your message", "a write the app started shows while it is in flight");
+    assert_eq!(busy.more, 2, "a write on other work is not this goal's");
+    assert_eq!(busy.rows[0].elapsed(at("2026-10-12T10:08:05Z")).as_deref(), Some("2m 5s"), "for how long, ticking");
+    let deciding = InFlight { id: 9, write: Write::Decide, work: "a".into(), at: at("2026-10-12T10:09:00Z") };
+    let decided = &goal.work_under_way(&[deciding]).rows[0];
+    assert_eq!((decided.who.as_str(), decided.doing.as_str()), ("Director", "Deciding for you"));
+
+    assert_eq!(doing(Some(StepKind::Thinking), Some("hmm")), "Thinking");
+    assert_eq!(doing(Some(StepKind::Text), Some("Let me look")), "Thinking");
+    assert_eq!(doing(Some(StepKind::Tool), Some("Edit · src/main.rs")), "Editing src/main.rs");
+    assert_eq!(doing(Some(StepKind::Tool), Some("Grep · TODO")), "Searching TODO");
+    assert_eq!(doing(Some(StepKind::Tool), Some("Bash")), "Running a command");
+    assert_eq!(doing(Some(StepKind::Tool), Some("mcp_probe · ping")), "Using mcp_probe: ping");
+
+    assert_eq!(Write::of(&Plan::send("g", "hi").expect("a plan")), Some((Write::Send, "g".to_string())));
+    assert_eq!(Write::of(&Plan::replan("g")), Some((Write::Plan, "g".to_string())));
+    assert_eq!(Write::of(&Plan::continue_goal("g", "more").expect("a plan")), Some((Write::Plan, "g".to_string())));
+    assert_eq!(Write::of(&Plan::director_decides("a")), Some((Write::Decide, "a".to_string())));
+    assert_eq!(Write::of(&Plan::approve("g")), None);
+
+    assert_eq!(
+        goal.sub_goal_rows().iter().map(|r| (r.id.as_str(), r.working)).collect::<Vec<_>>(),
+        vec![("s", true), ("q", false)],
+        "a sub-goal is working while a session under it works"
+    );
+
+    let mut idle = work_json("i", "running");
+    idle["kind"] = json!("goal");
+    let mut busy_goal = work_json("w", "running");
+    busy_goal["kind"] = json!("goal");
+    let mut busy_entry = board_goal(busy_goal, "in-flight");
+    busy_entry["rollup"]["counts"] = json!({"running": 1});
+    let board: Board = serde_json::from_value(json!({"goals": [board_goal(idle, "in-flight"), busy_entry],
+        "standalone": [{"work": work_json("x", "running"), "band": "in-flight"}]}))
+    .expect("a board");
+    let working: HashMap<String, bool> =
+        board.bands(None, chrono::Utc::now()).all().map(|r| (r.work.id.clone(), r.working)).collect();
+    assert!(working["w"], "a goal with running work under it is working in the sidebar");
+    assert!(!working["i"]);
+    assert!(working["x"]);
+
+    let home = Home::new();
+    let id = home.wd(&["add", "demo", "Sent to"]);
+    let run = Run::new();
+    let store = run.store(home.channel());
+    run.wait(store.run(&Plan::send(&id, "hello").expect("a plan"))).expect("ran");
+    assert!(store.in_flight().is_empty(), "a write is in flight only until wd answers it");
+    store.stop();
+}
+
 /// The Agents Panel Sits Beside The Page, Never Over It
 #[test]
 fn the_agents_panel_sits_beside_the_page_never_over_it() {

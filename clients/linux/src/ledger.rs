@@ -240,6 +240,8 @@ pub struct SidebarRow {
     pub needs_you: i64,
     /// Whether its breakdown waits for the person's approval.
     pub proposed: bool,
+    /// Whether work on it is running now: a task or sub-goal under a goal, or the item itself.
+    pub working: bool,
 }
 
 /// The sidebar's bands, each most recently active first.
@@ -318,7 +320,14 @@ impl Board {
                 Some(lead) => lead,
                 None => ago(&g.work),
             };
-            SidebarRow { work: g.work.clone(), band, meta, needs_you: g.needs_you, proposed: g.proposed }
+            SidebarRow {
+                work: g.work.clone(),
+                band,
+                meta,
+                needs_you: g.needs_you,
+                proposed: g.proposed,
+                working: !g.work.at_rest() && g.rollup.counts.get("running").is_some_and(|n| *n > 0),
+            }
         });
         let standalone = self.standalone.iter().filter(|s| mine(&s.work)).map(|s| SidebarRow {
             work: s.work.clone(),
@@ -326,6 +335,7 @@ impl Board {
             meta: format!("{} · {}", s.work.state.look().label, ago(&s.work)),
             needs_you: 0,
             proposed: false,
+            working: s.work.state == WorkState::Running,
         });
         let mut rows: Vec<SidebarRow> = goals.chain(standalone).collect();
         rows.sort_by(|a, b| b.work.updated.cmp(&a.work.updated));

@@ -273,3 +273,8 @@ button.choice, button.choice:checked, button.choice:hover {
 .question button.choice.option { padding: 7px 10px; border-radius: 8px; border: 1px solid transparent; }
 .question button.choice.option.chosen { background-color: @wd_page; border-color: @wd_question_border; }
 .question .declined { background-color: @wd_page; border-color: @wd_question_border; }
+
+/* Work under way */
+.working-mark { -gtk-icon-size: 14px; color: @wd_accent; }
+.sidebar-working { -gtk-icon-size: 10px; min-width: 10px; min-height: 10px; }
+.under-way { padding: 4px 0 4px 6px; }

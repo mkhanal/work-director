@@ -12,6 +12,7 @@ use kit::{Link, SidebarBand, SidebarRow, Tone, Watch};
 
 use crate::app::{work_menu, App, Place};
 use crate::ui::{self, SPACE_1, SPACE_2, SPACE_3};
+use crate::working;
 
 /// What a row of the list does when chosen.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,7 +124,7 @@ impl Sidebar {
                     sidebar.render_products();
                     sidebar.render();
                 }
-                kit::Change::Outbox | kit::Change::Failure => {}
+                kit::Change::Outbox | kit::Change::Writes | kit::Change::Failure => {}
             }
         }));
         let weak = self.me.clone();
@@ -325,6 +326,11 @@ impl Sidebar {
         } else if r.needs_you > 0 {
             meta.append(&ui::line("·", &["meta", "text3"]));
             meta.append(&ui::badge(&format!("{} needs you", r.needs_you), Tone::Attention));
+        }
+        if r.working {
+            let mark = working::mark();
+            mark.add_css_class("sidebar-working");
+            meta.append(&mark);
         }
         column.append(&meta);
         let path = self.path.borrow();
