@@ -251,8 +251,8 @@ func (s *Server) watchSessions(stop <-chan struct{}) error {
 	}
 }
 
-// superviseGoals supervises every running goal on the board every few
-// seconds, until stop closes. A pass that fails is filed on its goal as a
+// superviseGoals supervises every running top goal on the board every few
+// seconds, until stop closes. A sub-goal is its top goal's supervisor's. A pass that fails is filed on its goal as a
 // note, once for each different failure, and the goal is tried again later.
 func (s *Server) superviseGoals(stop <-chan struct{}) error {
 	tick := time.NewTicker(sessionWatch)
@@ -273,6 +273,11 @@ func (s *Server) superviseGoals(stop <-chan struct{}) error {
 			if !core.IsGoal(w.Kind) {
 				continue
 			}
+			if top, err := s.topGoal(w); err != nil {
+				return err
+			} else if !top {
+				continue
+			}
 			if err := s.supervise(w); err != nil {
 				if failed[w.ID] != err.Error() {
 					failed[w.ID] = err.Error()
@@ -285,4 +290,16 @@ func (s *Server) superviseGoals(stop <-chan struct{}) error {
 			delete(failed, w.ID)
 		}
 	}
+}
+
+// topGoal reports whether goal has no goal above it.
+func (s *Server) topGoal(goal core.Work) (bool, error) {
+	if goal.Parent == nil {
+		return true, nil
+	}
+	p, err := s.ledger.Get(*goal.Parent)
+	if err != nil {
+		return false, err
+	}
+	return !core.IsGoal(p.Kind), nil
 }

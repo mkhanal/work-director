@@ -1559,6 +1559,22 @@ func aRunningGoalIsSupervisedWhileServing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	nested, err := s.ledger.Add("p", "Nested goal", ledger.AddOptions{Kind: core.WorkGoal, Parent: &running.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := s.ledger.Add("p", "Leaf", ledger.AddOptions{Parent: &nested.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range []core.State{core.StateBriefed, core.StateRunning} {
+		if _, err := s.ledger.Transition(leaf.ID, st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if w, err := s.ledger.Get(nested.ID); err != nil || w.State != core.StateRunning {
+		t.Fatalf("nested goal = %+v, %v; want it running", w, err)
+	}
 	var mu sync.Mutex
 	passes := map[string]int{}
 	s.supervise = func(goal core.Work) error {
@@ -1580,8 +1596,8 @@ func aRunningGoalIsSupervisedWhileServing(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if passes[running.ID] < 2 || passes[queued.ID] != 0 {
-		t.Fatalf("passes = %v, want the running goal supervised every few seconds and the queued one not", passes)
+	if passes[running.ID] < 2 || passes[queued.ID] != 0 || passes[nested.ID] != 0 {
+		t.Fatalf("passes = %v, want the running top goal supervised every few seconds, the queued one and the sub-goal not", passes)
 	}
 	notes, err := s.ledger.Events(failing.ID, kindOf(core.EventNote))
 	if err != nil {

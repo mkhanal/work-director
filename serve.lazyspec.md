@@ -101,7 +101,8 @@ JSON message per line to stdout:
 - It is noted once at that point of the conversation.
 
 ## A Running Goal Is Supervised While Serving
-- While serving, each running goal is supervised every few seconds, as `wd goal supervise` does.
+- While serving, each running top goal (a goal with no goal above it) is supervised every few seconds, as `wd goal supervise` does.
+- A sub-goal is not supervised on its own: its top goal's supervisor looks after it.
 
 ## Work Items Serve Over HTTP
 `GET /api/work` lists all work items. `GET /api/work/<id>` returns one
