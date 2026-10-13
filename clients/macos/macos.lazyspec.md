@@ -247,3 +247,8 @@ hold only that product's work; with none, every product's.
 - The panel takes its own width beside the page; the page narrows to fit and nothing is hidden under it.
 - It is 320 points wide at first, dragged wider or narrower within 260 to 480, and keeps its width and whether it shows between launches.
 
+## Files And Images Go With What The Person Sends
+- A file pasted or dropped on a composer waits above the field until sent or removed; a pasted image is written as a PNG of its own; a folder is refused.
+- Sending passes each file as `--attach <path>` to the command it runs: `wd send`, `wd goal start`, `wd goal continue` or `wd answer`; files alone can be sent, except to continue a goal.
+- A file shows on the message it was sent with: the one on the same work at the same moment; a file no message carries shows on its own, once per moment.
+

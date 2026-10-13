@@ -11,6 +11,7 @@ struct NewGoalPage: View {
 
     @State private var flow: NewGoal
     @State private var text = ""
+    @State private var files: [Attaching] = []
     @AppStorage("newGoal.product") private var chosen = ""
 
     init(store: Store, scope: String?, started: @escaping (String) -> Void) {
@@ -65,13 +66,15 @@ struct NewGoalPage: View {
                 text: $text,
                 placeholder: "Describe the goal…",
                 command: plan?.commandLine,
-                busy: flow.phase == .finding || flow.phase == .starting
+                busy: flow.phase == .finding || flow.phase == .starting,
+                files: $files
             ) { Task { await submit(flow) } }
         }
         .navigationTitle("New goal")
         .onChange(of: flow.phase) {
             if case .started(let s) = flow.phase {
                 text = ""
+                files = []
                 flow.reset()
                 started(s.goal.id)
             }
@@ -87,12 +90,12 @@ struct NewGoalPage: View {
     }
 
     private var plan: Plan? {
-        product.isEmpty ? nil : try? Plan.start(project: product, text: text)
+        product.isEmpty ? nil : try? Plan.start(project: product, text: text, files: files)
     }
 
     private func submit(_ flow: NewGoal) async {
         guard plan != nil else { return }
-        await flow.submit(project: product, text: text)
+        await flow.submit(project: product, text: text, files: files)
     }
 
     @ViewBuilder private func phaseView(_ flow: NewGoal) -> some View {
@@ -126,7 +129,7 @@ struct NewGoalPage: View {
                                     Label("archived", systemImage: "archivebox").font(TypeScale.caption).foregroundStyle(.tertiary)
                                 }
                                 Spacer()
-                                Button("Continue this goal") { Task { await flow.continueGoal(f.goal.id, text: text) } }
+                                Button("Continue this goal") { Task { await flow.continueGoal(f.goal.id, text: text, files: files) } }
                                     .buttonStyle(.borderedProminent)
                             }
                         }

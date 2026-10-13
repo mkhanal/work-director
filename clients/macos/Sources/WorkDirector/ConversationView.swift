@@ -171,6 +171,8 @@ struct YouBubble<Status: View>: View {
     let text: String
     let at: String
     var label = "You"
+    /// The files sent with it.
+    var files: [Attachment] = []
     @ViewBuilder var status: Status
     @State private var expanded = false
 
@@ -186,16 +188,19 @@ struct YouBubble<Status: View>: View {
                 }
                 .font(TypeScale.caption)
                 .foregroundStyle(Palette.text3)
-                Text(text)
-                    .readable()
-                    .foregroundStyle(Palette.text)
-                    .lineLimit(expanded || !folds ? nil : 8)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Palette.bubbleFill, in: RoundedRectangle(cornerRadius: Radius.bubble))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.bubble).strokeBorder(Palette.bubbleBorder))
-                    .copyable(text)
+                if !text.isEmpty || files.isEmpty {
+                    Text(text)
+                        .readable()
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(expanded || !folds ? nil : 8)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Palette.bubbleFill, in: RoundedRectangle(cornerRadius: Radius.bubble))
+                        .overlay(RoundedRectangle(cornerRadius: Radius.bubble).strokeBorder(Palette.bubbleBorder))
+                        .copyable(text)
+                }
+                if !files.isEmpty { SentFiles(files: files) }
                 if folds {
                     Button(expanded ? "Show less" : "Show all") { expanded.toggle() }
                         .buttonStyle(.link)
@@ -209,8 +214,8 @@ struct YouBubble<Status: View>: View {
 }
 
 extension YouBubble where Status == EmptyView {
-    init(text: String, at: String, label: String = "You") {
-        self.init(text: text, at: at, label: label) { EmptyView() }
+    init(text: String, at: String, label: String = "You", files: [Attachment] = []) {
+        self.init(text: text, at: at, label: label, files: files) { EmptyView() }
     }
 }
 
@@ -236,6 +241,12 @@ struct OutgoingBubble: View {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.failure)
                     Text("Not sent").foregroundStyle(Palette.failure)
                 }
+            }
+            if !message.files.isEmpty {
+                Label(message.files.map { ($0 as NSString).lastPathComponent }.joined(separator: ", "), systemImage: "paperclip")
+                    .font(TypeScale.meta)
+                    .foregroundStyle(Palette.text3)
+                    .lineLimit(2)
             }
             if case .failed(let why, _) = message.state {
                 HStack(spacing: Space.s3) {

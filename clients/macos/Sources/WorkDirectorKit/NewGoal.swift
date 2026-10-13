@@ -24,12 +24,17 @@ public final class NewGoal {
     }
 
     /// Looks for goals the request continues; with none, starts it at once.
-    public func submit(project: String, text: String) async {
+    public func submit(project: String, text: String, files: [Attaching] = []) async {
+        // Files alone say nothing to match a goal on.
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            await startNew(project: project, text: text, files: files)
+            return
+        }
         phase = .finding
         do {
             let found = try await store.find(project: project, text: text)
             if found.isEmpty {
-                await startNew(project: project, text: text)
+                await startNew(project: project, text: text, files: files)
             } else {
                 phase = .offering(found)
             }
@@ -38,12 +43,12 @@ public final class NewGoal {
         }
     }
 
-    public func startNew(project: String, text: String) async {
-        await run { try Plan.start(project: project, text: text) }
+    public func startNew(project: String, text: String, files: [Attaching] = []) async {
+        await run { try Plan.start(project: project, text: text, files: files) }
     }
 
-    public func continueGoal(_ id: String, text: String) async {
-        await run { try Plan.continueGoal(id, text: text) }
+    public func continueGoal(_ id: String, text: String, files: [Attaching] = []) async {
+        await run { try Plan.continueGoal(id, text: text, files: files) }
     }
 
     public func reset() {

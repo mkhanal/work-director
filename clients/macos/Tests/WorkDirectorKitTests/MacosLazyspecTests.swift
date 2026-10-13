@@ -1458,4 +1458,52 @@ struct SeededTree {
         #expect(PanelWidth.clamped(900) == 480)
         #expect(PanelWidth.clamped(333) == 333)
     }
+
+    @Test("Files And Images Go With What The Person Sends")
+    func filesGoWithWhatIsSent() async throws {
+        let dir = tempDir()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let notes = dir.appendingPathComponent("notes.txt")
+        try "rollback notes".write(to: notes, atomically: true, encoding: .utf8)
+        let file = try Attaching.file(notes)
+        #expect(file.name == "notes.txt" && file.size == 14 && !file.isImage)
+        #expect(throws: AttachError.folder(dir.lastPathComponent)) { try Attaching.file(dir) }
+        let pasted = try Attaching.png(Data([0x89, 0x50, 0x4E, 0x47]), in: dir.appendingPathComponent("pasted"))
+        #expect(pasted.isImage && pasted.name.hasSuffix(".png") && FileManager.default.fileExists(atPath: pasted.path), "a pasted image is a PNG file of its own")
+
+        #expect(try Plan.send("g1", text: "see this", files: [file, pasted]).argv == ["send", "g1", "see this", "--attach", notes.path, "--attach", pasted.path])
+        #expect(try Plan.send("g1", text: "  ", files: [file]).argv == ["send", "g1", "", "--attach", notes.path], "files alone can be sent")
+        #expect(throws: PlanError.self) { try Plan.send("g1", text: " ") }
+        #expect(try Plan.start(project: "demo", text: "", files: [file]).argv == ["goal", "start", "demo", "", "--detach", "--json", "--attach", notes.path])
+        #expect(throws: PlanError.self) { try Plan.continueGoal("g1", text: "", files: [file]) }
+        #expect(try Plan.send("g1", text: "x", files: [file]).attached == [notes.path])
+
+        let home = try Home()
+        try fakeRunner(home)
+        let store = await Store(channel: try home.channel())
+        let message = await store.post(try Plan.send("t1", text: "see this", files: [file]), to: "t1")
+        #expect(message.text == "see this", "what was said is the text, not a file")
+
+        let goal = try home.goal("demo", "Pick a queue library")
+        try home.sql("""
+        UPDATE work SET state='needs-input', runner='fake', session='s-plan' WHERE id='\(goal)';
+        INSERT INTO event (work,kind,body,at) VALUES ('\(goal)','question','Where does this goal finish?
+        - research (recommended)
+        - complete PR','2026-10-13T14:02:00Z');
+        INSERT INTO event (work,kind,body,at,payload) VALUES ('\(goal)','attachment','/x/1-alone.txt','2026-10-13T14:01:00Z','{"name":"alone.txt","path":"/x/1-alone.txt","size":3,"media_type":"text/plain"}');
+        """)
+        let asked = try await store.goal(goal)
+        let question = try #require(asked.asking)
+        let r = try await store.run(try Plan.answer(goal, question, answers: ["research"], files: [file]))
+        #expect(r.code == 0, "\(r.stderr)")
+        let detail = try await store.goal(goal)
+        #expect(detail.files.map(\.name) == ["alone.txt", "notes.txt"])
+        let answer = try #require(detail.events.first { $0.kind == "answer" })
+        #expect(detail.files(with: answer).map(\.name) == ["notes.txt"], "a file shows on the message it was sent with")
+        let alone = detail.thread.compactMap { step -> String? in
+            if case .event(let e) = step, e.kind == "attachment" { return e.body } else { return nil }
+        }
+        #expect(alone == ["/x/1-alone.txt"], "a file no message carries shows on its own; one a message carries does not")
+    }
 }
+

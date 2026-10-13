@@ -158,7 +158,7 @@ public final class Store {
     /// outbox at once, and `then` runs once `wd` has taken it.
     @discardableResult
     public func post(_ plan: Plan, to work: String, then: Plan? = nil) -> Outgoing {
-        let message = Outgoing(id: UUID(), work: work, text: plan.argv.last ?? "", at: Date(), state: .sending, plan: plan, then: then)
+        let message = Outgoing(id: UUID(), work: work, text: plan.argv.count > 2 ? plan.argv[2] : "", at: Date(), state: .sending, plan: plan, then: then)
         outbox.append(message)
         Task { await deliver(message.id) }
         return message

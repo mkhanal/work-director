@@ -89,6 +89,8 @@ extension GoalDetail {
             return .stopped(e, said: String(e.body.dropFirst(stoppedPrefix.count)))
         case "note":
             return e.directorDeclined.map { .declined(e, $0) }
+        case "attachment" where showsAlone(e):
+            return .event(e)
         default:
             return nil
         }

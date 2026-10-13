@@ -68,19 +68,19 @@ public struct Plan: Hashable, Sendable, Identifiable {
 
     /// Starts a goal from what the person typed: wd files it, plans it and
     /// spawns its tasks.
-    public static func start(project: String, text: String) throws -> Plan {
+    public static func start(project: String, text: String, files: [Attaching] = []) throws -> Plan {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { throw PlanError.empty }
+        guard !text.isEmpty || !files.isEmpty else { throw PlanError.empty }
         // Planning runs in its own process, so the goal opens while it is
         // planned and its planning can be watched and stopped.
-        return Plan(title: "Start goal", argv: ["goal", "start", project, text, "--detach", "--json"])
+        return Plan(title: "Start goal", argv: ["goal", "start", project, text, "--detach", "--json"]).attaching(files)
     }
 
     /// Picks a goal up where it stands with what the person typed.
-    public static func continueGoal(_ id: String, text: String) throws -> Plan {
+    public static func continueGoal(_ id: String, text: String, files: [Attaching] = []) throws -> Plan {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw PlanError.empty }
-        return Plan(title: "Continue goal", argv: ["goal", "continue", id, text, "--json"])
+        return Plan(title: "Continue goal", argv: ["goal", "continue", id, text, "--json"]).attaching(files)
     }
 
     /// Archives work. Work at rest needs no reason; open work is dropped first,
@@ -93,10 +93,10 @@ public struct Plan: Hashable, Sendable, Identifiable {
 
     /// Something said to work while it runs: a goal passes it to every open
     /// task and keeps it as a decision; a running session gets it when idle.
-    public static func send(_ id: String, text: String) throws -> Plan {
+    public static func send(_ id: String, text: String, files: [Attaching] = []) throws -> Plan {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { throw PlanError.empty }
-        return Plan(title: "Send", argv: ["send", id, text])
+        guard !text.isEmpty || !files.isEmpty else { throw PlanError.empty }
+        return Plan(title: "Send", argv: ["send", id, text]).attaching(files)
     }
 
     /// A new title a person chose; a goal renamed keeps it when it is planned.
@@ -109,10 +109,10 @@ public struct Plan: Hashable, Sendable, Identifiable {
     /// The answers to the question a session is waiting on, one per item in
     /// the order asked. Remembered, a finish-line choice also becomes the
     /// product's setting.
-    public static func answer(_ id: String, _ question: Question, answers: [String], remember: Bool = false) throws -> Plan {
+    public static func answer(_ id: String, _ question: Question, answers: [String], remember: Bool = false, files: [Attaching] = []) throws -> Plan {
         let answers = answers.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         guard answers.count == question.items.count, !answers.contains(where: \.isEmpty) else { throw PlanError.empty }
-        return Plan(title: "Answer", argv: ["answer", id] + answers + (remember ? ["--remember"] : []))
+        return Plan(title: "Answer", argv: ["answer", id] + answers + (remember ? ["--remember"] : [])).attaching(files)
     }
 
     /// Leaves the question to the director's judgement: it answers every item

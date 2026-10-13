@@ -64,7 +64,11 @@ struct GoalThread: View {
     @ViewBuilder private func row(_ step: ThreadStep) -> some View {
         switch step {
         case .event(let event) where goal.isYours(event):
-            YouBubble(text: event.decision?.answer ?? event.answerText, at: when(event.at), label: event.kind == "answer" ? "You answered" : "You")
+            YouBubble(text: event.decision?.answer ?? event.answerText, at: when(event.at), label: event.kind == "answer" ? "You answered" : "You",
+                      files: goal.files(with: event))
+        case .event(let event) where event.kind == "attachment":
+            YouBubble(text: "", at: when(event.at), label: event.work == goal.goal.id ? "You attached" : "You attached to \(name(of: event.work))",
+                      files: goal.files(with: event))
         case .event(let event) where event.kind == "report":
             Turn(speaker: speaker(of: event.work), at: event.at, open: opener(event.work), tag: goal.tag(of: event.work)) {
                 ReportCard(text: event.body, report: goal.reports[String(event.id)])
@@ -94,7 +98,7 @@ struct GoalThread: View {
                             if answer.answeredByDirector {
                                 DirectorTurn(answer: answer, decided: goal.decided(for: answer))
                             } else {
-                                YouBubble(text: answer.answerText, at: when(answer.at), label: "You answered")
+                                YouBubble(text: answer.answerText, at: when(answer.at), label: "You answered", files: goal.files(with: answer))
                             }
                         }
                     }

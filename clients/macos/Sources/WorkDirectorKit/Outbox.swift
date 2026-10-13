@@ -13,6 +13,9 @@ public struct Outgoing: Sendable, Hashable, Identifiable {
     /// What runs once it is sent, as part of sending it: keeping it as feedback.
     let then: Plan?
 
+    /// The paths of the files it carries.
+    public var files: [String] { plan.attached }
+
     public enum State: Sendable, Hashable {
         case sending
         /// `wd` took it; it shows here until the work's record does.

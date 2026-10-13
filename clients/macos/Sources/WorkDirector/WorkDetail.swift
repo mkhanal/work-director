@@ -712,6 +712,7 @@ struct MessageBar: View {
     @State private var failed = false
     /// Whether what is said is also kept as feedback, to learn from.
     @State private var remember = false
+    @State private var files: [Attaching] = []
 
     var body: some View {
         InputBar(
@@ -720,6 +721,7 @@ struct MessageBar: View {
                 : work.kind.isGoal ? "Message the director about this goal…" : "Message this task… it reads it when it is ready",
             command: plan?.commandLine,
             busy: sending,
+            files: $files,
             sendingNow: store.outbox.contains { $0.work == work.id && $0.state == .sending },
             note: outcome,
             noteIsError: failed,
@@ -736,7 +738,7 @@ struct MessageBar: View {
     private var continuing: Bool { work.kind.isGoal && work.state == .done }
 
     private var plan: Plan? {
-        continuing ? try? Plan.continueGoal(work.id, text: text) : try? Plan.send(work.id, text: text)
+        continuing ? try? Plan.continueGoal(work.id, text: text, files: files) : try? Plan.send(work.id, text: text, files: files)
     }
 
     private func send() async {
@@ -749,6 +751,7 @@ struct MessageBar: View {
                 failed = false
                 outcome = "continued: planned and started again"
                 text = ""
+                files = []
             } catch {
                 failed = true
                 outcome = String(describing: error)
@@ -757,8 +760,9 @@ struct MessageBar: View {
         }
         // The field is free again at once; the message shows in the
         // conversation until the work's record holds it.
-        store.post(plan, to: work.id, then: remember ? try? Plan.remember(text, work: work) : nil)
+        store.post(plan, to: work.id, then: remember && !text.isEmpty ? try? Plan.remember(text, work: work) : nil)
         text = ""
+        files = []
         outcome = nil
         failed = false
     }
@@ -790,6 +794,8 @@ struct InputBar: View {
     let placeholder: String
     let command: String?
     let busy: Bool
+    /// Files waiting to go with the message; nil where nothing can be attached.
+    var files: Binding<[Attaching]>? = nil
     /// A message from here is on its way; the field stays free.
     var sendingNow = false
     var note: String? = nil
@@ -811,6 +817,7 @@ struct InputBar: View {
     @State private var escapeStops = EscapeTarget()
     /// Shown after one Escape, while a second one would stop.
     @State private var armed = false
+    @State private var dropping = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
@@ -823,12 +830,16 @@ struct InputBar: View {
                     .padding(.horizontal, Space.s1)
             }
             VStack(alignment: .leading, spacing: Space.s3) {
+                if let files, !files.wrappedValue.isEmpty {
+                    AttachingChips(files: files)
+                }
                 MessageField(
                     text: $text,
                     placeholder: placeholder,
                     sendKey: sendKey,
                     enabled: !busy,
                     height: $height,
+                    attach: files.map { files in { files.wrappedValue += $0.filter { f in !files.wrappedValue.contains(f) } } },
                     send: { if command != nil && !busy { submit() } }
                 )
                 .frame(height: height)
@@ -896,7 +907,17 @@ struct InputBar: View {
             .padding(.horizontal, Space.s4 - 2)
             .padding(.vertical, Space.s3)
             .background(Palette.raised, in: RoundedRectangle(cornerRadius: Radius.bubble))
-            .overlay(RoundedRectangle(cornerRadius: Radius.bubble).strokeBorder(Palette.separator))
+            .overlay(RoundedRectangle(cornerRadius: Radius.bubble).strokeBorder(dropping ? Color.accentColor : Palette.separator, lineWidth: dropping ? 2 : 1))
+            .onDrop(of: [.fileURL], isTargeted: files == nil ? nil : $dropping) { providers in
+                guard let files else { return false }
+                for provider in providers {
+                    _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                        guard let url, let file = try? Attaching.file(url) else { return }
+                        Task { @MainActor in if !files.wrappedValue.contains(file) { files.wrappedValue.append(file) } }
+                    }
+                }
+                return true
+            }
             .shadow(color: .black.opacity(0.07), radius: 10, y: 2)
             HStack(spacing: Space.s2) {
                 if let command {

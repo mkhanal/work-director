@@ -223,10 +223,12 @@ public struct GoalDetail: Codable, Sendable, Hashable {
     public let proposed: Bool
     /// Why its latest planning broke it down so; nil when the planner said nothing.
     public let reasoning: Reasoning?
+    /// The files attached under the goal, oldest first.
+    let attachments: [Attachment]?
 
     enum CodingKeys: String, CodingKey {
         case goal, tasks, rollup, events, claims, landings, delivery, activity, asking, reports, waiting
-        case chain, tree, paths, finish, progress, course, superseded, proposed, reasoning
+        case chain, tree, paths, finish, progress, course, superseded, proposed, reasoning, attachments
         case doneWhen = "done_when"
         case notDoneBecause = "not_done_because"
         case needsYou = "needs_you"

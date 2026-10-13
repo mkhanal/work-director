@@ -12,6 +12,8 @@ struct MessageField: NSViewRepresentable {
     let enabled: Bool
     /// The height the text needs, from one line up to `maxLines`.
     @Binding var height: CGFloat
+    /// Takes the files pasted or dropped on the field; nil where nothing can be attached.
+    var attach: (([Attaching]) -> Void)? = nil
     let send: () -> Void
 
     static let font = NSFont.systemFont(ofSize: 14)
@@ -55,6 +57,7 @@ struct MessageField: NSViewRepresentable {
         }
         view.isEditable = enabled
         view.placeholder = placeholder
+        view.attach = attach
         view.needsDisplay = true
         context.coordinator.measure()
     }
@@ -110,6 +113,48 @@ struct MessageField: NSViewRepresentable {
 /// A text view that shows what to type while it is empty.
 final class PlaceholderTextView: NSTextView {
     var placeholder = ""
+    /// Where pasted and dropped files go; without it they paste as text.
+    var attach: (([Attaching]) -> Void)?
+
+    override func paste(_ sender: Any?) {
+        if let attach, let files = Self.files(on: .general) {
+            attach(files)
+        } else {
+            super.paste(sender)
+        }
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        attach != nil && Self.fileURLs(on: sender.draggingPasteboard) != nil ? .copy : super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        attach != nil && Self.fileURLs(on: sender.draggingPasteboard) != nil ? .copy : super.draggingUpdated(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if let attach, let urls = Self.fileURLs(on: sender.draggingPasteboard) {
+            attach(urls.compactMap { try? Attaching.file($0) })
+            return true
+        }
+        return super.performDragOperation(sender)
+    }
+
+    static func fileURLs(on board: NSPasteboard) -> [URL]? {
+        let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        return urls.isEmpty ? nil : urls
+    }
+
+    /// The files a paste brings: copied files, else an image with no text,
+    /// written as a PNG. Nil when it is text to paste.
+    static func files(on board: NSPasteboard) -> [Attaching]? {
+        if let urls = fileURLs(on: board) { return urls.compactMap { try? Attaching.file($0) } }
+        guard board.string(forType: .string) == nil, let image = NSImage(pasteboard: board),
+              let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]),
+              let file = try? Attaching.png(png, in: Attaching.pasteDir) else { return nil }
+        return [file]
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
