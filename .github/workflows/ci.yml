@@ -73,7 +73,7 @@ jobs:
           goal=$("$WD_BIN" goal add demo "Smoke the app" --json | jq -r .id)
           "$WD_BIN" decide "$goal" "keep it small"
           "$WD_BIN" add demo "A task on its own"
-          for view in overview conversation tasks record new; do
+          for view in overview conversation record new; do
             if [ "$view" = new ]; then
               printf 'scope=demo\n' > "$XDG_CONFIG_HOME/work-director/settings"
             else

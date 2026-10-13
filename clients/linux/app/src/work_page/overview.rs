@@ -107,7 +107,7 @@ fn cards_row(
     };
     let done = card("Done when");
     let text = match done_when {
-        Some(d) => ui::said(d, &["callout"]),
+        Some(d) => ui::said(&kit::sentence(d), &["callout"]),
         None => ui::text("Not set yet", &["callout", "text3"]),
     };
     done.append(&text);
@@ -410,7 +410,14 @@ fn what_would_change(need: &NeedYou) -> Option<gtk::Widget> {
             "What would change"
         }));
         for line in &change.lines {
-            lines.append(&ui::said(&format!("· {line}"), &["callout"]));
+            let row = ui::hbox(SPACE_2);
+            let bullet = ui::line("•", &["callout", "text3"]);
+            bullet.set_valign(gtk::Align::Start);
+            row.append(&bullet);
+            let said = ui::said(&kit::sentence(line.trim_start_matches("- ")), &["callout"]);
+            said.set_hexpand(true);
+            row.append(&said);
+            lines.append(&row);
         }
         column.append(&lines);
     }

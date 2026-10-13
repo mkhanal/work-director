@@ -28,6 +28,10 @@ pub struct ToolCall {
 pub struct QuestionOption {
     pub label: String,
     pub description: String,
+    /// What the option is shown as when its label is terse, as a finish
+    /// line's is; the label is still what is answered.
+    #[serde(skip)]
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]

@@ -876,7 +876,7 @@ fn a_goal_page_shows_what_done_means_what_needs_you_and_its_sub_goals() {
                 "steps": [step(1, "done"), step(2, "doing"), step(3, "todo"), step(4, "dropped")]})),
             node_json("a", "task", "queued", json!({"why_not_moving": "waits on Title d, Title c"})),
             node_json("x", "task", "running", json!({"steps": [step(1, "doing")]})),
-            node_json("w", "task", "superseded", json!({"why_not_moving": "guides live with each release"})),
+            node_json("w", "task", "superseded", json!({"why_not_moving": "superseded: guides live with each release"})),
         ],
     }));
     assert!(!goal.nested());
@@ -1128,13 +1128,24 @@ fn a_change_waiting_for_the_person_shows_what_would_change() {
     assert_eq!((change.why.as_str(), change.lines.len()), ("The fix is small.", 1));
     assert_eq!(finish.label("g"), "Before I plan it · where does this goal finish?");
     assert_eq!(finish.change.as_ref().map(|c| c.choices.len()), Some(2));
-    let offered: Vec<(String, String)> =
-        finish.shown_question().items[0].options.iter().map(|o| (o.label.clone(), o.description.clone())).collect();
+    let offered: Vec<(String, Option<String>, String)> = finish.shown_question().items[0]
+        .options
+        .iter()
+        .map(|o| (o.label.clone(), o.title.clone(), o.description.clone()))
+        .collect();
     assert_eq!(
         offered,
         vec![
-            ("research (recommended)".to_string(), "Research complete: a written comparison and a pick".to_string()),
-            ("local build".to_string(), "A local build you can try".to_string()),
+            (
+                "research (recommended)".to_string(),
+                Some("Research complete: a written comparison and a pick".to_string()),
+                "Trade-offs and a recommendation with its reasons. No code changes.".to_string()
+            ),
+            (
+                "local build".to_string(),
+                Some("A local build you can try".to_string()),
+                "The work on a branch, with how to run it.".to_string()
+            ),
         ],
         "each finish line with what it means, answered by its own words"
     );

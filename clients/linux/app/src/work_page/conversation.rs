@@ -119,7 +119,10 @@ impl WorkPage {
                 Turn::key(&id, &(&e, &report)).with(move || event_turn(&e, report.as_ref(), task, weak))
             }
             ThreadStep::Exchange(q, answer) => {
-                if answer.is_none() && g.asking.as_ref().is_some_and(|a| a.id == format!("event-{}", q.id)) {
+                // An open question is answered in its needs-you card, shown once.
+                let open = g.asking.as_ref().is_some_and(|a| a.id == format!("event-{}", q.id))
+                    || g.needs_you.iter().any(|n| n.work == q.work);
+                if answer.is_none() && open {
                     return None;
                 }
                 if let Some(a) = answer.as_ref().filter(|a| g.is_yours(a)) {
@@ -512,7 +515,12 @@ pub(super) fn exchange_turn(
     page: Weak<WorkPage>,
 ) -> gtk::Widget {
     let card = ui::wd_card(SPACE_1);
-    card.append(&ui::label(if task.is_some() { "Asked the director" } else { "Asked you" }));
+    let asked = match (answer, &task) {
+        (Some(a), _) if a.answered_by_director() => "Asked the director".to_string(),
+        (_, Some(_)) => format!("{asker} asks you"),
+        (_, None) => "Asked you".to_string(),
+    };
+    card.append(&ui::label(&asked));
     for item in q.asked_items() {
         card.append(&ui::said(&item.question, &["callout"]));
         for choice in &item.choices {

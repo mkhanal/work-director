@@ -5,7 +5,7 @@
 use crate::conversation::Question;
 use crate::ledger::{GoalDetail, WorkState};
 use crate::look::{Mark, Tone};
-use crate::record::{RecordBy, RecordEntry, RecordKind, RecordView};
+use crate::record::{RecordBy, RecordEntry, RecordView};
 use crate::tree::{ChangeKind, Course, FinishLine, NeedYou, Node, PlanStep, Shape, StepState};
 
 /// One sub-goal as its row reads.
@@ -52,7 +52,8 @@ impl Node {
     fn meta(&self) -> String {
         let state = self.work.state;
         if state == WorkState::Superseded {
-            let why = self.why_not_moving.as_deref().filter(|w| *w != "superseded");
+            let why = self.why_not_moving.as_deref().map(|w| w.strip_prefix("superseded: ").unwrap_or(w));
+            let why = why.filter(|w| *w != "superseded");
             return why.map_or_else(|| "Superseded".to_string(), |w| format!("Superseded: {w}"));
         }
         if self.opens().is_some() || self.group {
@@ -176,24 +177,9 @@ impl GoalDetail {
 }
 
 impl RecordView {
-    /// What the director did itself: its course checks, chores, judgements,
-    /// answers and supersessions, newest first.
+    /// What the director did itself, newest first.
     pub fn director_did(&self) -> Vec<&RecordEntry> {
-        self.entries
-            .iter()
-            .filter(|e| e.by == RecordBy::Director)
-            .filter(|e| {
-                matches!(
-                    e.kind,
-                    RecordKind::Course
-                        | RecordKind::Chore
-                        | RecordKind::Judged
-                        | RecordKind::Answer
-                        | RecordKind::Superseded
-                        | RecordKind::Finish
-                )
-            })
-            .collect()
+        self.entries.iter().filter(|e| e.by == RecordBy::Director).collect()
     }
 }
 
@@ -283,8 +269,10 @@ impl NeedYou {
             Some(ChangeKind::Finish) => {
                 for option in q.items.iter_mut().flat_map(|i| i.options.iter_mut()) {
                     if let Some(line) = FinishLine::from_label(crate::conversation::unmarked(&option.label)) {
+                        let (title, means) = line.choice();
+                        option.title = Some(title.to_string());
                         if option.description.is_empty() {
-                            option.description = line.choice().to_string();
+                            option.description = means.to_string();
                         }
                     }
                 }

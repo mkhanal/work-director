@@ -139,15 +139,20 @@ impl FinishLine {
         all.into_iter().find(|f| f.name().eq_ignore_ascii_case(label.trim()))
     }
 
-    /// The finish line as a choice reads it.
-    pub fn choice(self) -> &'static str {
+    /// The finish line as a choice reads it: its title and what it hands back.
+    pub fn choice(self) -> (&'static str, &'static str) {
         match self {
-            FinishLine::Discovery => "Discovery: the cause found and explained",
-            FinishLine::Research => "Research complete: a written comparison and a pick",
-            FinishLine::LocalBuild => "A local build you can try",
-            FinishLine::CompletePr => "A complete PR",
-            FinishLine::Merged => "Merged",
-            FinishLine::Released => "Released",
+            FinishLine::Discovery => {
+                ("Discovery: the cause found and explained", "A findings report with its proof. No code changes.")
+            }
+            FinishLine::Research => (
+                "Research complete: a written comparison and a pick",
+                "Trade-offs and a recommendation with its reasons. No code changes.",
+            ),
+            FinishLine::LocalBuild => ("A local build you can try", "The work on a branch, with how to run it."),
+            FinishLine::CompletePr => ("A complete PR", "The change with its tests, ready to merge."),
+            FinishLine::Merged => ("Merged", "The pull request merged into the main branch."),
+            FinishLine::Released => ("Released", "Merged and published as a release."),
         }
     }
 

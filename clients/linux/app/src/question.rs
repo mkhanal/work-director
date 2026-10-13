@@ -206,7 +206,7 @@ fn item_page(
         row.append(&check);
         let words = ui::vbox(2);
         words.set_hexpand(true);
-        words.append(&ui::text(label, &["callout", "medium"]));
+        words.append(&ui::text(option.title.as_deref().unwrap_or(label), &["callout", "medium"]));
         if !option.description.is_empty() {
             words.append(&ui::text(&option.description, &["meta", "text3"]));
         }
