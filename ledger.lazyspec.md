@@ -158,6 +158,10 @@ For a goal, `SoftDone` also requires every task under it done, dropped or supers
 - A goal finishing at discovery or research needs a DONE report; at a local build also a passing verify; at a complete PR also a pull request; at merged a commit landing; at released a commit landing and a released note.
 - A goal with no finish line needs a DONE report, a passing verify and a pull request.
 
+## What Soft Done Finds Missing Reads In Plain Words
+- Each missing item reads for a person: `a report that it's finished`, `its checks passing`, `a pull request`, `a merged commit`, `a note that it's released`, and `“<title>” to finish` for each open task under a goal.
+- The refusal reads `Not ready to call it finished: it still needs ` and the items as a sentence lists them.
+
 ## The Ledger Persists Across Reopen
 Work added to a file-backed ledger is still there after closing and reopening it.
 

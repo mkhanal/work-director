@@ -460,6 +460,11 @@ could not with their work, the bound that ran out, and the work still open.
 - `wd resume <id>` on dropped work restores it as `Restore` does, and each restored task with a session is sent "Resume where you left off.".
 - `wd archive` of open work stops running sessions the same way before it drops them.
 
+## What Pause, Resume, Cancel And Stop Tell The Person Names Work By Its Title
+- `wd pause`, `wd resume`, `wd cancel` and `wd stop` print what they did naming the work by its title in quotes and counting what changed under it as agents, as in `Paused “<title>” and its 2 agents; resume it to carry on`.
+- `wd stop` names each agent it stopped by its work's title, and hands back what it withdrew under `Taken back, unread:`.
+- None prints an id, `task(s)`, `work item(s)` or `session(s)`.
+
 ## Wd Goal Find Asks A Model Which Goals A Request Continues
 - `wd goal find <project> "<text>"` shows the project's goals, finished and archived ones included, to one bounded model call with the `interpret` role's model, through the project's runner or `--runner`.
 - `--json` prints `[{goal, why}]`, the goal as its whole work row, most relevant first.

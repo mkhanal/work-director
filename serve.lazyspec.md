@@ -131,7 +131,7 @@ JSON message per line to stdout:
 
 ## Sentences A Goal Serves Are Free Of Internal Terms
 - The sentences wd writes for the person — `not_done_because`, each node's `why_not_moving`, `finished`, a change's `lines`, a gate's `why`, and a record entry's `what` for what the director filed — name work by its title, never its id.
-- None says a report status, verify, soft-done, supersede as a verb, claim, judged, ACTIONS, STEPS, payload or worktree, or carries a session id.
+- None says a report status, verify, soft-done, supersede as a verb, claim, judged, done-when, ACTIONS, STEPS, payload or worktree, counts in `(s)`, or carries a session id.
 - A goal short of its finish line reads `Not finished yet: ` and what has not happened, as in `the work isn't reported done, its checks haven't passed, and there's no pull request`; one not yet checked against its done-when reads `It hasn't been checked against what done means yet`.
 - A finish line set reads in the record as `Finishes at a complete pull request, as your taste says`; a report as `Reported finished`, `Reported stuck` or `Asked for your input` with what it said.
 

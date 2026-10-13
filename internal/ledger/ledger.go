@@ -2181,7 +2181,7 @@ func (l *Ledger) Conflicts(epicID string) ([]core.Conflict, error) {
 
 // review → soft-done. Goal: needs every task under it settled, and its finish
 // line reached (FinishReached), or with none a DONE report, passing verify and
-// PR. Task: needs only the DONE report. Standalone: DONE + verify, and
+// PR; what is missing is listed in a person's words. Task: needs only the DONE report. Standalone: DONE + verify, and
 // PR when code changed.
 func (l *Ledger) SoftDone(id string, codeChanged bool) (core.Work, error) {
 	w, err := l.Get(id)
@@ -2206,14 +2206,10 @@ func (l *Ledger) SoftDone(id string, codeChanged bool) (core.Work, error) {
 		if err != nil {
 			return core.Work{}, err
 		}
-		var n int
 		for _, t := range open {
 			if !core.Settled(t.State) {
-				n++
+				missing = append(missing, core.MissingTask(t.Title))
 			}
-		}
-		if n > 0 {
-			missing = append(missing, fmt.Sprintf("%d task(s) not done", n))
 		}
 		if w.FinishLine != nil {
 			if ok, what := core.FinishReached(*w.FinishLine, evs); !ok {
@@ -2221,28 +2217,28 @@ func (l *Ledger) SoftDone(id string, codeChanged bool) (core.Work, error) {
 			}
 		} else {
 			if r := last(core.EventReport); r == nil || !strings.HasPrefix(r.Body, "DONE") {
-				missing = append(missing, "DONE report")
+				missing = append(missing, core.MissingReport)
 			}
 			if v := last(core.EventVerify); v == nil || !strings.HasPrefix(v.Body, "pass") {
-				missing = append(missing, "passing verify")
+				missing = append(missing, core.MissingChecks)
 			}
 			if last(core.EventPr) == nil {
-				missing = append(missing, "pull request")
+				missing = append(missing, core.MissingPullRequest)
 			}
 		}
 	} else if w.Parent != nil {
 		if r := last(core.EventReport); r == nil || !strings.HasPrefix(r.Body, "DONE") {
-			missing = append(missing, "DONE report")
+			missing = append(missing, core.MissingReport)
 		}
 	} else {
 		if r := last(core.EventReport); r == nil || !strings.HasPrefix(r.Body, "DONE") {
-			missing = append(missing, "DONE report")
+			missing = append(missing, core.MissingReport)
 		}
 		if v := last(core.EventVerify); v == nil || !strings.HasPrefix(v.Body, "pass") {
-			missing = append(missing, "passing verify")
+			missing = append(missing, core.MissingChecks)
 		}
 		if codeChanged && last(core.EventPr) == nil {
-			missing = append(missing, "pull request")
+			missing = append(missing, core.MissingPullRequest)
 		}
 	}
 	if len(missing) > 0 {

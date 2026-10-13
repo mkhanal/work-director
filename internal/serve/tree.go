@@ -377,11 +377,11 @@ func (s *Server) notDoneBecause(t tree, top bool) ([]string, error) {
 // missingPlain says each part core.FinishReached finds missing as the person
 // would: what has not happened to the work yet.
 var missingPlain = map[string]string{
-	"DONE report":    "the work isn't reported done",
-	"passing verify": "its checks haven't passed",
-	"pull request":   "there's no pull request",
-	"commit landing": "it isn't merged",
-	"released note":  "it isn't released",
+	core.MissingReport:      "the work isn't reported done",
+	core.MissingChecks:      "its checks haven't passed",
+	core.MissingPullRequest: "there's no pull request",
+	core.MissingMerge:       "it isn't merged",
+	core.MissingRelease:     "it isn't released",
 }
 
 // missingWords lists what core.FinishReached finds missing as one clause.
@@ -392,20 +392,7 @@ func missingWords(missing string) string {
 			parts[i] = plain
 		}
 	}
-	return andList(parts)
-}
-
-// andList joins phrases as a sentence lists them: "a, b, and c".
-func andList(parts []string) string {
-	switch len(parts) {
-	case 0:
-		return ""
-	case 1:
-		return parts[0]
-	case 2:
-		return parts[0] + " and " + parts[1]
-	}
-	return strings.Join(parts[:len(parts)-1], ", ") + ", and " + parts[len(parts)-1]
+	return core.AndList(parts)
 }
 
 // needYou is a question on work in the tree that waits on the person, and

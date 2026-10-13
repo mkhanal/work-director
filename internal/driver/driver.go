@@ -344,7 +344,7 @@ func (d *Driver) Drive(goal core.Work, b Budget) (Result, error) {
 		}
 		res.Unfinished = unfinished
 		if len(unfinished) == 0 {
-			res.Stop, res.Why = StopComplete, "every task at rest"
+			res.Stop, res.Why = StopComplete, "nothing is left to work on"
 			break
 		}
 		// Movement is measured on the work itself, not on what a turn reported.
@@ -366,7 +366,19 @@ func (d *Driver) Drive(goal core.Work, b Budget) (Result, error) {
 		}
 	}
 	if len(res.Unjudged) > 0 && res.Stop != StopComplete {
-		res.Why += "; done-when not judged: " + strings.Join(res.Unjudged, ", ")
+		names := make([]string, len(res.Unjudged))
+		for i, id := range res.Unjudged {
+			w, err := d.Ledger.Get(id)
+			if err != nil {
+				return res, err
+			}
+			names[i] = "“" + w.Title + "”"
+		}
+		verb := "hasn't"
+		if len(names) > 1 {
+			verb = "haven't"
+		}
+		res.Why += "; " + core.AndList(names) + " " + verb + " been checked against what done means yet"
 	}
 	res.Shipped = res.Stop.Shipped()
 	res.Answered, res.Unanswered = unique(res.Answered), uniqueQuestions(res.Unanswered)
@@ -551,7 +563,7 @@ func (d *Driver) judgeDoneWhens(goal core.Work, b, spent Budget, settled []core.
 		}
 		if !met && d.Missed != nil {
 			if err := d.Missed(w.ID, text); err != nil {
-				return unjudged, spent, fmt.Sprintf("telling %s what is missing: %v", w.ID, err)
+				return unjudged, spent, fmt.Sprintf("telling the agent on “%s” what is missing: %v", w.Title, err)
 			}
 		}
 	}

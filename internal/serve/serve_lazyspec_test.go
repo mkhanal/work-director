@@ -2503,6 +2503,8 @@ var internalTerms = []*regexp.Regexp{
 	regexp.MustCompile(`\bACTIONS\b|\bSTEPS\b`),
 	regexp.MustCompile(`(?i)\bpayload\b`),
 	regexp.MustCompile(`(?i)\bworktree\b`),
+	regexp.MustCompile(`\w\(s\)`),
+	regexp.MustCompile(`(?i)\bdone-when\b`),
 	regexp.MustCompile(`(?i)\bses_[A-Za-z0-9]+|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-`),
 	regexp.MustCompile(`\b[0-9a-f]{8}\b`),
 }

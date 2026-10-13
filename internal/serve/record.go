@@ -266,7 +266,7 @@ func (s *Server) reshapeWords(t tree, what string) (string, error) {
 			}
 			names = append(names, n)
 		}
-		return name + " waits on " + andList(names), nil
+		return name + " waits on " + core.AndList(names), nil
 	}
 	if m := courseRe.FindStringSubmatch(what); m != nil {
 		return "Changed course to “" + m[1] + "”, done when " + m[2] + ", finishing at " + coordinator.FinishWords(core.FinishLine(m[3])), nil

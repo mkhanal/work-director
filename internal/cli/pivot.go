@@ -181,7 +181,7 @@ func (c *Cli) stop(rest []string) error {
 		// The goal's own session, while it is planned, stops with its tasks.
 		targets = append(targets, tasks...)
 	}
-	stopped, withdrawn := []string{}, []string{}
+	stopped, withdrawn, names := []string{}, []string{}, []string{}
 	for _, t := range targets {
 		if core.AtRest(t.State) {
 			continue
@@ -192,6 +192,7 @@ func (c *Cli) stop(rest []string) error {
 		}
 		if was {
 			stopped = append(stopped, t.ID)
+			names = append(names, quoted(t))
 		}
 		back, err := c.Ledger.Withdraw(t.ID)
 		if err != nil {
@@ -202,11 +203,19 @@ func (c *Cli) stop(rest []string) error {
 		}
 	}
 	if len(stopped) == 0 && len(withdrawn) == 0 {
-		return fail("%s has nothing to stop: no session is working and no message is waiting", w.ID)
+		return fail("%s has nothing to stop: no agent is working on it and no message is waiting", quoted(w))
 	}
-	text := fmt.Sprintf("stopped %d session(s); the next message continues them", len(stopped))
+	var text string
+	switch len(names) {
+	case 0:
+		text = "No agent was working"
+	case 1:
+		text = "Stopped the agent on " + names[0] + "; your next message continues it"
+	default:
+		text = "Stopped the agents on " + core.AndList(names) + "; your next message continues them"
+	}
 	if len(withdrawn) > 0 {
-		text += fmt.Sprintf("\nwithdrawn, not read:\n%s", strings.Join(withdrawn, "\n\n"))
+		text += "\nTaken back, unread:\n" + strings.Join(withdrawn, "\n\n")
 	}
 	return c.out(map[string]any{"ok": true, "stopped": stopped, "withdrawn": withdrawn}, text)
 }
@@ -222,7 +231,7 @@ func (c *Cli) pause(rest []string) error {
 		return err
 	}
 	if core.AtRest(w.State) || w.State == core.StatePaused {
-		return fail("%s is %s: there is nothing running to pause", w.ID, w.State)
+		return fail("%s isn't running: there is nothing to pause", quoted(w))
 	}
 	targets := []core.Work{w}
 	if core.IsGoal(w.Kind) {
@@ -236,7 +245,7 @@ func (c *Cli) pause(rest []string) error {
 			continue
 		}
 		if _, err := c.stopSession(t); err != nil {
-			failed = append(failed, fmt.Sprintf("%s: %v", t.ID, err))
+			failed = append(failed, fmt.Sprintf("the agent on %s (%v)", quoted(t), err))
 			continue
 		}
 		if _, err := c.Ledger.Transition(t.ID, core.StatePaused); err != nil {
@@ -245,14 +254,14 @@ func (c *Cli) pause(rest []string) error {
 		paused = append(paused, t.ID)
 	}
 	if len(failed) > 0 {
-		return fail("could not stop %s; the rest are paused and %s is not", strings.Join(failed, "; "), w.ID)
+		return fail("Couldn't stop %s; the rest are paused and %s is not", core.AndList(failed), quoted(w))
 	}
 	if core.IsGoal(w.Kind) {
 		if _, err := c.Ledger.Transition(w.ID, core.StatePaused); err != nil {
 			return err
 		}
 	}
-	return c.out(map[string]any{"paused": paused}, fmt.Sprintf("%s paused with %d task(s); wd resume %s carries on", w.ID, len(paused), w.ID))
+	return c.out(map[string]any{"paused": paused}, "Paused "+withAgents(w, paused)+"; resume it to carry on")
 }
 
 // resume returns paused work to the state it was paused from, and sends every
@@ -269,7 +278,7 @@ func (c *Cli) resume(rest []string) error {
 	if err != nil {
 		return err
 	}
-	return c.out(map[string]any{"resumed": resumed}, fmt.Sprintf("%s resumed with %d task(s)", w.ID, len(resumed)))
+	return c.out(map[string]any{"resumed": resumed}, "Resumed "+withAgents(w, resumed))
 }
 
 // resumeWork returns paused work to where it was and tells each task that was
@@ -290,7 +299,7 @@ func (c *Cli) resumeWork(w core.Work, note string) ([]string, error) {
 			return nil, err
 		}
 	} else if w.State != core.StatePaused {
-		return nil, fail("%s is %s, not paused", w.ID, w.State)
+		return nil, fail("%s isn't paused", quoted(w))
 	}
 	if core.IsGoal(w.Kind) && w.State == core.StatePaused {
 		if err := c.unpause(w); err != nil {
@@ -391,7 +400,19 @@ func (c *Cli) cancel(rest []string) error {
 	if err != nil {
 		return fail("%v", err)
 	}
-	return c.out(dropped, fmt.Sprintf("cancelled %s: %d work item(s) dropped; wd resume %s brings them back", rest[0], len(dropped), rest[0]))
+	w, err := c.Ledger.Get(rest[0])
+	if err != nil {
+		return err
+	}
+	ids := make([]string, len(dropped))
+	for i, d := range dropped {
+		ids[i] = d.ID
+	}
+	back := "them"
+	if len(dropped) <= 1 {
+		back = "it"
+	}
+	return c.out(dropped, "Cancelled "+withAgents(w, ids)+"; resume it to bring "+back+" back")
 }
 
 // stopUnder stops the running session of every open work under id, itself
@@ -407,11 +428,11 @@ func (c *Cli) stopUnder(id string) error {
 			continue
 		}
 		if _, err := c.stopSession(t); err != nil {
-			failed = append(failed, fmt.Sprintf("%s: %v", t.ID, err))
+			failed = append(failed, fmt.Sprintf("the agent on %s (%v)", quoted(t), err))
 		}
 	}
 	if len(failed) > 0 {
-		return fail("could not stop %s; nothing was dropped", strings.Join(failed, "; "))
+		return fail("Couldn't stop %s; nothing was dropped", core.AndList(failed))
 	}
 	return nil
 }
@@ -500,4 +521,22 @@ func (c *Cli) goalContinue(goal core.Work, text string) error {
 	}
 	return c.out(map[string]any{"goal": goal, "tasks": tasks, "attachments": atts},
 		strings.TrimSpace(fmt.Sprintf("%s continues (%s)\n%s", quoted(goal), goal.State, strings.Join(lines, "\n"))))
+}
+
+// withAgents names w by its title with how many agents' work under it changed
+// alongside it: ids are what changed, w itself among them or not.
+func withAgents(w core.Work, ids []string) string {
+	n := 0
+	for _, id := range ids {
+		if id != w.ID {
+			n++
+		}
+	}
+	switch n {
+	case 0:
+		return quoted(w)
+	case 1:
+		return quoted(w) + " and its agent"
+	}
+	return fmt.Sprintf("%s and its %d agents", quoted(w), n)
 }

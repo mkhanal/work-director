@@ -230,23 +230,23 @@ func FinishReached(f FinishLine, run []Event) (bool, string) {
 	}
 	var missing []string
 	if report == nil || !strings.HasPrefix(report.Body, "DONE") {
-		missing = append(missing, "DONE report")
+		missing = append(missing, MissingReport)
 	}
 	if f.ChangesCode() && (verify == nil || !strings.HasPrefix(verify.Body, "pass")) {
-		missing = append(missing, "passing verify")
+		missing = append(missing, MissingChecks)
 	}
 	switch f {
 	case FinishPR:
 		if !landed(LandingPullRequest) && !landed(LandingCommit) {
-			missing = append(missing, "pull request")
+			missing = append(missing, MissingPullRequest)
 		}
 	case FinishMerged, FinishReleased:
 		if !landed(LandingCommit) {
-			missing = append(missing, "commit landing")
+			missing = append(missing, MissingMerge)
 		}
 	}
 	if f == FinishReleased && !released {
-		missing = append(missing, "released note")
+		missing = append(missing, MissingRelease)
 	}
 	return len(missing) == 0, strings.Join(missing, ", ")
 }
@@ -829,7 +829,32 @@ type NotReady struct {
 }
 
 func (e NotReady) Error() string {
-	return "not ready for soft-done: " + strings.Join(e.Missing, ", ")
+	return "Not ready to call it finished: it still needs " + AndList(e.Missing)
+}
+
+// What readiness finds missing, each as a person reads it after "it still needs".
+const (
+	MissingReport      = "a report that it's finished"
+	MissingChecks      = "its checks passing"
+	MissingPullRequest = "a pull request"
+	MissingMerge       = "a merged commit"
+	MissingRelease     = "a note that it's released"
+)
+
+// MissingTask is an open task under a goal, as readiness finds it missing.
+func MissingTask(title string) string { return "“" + title + "” to finish" }
+
+// AndList joins phrases as a sentence lists them: "a, b, and c".
+func AndList(parts []string) string {
+	switch len(parts) {
+	case 0:
+		return ""
+	case 1:
+		return parts[0]
+	case 2:
+		return parts[0] + " and " + parts[1]
+	}
+	return strings.Join(parts[:len(parts)-1], ", ") + ", and " + parts[len(parts)-1]
 }
 
 func SplitImpact(impact *string) []string {

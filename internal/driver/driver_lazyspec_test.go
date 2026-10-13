@@ -143,7 +143,7 @@ func TestARunStopsOnAConditionTheLedgerAlreadyHolds(t *testing.T) {
 	if res.Open != nil && len(res.Open) != 0 {
 		t.Errorf("open = %v, want nothing open when every task closed", res.Open)
 	}
-	if res.Why != "every task at rest" {
+	if res.Why != "nothing is left to work on" {
 		t.Errorf("why = %q, want it to say what held", res.Why)
 	}
 
@@ -794,7 +794,7 @@ func TestARunJudgesEachFinishedSubGoalAgainstItsDoneWhen(t *testing.T) {
 	if len(res.Unjudged) != 1 || res.Unjudged[0] != unjudged.ID {
 		t.Errorf("unjudged = %v, want only the sub-goal past the bound", res.Unjudged)
 	}
-	if res.Stop != StopBudget || !strings.Contains(res.Why, unjudged.ID) {
-		t.Errorf("stop = %s (%s), want the budget stop naming %s", res.Stop, res.Why, unjudged.ID)
+	if want := "; “" + unjudged.Title + "” hasn't been checked against what done means yet"; res.Stop != StopBudget || !strings.HasSuffix(res.Why, want) || strings.Contains(res.Why, unjudged.ID) {
+		t.Errorf("stop = %s (%s), want the budget stop ending %q, naming no id", res.Stop, res.Why, want)
 	}
 }

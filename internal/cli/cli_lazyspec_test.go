@@ -145,7 +145,7 @@ func TestCommandsComputeTheSameStatesAndValues(t *testing.T) {
 
 	// soft-done: a fresh standalone needs a DONE report first.
 	errStr := f.runFail(t, "soft-done", f.ids["standalone"], "--no-code")
-	if !strings.Contains(errStr, "not ready for soft-done") {
+	if !strings.Contains(errStr, "Not ready to call it finished") {
 		t.Fatalf("soft-done should refuse without a DONE report, got %q", errStr)
 	}
 
@@ -734,7 +734,7 @@ func TestErrorsAndExitCodesMatch(t *testing.T) {
 		{[]string{"models", "bogus"}, "unknown runner bogus"},
 		{[]string{"impact", t1}, "usage: wd impact"},
 		{[]string{"merge", f.ids["standalone"]}, "merge is only for tasks under a goal"},
-		{[]string{"soft-done", epic}, "not ready for soft-done"},
+		{[]string{"soft-done", epic}, "Not ready to call it finished"},
 		{[]string{"epic", "plan"}, "usage: wd epic plan"},
 		{[]string{"concern", "add", t1}, "usage: wd concern add"},
 		{[]string{"runner", "init", "bad name!"}, "usage: wd runner init"},
@@ -1125,7 +1125,7 @@ func TestSetCannotSkipTheSoftDoneGate(t *testing.T) {
 	}
 
 	errStr := f.runFail(t, "set", t2, "soft-done")
-	if !strings.Contains(errStr, "not ready for soft-done") {
+	if !strings.Contains(errStr, "Not ready to call it finished") {
 		t.Fatalf("stderr = %q, want the soft-done gate", errStr)
 	}
 	out := f.runOK(t, "set", t3, "soft-done", "--json")
@@ -1811,8 +1811,8 @@ func TestAStandaloneTaskClosesThroughTheCLIAlone(t *testing.T) {
 		f.runOK(t, "set", id, "review")
 		f.runOK(t, "verify", id)
 		f.runOK(t, "pr", id, "https://github.com/x/sample-app/pull/15")
-		if errStr := f.runFail(t, "soft-done", id); !strings.Contains(errStr, "DONE report") {
-			t.Errorf("soft-done after a %s report: stderr %q, want DONE report named", status, errStr)
+		if errStr := f.runFail(t, "soft-done", id); !strings.Contains(errStr, "a report that it's finished") {
+			t.Errorf("soft-done after a %s report: stderr %q, want the missing report named", status, errStr)
 		}
 		if got := f.stateOf(t, id); got != core.StateReview {
 			t.Errorf("soft-done after a %s report left state %s, want review", status, got)
@@ -2572,7 +2572,7 @@ func TestAStopRecordedAsAFailureCanBeReleasedIntoAChoice(t *testing.T) {
 	f.runOK(t, "report", goal, "DONE\nSTATUS: DONE")
 	f.runOK(t, "verify", goal)
 	f.runOK(t, "pr", goal, "commit https://github.com/mkhanal/sample-app/commit/abc1234")
-	if errStr := f.runFail(t, "soft-done", goal); !strings.Contains(errStr, "task(s) not done") {
+	if errStr := f.runFail(t, "soft-done", goal); !strings.Contains(errStr, "” to finish") {
 		t.Errorf("soft-done over an abandoned task = %q, want it counting the stop", errStr)
 	}
 	f.runOK(t, "release", leftBehind, "the same work shipped as "+kept)
@@ -2785,7 +2785,7 @@ func TestAFinishedGoalIsReopenedOnlyForWorkNotForAQuestion(t *testing.T) {
 	// that has not been done, and the report, verify and pull request it still
 	// holds are all from before the reopen.
 	errStr = f.runFail(t, "soft-done", goal)
-	for _, want := range []string{"DONE report", "passing verify", "pull request"} {
+	for _, want := range []string{"a report that it's finished", "its checks passing", "a pull request"} {
 		if !strings.Contains(errStr, want) {
 			t.Errorf("soft-done after reopen = %q, want it to still want %q", errStr, want)
 		}
@@ -3553,11 +3553,11 @@ func TestAReportCanBeFiledAsTextAndTheGateIsTheSame(t *testing.T) {
 	// The gate is the same gate. Filing a report is not a way past verify or a
 	// pull request; it is only a way to produce the one thing a session-less work
 	// item had no way to produce.
-	if errStr := f.runFail(t, "soft-done", built); !strings.Contains(errStr, "passing verify") {
+	if errStr := f.runFail(t, "soft-done", built); !strings.Contains(errStr, "its checks passing") {
 		t.Errorf("soft-done with no verify: stderr %q, want the verify gate still standing", errStr)
 	}
 	f.runOK(t, "verify", built)
-	if errStr := f.runFail(t, "soft-done", built); !strings.Contains(errStr, "pull request") {
+	if errStr := f.runFail(t, "soft-done", built); !strings.Contains(errStr, "a pull request") {
 		t.Errorf("soft-done with no pull request: stderr %q, want the pull-request gate still standing", errStr)
 	}
 	f.runOK(t, "pr", built, "https://github.com/x/sample-app/pull/16")
@@ -4882,7 +4882,7 @@ func TestAGoalIsDeclaredDoneOnlyWhenEveryPartOfDoneHolds(t *testing.T) {
 		}
 	}
 	proj("test -f NOT-THERE")
-	if s := done(); len(s.Refused) != 1 || !strings.Contains(s.Refused[0], "the finish line (local build) is not reached: passing verify") {
+	if s := done(); len(s.Refused) != 1 || !strings.Contains(s.Refused[0], "the finish line (local build) is not reached: its checks passing") {
 		t.Fatalf("DONE with a failing verify = %+v, want it refused naming the finish line", s)
 	}
 	proj("test -f README.md")
@@ -6235,4 +6235,40 @@ func TestWhatAGoalCommandTellsThePersonNamesWorkByItsTitle(t *testing.T) {
 	out = f.runOK(t, "send", o.goal, "tags start at v1")
 	said(out, "Kept as a decision on “Ship tagged releases”")
 	noIDs(out)
+}
+
+func TestWhatPauseResumeCancelAndStopTellThePersonNamesWorkByItsTitle(t *testing.T) {
+	f := newCLIFixture(t)
+	state := liveClaude(t, f)
+	epic, t2, t3 := f.ids["epic"], f.ids["t2"], f.ids["t3"]
+	said := func(out, want string) {
+		t.Helper()
+		if !strings.Contains(out, want) {
+			t.Errorf("printed %q, want %q", out, want)
+		}
+		for _, id := range f.ids {
+			if strings.Contains(out, id) {
+				t.Errorf("printed %q, which names the id %s", out, id)
+			}
+		}
+		if m := regexp.MustCompile(`\(s\)`).FindString(out); m != "" {
+			t.Errorf("printed %q, which counts in %q", out, m)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(state, "claude-busy"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.runOK(t, "send", t2, "drop the tables")
+	out := f.runOK(t, "stop", t2)
+	said(out, "Stopped the agent on “Rewrite ingestion”; your next message continues it")
+	said(out, "Taken back, unread:\ndrop the tables")
+	said(f.runFail(t, "stop", t2), "“Rewrite ingestion” has nothing to stop")
+
+	said(f.runOK(t, "pause", epic), "Paused “Metabase → Superset” and its 2 agents; resume it to carry on")
+	said(f.runOK(t, "resume", epic), "Resumed “Metabase → Superset” and its 2 agents")
+	said(f.runOK(t, "cancel", epic), "Cancelled “Metabase → Superset” and its 2 agents; resume it to bring them back")
+	said(f.runOK(t, "resume", epic), "Resumed “Metabase → Superset” and its 2 agents")
+	said(f.runOK(t, "pause", t3), "Paused “Wire the schema”; resume it to carry on")
+	said(f.runOK(t, "resume", t3), "Resumed “Wire the schema”")
+	said(f.runOK(t, "cancel", t3), "Cancelled “Wire the schema”; resume it to bring it back")
 }

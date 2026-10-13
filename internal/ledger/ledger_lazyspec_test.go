@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -284,8 +285,8 @@ func TestLedger(t *testing.T) {
 		var nr core.NotReady
 		if _, err := l.SoftDone(w.ID, false); !errors.As(err, &nr) {
 			t.Fatalf("error = %v, want NotReady", err)
-		} else if !slices.Equal(nr.Missing, []string{"DONE report", "passing verify"}) {
-			t.Fatalf("missing = %v, want [DONE report passing verify]", nr.Missing)
+		} else if !slices.Equal(nr.Missing, []string{"a report that it's finished", "its checks passing"}) {
+			t.Fatalf("missing = %q, want a report that it's finished and its checks passing", nr.Missing)
 		}
 		l.AddEvent(w.ID, core.EventReport, "BLOCKED\nx")
 		l.AddEvent(w.ID, core.EventVerify, "fail\nx")
@@ -332,8 +333,8 @@ func TestLedger(t *testing.T) {
 		var nr core.NotReady
 		if _, err := l.SoftDone(w.ID, true); !errors.As(err, &nr) {
 			t.Fatalf("error = %v, want NotReady", err)
-		} else if !slices.Equal(nr.Missing, []string{"pull request"}) {
-			t.Fatalf("missing = %v, want [pull request]", nr.Missing)
+		} else if !slices.Equal(nr.Missing, []string{"a pull request"}) {
+			t.Fatalf("missing = %q, want a pull request", nr.Missing)
 		}
 		l.AddEvent(w.ID, core.EventPr, "https://github.com/x/y/pull/1")
 		if got := softDone(t, l, w.ID, true); got.State != core.StateSoftDone {
@@ -1019,15 +1020,15 @@ func TestLedger(t *testing.T) {
 			steps  []core.Event
 			want   []string
 		}{
-			{core.FinishDiscovery, nil, []string{"DONE report"}},
+			{core.FinishDiscovery, nil, []string{"a report that it's finished"}},
 			{core.FinishResearch, []core.Event{{Kind: core.EventReport, Body: "DONE"}}, nil},
-			{core.FinishLocalBuild, []core.Event{{Kind: core.EventReport, Body: "DONE"}}, []string{"passing verify"}},
+			{core.FinishLocalBuild, []core.Event{{Kind: core.EventReport, Body: "DONE"}}, []string{"its checks passing"}},
 			{core.FinishLocalBuild, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}}, nil},
-			{core.FinishPR, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}}, []string{"pull request"}},
+			{core.FinishPR, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}}, []string{"a pull request"}},
 			{core.FinishPR, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}, {Kind: core.EventPr, Body: pr}}, nil},
-			{core.FinishMerged, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}, {Kind: core.EventPr, Body: pr}}, []string{"commit landing"}},
+			{core.FinishMerged, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}, {Kind: core.EventPr, Body: pr}}, []string{"a merged commit"}},
 			{core.FinishMerged, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}, {Kind: core.EventPr, Body: commit}}, nil},
-			{core.FinishReleased, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}, {Kind: core.EventPr, Body: commit}}, []string{"released note"}},
+			{core.FinishReleased, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}, {Kind: core.EventPr, Body: commit}}, []string{"a note that it's released"}},
 			{core.FinishReleased, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}, {Kind: core.EventPr, Body: commit}, {Kind: core.EventNote, Body: "released: v1.0.0"}}, nil},
 		} {
 			g := goal(&c.finish)
@@ -1040,7 +1041,7 @@ func TestLedger(t *testing.T) {
 			}
 		}
 		bare := goal(nil)
-		if got := missing(bare.ID); !slices.Equal(got, []string{"DONE report", "passing verify", "pull request"}) {
+		if got := missing(bare.ID); !slices.Equal(got, []string{"a report that it's finished", "its checks passing", "a pull request"}) {
 			t.Fatalf("a goal with no finish line misses %q", got)
 		}
 	})
@@ -1058,8 +1059,8 @@ func TestLedger(t *testing.T) {
 		var nr core.NotReady
 		if _, err := l.SoftDone(epic.ID, true); !errors.As(err, &nr) {
 			t.Fatalf("error = %v, want NotReady", err)
-		} else if !slices.Equal(nr.Missing, []string{"1 task(s) not done"}) {
-			t.Fatalf("missing = %v, want [1 task(s) not done]", nr.Missing)
+		} else if !slices.Equal(nr.Missing, []string{"“T” to finish"}) {
+			t.Fatalf("missing = %q, want “T” to finish", nr.Missing)
 		}
 		move(t, l, task.ID, core.StateBriefed)
 		move(t, l, task.ID, core.StateRunning)
@@ -1079,14 +1080,41 @@ func TestLedger(t *testing.T) {
 		l.AddEvent(goal.ID, core.EventReport, "DONE")
 		l.AddEvent(goal.ID, core.EventVerify, "pass")
 		l.AddEvent(goal.ID, core.EventPr, "https://github.com/x/y/pull/2")
-		if _, err := l.SoftDone(goal.ID, true); !errors.As(err, &nr) || !slices.Equal(nr.Missing, []string{"1 task(s) not done"}) {
-			t.Fatalf("error = %v, want the nested task not done", err)
+		if _, err := l.SoftDone(goal.ID, true); !errors.As(err, &nr) || !slices.Equal(nr.Missing, []string{"“D” to finish"}) {
+			t.Fatalf("error = %v, want the nested task named as not finished", err)
 		}
 		if _, err := l.Supersede(deep.ID, "folded into another"); err != nil {
 			t.Fatalf("supersede: %v", err)
 		}
 		if got := softDone(t, l, goal.ID, true); got.State != core.StateSoftDone {
 			t.Fatalf("state = %q, want soft-done once its only task is superseded", got.State)
+		}
+	})
+
+	t.Run("What Soft Done Finds Missing Reads In Plain Words", func(t *testing.T) {
+		l := newTestLedger(t)
+		g := add(t, l, "p", "Release notes", AddOptions{Kind: core.WorkGoal})
+		add(t, l, "p", "Tag every release", AddOptions{Parent: &g.ID})
+		add(t, l, "p", "Write the customer note", AddOptions{Parent: &g.ID})
+		move(t, l, g.ID, core.StateRunning)
+		move(t, l, g.ID, core.StateReview)
+		var nr core.NotReady
+		if _, err := l.SoftDone(g.ID, true); !errors.As(err, &nr) {
+			t.Fatalf("error = %v, want NotReady", err)
+		}
+		want := "Not ready to call it finished: it still needs “Tag every release” to finish, “Write the customer note” to finish, a report that it's finished, its checks passing, and a pull request"
+		if nr.Error() != want {
+			t.Fatalf("refusal = %q, want %q", nr.Error(), want)
+		}
+		jargon := regexp.MustCompile(`(?i)\bDONE report\b|\bverif(y|ied)\b|\bsoft-done\b|\btask\(s\)|\blanding\b|\b[0-9a-f]{8}\b`)
+		for _, line := range []core.FinishLine{core.FinishPR, core.FinishMerged, core.FinishReleased} {
+			_, missing := core.FinishReached(line, nil)
+			if m := jargon.FindString(missing); m != "" {
+				t.Errorf("%s misses %q, which says %q", line, missing, m)
+			}
+		}
+		if m := jargon.FindString(nr.Error()); m != "" {
+			t.Errorf("refusal %q says %q", nr.Error(), m)
 		}
 	})
 
@@ -1597,7 +1625,7 @@ func TestReadinessIsJudgedOnThisRunsEvidence(t *testing.T) {
 	var nr core.NotReady
 	if _, err := l.SoftDone(g.ID, false); !errors.As(err, &nr) {
 		t.Fatalf("SoftDone after reopen = %v, want NotReady", err)
-	} else if !slices.Equal(nr.Missing, []string{"1 task(s) not done", "DONE report", "passing verify", "pull request"}) {
+	} else if !slices.Equal(nr.Missing, []string{"“The promotion step” to finish", "a report that it's finished", "its checks passing", "a pull request"}) {
 		t.Errorf("missing = %v, want the second run to prove all four again", nr.Missing)
 	}
 

@@ -12,7 +12,7 @@ Each turn runs one coordination pass, then judges what the pass could not answer
 ## A Run Stops On A Condition The Ledger Already Holds
 - Every bound is checked before a turn, so a bound of zero spends no turn.
 - `Drive` never asks whether to continue.
-- `StopComplete`: every task has come to rest.
+- `StopComplete`: every task has come to rest; `Why` reads `nothing is left to work on`.
 - `StopBudget`: a bound (turns, judgements, tokens, deadline) ran out with work left; `Why` names the bound.
 - `StopFailed`: the loop could not run; `Why` carries the failure.
 
@@ -50,7 +50,7 @@ A goal whose other tasks landed and one task was dropped stops complete with
 - Each such judgement spends from the judgement and token bounds and is recorded as any judgement is.
 - `met: <why>` or `missed: <what>` is filed on the task as a `judged` event.
 - A missed task's agent is told what is missing and the task goes back to running.
-- A task the bounds left unjudged stays in review, is named in `Unjudged`, and the stop's `Why` names it.
+- A task the bounds left unjudged stays in review, is named in `Unjudged`, and the stop's `Why` ends `; “<title>” hasn't been checked against what done means yet`, naming each by its title.
 
 ## A Refusal Is An Answer, And It Is Retried Never
 - A decline is recorded once and counted against the bound.
