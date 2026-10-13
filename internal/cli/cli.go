@@ -613,6 +613,11 @@ func (c *Cli) briefFor(id string) (string, error) {
 				claimList = append(claimList, t)
 			}
 		}
+		chain, err := c.chain(w)
+		if err != nil {
+			return "", err
+		}
+		ctx.Above = chain.Ancestors
 		return brief.ComposeSlice(w, goal, claimList, p, cards, ctx)
 	}
 	return brief.Compose(w, p, cards, ctx)

@@ -270,6 +270,77 @@ func ParseFinish(texts []string) (PlanFinish, bool) {
 	return found, ok
 }
 
+var stepsRe = regexp.MustCompile(`^\s*\**STEPS:\**\s*$`)
+var stepRe = regexp.MustCompile(`^\s*[-*]\s+\[([ ~xX-])\]\s*(\S.*)`)
+var splitRe = regexp.MustCompile(`^\s*\**SPLIT:\**\s*$`)
+var offCourseRe = regexp.MustCompile(`^\s*\**OFF-COURSE:\**\s*(\S.*)`)
+
+var stepMarks = map[string]core.StepState{" ": core.StepTodo, "~": core.StepDoing, "x": core.StepDone, "X": core.StepDone, "-": core.StepDropped}
+
+// lastLine is the index of the last line matching re, or -1.
+func lastLine(lines []string, re *regexp.Regexp) int {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if re.MatchString(lines[i]) {
+			return i
+		}
+	}
+	return -1
+}
+
+// ParseSteps reads an agent's own plan from the last STEPS block of its
+// transcript: the step lines right after it, numbered from 1.
+func ParseSteps(texts []string) ([]core.Step, bool) {
+	lines := strings.Split(strings.Join(texts, "\n"), "\n")
+	at := lastLine(lines, stepsRe)
+	if at < 0 {
+		return nil, false
+	}
+	steps := []core.Step{}
+	for _, line := range lines[at+1:] {
+		m := stepRe.FindStringSubmatch(line)
+		if m == nil {
+			break
+		}
+		steps = append(steps, core.Step{N: len(steps) + 1, Text: strings.TrimSpace(m[2]), State: stepMarks[m[1]]})
+	}
+	return steps, true
+}
+
+// ParseSplit reads the outcomes an agent proposes after the last SPLIT line,
+// each "- <outcome> | done when: <…>".
+func ParseSplit(texts []string) ([]PlanOutcome, bool) {
+	lines := strings.Split(strings.Join(texts, "\n"), "\n")
+	at := lastLine(lines, splitRe)
+	if at < 0 {
+		return nil, false
+	}
+	var out []PlanOutcome
+	for _, line := range lines[at+1:] {
+		m := outcomeRe.FindStringSubmatch(line)
+		if m == nil {
+			break
+		}
+		title, rest, _ := strings.Cut(m[1], "|")
+		o := PlanOutcome{Title: strings.TrimSpace(title)}
+		if f := outcomeFieldRe.FindStringSubmatch(rest); f != nil && strings.EqualFold(f[1], "done when") {
+			o.DoneWhen = strings.TrimSpace(f[2])
+		}
+		out = append(out, o)
+	}
+	return out, len(out) > 0
+}
+
+// ParseOffCourse reads what an agent found that breaks why its work exists,
+// from the last OFF-COURSE line.
+func ParseOffCourse(texts []string) (string, bool) {
+	lines := strings.Split(strings.Join(texts, "\n"), "\n")
+	at := lastLine(lines, offCourseRe)
+	if at < 0 {
+		return "", false
+	}
+	return strings.TrimSpace(offCourseRe.FindStringSubmatch(lines[at])[1]), true
+}
+
 var nonTokenRe = regexp.MustCompile(`[^a-z0-9\s-]`)
 
 // tokens are the significant words of a string: lowercase, punctuation

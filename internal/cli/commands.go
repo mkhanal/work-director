@@ -1215,8 +1215,11 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project, propose bool) ([]core
 	if outcomes == nil {
 		return nil, fail("plan session %s produced no outcomes", h.Session)
 	}
-	if err := c.nameGoal(goal, name); err != nil {
-		return nil, err
+	// A sub-goal keeps the outcome its parent's plan named it by.
+	if top {
+		if err := c.nameGoal(goal, name); err != nil {
+			return nil, err
+		}
 	}
 	rows := make([]core.Work, 0, len(outcomes))
 	for _, o := range outcomes {

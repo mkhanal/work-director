@@ -36,6 +36,14 @@ are specified in `ledger.lazyspec.md`.
 - `FINISH: ?` with listed choices reads as unsure, keeping the choices in order.
 - A line or source outside its set reads as no finish at all.
 
+## An Agent's Steps Are Read From Its Last STEPS Block
+- `ParseSteps` reads the last `STEPS:` block: `[ ]` todo, `[~]` doing, `[x]` done, `[-]` dropped.
+- A transcript with no `STEPS:` block has no steps.
+
+## An Agent Can Ask For A Split Or Say It Is Off Course
+- `ParseSplit` reads the outcomes after the last `SPLIT:` line, each with its done-when.
+- `ParseOffCourse` reads what the last `OFF-COURSE:` line found.
+
 ## A Resolved Concern's Decision Can Answer
 `KnownAnswer` finds a resolved concern's decision on the goal or one of its
 children that shares ≥2 significant words with the question.

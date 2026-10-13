@@ -130,6 +130,14 @@ verify event.
 - Starting a sub-goal that waits on an unsettled sibling is refused naming the sibling.
 - Starting every open sub-goal of a goal starts only those with nothing left to wait on.
 
+## An Agent's Brief Carries Why Its Sub-Goal Exists
+- A sub-goal's brief carries its top goal with its done-when and finish line, each goal between, its own done-when, and the checkpoint contract.
+- A sub-goal finishing at discovery or research is told to change no code.
+
+## Tending A Goal Keeps Each Agent's Steps
+- Each look stores an agent's latest steps when they differ from the ones stored.
+- A SPLIT or OFF-COURSE an agent raised is filed once as a concern on its sub-goal, for the supervisor.
+
 ## A Goal Is Named By Its Planner Until A Person Renames It
 - A goal its planner names takes that name as its title, noting it.
 - A goal a person has renamed keeps their name when it is planned.

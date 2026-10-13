@@ -5249,3 +5249,80 @@ func TestASubGoalStartsOnlyOnceWhatItWaitsOnIsSettled(t *testing.T) {
 		t.Fatalf("once what it waits on is settled, the sub-goal is %s, want running", s)
 	}
 }
+
+func TestAnAgentsBriefCarriesWhyItsSubGoalExists(t *testing.T) {
+	f := newCLIFixture(t)
+	f.planReply(t, "NAME: Cache findings\nFINISH: research | from: goal\n- Each cache miss is explained\n  done when: a report names each miss's cause\n  split: yes\n")
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Look into the cache", "--json"), "id")
+	f.runOK(t, "goal", "plan", goal, "--runner", "planner")
+	kids, _ := f.tree(t, goal)
+	f.planReply(t, "NAME: Misses\n- The cold-start misses are explained\n  done when: the report covers cold starts\n")
+	f.runOK(t, "goal", "plan", kids[0].ID, "--runner", "planner")
+	leaves, _ := f.tree(t, kids[0].ID)
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetDoneWhen(goal, "the team knows why the cache misses"); err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	brief := f.runOK(t, "brief", leaves[0].ID)
+	for _, want := range []string{
+		"## Why this exists", "Cache findings", "the team knows why the cache misses", "finishes at: research",
+		"Each cache miss is explained", "a report names each miss's cause",
+		"## Done when\nthe report covers cold starts", "## Finishes at\nresearch", "change no code",
+		"## Checkpoints", "STEPS:\n- [ ] <step>", "[x] done, [~] doing, [-] dropped", "SPLIT:", "OFF-COURSE:",
+	} {
+		if !strings.Contains(brief, want) {
+			t.Fatalf("brief missing %q:\n%s", want, brief)
+		}
+	}
+}
+
+func TestTendingAGoalKeepsEachAgentsSteps(t *testing.T) {
+	f := newCLIFixture(t)
+	o := overseenGoal(t, f)
+	o.busy(t, "task-"+o.a, true)
+	o.say(t, "task-"+o.a, "STEPS:", "- [x] read the collector", "- [~] call the detector")
+	steps := func() []core.Step {
+		t.Helper()
+		l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer l.Close()
+		st, err := l.Steps(o.a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	f.runOK(t, "goal", "supervise", o.goal)
+	want := []core.Step{{N: 1, Text: "read the collector", State: core.StepDone}, {N: 2, Text: "call the detector", State: core.StepDoing}}
+	if got := steps(); !slices.Equal(got, want) {
+		t.Fatalf("steps = %+v, want %+v", got, want)
+	}
+	o.say(t, "task-"+o.a, "SPLIT:", "- The detector runs on its own | done when: it prints impacts", "OFF-COURSE: the collector was removed upstream")
+	f.runOK(t, "goal", "supervise", o.goal)
+	f.runOK(t, "goal", "supervise", o.goal)
+	var concerns []core.Concern
+	if err := json.Unmarshal([]byte(f.runOK(t, "concern", "list", o.a, "--json")), &concerns); err != nil {
+		t.Fatal(err)
+	}
+	var split, off int
+	for _, cx := range concerns {
+		if strings.HasPrefix(cx.Text, "SPLIT:") && strings.Contains(cx.Text, "The detector runs on its own | done when: it prints impacts") {
+			split++
+		}
+		if cx.Text == "OFF-COURSE: the collector was removed upstream" {
+			off++
+		}
+	}
+	if split != 1 || off != 1 {
+		t.Fatalf("concerns = %+v, want the split and the off-course finding filed once each", concerns)
+	}
+	if got := steps(); !slices.Equal(got, want) {
+		t.Fatalf("steps after a message with none = %+v, want them kept", got)
+	}
+}

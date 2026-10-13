@@ -75,6 +75,67 @@ type Context struct {
 	// specification conventions the repository keeps, both as its toolkit says.
 	Checks []string
 	Specs  []string
+	// Above are the goals the work serves, top goal first; empty for work
+	// that serves no goal.
+	Above []core.Work
+}
+
+// Checkpoints is the contract every sub-goal's agent keeps: its plan as steps
+// before it changes anything, kept current, and a way to say the sub-goal is
+// the wrong size or the wrong goal.
+const Checkpoints = `## Checkpoints
+First, before changing anything, reply with your plan as
+STEPS:
+- [ ] <step>
+Repeat STEPS in every later message that changes it, marking [x] done, [~] doing, [-] dropped.
+If this sub-goal is too big for one agent, reply SPLIT: followed by ` + "`- <outcome> | done when: <…>`" + ` lines instead of starting.
+If you find something that breaks why this sub-goal or a goal above it exists, say OFF-COURSE: <what you found> and stop.`
+
+func orNotSet(s *string) string {
+	if s == nil || *s == "" {
+		return "not set"
+	}
+	return *s
+}
+
+// why is the chain a sub-goal serves, top goal first, ending at w.
+func why(w core.Work, above []core.Work) string {
+	var b strings.Builder
+	b.WriteString("## Why this exists\n")
+	for i, g := range above {
+		if i == 0 {
+			b.WriteString("- Top goal: " + g.Title + "; done when: " + orNotSet(g.DoneWhen) + "; finishes at: " + finishOf(above) + "\n")
+			continue
+		}
+		b.WriteString("- Serving: " + g.Title + "; done when: " + orNotSet(g.DoneWhen) + "\n")
+	}
+	b.WriteString("- This sub-goal: " + w.Title + "\n")
+	b.WriteString("\n## Done when\n" + orNotSet(w.DoneWhen) + "\n")
+	b.WriteString("\n## Finishes at\n" + finishOf(above) + ": " + finishMeans(above) + "\n")
+	return b.String()
+}
+
+func finishOf(above []core.Work) string {
+	if len(above) == 0 || above[0].FinishLine == nil {
+		return "not set"
+	}
+	return string(*above[0].FinishLine)
+}
+
+// finishMeans is what the top goal's finish line asks of one agent.
+func finishMeans(above []core.Work) string {
+	if len(above) == 0 || above[0].FinishLine == nil {
+		return "not decided yet; finish with the change ready for review."
+	}
+	f := *above[0].FinishLine
+	switch {
+	case !f.ChangesCode():
+		return "change no code: no edits, commits or PR; report your findings."
+	case f == core.FinishLocalBuild:
+		return "build it so it runs, and say how to run it; no PR."
+	default:
+		return "the change ready for a PR, with the checks green and the done-when met."
+	}
 }
 
 func (c Context) roadmapOr(p *project.Project) string {
@@ -240,12 +301,21 @@ func ComposeSlice(w core.Work, goal core.Work, claims []core.Work, p *project.Pr
 	if w.Detail != "" {
 		detail = "\n" + w.Detail
 	}
+	chain := ""
+	checkpoint := "- Checkpoint: after your plan (before code) and at DONE, send a report in the format below. Nothing else in between."
+	checkpoints := ""
+	if len(ctx.Above) > 0 {
+		chain = "\n" + why(w, ctx.Above)
+		checkpoint = "- Checkpoint: your plan as STEPS before code (see Checkpoints), and at DONE a report in the format below."
+		checkpoints = Checkpoints + "\n\n"
+	}
 	return `# Brief ` + w.ID + ` · ` + p.Name + ` · ` + *heading + ` of goal ` + goal.ID + `
 
 ## Goal (goal)
 ` + goal.Title + `
 — this task:
 ` + w.Title + detail + `
+` + chain + `
 
 Decisions already made (do not re-open):
 ` + ctx.decisionsOr() + `
@@ -257,7 +327,7 @@ The full register is ` + "`wd tasks " + goal.ID + "`" + `; before a shared path 
 ## How to work
 ` + strings.ReplaceAll(strings.ReplaceAll(coordination, "<id>", w.ID), "<goal>", goal.ID) + `
 - Decide ambiguities yourself, consistent with the rules below. Stop only for irreversible actions.
-- Checkpoint: after your plan (before code) and at DONE, send a report in the format below. Nothing else in between.
+` + checkpoint + `
 
 ## Constraints
 ` + shared(p, ctx) + `
@@ -265,7 +335,7 @@ The full register is ` + "`wd tasks " + goal.ID + "`" + `; before a shared path 
 Global rules are in your taste constitution and /taste-* skills. Specific to this project and stack:
 ` + rules(p, cards) + `
 
-` + ReportFormat + `
+` + checkpoints + ReportFormat + `
 `, nil
 }
 

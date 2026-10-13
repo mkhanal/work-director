@@ -334,6 +334,47 @@ func TestCoordinator(t *testing.T) {
 		}
 	})
 
+	t.Run("An Agent's Steps Are Read From Its Last STEPS Block", func(t *testing.T) {
+		texts := []string{
+			"STEPS:\n- [ ] read the config",
+			"Done reading.\nSTEPS:\n- [x] read the config\n- [~] check the fields\n- [ ] refuse a bad one\n- [-] rewrite the loader\nSTATUS: working",
+		}
+		got, ok := ParseSteps(texts)
+		want := []core.Step{
+			{N: 1, Text: "read the config", State: core.StepDone},
+			{N: 2, Text: "check the fields", State: core.StepDoing},
+			{N: 3, Text: "refuse a bad one", State: core.StepTodo},
+			{N: 4, Text: "rewrite the loader", State: core.StepDropped},
+		}
+		if !ok || !reflect.DeepEqual(got, want) {
+			t.Fatalf("steps = %+v, %v\nwant %+v", got, ok, want)
+		}
+		if got, ok := ParseSteps([]string{"I am working.\n- [ ] not a step block"}); ok {
+			t.Fatalf("a transcript with no STEPS block read as %+v", got)
+		}
+	})
+
+	t.Run("An Agent Can Ask For A Split Or Say It Is Off Course", func(t *testing.T) {
+		got, ok := ParseSplit([]string{"SPLIT:\n- old | done when: x", "This is two jobs.\nSPLIT:\n- The loader refuses bad configs | done when: a bad config names its field\n- The schema keeps decisions | done when: the schema holds one\nThat is all."})
+		want := []PlanOutcome{
+			{Title: "The loader refuses bad configs", DoneWhen: "a bad config names its field"},
+			{Title: "The schema keeps decisions", DoneWhen: "the schema holds one"},
+		}
+		if !ok || !reflect.DeepEqual(got, want) {
+			t.Fatalf("split = %+v, %v\nwant %+v", got, ok, want)
+		}
+		if got, ok := ParseSplit([]string{"STEPS:\n- [ ] one"}); ok {
+			t.Fatalf("no SPLIT read as %+v", got)
+		}
+		found, ok := ParseOffCourse([]string{"OFF-COURSE: early", "Looked again.\nOFF-COURSE: the export already exists upstream\nStopping."})
+		if !ok || found != "the export already exists upstream" {
+			t.Fatalf("off course = %q, %v", found, ok)
+		}
+		if found, ok := ParseOffCourse([]string{"all fine"}); ok {
+			t.Fatalf("no OFF-COURSE read as %q", found)
+		}
+	})
+
 	t.Run("A Resolved Concern's Decision Can Answer", func(t *testing.T) {
 		l := newTestLedger(t)
 		goal := add(t, l, "proj", "goal", ledger.AddOptions{Kind: core.WorkEpic})

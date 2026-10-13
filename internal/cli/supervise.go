@@ -226,13 +226,16 @@ func (c *Cli) tend(tasks []core.Work, p *project.Project) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		if status == runner.StatusRunning {
-			working = true
-			continue
-		}
 		texts, err := runner.Transcript(r, h)
 		if err != nil {
 			return false, err
+		}
+		if err := c.keepCheckpoints(t, texts); err != nil {
+			return false, err
+		}
+		if status == runner.StatusRunning {
+			working = true
+			continue
 		}
 		if _, err := coordinator.Notice(c.Ledger, t, h, texts); err != nil {
 			return false, err
@@ -664,4 +667,48 @@ func (c *Cli) startGoalRow(top core.Work, p *project.Project, g core.Work, propo
 		}
 	}
 	return c.startSubGoals(top, p, subs, propose)
+}
+
+// keepCheckpoints stores the steps an agent last gave when they differ from
+// those stored, and files a SPLIT or OFF-COURSE it raised as a concern on its
+// work, once.
+func (c *Cli) keepCheckpoints(t core.Work, texts []string) error {
+	if steps, ok := coordinator.ParseSteps(texts); ok {
+		stored, err := c.Ledger.Steps(t.ID)
+		if err != nil {
+			return err
+		}
+		if !slices.Equal(steps, stored) {
+			if err := c.Ledger.SetSteps(t.ID, steps); err != nil {
+				return err
+			}
+		}
+	}
+	var raised []string
+	if outcomes, ok := coordinator.ParseSplit(texts); ok {
+		lines := make([]string, 0, len(outcomes))
+		for _, o := range outcomes {
+			lines = append(lines, "- "+o.Title+" | done when: "+textOr(&o.DoneWhen, "not set"))
+		}
+		raised = append(raised, "SPLIT:\n"+strings.Join(lines, "\n"))
+	}
+	if found, ok := coordinator.ParseOffCourse(texts); ok {
+		raised = append(raised, "OFF-COURSE: "+found)
+	}
+	if len(raised) == 0 {
+		return nil
+	}
+	concerns, err := c.Ledger.Concerns(&t.ID)
+	if err != nil {
+		return err
+	}
+	for _, text := range raised {
+		if slices.ContainsFunc(concerns, func(cx core.Concern) bool { return cx.Text == text }) {
+			continue
+		}
+		if _, err := c.Ledger.AddConcern(t.ID, text); err != nil {
+			return err
+		}
+	}
+	return nil
 }
