@@ -54,17 +54,19 @@ func (c *Cli) answer(rest []string) error {
 			answers[i] = d.Answer
 		}
 	}
-	h, err := c.handle(w.ID)
+	h, has, err := c.answerHandle(w)
 	if err != nil {
 		return err
 	}
-	r, err := runner.RunnerNamed(h.Runner)
-	if err != nil {
-		return err
-	}
-	entries, err := r.Conversation(h)
-	if err != nil {
-		return err
+	var entries []runner.Entry
+	if has {
+		r, err := runner.RunnerNamed(h.Runner)
+		if err != nil {
+			return err
+		}
+		if entries, err = r.Conversation(h); err != nil {
+			return err
+		}
 	}
 	var text, asked string
 	var filed *core.Event
@@ -128,7 +130,7 @@ func (c *Cli) answer(rest []string) error {
 			return err
 		}
 	}
-	where, err := c.tellTask(w, text)
+	where, err := c.deliverAnswer(w, h, has, text)
 	if err != nil {
 		return err
 	}
@@ -157,23 +159,57 @@ type directorChoice struct {
 	Why      string `json:"why"`
 }
 
+// answerHandle is the session an answer to w goes to. A goal's is its own
+// session or its supervisor's, never the session that planned it, and a goal
+// may have none yet; any other work must have one.
+func (c *Cli) answerHandle(w core.Work) (runner.Handle, bool, error) {
+	if !core.IsGoal(w.Kind) || w.Session != nil || w.Claim != nil {
+		h, err := c.handle(w.ID)
+		return h, err == nil, err
+	}
+	p, err := c.project(w.Project)
+	if err != nil {
+		return runner.Handle{}, false, err
+	}
+	return coordinator.Supervisor(c.Ledger, w, p)
+}
+
+// deliverAnswer sends text through h when there is a session to read it; a
+// goal with none keeps it recorded and goes back to work.
+func (c *Cli) deliverAnswer(w core.Work, h runner.Handle, has bool, text string) (told, error) {
+	if !core.IsGoal(w.Kind) {
+		return c.tellTask(w, text)
+	}
+	if has {
+		return c.tellVia(w, h, text)
+	}
+	if w.State == core.StateNeedsInput {
+		if _, err := c.Ledger.Transition(w.ID, core.StateRunning); err != nil {
+			return "", err
+		}
+	}
+	return toldRecorded, nil
+}
+
 // openQuestion is the question w waits on: its session's, or one the director
 // filed on it while it needs input.
 func (c *Cli) openQuestion(w core.Work) (runner.Question, bool, error) {
-	h, err := c.handle(w.ID)
+	h, has, err := c.answerHandle(w)
 	if err != nil {
 		return runner.Question{}, false, err
 	}
-	r, err := runner.RunnerNamed(h.Runner)
-	if err != nil {
-		return runner.Question{}, false, err
-	}
-	entries, err := r.Conversation(h)
-	if err != nil {
-		return runner.Question{}, false, err
-	}
-	if q, asking := runner.Asking(entries); asking {
-		return *q, true, nil
+	if has {
+		r, err := runner.RunnerNamed(h.Runner)
+		if err != nil {
+			return runner.Question{}, false, err
+		}
+		entries, err := r.Conversation(h)
+		if err != nil {
+			return runner.Question{}, false, err
+		}
+		if q, asking := runner.Asking(entries); asking {
+			return *q, true, nil
+		}
 	}
 	if w.State != core.StateNeedsInput {
 		return runner.Question{}, false, nil

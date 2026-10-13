@@ -16,6 +16,9 @@ type told string
 const (
 	toldDelivered told = "delivered"
 	toldQueued    told = "queued"
+	// toldRecorded is an answer kept on a goal with no supervisor yet: the
+	// supervisor reads it when it first looks.
+	toldRecorded told = "recorded"
 )
 
 // resumeText opens every message that continues paused work.
@@ -81,6 +84,12 @@ func (c *Cli) tellTask(w core.Work, text string) (told, error) {
 	if err != nil {
 		return "", err
 	}
+	return c.tellVia(w, h, text)
+}
+
+// tellVia queues text for w and delivers it through h, the session that is
+// to read it.
+func (c *Cli) tellVia(w core.Work, h runner.Handle, text string) (told, error) {
 	if _, err := c.Ledger.QueueMessage(w.ID, text); err != nil {
 		return "", err
 	}

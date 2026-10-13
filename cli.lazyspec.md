@@ -416,6 +416,11 @@ could not with their work, the bound that ran out, and the work still open.
 - Work in needs-input on a question the director filed takes one answer per question it asks, or words.
 - The answer is recorded on the work as an `answer` event with the question it answers, as answered by the person, and reaches the session as `wd send` does.
 
+## A Goal's Answer Reaches Its Supervisor, Never Its Planner
+- On a goal, the answer is sent to the goal's supervisor as `wd send` does.
+- A goal with no supervisor yet keeps the answer recorded, carries out what it changes, goes back to work, and says `recorded`.
+- The session that planned the goal is never sent an answer.
+
 ## The Director Can Decide A Question Put To The Person
 - `wd answer <id> --director` puts each item of the question the work waits on to the judgement model, with its top goal's title, done-when and finish line and the project's settled work.
 - An item with choices is decided only by one of them; any other answer is a decline.

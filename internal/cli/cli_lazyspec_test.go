@@ -5569,6 +5569,37 @@ func TestAPlanningSessionThatFailsIsReportedAtOnceWithWhy(t *testing.T) {
 	}
 }
 
+func TestAGoalsAnswerReachesItsSupervisorNeverItsPlanner(t *testing.T) {
+	f := newCLIFixture(t)
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Look into the cache", "--json"), "id")
+	f.planReply(t, "NAME: Cache findings\nFINISH: ?\n- research (recommended)\n- local build\n- The cache's misses are explained\n  done when: a report names each miss's cause\n")
+	f.runOK(t, "goal", "plan", goal, "--runner", "planner")
+	if s := f.stateOf(t, goal); s != core.StateNeedsInput {
+		t.Fatalf("goal = %s, want it waiting on where it finishes", s)
+	}
+	var got struct {
+		Told string `json:"told"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "answer", goal, "research (recommended)", "--json")), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Told != "recorded" {
+		t.Fatalf("told = %q, want recorded: no supervisor yet, and the planner is never sent it", got.Told)
+	}
+	g, err := f.work(t, goal)
+	if err != nil || g.State != core.StateRunning || g.FinishLine == nil || *g.FinishLine != core.FinishResearch {
+		t.Fatalf("goal = %+v (%v), want it back at work, finishing at research", g, err)
+	}
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	if msgs, err := l.Undelivered(goal); err != nil || len(msgs) != 0 {
+		t.Fatalf("messages for the goal = %v (%v), want none: the answer is recorded, not sent", msgs, err)
+	}
+}
+
 func TestPlanningFilesSubGoalsWithTheirDoneWhenAndOrder(t *testing.T) {
 	f := newCLIFixture(t)
 	f.planReply(t, releasePlan)
