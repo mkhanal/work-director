@@ -53,9 +53,9 @@ func (c *Cli) send(rest []string) error {
 			discard(atts)
 			return err
 		}
-		text := fmt.Sprintf("kept as a decision on %s; its supervisor reads it at its next look", w.ID)
+		text := fmt.Sprintf("Kept as a decision on %s; its supervisor reads it at its next look", quoted(w))
 		if out["looked"] == true {
-			text = fmt.Sprintf("kept as a decision on %s; its supervisor is looking", w.ID)
+			text = fmt.Sprintf("Kept as a decision on %s; its supervisor is reading it now", quoted(w))
 		}
 		return c.out(out, text)
 	}
@@ -69,7 +69,7 @@ func (c *Cli) send(rest []string) error {
 	}
 	said := "delivered"
 	if where == toldQueued {
-		said = fmt.Sprintf("queued: %s is busy and reads this when it is ready; the next wd drive or wd goal review pass delivers it", w.ID)
+		said = fmt.Sprintf("The agent on %s is busy; your message is queued and reaches it as soon as it is free", quoted(w))
 	}
 	return c.out(map[string]any{"ok": true, "told": where, "attachments": atts}, said)
 }
@@ -499,5 +499,5 @@ func (c *Cli) goalContinue(goal core.Work, text string) error {
 		return err
 	}
 	return c.out(map[string]any{"goal": goal, "tasks": tasks, "attachments": atts},
-		strings.TrimSpace(fmt.Sprintf("goal %s continued: %s (%s)\n%s", goal.ID, goal.Title, goal.State, strings.Join(lines, "\n"))))
+		strings.TrimSpace(fmt.Sprintf("%s continues (%s)\n%s", quoted(goal), goal.State, strings.Join(lines, "\n"))))
 }

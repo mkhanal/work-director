@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -6147,4 +6148,91 @@ func TestAPersonCanAttachFilesToWhatTheySend(t *testing.T) {
 	if out := f.runOK(t, "send", t2, "plain", "--json"); !strings.Contains(out, `"attachments": []`) {
 		t.Fatalf("send with no files: %s, want attachments []", out)
 	}
+}
+
+func TestWhatAGoalCommandTellsThePersonNamesWorkByItsTitle(t *testing.T) {
+	f := newCLIFixture(t)
+	o := overseenGoal(t, f)
+	proj := "---\npath: " + f.sample + "\nrunner: overseer\nmode: ask\nverify: [test -f README.md]\n---\n"
+	if err := os.WriteFile(filepath.Join(f.wdHome, "projects", "overseen.md"), []byte(proj), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jargon := regexp.MustCompile(`(?i)\bDONE report\b|\bverif(y|ied)\b|\bsoft-done\b|\bsupersed(e|ed|es|ing)\b|\bclaim(s|ed)?\b|\bjudged\b|\bACTIONS\b|\bSTEPS\b|\b(GOAL|EDIT|AFTER|START|SUPERSEDE) [0-9a-f]+:`)
+	ids := []string{o.goal, o.a, o.b}
+	said := func(out string, want ...string) {
+		t.Helper()
+		for _, w := range want {
+			if !strings.Contains(out, w) {
+				t.Errorf("printed %q, want %q", out, w)
+			}
+		}
+		if m := jargon.FindString(out); m != "" {
+			t.Errorf("printed %q, which says %q", out, m)
+		}
+	}
+	noIDs := func(out string) {
+		t.Helper()
+		for _, id := range ids {
+			if strings.Contains(out, id) {
+				t.Errorf("printed %q, which names the id %s", out, id)
+			}
+		}
+	}
+
+	superviseOnce(t, f, o.goal)
+	o.say(t, supervisor, "ACTIONS:",
+		"GOAL "+o.goal+": Whoever deploys gets a guide | done when: a guide covers rollback",
+		"EDIT "+o.a+": done when: impacts are listed per release")
+	superviseOnce(t, f, o.goal)
+	out := f.runOK(t, "answer", o.goal, "Apply these changes")
+	said(out, "Changed the plan:",
+		"- Add “Whoever deploys gets a guide” under “Release notes for engineers and customers”, done when a guide covers rollback",
+		"- Change “Detect operational impacts”: done when impacts are listed per release")
+	noIDs(out)
+
+	o.say(t, supervisor, "COURSE: pivot — tags already exist", "ACTIONS:",
+		"PROPOSE: Ship tagged releases | done when: every release is tagged | finish: merged — tags already exist")
+	superviseOnce(t, f, o.goal)
+	out = f.runOK(t, "answer", o.goal, "Change course (recommended)")
+	said(out, "Changed course: the goal is now “Ship tagged releases”, done when every release is tagged, finishing at merged")
+	noIDs(out)
+
+	out = f.runOK(t, "goal", "finish", o.goal, "complete PR")
+	said(out, "“Ship tagged releases” finishes at a complete pull request")
+	noIDs(out)
+
+	out = f.runOK(t, "goal", "add", o.goal, "Ops get a guide", "--done-when", "ops know the flags")
+	said(out, "Added “Ops get a guide” under “Ship tagged releases”, as ")
+	c := strings.TrimSpace(out[strings.LastIndex(out, " ")+1:])
+	ids = append(ids, c)
+
+	out = f.runOK(t, "goal", "edit", c, "--done-when", "ops know every flag")
+	said(out, "Changed “Ops get a guide”: done when: ops know every flag")
+	noIDs(out)
+	out = f.runOK(t, "goal", "after", c, o.a)
+	said(out, "“Ops get a guide” waits on “Detect operational impacts”")
+	noIDs(out)
+	out = f.runOK(t, "goal", "after", c)
+	said(out, "“Ops get a guide” waits on nothing")
+	noIDs(out)
+
+	out = f.runOK(t, "goal", "split", c)
+	said(out, "“Ops get a guide” is now a sub-goal of its own, ")
+	split, err := f.work(t, c)
+	if err != nil || split.Parent == nil {
+		t.Fatalf("split %s = %+v, %v", c, split, err)
+	}
+	g := *split.Parent
+	d := jsonString(t, f.runOK(t, "goal", "add", o.goal, "Ops get a runbook", "--done-when", "ops can roll back", "--json"), "id")
+	ids = append(ids, g, d)
+	out = f.runOK(t, "goal", "merge", g, d)
+	said(out, "Merged “Ops get a runbook” into “Ops get a guide”, now done when ops know every flag; ops can roll back")
+	noIDs(out)
+	out = f.runOK(t, "goal", "drop", g, "ops read the wiki")
+	said(out, "Dropped “Ops get a guide” and the sub-goal under it; their work stays readable")
+	noIDs(out)
+
+	out = f.runOK(t, "send", o.goal, "tags start at v1")
+	said(out, "Kept as a decision on “Ship tagged releases”")
+	noIDs(out)
 }

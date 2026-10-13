@@ -159,6 +159,11 @@ verify event.
 - Dropping supersedes the sub-goal and everything open under it, and stops their sessions.
 - Editing a sub-goal an agent is working on tells the agent.
 
+## What A Goal Command Tells The Person Names Work By Its Title
+- `wd goal finish`, `add`, `edit`, `after`, `split`, `merge`, `drop` and `approve`, `wd goal continue`, `wd send` and `wd answer` print what they did as sentences naming work by its title in quotes; an id appears only where the next command needs it, as after `add` and `split`.
+- An answer that carries out a plan change prints each change as a goal serves its change `lines`; one that changes course prints the goal's new title, done-when and finish line.
+- None prints a report status, verify, soft-done, supersede, claim, judged or an action line.
+
 ## A Proposed Breakdown Starts On Approval
 - `wd goal approve` starts a proposed breakdown's unblocked sub-goals and records the approval.
 - Approving a goal with nothing proposed is refused.

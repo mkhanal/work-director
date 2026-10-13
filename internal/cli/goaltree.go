@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"wd/internal/coordinator"
 	"wd/internal/core"
 	"wd/internal/ledger"
 )
@@ -43,6 +44,25 @@ func (c *Cli) goalTree(sub string, rest []string) (bool, error) {
 
 // goalFinish is `wd goal finish <goal> "<line>"`: the person sets where a top
 // goal finishes.
+// quoted names work in a sentence for the person: its title in quotes.
+func quoted(w core.Work) string { return "“" + w.Title + "”" }
+
+// waitsWords says what w now waits on, naming each by its title.
+func (c *Cli) waitsWords(w core.Work, waits []string) (string, error) {
+	if len(waits) == 0 {
+		return quoted(w) + " waits on nothing", nil
+	}
+	names := make([]string, 0, len(waits))
+	for _, id := range waits {
+		o, err := c.Ledger.Get(id)
+		if err != nil {
+			return "", err
+		}
+		names = append(names, quoted(o))
+	}
+	return quoted(w) + " waits on " + strings.Join(names, ", "), nil
+}
+
 func (c *Cli) goalFinish(rest []string) error {
 	if len(rest) != 3 {
 		return fail("usage: wd goal finish <goal> \"<finish line>\"")
@@ -75,7 +95,7 @@ func (c *Cli) goalFinish(rest []string) error {
 	if goal, err = c.Ledger.Get(goal.ID); err != nil {
 		return err
 	}
-	return c.out(map[string]any{"work": goal, "finish": line, "source": core.FinishFromPerson}, fmt.Sprintf("%s finishes at: %s", goal.ID, line))
+	return c.out(map[string]any{"work": goal, "finish": line, "source": core.FinishFromPerson}, fmt.Sprintf("%s finishes at %s", quoted(goal), coordinator.FinishWords(line)))
 }
 
 // reshaped records text as a decision made by by on the goal w sits under, or
@@ -141,9 +161,9 @@ func (c *Cli) goalEdit(rest []string) error {
 	if w, err = c.Ledger.Get(w.ID); err != nil {
 		return err
 	}
-	text := fmt.Sprintf("%s edited: %s", w.ID, what)
+	text := fmt.Sprintf("Changed %s: %s", quoted(w), what)
 	if len(told) > 0 {
-		text += "; told " + strings.Join(told, ", ")
+		text += fmt.Sprintf("; its %d working agent(s) were told", len(told))
 	}
 	return c.out(map[string]any{"work": w, "told": told}, text)
 }
@@ -209,7 +229,7 @@ func (c *Cli) goalAddSub(parent core.Work, rest []string) error {
 	if err != nil {
 		return err
 	}
-	return c.out(w, fmt.Sprintf("%s added under %s: %s", w.ID, parent.ID, w.Title))
+	return c.out(w, fmt.Sprintf("Added %s under %s, as %s", quoted(w), quoted(parent), w.ID))
 }
 
 // addSubGoal files a sub-goal under parent with its done-when and what it
@@ -255,7 +275,14 @@ func (c *Cli) goalDrop(rest []string) error {
 	if err != nil {
 		return err
 	}
-	return c.out(gone, fmt.Sprintf("%s dropped: %d superseded", w.ID, len(gone)))
+	text := fmt.Sprintf("Dropped %s; its work stays readable", quoted(w))
+	switch under := len(gone) - 1; {
+	case under == 1:
+		text = fmt.Sprintf("Dropped %s and the sub-goal under it; their work stays readable", quoted(w))
+	case under > 1:
+		text = fmt.Sprintf("Dropped %s and the %d sub-goals under it; their work stays readable", quoted(w), under)
+	}
+	return c.out(gone, text)
 }
 
 // supersedeSubGoal stops every session under w, supersedes it and what is open
@@ -314,7 +341,7 @@ func (c *Cli) goalMerge(rest []string) error {
 	if keep, err = c.Ledger.Get(keep.ID); err != nil {
 		return err
 	}
-	return c.out(keep, fmt.Sprintf("%s merged into %s; done when: %s", other.ID, keep.ID, textOr(keep.DoneWhen, "not set")))
+	return c.out(keep, fmt.Sprintf("Merged %s into %s, now done when %s", quoted(other), quoted(keep), textOr(keep.DoneWhen, "not set")))
 }
 
 // moveWaiters has every sibling waiting on from wait on to instead.
@@ -391,7 +418,7 @@ func (c *Cli) goalSplit(rest []string) error {
 	if g, err = c.Ledger.Get(g.ID); err != nil {
 		return err
 	}
-	return c.out(g, fmt.Sprintf("%s now holds %s; add beside it with wd goal add %s \"<title>\" --done-when \"<…>\"", g.ID, t.ID, g.ID))
+	return c.out(g, fmt.Sprintf("%s is now a sub-goal of its own, %s; add more beside it with wd goal add %s \"<title>\" --done-when \"<…>\"", quoted(t), g.ID, g.ID))
 }
 
 func (c *Cli) goalAfter(rest []string) error {
@@ -406,11 +433,14 @@ func (c *Cli) goalAfter(rest []string) error {
 	if len(rest) == 3 {
 		waits = idList(rest[2])
 	}
-	what, err := c.orderSubGoal(w, waits, core.AnsweredByPerson)
+	if _, err := c.orderSubGoal(w, waits, core.AnsweredByPerson); err != nil {
+		return err
+	}
+	said, err := c.waitsWords(w, waits)
 	if err != nil {
 		return err
 	}
-	return c.out(map[string]any{"work": w.ID, "after": waits}, fmt.Sprintf("%s waits on: %s", w.ID, what))
+	return c.out(map[string]any{"work": w.ID, "after": waits}, said)
 }
 
 // orderSubGoal replaces what w waits on and records it; it returns the order
@@ -483,5 +513,5 @@ func (c *Cli) goalApprove(rest []string) error {
 	if err != nil {
 		return err
 	}
-	return c.out(map[string]any{"goal": goal.ID, "tasks": all}, strings.TrimSpace(fmt.Sprintf("%s approved: %d sub-goals\n%s", goal.ID, len(open), strings.Join(lines, "\n"))))
+	return c.out(map[string]any{"goal": goal.ID, "tasks": all}, strings.TrimSpace(fmt.Sprintf("Approved the plan for %s: %d sub-goals\n%s", quoted(goal), len(open), strings.Join(lines, "\n"))))
 }

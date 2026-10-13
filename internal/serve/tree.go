@@ -269,6 +269,19 @@ func (s *Server) node(t tree, w core.Work) (node, error) {
 // proposedWhy is why a sub-goal of a breakdown awaiting approval is not moving.
 const proposedWhy = "Proposed, waiting for your approval"
 
+// mergedWords names the sub-goal a merge kept by its title: the ledger files
+// a merged-away sub-goal's why as "merged into <id>".
+func (t tree) mergedWords(why string) string {
+	id, ok := strings.CutPrefix(why, "merged into ")
+	if !ok {
+		return why
+	}
+	if w, ok := t.byID[id]; ok {
+		return "merged into “" + w.Title + "”"
+	}
+	return "merged into another sub-goal"
+}
+
 // whyNotMoving says why work is not moving, or nil when it is or has finished.
 func (t tree) whyNotMoving(w core.Work, waitingOn []string) *string {
 	var why string
@@ -276,7 +289,7 @@ func (t tree) whyNotMoving(w core.Work, waitingOn []string) *string {
 	case w.State == core.StateSuperseded:
 		why = "superseded"
 		if e, ok := t.last(w.ID, core.EventNote, "superseded: "); ok {
-			why = e.Body
+			why = "superseded: " + t.mergedWords(strings.TrimPrefix(e.Body, "superseded: "))
 		}
 	case w.State == core.StateNeedsInput:
 		why = "waits for you"
@@ -612,64 +625,11 @@ func (s *Server) planLines(t tree, actions []string) ([]string, error) {
 		w, err := s.ledger.Get(id)
 		return w.Title, err
 	}
-	titles := func(ids []string) (string, error) {
-		out := make([]string, 0, len(ids))
-		for _, id := range ids {
-			t, err := title(id)
-			if err != nil {
-				return "", err
-			}
-			out = append(out, t)
-		}
-		return strings.Join(out, ", "), nil
-	}
 	out := make([]string, 0, len(actions))
 	for _, line := range actions {
-		acts, _ := coordinator.ParseSupervision([]string{"ACTIONS:", line})
-		if len(acts) != 1 {
-			out = append(out, line)
-			continue
-		}
-		a := acts[0]
-		name, err := title(a.Work)
+		said, err := coordinator.PlanWords(line, title)
 		if err != nil {
 			return nil, err
-		}
-		var said string
-		switch a.Kind {
-		case coordinator.ActGoal:
-			said = fmt.Sprintf("Add “%s” under %s, done when %s", a.Title, name, a.DoneWhen)
-			if len(a.After) > 0 {
-				after, err := titles(a.After)
-				if err != nil {
-					return nil, err
-				}
-				said += ", after " + after
-			}
-		case coordinator.ActStart:
-			said = "Start " + name
-		case coordinator.ActSupersede:
-			said = fmt.Sprintf("Drop %s: %s", name, a.Text)
-		case coordinator.ActEdit:
-			var parts []string
-			if a.Title != "" {
-				parts = append(parts, fmt.Sprintf("call it “%s”", a.Title))
-			}
-			if a.DoneWhen != "" {
-				parts = append(parts, "done when "+a.DoneWhen)
-			}
-			said = fmt.Sprintf("Change %s: %s", name, strings.Join(parts, "; "))
-		case coordinator.ActAfter:
-			after, err := titles(a.After)
-			if err != nil {
-				return nil, err
-			}
-			said = name + " waits on " + after
-			if after == "" {
-				said = name + " waits on nothing"
-			}
-		default:
-			said = line
 		}
 		out = append(out, said)
 	}
@@ -713,7 +673,7 @@ func (t tree) superseded() []supersededWork {
 		}
 		sw := supersededWork{Work: w.ID, Title: w.Title}
 		if e, ok := t.last(w.ID, core.EventNote, "superseded: "); ok {
-			sw.Why, sw.At = strings.TrimPrefix(e.Body, "superseded: "), e.At
+			sw.Why, sw.At = t.mergedWords(strings.TrimPrefix(e.Body, "superseded: ")), e.At
 		}
 		out = append(out, sw)
 	}

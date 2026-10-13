@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"wd/internal/coordinator"
 	"wd/internal/core"
 )
 
@@ -84,10 +85,13 @@ func (s *Server) record(id string) (recordView, error) {
 		if !ok {
 			continue
 		}
-		if kind == "decision" {
+		switch kind {
+		case "decision":
 			if what, err = s.reshapeWords(t, what); err != nil {
 				return recordView{}, err
 			}
+		case "superseded":
+			what = t.mergedWords(what)
 		}
 		v.Entries = append(v.Entries, recordEntry{Event: e.ID, At: e.At, Kind: kind, What: what, Where: where(e.Work), By: by})
 		switch kind {
@@ -131,7 +135,7 @@ func recorded(e core.Event) (kind, what, by string, ok bool) {
 			if m[2] == string(core.FinishFromPerson) {
 				by = byYou
 			}
-			return "finish", "Finishes at " + finishWords(core.FinishLine(m[1])) + ", " + finishSourceWords[core.FinishSource(m[2])], by, true
+			return "finish", "Finishes at " + coordinator.FinishWords(core.FinishLine(m[1])) + ", " + finishSourceWords[core.FinishSource(m[2])], by, true
 		}
 		return "decision", firstLine, decidedBy(e), true
 	case core.EventCourse:
@@ -186,19 +190,6 @@ var finishSourceWords = map[core.FinishSource]string{
 	core.FinishFromRepo:   "as the repository is set up",
 	core.FinishFromTaste:  "as your taste says",
 	core.FinishFromPerson: "as you chose",
-}
-
-// finishWords names a finish line in a sentence.
-func finishWords(line core.FinishLine) string {
-	switch line {
-	case core.FinishLocalBuild:
-		return "a local build"
-	case core.FinishPR:
-		return "a complete pull request"
-	case core.FinishDiscovery:
-		return "a discovery report"
-	}
-	return string(line)
 }
 
 // The decisions the director files when it reshapes a goal or settles part
@@ -278,7 +269,7 @@ func (s *Server) reshapeWords(t tree, what string) (string, error) {
 		return name + " waits on " + andList(names), nil
 	}
 	if m := courseRe.FindStringSubmatch(what); m != nil {
-		return "Changed course to “" + m[1] + "”, done when " + m[2] + ", finishing at " + finishWords(core.FinishLine(m[3])), nil
+		return "Changed course to “" + m[1] + "”, done when " + m[2] + ", finishing at " + coordinator.FinishWords(core.FinishLine(m[3])), nil
 	}
 	if n, ok := strings.CutPrefix(what, core.ApprovedPrefix); ok {
 		return "Approved the plan: " + n, nil

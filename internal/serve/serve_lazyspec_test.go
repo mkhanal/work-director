@@ -2554,6 +2554,10 @@ func sentencesAGoalServesAreFreeOfInternalTerms(t *testing.T) {
 	if _, err := l.Supersede(s2d, "guides live with each release in the docs"); err != nil {
 		t.Fatal(err)
 	}
+	s2e := sub(s2, "The guide covers staging", "staging is covered", core.WorkTask)
+	if _, err := l.Supersede(s2e, "merged into "+s2c); err != nil {
+		t.Fatal(err)
+	}
 	reshape(g, "added "+s4+": Any agent can produce the notes from the documented workflow", core.AnsweredByPerson)
 	reshape(g, "edited "+s3+": title: Customers get a plain-language release note; done when: a customer note is produced", core.AnsweredByPerson)
 	reshape(s2, "dropped "+s2d+": guides live with each release in the docs", core.AnsweredByPerson)
@@ -2623,7 +2627,7 @@ func sentencesAGoalServesAreFreeOfInternalTerms(t *testing.T) {
 	event(t, l, p, core.EventPr, "pull-request https://github.com/metariki/metariki-eqms/pull/512")
 	walk(t, l, p, core.StateDone)
 
-	ids := []string{g, s1, s2, s3, s4, s2a, s2b, s2c, s2d, d, d1, d3, a, a1, a2, p, "0badf00d"}
+	ids := []string{g, s1, s2, s3, s4, s2a, s2b, s2c, s2d, s2e, d, d1, d3, a, a1, a2, p, "0badf00d"}
 	var seen []string
 	check := func(where, sentence string) {
 		t.Helper()
@@ -2656,7 +2660,7 @@ func sentencesAGoalServesAreFreeOfInternalTerms(t *testing.T) {
 	var walkTree func(nodes []treeNode)
 	walkTree = func(nodes []treeNode) {
 		for _, n := range nodes {
-			if n.WhyNotMoving != nil && n.Work.State != core.StateSuperseded {
+			if n.WhyNotMoving != nil {
 				check("why_not_moving of "+n.Work.Title, *n.WhyNotMoving)
 			}
 			walkTree(n.Children)
@@ -2704,6 +2708,8 @@ func sentencesAGoalServesAreFreeOfInternalTerms(t *testing.T) {
 		"Merged “Guides are published to the team wiki” into “The guide says how to roll back”",
 		"“Any agent can produce the notes from the documented workflow” waits on “Whoever deploys gets a guide for each release” and “Customers get a plain-language release note”",
 		"Reported stuck: the flag list lives in another repository",
+		"superseded: merged into “The guide says how to roll back”",
+		"merged into “The guide says how to roll back”",
 	} {
 		if !slices.Contains(seen, want) {
 			t.Errorf("no sentence %q among %q", want, seen)

@@ -119,20 +119,21 @@ func (c *Cli) answer(rest []string) error {
 			return err
 		}
 	}
-	applied := []string{}
+	applied, said := []string{}, []string{}
 	if filed != nil {
-		if applied, err = c.answered(w, *filed, answers); err != nil {
+		if applied, said, err = c.answered(w, *filed, answers); err != nil {
 			return err
 		}
 		if setting != nil {
 			if err := os.WriteFile(setting.path, []byte(setting.text), 0o644); err != nil {
 				return err
 			}
-			said := "finish setting: " + string(setting.line)
-			if _, err := c.Ledger.Decide(w.ID, said, core.Decision{Question: "where " + w.Project + "'s goals finish", Answer: string(setting.line), Source: core.AnsweredByPerson}, nil); err != nil {
+			setLine := "finish setting: " + string(setting.line)
+			if _, err := c.Ledger.Decide(w.ID, setLine, core.Decision{Question: "where " + w.Project + "'s goals finish", Answer: string(setting.line), Source: core.AnsweredByPerson}, nil); err != nil {
 				return err
 			}
-			applied = append(applied, said)
+			applied = append(applied, setLine)
+			said = append(said, "Goals in "+w.Project+" finish at "+coordinator.FinishWords(setting.line)+" from now on")
 		}
 		// Carrying out a change can have moved the work on.
 		if w, err = c.Ledger.Get(w.ID); err != nil {
@@ -145,10 +146,10 @@ func (c *Cli) answer(rest []string) error {
 	}
 	human := "answered"
 	if where == toldQueued {
-		human = fmt.Sprintf("answer queued: %s reads it when it is ready", w.ID)
+		human = fmt.Sprintf("The agent on %s is busy; your answer is queued and reaches it as soon as it is free", quoted(w))
 	}
-	if len(applied) > 0 {
-		human += "\n" + strings.Join(applied, "\n")
+	if len(said) > 0 {
+		human += "\n" + strings.Join(said, "\n")
 	}
 	out := map[string]any{"ok": true, "told": where, "answer": text, "applied": applied, "attachments": atts}
 	if director {
@@ -359,13 +360,20 @@ func (c *Cli) finishToRemember(w core.Work, filed *core.Event, answers []string)
 // filed on w decide: a finish line chosen is stored, from the person; Apply
 // carries out the plan changes the question holds; Change course sets the top
 // goal as proposed. Each is recorded as a decision. It returns what it did
-// and what it could not.
-func (c *Cli) answered(w core.Work, e core.Event, answers []string) ([]string, error) {
+// and what it could not, as action lines and as sentences for the person.
+func (c *Cli) answered(w core.Work, e core.Event, answers []string) ([]string, []string, error) {
 	q := coordinator.AskedQuestion(e)
 	if len(answers) != len(q.Items) {
-		return nil, nil
+		return nil, nil, nil
 	}
-	did := []string{}
+	did, said := []string{}, []string{}
+	title := func(id string) (string, error) {
+		o, err := c.Ledger.Get(id)
+		if err != nil {
+			return "a sub-goal that no longer exists", nil
+		}
+		return quoted(o), nil
+	}
 	for i, it := range q.Items {
 		head, _, _ := strings.Cut(it.Question, "\n")
 		first := len(it.Options) > 0 && pickedFirst(answers[i], it.Options[0].Label)
@@ -376,65 +384,77 @@ func (c *Cli) answered(w core.Work, e core.Event, answers []string) ([]string, e
 				continue
 			}
 			if err := c.Ledger.SetFinish(w.ID, line, core.FinishFromPerson); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			did = append(did, "finishes at: "+string(line))
+			said = append(said, quoted(w)+" finishes at "+coordinator.FinishWords(line))
 		case head == planChangeQuestion && e.Change != nil:
 			if !first {
 				if _, err := c.Ledger.AddEvent(w.ID, core.EventDecision, "kept the plan as it is"); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
+				said = append(said, "Kept the plan as it is")
 				continue
 			}
 			p, err := c.project(w.Project)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if _, err := c.Ledger.AddEvent(w.ID, core.EventDecision, "applied the plan change:\n"+strings.Join(e.Change.Actions, "\n")); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
+			said = append(said, "Changed the plan:")
 			for _, line := range e.Change.Actions {
+				words, err := coordinator.PlanWords(line, title)
+				if err != nil {
+					return nil, nil, err
+				}
 				acts, _ := coordinator.ParseSupervision([]string{"ACTIONS:", line})
 				if len(acts) != 1 {
 					did = append(did, line+" — not an action")
+					said = append(said, "- not done, as it is no change wd can make: "+words)
 					continue
 				}
 				if err := c.applyAction(w, p, acts[0]); err != nil {
 					did = append(did, line+" — "+err.Error())
+					said = append(said, "- not done: "+words+" ("+err.Error()+")")
 					continue
 				}
 				did = append(did, line)
+				said = append(said, "- "+words)
 			}
 		case head == courseQuestion && e.Change != nil && e.Change.Title != "":
 			if !first {
 				if _, err := c.Ledger.AddEvent(w.ID, core.EventDecision, "kept the goal as it is"); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
+				said = append(said, "Kept the goal as it is")
 				continue
 			}
 			ch := e.Change
 			if ch.Title != w.Title {
 				if err := c.Ledger.SetTitle(w.ID, ch.Title); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				if _, err := c.Ledger.AddEvent(w.ID, core.EventNote, renamedPrefix+w.Title); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 			}
 			if err := c.Ledger.SetDoneWhen(w.ID, ch.DoneWhen, core.AnsweredByPerson); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if err := c.Ledger.SetFinish(w.ID, ch.Finish, core.FinishFromPerson); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			decided := fmt.Sprintf("changed course: %s | done when: %s | finish: %s", ch.Title, ch.DoneWhen, ch.Finish)
 			if _, err := c.Ledger.AddEvent(w.ID, core.EventDecision, decided); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			did = append(did, decided)
+			said = append(said, fmt.Sprintf("Changed course: the goal is now “%s”, done when %s, finishing at %s", ch.Title, ch.DoneWhen, coordinator.FinishWords(ch.Finish)))
 		}
 	}
-	return did, nil
+	return did, said, nil
 }
 
 // pickedFirst reports whether answer picks choice, with or without its

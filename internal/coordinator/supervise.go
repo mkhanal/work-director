@@ -173,6 +173,83 @@ DONE: <one line: every part of the goal is built, checked and fits together>
 WAIT  (nothing to do until a sub-goal reports)
 `
 
+// FinishWords names a finish line in a sentence for the person.
+func FinishWords(line core.FinishLine) string {
+	switch line {
+	case core.FinishLocalBuild:
+		return "a local build"
+	case core.FinishPR:
+		return "a complete pull request"
+	case core.FinishDiscovery:
+		return "a discovery report"
+	}
+	return string(line)
+}
+
+// PlanWords says one plan action line as a sentence for the person, naming
+// work by the title title gives its id; a line that is not one plan action
+// reads as written.
+func PlanWords(line string, title func(id string) (string, error)) (string, error) {
+	acts, _ := ParseSupervision([]string{"ACTIONS:", line})
+	if len(acts) != 1 {
+		return line, nil
+	}
+	a := acts[0]
+	titles := func(ids []string) (string, error) {
+		out := make([]string, 0, len(ids))
+		for _, id := range ids {
+			t, err := title(id)
+			if err != nil {
+				return "", err
+			}
+			out = append(out, t)
+		}
+		return strings.Join(out, ", "), nil
+	}
+	switch a.Kind {
+	case ActGoal, ActStart, ActSupersede, ActEdit, ActAfter:
+	default:
+		return line, nil
+	}
+	name, err := title(a.Work)
+	if err != nil {
+		return "", err
+	}
+	switch a.Kind {
+	case ActGoal:
+		said := fmt.Sprintf("Add “%s” under %s, done when %s", a.Title, name, a.DoneWhen)
+		if len(a.After) > 0 {
+			after, err := titles(a.After)
+			if err != nil {
+				return "", err
+			}
+			said += ", after " + after
+		}
+		return said, nil
+	case ActStart:
+		return "Start " + name, nil
+	case ActSupersede:
+		return fmt.Sprintf("Drop %s: %s", name, a.Text), nil
+	case ActEdit:
+		var parts []string
+		if a.Title != "" {
+			parts = append(parts, fmt.Sprintf("call it “%s”", a.Title))
+		}
+		if a.DoneWhen != "" {
+			parts = append(parts, "done when "+a.DoneWhen)
+		}
+		return fmt.Sprintf("Change %s: %s", name, strings.Join(parts, "; ")), nil
+	}
+	after, err := titles(a.After)
+	if err != nil {
+		return "", err
+	}
+	if after == "" {
+		return name + " waits on nothing", nil
+	}
+	return name + " waits on " + after, nil
+}
+
 // CourseVerdict is a supervisor's judgement of where its goal stands.
 type CourseVerdict string
 
