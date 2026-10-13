@@ -326,33 +326,6 @@ public struct Gate: Codable, Sendable, Hashable {
     public let why: String?
 }
 
-/// Work that has just come to wait on a person: a question or a block, or a
-/// gate only a person passes.
-public struct Arrival: Sendable, Hashable {
-    public let work: Work
-    public let band: Band
-}
-
-extension Board {
-    /// The bands a person is told about when work enters them.
-    public static let announced: Set<Band> = [.needsYou, .readyToPush, .readyToClose]
-
-    /// Work that entered an announced band since `earlier`. With no earlier
-    /// board there is nothing to compare, so nothing has arrived.
-    public func arrivals(since earlier: Board?) -> [Arrival] {
-        guard let earlier else { return [] }
-        let before = Dictionary(earlier.placed.map { ($0.work.id, $0.band) }, uniquingKeysWith: { a, _ in a })
-        return placed
-            .filter { Board.announced.contains($0.band) && before[$0.work.id] != $0.band }
-            .map { Arrival(work: $0.work, band: $0.band) }
-    }
-
-    /// Every goal and standalone item with its band.
-    var placed: [Arrival] {
-        goals.map { Arrival(work: $0.work, band: $0.band) } + standalone.map { Arrival(work: $0.work, band: $0.band) }
-    }
-}
-
 /// What `wd doctor` says the host offers: which runners are on PATH.
 public struct Doctor: Codable, Sendable, Hashable {
     public struct Runner: Codable, Sendable, Hashable, Identifiable {

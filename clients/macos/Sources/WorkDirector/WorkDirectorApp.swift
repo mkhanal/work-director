@@ -81,7 +81,7 @@ final class Launch {
             let environment = await Task.detached { LoginPath.resolve() }.value
             let store = Store(channel: try Channel(wd: wd, environment: environment))
             Notifier.shared.start()
-            store.arrived = { Notifier.shared.announce($0) }
+            store.told = { Notifier.shared.announce($0) }
             state = .running(store)
             await store.start()
         } catch {

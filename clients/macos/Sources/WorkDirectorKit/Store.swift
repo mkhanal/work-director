@@ -12,8 +12,16 @@ public final class Store {
     public private(set) var failure: String?
     /// How many times the board has been read; a view can watch it change.
     public private(set) var reads = 0
-    /// Told about each work that comes to wait on a person, once.
-    public var arrived: ((Arrival) -> Void)?
+    /// Told each thing that happens for the person to know, once.
+    public var told: ((Notice) -> Void)?
+    /// The board and goal views the last read compared on; nil before the first.
+    public private(set) var sighting: Sighting?
+    /// What has been told, so nothing is told twice.
+    private var toldKeys: Set<String> = []
+    /// Work events named since the last read.
+    private var touched: Set<String> = []
+    /// The person's writes that came back, with when, kept while they quiet notices.
+    private var ended: [(plan: Plan, at: Date)] = []
 
     private let channel: Channel
     private var following: Task<Void, Never>?
@@ -33,7 +41,8 @@ public final class Store {
             failure = "\(error)"
         }
         following = Task { [weak self, channel] in
-            for await _ in channel.events {
+            for await event in channel.events {
+                self?.touched.insert(event.work)
                 await self?.refresh()
             }
             self?.failure = "wd stopped; relaunch the app"
@@ -57,12 +66,11 @@ public final class Store {
         repeat {
             stale = false
             do {
-                let earlier = board
                 let now = try await channel.board()
                 board = now
                 reads += 1
-                for a in now.arrivals(since: earlier) { arrived?(a) }
                 failure = nil
+                await notice(now)
             } catch {
                 failure = "\(error)"
             }
@@ -144,7 +152,10 @@ public final class Store {
     public func run(_ plan: Plan) async throws -> ActionResult {
         let flight = InFlight(plan: plan, at: Date())
         inFlight.append(flight)
-        defer { inFlight.removeAll { $0.id == flight.id } }
+        defer {
+            inFlight.removeAll { $0.id == flight.id }
+            ended.append((plan, Date()))
+        }
         return try await channel.action(plan.argv)
     }
 
@@ -200,6 +211,27 @@ public final class Store {
             outbox[i].state = state
         }
         await refresh()
+    }
+
+    /// Reads the goal views a sighting of `board` needs, and tells what
+    /// happened since the last one.
+    private func notice(_ board: Board) async {
+        let touched = self.touched
+        self.touched = []
+        let (read, kept) = Sighting.reads(for: board, after: sighting, touched: touched)
+        var goals = kept
+        for id in read {
+            goals[id] = try? await channel.goal(id)
+        }
+        let now = Sighting(board: board, goals: goals)
+        let at = Date()
+        ended.removeAll { at.timeIntervalSince($0.at) >= Notice.quietFor }
+        let quiet = Notice.quiet(running: inFlight.map(\.plan), ended: ended, now: at)
+        for n in Notice.between(sighting, now, told: toldKeys, quiet: quiet) {
+            toldKeys.formUnion(n.keys)
+            told?(n)
+        }
+        sighting = now
     }
 
     private func decode<T: Decodable>(_ type: T.Type, _ result: ActionResult) throws -> T {

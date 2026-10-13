@@ -2,8 +2,8 @@ import Foundation
 import UserNotifications
 import WorkDirectorKit
 
-/// Tells the person, outside the window, when work comes to wait on them; a
-/// click opens that work.
+/// Tells the person, outside the window, what happened and to which goal; a
+/// click opens that goal.
 @MainActor
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
@@ -20,20 +20,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    func announce(_ arrival: Arrival) {
+    func announce(_ notice: Notice) {
         guard let center, UserDefaults.standard.object(forKey: "notify") as? Bool ?? true else { return }
         let content = UNMutableNotificationContent()
-        content.title = switch arrival.band {
-        case .needsYou: arrival.work.state == .blocked ? "Blocked" : "Needs you"
-        case .readyToPush: "Ready to land"
-        case .readyToClose: "Ready to close"
-        default: arrival.band.label
-        }
-        content.body = arrival.work.title
-        content.subtitle = arrival.work.project
+        content.title = notice.title
+        content.body = notice.body
         content.sound = .default
-        content.userInfo = ["work": arrival.work.id]
-        center.add(UNNotificationRequest(identifier: "\(arrival.work.id)-\(arrival.band.rawValue)", content: content, trigger: nil))
+        content.userInfo = ["work": notice.work]
+        center.add(UNNotificationRequest(identifier: notice.keys.first ?? notice.work, content: content, trigger: nil))
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {

@@ -755,19 +755,91 @@ struct SeededTree {
         #expect(verify.title == "Verify")
     }
 
-    @Test("Work That Comes To Wait On You Is Announced Once")
-    func arrivalsAnnouncedOnce() throws {
-        func board(_ rows: [(String, String, String)]) throws -> Board {
-            let goals = rows.map { id, state, band in
-                #"{"work":\#(workJSON(state: state).replacingOccurrences(of: #""id":"w1""#, with: #""id":"\#(id)""#)),"rollup":{"counts":{},"done":0,"total":1},"band":"\#(band)",\#(unplanned)}"#
-            }
-            return try JSONDecoder().decode(Board.self, from: Data(#"{"goals":[\#(goals.joined(separator: ","))],"standalone":[]}"#.utf8))
+    @Test("A Notification Says What Happened And Where")
+    func notificationSaysWhatHappened() throws {
+        func work(_ id: String, _ title: String, _ state: String, kind: String = "goal", updated: String = "u0") -> [String: Any] {
+            ["id": id, "project": "demo", "title": title, "detail": "", "kind": kind, "state": state,
+             "runner": NSNull(), "session": NSNull(), "ref": NSNull(), "cwd": NSNull(), "created": "c", "updated": updated,
+             "parent": NSNull(), "heading": NSNull(), "claim": NSNull(), "impact": NSNull(), "goal_type": NSNull(), "archived": NSNull()]
         }
-        let first = try board([("a", "running", "in-flight"), ("b", "needs-input", "needs-you"), ("c", "running", "in-flight")])
-        #expect(first.arrivals(since: nil).isEmpty, "nothing is announced from the first read")
-        let second = try board([("a", "needs-input", "needs-you"), ("b", "needs-input", "needs-you"), ("c", "review", "ready-to-push"), ("d", "paused", "paused")])
-        #expect(Set(second.arrivals(since: first).map(\.work.id)) == ["a", "c"])
-        #expect(second.arrivals(since: second).isEmpty, "staying put is not news")
+        func row(_ w: [String: Any], _ band: String, needsYou: Int = 0, total: Int = 0, finished: String? = nil, proposed: Bool = false) -> [String: Any] {
+            ["work": w, "rollup": ["counts": [String: Int](), "done": 0, "total": total], "band": band,
+             "progress": ["done": 0, "total": total, "superseded": 0], "needs_you": needsYou, "finish": NSNull(),
+             "finished": finished ?? NSNull(), "proposed": proposed]
+        }
+        func node(_ w: [String: Any], _ children: [[String: Any]] = []) -> [String: Any] {
+            ["work": w, "group": false, "done_when": NSNull(), "after": [String](), "waiting_on": [String](), "why_not_moving": NSNull(),
+             "owner": NSNull(), "planned_into": NSNull(), "progress": NSNull(), "doing": NSNull(), "steps": [Any](), "judged": NSNull(),
+             "needs_you": 0, "children": children]
+        }
+        func ask(_ id: String, on work: String, _ text: String, change: [String: Any]? = nil) -> [String: Any] {
+            ["work": work, "path": work, "change": change ?? NSNull(),
+             "question": ["id": id, "items": [["header": "", "question": text, "multi": false,
+                                               "options": [["label": "Yes", "description": ""]]]], "answers": NSNull(), "reply": NSNull()]]
+        }
+        func detail(_ w: [String: Any], tree: [[String: Any]] = [], asks: [[String: Any]] = []) -> [String: Any] {
+            ["goal": w, "tasks": [Any](), "rollup": ["counts": [String: Int](), "done": 0, "total": 0], "events": [Any](), "claims": [Any](),
+             "landings": [Any](), "delivery": NSNull(), "activity": [String: Any](), "asking": NSNull(), "reports": [String: Any](),
+             "waiting": [Any](), "chain": [Any](), "tree": tree, "paths": [String: String](), "done_when": NSNull(), "finish": NSNull(),
+             "progress": ["done": 0, "total": 0, "superseded": 0], "not_done_because": [String](), "needs_you": asks, "course": NSNull(),
+             "superseded": [Any](), "proposed": false, "reasoning": NSNull()]
+        }
+        func sighting(_ goals: [[String: Any]], _ standalone: [[String: Any]], _ details: [String: [String: Any]]) throws -> Sighting {
+            func decode<T: Decodable>(_ v: Any) throws -> T { try JSONDecoder().decode(T.self, from: JSONSerialization.data(withJSONObject: v)) }
+            return Sighting(board: try decode(["goals": goals, "standalone": standalone]), goals: try details.mapValues { try decode($0) })
+        }
+
+        let export = work("g", "Ship the export", "running"), csv = work("s", "Export as CSV", "running")
+        let audit = work("p", "Audit trail", "running"), sync = work("d", "Fix sync", "running")
+        let search = work("r", "Speed up search", "running"), why = work("c", "Why does sync drop events?", "running")
+        let keys = work("t", "Rotate keys", "running", kind: "task")
+        let before = try sighting(
+            [row(export, "in-flight"), row(audit, "in-flight", total: 3), row(sync, "in-flight"), row(search, "in-flight"), row(why, "in-flight")],
+            [row(keys, "in-flight")],
+            ["g": detail(export, tree: [node(csv)]), "p": detail(audit), "d": detail(sync), "r": detail(search), "c": detail(why)])
+
+        let exportNow = work("g", "Ship the export", "needs-input", updated: "u1"), whyNow = work("c", "Why does sync drop events?", "needs-input", updated: "u1")
+        let course: [String: Any] = ["kind": "course", "proposed": ["title": "Sync never drops events", "done_when": NSNull(), "finish": NSNull()]]
+        let after = try sighting(
+            [row(exportNow, "needs-you", needsYou: 2), row(audit, "needs-you", total: 3, proposed: true),
+             row(work("d", "Fix sync", "done", updated: "u1"), "at-rest", finished: "Complete PR #512"),
+             row(work("r", "Speed up search", "review", updated: "u1"), "ready-to-push"), row(whyNow, "needs-you", needsYou: 3)],
+            [row(work("t", "Rotate keys", "blocked", kind: "task", updated: "u1"), "needs-you")],
+            ["g": detail(exportNow, tree: [node(work("s", "Export as CSV", "needs-input"), [node(work("b", "Upload to S3", "blocked", kind: "task"))])],
+                         asks: [ask("q1", on: "s", "Which columns go in?\nThe export has forty."), ask("q2", on: "g", "Is UTF-8 fine?")]),
+             "p": detail(audit), "r": detail(work("r", "Speed up search", "review")),
+             "c": detail(whyNow, asks: [ask("q3", on: "c", "Turn this into fixing it?", change: course),
+                                        ask("q4", on: "f", "Where does this goal finish?", change: ["kind": "finish"]),
+                                        ask("q5", on: "c", "Add a retry sub-goal?", change: ["kind": "plan"])])])
+
+        #expect(Notice.between(nil, after).isEmpty, "nothing is told from the first read")
+        let told = Notice.between(before, after)
+        #expect(told.map { [$0.title, $0.body, $0.work] } == [
+            ["Question for you", "Ship the export\nWhich columns go in?\n1 more question", "g"],
+            ["Blocked", "Ship the export — Upload to S3", "g"],
+            ["Approve the plan", "Audit trail · 3 sub-goals", "p"],
+            ["Finished", "Fix sync — Complete PR #512", "d"],
+            ["Ready for review", "Speed up search", "r"],
+            ["Change of course proposed", "Why does sync drop events? — Sync never drops events", "c"],
+            ["Choose where it finishes", "Why does sync drop events?", "c"],
+            ["Plan change to approve", "Why does sync drop events?", "c"],
+            ["Blocked", "Rotate keys", "t"],
+        ])
+        #expect(Notice.between(after, after).isEmpty, "staying put is not news")
+        #expect(Notice.between(before, after, told: Set(told.flatMap(\.keys))).isEmpty, "nothing is told twice")
+        #expect(!Notice.between(before, after, quiet: ["g", "q3"]).contains { $0.work == "g" || $0.body.contains("Sync never") },
+                "what the person just did is not told back to them")
+
+        let now = Date()
+        let answered = try Plan.decide("g", text: "csv only")
+        #expect(Notice.quiet(running: [], ended: [(answered, now.addingTimeInterval(-2))], now: now).contains("g"))
+        #expect(!Notice.quiet(running: [], ended: [(answered, now.addingTimeInterval(-10))], now: now).contains("g"))
+        #expect(Notice.quiet(running: [answered], ended: [], now: now).contains("g"))
+
+        #expect(Sighting.reads(for: before.board, after: before, touched: []).read.isEmpty, "a goal nothing touched is not read again")
+        #expect(Sighting.reads(for: before.board, after: before, touched: ["s"]).read == ["g"], "an event under a goal reads it again")
+        #expect(Set(Sighting.reads(for: after.board, after: before, touched: []).read) == Set(["g", "p", "r", "c"]),
+                "a goal whose row changed is read again; one at rest with nothing asked is not read")
     }
 
     @Test("A Product Is Added From A Folder")
