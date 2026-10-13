@@ -256,3 +256,18 @@ func TestAddEventReturnsTheEventItStored(t *testing.T) {
 		t.Fatalf("AddEvent = %+v, want the stored %+v", got, last)
 	}
 }
+
+func TestOpenConcernsReachEveryDepth(t *testing.T) {
+	l := newTestLedger(t)
+	goal := add(t, l, "p", "G", AddOptions{Kind: core.WorkGoal})
+	sub := add(t, l, "p", "S", AddOptions{Kind: core.WorkGoal, Parent: &goal.ID})
+	deep := add(t, l, "p", "T", AddOptions{Parent: &sub.ID})
+	for _, id := range []string{goal.ID, sub.ID, deep.ID} {
+		if _, err := l.AddConcern(id, "risk on "+id); err != nil {
+			t.Fatalf("concern: %v", err)
+		}
+	}
+	if got := allOpenConcerns(t, l, goal.ID); len(got) != 3 {
+		t.Fatalf("open concerns = %v, want the goal's, the sub-goal's and its task's", got)
+	}
+}

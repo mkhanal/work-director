@@ -1443,11 +1443,13 @@ func (l *Ledger) Events(work string, kind *core.EventKind) ([]core.Event, error)
 // looks like tasks with no parent. One set is the whole subtree, which is what
 // both surfaces show on a goal and what keeps them showing the same thing.
 //
+// It reaches every depth: a goal's sub-goals and their tasks are under it too.
 // A task has nothing under it, so for a task this is its own events.
 func (l *Ledger) EventsUnder(work string) ([]core.Event, error) {
-	rows, err := l.db.Query(`SELECT `+eventColumns+` FROM event
-		WHERE work = ? OR work IN (SELECT id FROM work WHERE parent = ?)
-		ORDER BY id`, work, work)
+	rows, err := l.db.Query(`WITH RECURSIVE tree(id) AS (
+			SELECT ? UNION SELECT work.id FROM work JOIN tree ON work.parent = tree.id)
+		SELECT `+eventColumns+` FROM event WHERE work IN (SELECT id FROM tree)
+		ORDER BY id`, work)
 	if err != nil {
 		return nil, err
 	}
@@ -1627,16 +1629,13 @@ func (l *Ledger) Concerns(work *string) ([]core.Concern, error) {
 }
 
 func (l *Ledger) OpenConcerns(epicID string) ([]core.Concern, error) {
-	if _, err := l.Get(epicID); err != nil {
-		return nil, err
-	}
-	tasks, err := l.Tasks(epicID)
+	tree, err := l.Under(epicID)
 	if err != nil {
 		return nil, err
 	}
-	works := map[string]bool{epicID: true}
-	for _, t := range tasks {
-		works[t.ID] = true
+	works := map[string]bool{}
+	for _, w := range tree {
+		works[w.ID] = true
 	}
 	all, err := l.Concerns(nil)
 	if err != nil {

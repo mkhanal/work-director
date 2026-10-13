@@ -1089,6 +1089,8 @@ func TestAGoalsEventsAreItsOwnAndItsTasks(t *testing.T) {
 	goal := add(t, l, "p", "Autonomous factory", AddOptions{Kind: core.WorkEpic})
 	t1 := add(t, l, "p", "Drive the loop", AddOptions{Parent: &goal.ID})
 	t2 := add(t, l, "p", "Show the goal in context", AddOptions{Parent: &goal.ID})
+	sub := add(t, l, "p", "Release baseline", AddOptions{Kind: core.WorkGoal, Parent: &goal.ID})
+	deep := add(t, l, "p", "Tag each release", AddOptions{Parent: &sub.ID})
 	elsewhere := add(t, l, "p", "Another goal", AddOptions{Kind: core.WorkEpic})
 
 	move(t, l, goal.ID, core.StateRunning)
@@ -1103,7 +1105,7 @@ func TestAGoalsEventsAreItsOwnAndItsTasks(t *testing.T) {
 
 	events, err := l.EventsUnder(goal.ID)
 	wantNoErr(t, err)
-	// Exactly the goal's own row and its two tasks', in event order: the spine is
+	// Exactly the goal's own row and everything under it at any depth, in event order: the spine is
 	// in the set, and so is every decision, landing and report filed on a task,
 	// because that is what makes a goal readable as a whole rather than as a row
 	// that looks like it decided nothing.
@@ -1111,8 +1113,8 @@ func TestAGoalsEventsAreItsOwnAndItsTasks(t *testing.T) {
 	for _, e := range events {
 		rows[e.Work]++
 	}
-	if len(rows) != 3 || rows[goal.ID] == 0 || rows[t1.ID] == 0 || rows[t2.ID] == 0 {
-		t.Errorf("rows under goal = %v, want the goal's own row and both its tasks'", rows)
+	if len(rows) != 5 || rows[goal.ID] == 0 || rows[t1.ID] == 0 || rows[t2.ID] == 0 || rows[sub.ID] == 0 || rows[deep.ID] == 0 {
+		t.Errorf("rows under goal = %v, want the goal's own row and every row under it", rows)
 	}
 	if !slices.IsSortedFunc(events, func(a, b core.Event) int { return a.ID - b.ID }) {
 		t.Errorf("events under goal are not in id order, so the log reads out of order")
