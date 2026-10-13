@@ -9,6 +9,10 @@
 #   scripts/ui/macos/shoot.sh [out]
 set -euo pipefail
 root=$(cd "$(dirname "$0")/../../.." && pwd)
+if ioreg -n Root -d1 -a | grep -A1 CGSSessionScreenIsLocked | grep -q '<true/>'; then
+  echo "the screen is locked: macOS draws no app windows until it is unlocked" >&2
+  exit 1
+fi
 out=$(mkdir -p "${1:-$root/ui-shots/macos}" && cd "${1:-$root/ui-shots/macos}" && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/wd-ui-macos.XXXXXX")
 (cd "$root" && go build -o "$work/wd" ./cmd/wd)
