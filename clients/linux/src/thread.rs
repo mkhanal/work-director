@@ -238,13 +238,20 @@ impl GoalDetail {
 }
 
 impl Event {
-    /// Whether it records the tree being reshaped: a sub-goal added, edited,
-    /// ordered, split, merged or dropped, or what makes one done. The record
-    /// holds these; the conversation does not.
+    /// Whether it is a decision the ledger files when a goal is reshaped or
+    /// settled (a sub-goal added, edited, dropped, merged, split or ordered; a
+    /// done-when, finish line, approval or classification), which belongs to
+    /// the record rather than the conversation.
     pub fn reshapes(&self) -> bool {
-        self.kind == "decision"
-            && (self.body.starts_with("done when: ")
-                || self.decision.as_ref().is_some_and(|d| d.question.starts_with("the sub-goals of ")))
+        if self.kind != "decision" {
+            return false;
+        }
+        let b = self.body.as_str();
+        let verb = ["added ", "edited ", "dropped ", "split "].iter().find_map(|v| b.strip_prefix(v));
+        verb.and_then(id_then).is_some_and(|rest| rest.starts_with(": "))
+            || b.strip_prefix("merged ").and_then(id_then).is_some_and(|rest| rest.starts_with(" into "))
+            || id_then(b).is_some_and(|rest| rest.starts_with(" waits on: "))
+            || ["done when: ", "finishes at: ", "approved: ", "classified "].iter().any(|p| b.starts_with(p))
     }
 
     /// Whether the director gave this answer, from what was decided or by its
@@ -374,6 +381,12 @@ impl GoalDetail {
         walk(&self.tree, &self.paths, &mut out);
         out
     }
+}
+
+/// What follows a leading work id (lower-case hex), or none without one.
+fn id_then(text: &str) -> Option<&str> {
+    let end = text.find(|c: char| !matches!(c, '0'..='9' | 'a'..='f')).unwrap_or(text.len());
+    (end > 0).then(|| &text[end..])
 }
 
 fn is_update(step: &ThreadStep) -> bool {
