@@ -1,33 +1,60 @@
-//! Markdown as an executor writes it: headings, lists, code blocks and
-//! paragraphs, each with its inline emphasis, code and links, made into the
-//! Pango markup a label renders.
+//! Markdown as an executor writes it: headings, lists, code blocks, tables,
+//! quotes, rules and paragraphs, each with its inline emphasis, code and
+//! links, made into the Pango markup a label renders.
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Block {
     Heading(usize, String),
-    /// A list item, with its number when the list is ordered.
-    Bullet(String, Option<String>),
+    /// A list item: its number when the list is ordered, and how many lists
+    /// it sits inside.
+    Bullet { text: String, number: Option<String>, depth: usize },
     Code(String),
     Paragraph(String),
+    Table(Table),
+    Quote(Vec<Block>),
+    Rule,
+}
+
+/// A pipe table: its header, each column's alignment, and its rows, every
+/// row as wide as the header. Cells hold their inline markdown.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Table {
+    pub head: Vec<String>,
+    pub align: Vec<Align>,
+    pub rows: Vec<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Align {
+    Start,
+    Center,
+    End,
 }
 
 pub fn parse(text: &str) -> Vec<Block> {
+    let lines: Vec<&str> = text.split('\n').collect();
     let mut out = Vec::new();
     let mut paragraph: Vec<&str> = Vec::new();
     let mut code: Option<Vec<&str>> = None;
+    // The indent of each list the next item may sit inside.
+    let mut lists: Vec<usize> = Vec::new();
     let flush = |paragraph: &mut Vec<&str>, out: &mut Vec<Block>| {
         if !paragraph.is_empty() {
             out.push(Block::Paragraph(paragraph.join("\n")));
             paragraph.clear();
         }
     };
-    for raw in text.split('\n') {
+    let mut i = 0;
+    while i < lines.len() {
+        let raw = lines[i];
         let line = raw.trim();
+        i += 1;
         if line.starts_with("```") {
             match code.take() {
                 Some(open) => out.push(Block::Code(open.join("\n"))),
                 None => {
                     flush(&mut paragraph, &mut out);
+                    lists.clear();
                     code = Some(Vec::new());
                 }
             }
@@ -38,18 +65,48 @@ pub fn parse(text: &str) -> Vec<Block> {
             continue;
         }
         let hashes = line.chars().take_while(|c| *c == '#').count();
+        let item = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")).or_else(|| line.strip_prefix("+ "));
         if line.is_empty() {
             flush(&mut paragraph, &mut out);
+        } else if let Some((head, align)) = lines.get(i).and_then(|next| table_head(line, next)) {
+            flush(&mut paragraph, &mut out);
+            lists.clear();
+            let mut rows = Vec::new();
+            i += 1;
+            while let Some(row) = lines.get(i).map(|l| l.trim()).filter(|l| l.contains('|')) {
+                let mut cells = cells(row);
+                cells.resize(head.len(), String::new());
+                rows.push(cells);
+                i += 1;
+            }
+            out.push(Block::Table(Table { head, align, rows }));
+        } else if let Some(quoted) = line.strip_prefix('>') {
+            flush(&mut paragraph, &mut out);
+            lists.clear();
+            let mut inner = vec![quoted.strip_prefix(' ').unwrap_or(quoted)];
+            while let Some(more) = lines.get(i).and_then(|l| l.trim().strip_prefix('>')) {
+                inner.push(more.strip_prefix(' ').unwrap_or(more));
+                i += 1;
+            }
+            out.push(Block::Quote(parse(&inner.join("\n"))));
+        } else if rule(line) {
+            flush(&mut paragraph, &mut out);
+            lists.clear();
+            out.push(Block::Rule);
         } else if hashes > 0 && line[hashes..].starts_with(' ') {
             flush(&mut paragraph, &mut out);
+            lists.clear();
             out.push(Block::Heading(hashes, line[hashes..].trim().to_string()));
-        } else if let Some(item) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
+        } else if let Some(item) = item {
             flush(&mut paragraph, &mut out);
-            out.push(Block::Bullet(item.to_string(), None));
+            let depth = depth(&mut lists, raw);
+            out.push(Block::Bullet { text: item.to_string(), number: None, depth });
         } else if let Some((number, item)) = ordered(line) {
             flush(&mut paragraph, &mut out);
-            out.push(Block::Bullet(item.to_string(), Some(number.to_string())));
+            let depth = depth(&mut lists, raw);
+            out.push(Block::Bullet { text: item.to_string(), number: Some(number.to_string()), depth });
         } else {
+            lists.clear();
             paragraph.push(raw);
         }
     }
@@ -57,6 +114,73 @@ pub fn parse(text: &str) -> Vec<Block> {
         out.push(Block::Code(open.join("\n")));
     }
     flush(&mut paragraph, &mut out);
+    out
+}
+
+/// How many lists an item indented as `raw` is nested in: those of the
+/// items before it that are indented less.
+fn depth(lists: &mut Vec<usize>, raw: &str) -> usize {
+    let indent = raw.chars().take_while(|c| c.is_whitespace()).map(|c| if c == '\t' { 4 } else { 1 }).sum();
+    while lists.last().is_some_and(|open| *open >= indent) {
+        lists.pop();
+    }
+    lists.push(indent);
+    lists.len() - 1
+}
+
+/// `---`, `***` or `___`: three or more of one mark, spaces allowed between.
+fn rule(line: &str) -> bool {
+    let mut marks = line.chars().filter(|c| !c.is_whitespace());
+    let Some(first) = marks.next() else { return false };
+    matches!(first, '-' | '*' | '_') && line.chars().filter(|c| *c == first).count() >= 3 && marks.all(|c| c == first)
+}
+
+/// A table's header and alignments, when `line` is a row of cells and
+/// `next` is the separator row under it, with a cell for each.
+fn table_head(line: &str, next: &str) -> Option<(Vec<String>, Vec<Align>)> {
+    if !line.contains('|') || !next.contains('-') {
+        return None;
+    }
+    let head = cells(line);
+    let align = cells(next)
+        .iter()
+        .map(|s| {
+            let dashes = s.trim_matches(':');
+            (!dashes.is_empty() && dashes.chars().all(|c| c == '-')).then_some(
+                match (s.starts_with(':'), s.ends_with(':')) {
+                    (true, true) => Align::Center,
+                    (false, true) => Align::End,
+                    _ => Align::Start,
+                },
+            )
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (align.len() == head.len()).then_some((head, align))
+}
+
+/// A row's cells, trimmed, split at each pipe not escaped with `\`; the pipes
+/// at either end are optional.
+fn cells(row: &str) -> Vec<String> {
+    let row = row.trim();
+    let row = row.strip_prefix('|').unwrap_or(row);
+    let row = match row.strip_suffix('|') {
+        Some(inner) if !inner.ends_with('\\') => inner,
+        _ => row,
+    };
+    let mut out = Vec::new();
+    let mut cell = String::new();
+    let mut chars = row.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek() == Some(&'|') => {
+                cell.push('|');
+                chars.next();
+            }
+            '|' => out.push(std::mem::take(&mut cell).trim().to_string()),
+            _ => cell.push(c),
+        }
+    }
+    out.push(cell.trim().to_string());
     out
 }
 

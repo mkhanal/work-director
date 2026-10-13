@@ -2374,3 +2374,54 @@ fn the_agents_panel_sits_beside_the_page_never_over_it() {
     assert!(PanelWidth::over_page(PanelWidth::NARROW), "where the goals sidebar folds away, it opens over the page");
     assert!(PanelWidth::over_page(400.0));
 }
+
+/// A Table In A Reply Reads As A Table
+#[test]
+fn a_table_in_a_reply_reads_as_a_table() {
+    use kit::markdown::{parse, Align, Block, Table};
+    let reply = "Checks so far:\n\n| Check | Run? | Result |\n|:---|:---:|---:|\n| `go test` | yes | **passed** |\n| lint \\| vet | no |\n| build | yes | ok | extra |\n\nThat is all.";
+    let blocks = parse(reply);
+    assert_eq!(blocks.len(), 3, "a paragraph, the table and a paragraph: {blocks:?}");
+    let Block::Table(table) = &blocks[1] else { panic!("a table: {:?}", blocks[1]) };
+    assert_eq!(
+        table,
+        &Table {
+            head: strings(&["Check", "Run?", "Result"]),
+            align: vec![Align::Start, Align::Center, Align::End],
+            rows: vec![
+                strings(&["`go test`", "yes", "**passed**"]),
+                strings(&["lint | vet", "no", ""]),
+                strings(&["build", "yes", "ok"]),
+            ],
+        },
+        "alignment from the separator, an escaped pipe kept, a short row padded, a long one cut"
+    );
+    let Block::Table(plain) = &parse("a | b\n--- | ---\n1 | 2")[0] else { panic!("a table without outer pipes") };
+    assert_eq!(plain.align, vec![Align::Start, Align::Start], "a column with no colon starts");
+    assert!(
+        matches!(&parse("| not | a table |\nno separator")[0], Block::Paragraph(_)),
+        "pipes without a separator row are words"
+    );
+    assert_eq!(
+        kit::copy::plain(reply),
+        "Checks so far:\n\nCheck\tRun?\tResult\ngo test\tyes\tpassed\nlint | vet\tno\t\nbuild\tyes\tok\n\nThat is all.",
+        "copied, a table is its rows with tab-separated cells, in words"
+    );
+
+    let more = parse("> quoted **words**\n> more\n\n---\n\n- top\n  - nested\n    - deeper\n- back");
+    assert_eq!(
+        more,
+        vec![
+            Block::Quote(vec![Block::Paragraph("quoted **words**\nmore".into())]),
+            Block::Rule,
+            Block::Bullet { text: "top".into(), number: None, depth: 0 },
+            Block::Bullet { text: "nested".into(), number: None, depth: 1 },
+            Block::Bullet { text: "deeper".into(), number: None, depth: 2 },
+            Block::Bullet { text: "back".into(), number: None, depth: 0 },
+        ]
+    );
+    assert_eq!(
+        kit::copy::plain("> quoted **words**\n\n***\n\n- top\n  - nested"),
+        "quoted words\n\n• top\n\n  • nested"
+    );
+}

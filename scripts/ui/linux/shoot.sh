@@ -30,7 +30,10 @@ screens=(
   "finishline $finish conversation"
   "conversation $goal conversation"
   "record $goal record"
+  "session $working conversation"
 )
+# ONLY=<screen|screen…> photographs just those.
+[ -z "${ONLY:-}" ] || mapfile -t screens < <(printf '%s\n' "${screens[@]}" | grep -E "^($ONLY) ")
 for scheme in light dark; do
   for row in "${screens[@]}"; do
     read -r screen work tab <<<"$row"

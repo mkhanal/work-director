@@ -256,24 +256,30 @@ pub fn code_block(code: &str) -> gtk::Widget {
     scroller.upcast()
 }
 
-/// Markdown as blocks of labels: paragraphs, headings, bullets and code.
+/// Markdown as blocks of labels: paragraphs, headings, bullets, code,
+/// tables, quotes and rules.
 pub fn markdown(source: &str) -> gtk::Box {
+    blocks(markdown::parse(source))
+}
+
+fn blocks(parsed: Vec<Block>) -> gtk::Box {
     let column = vbox(SPACE_3);
-    for block in markdown::parse(source) {
+    for block in parsed {
         let widget: gtk::Widget = match block {
             Block::Heading(_, title) => {
                 let label = marked(&markdown::inline(&title), &["title"]);
                 label.set_margin_top(SPACE_2);
                 label.upcast()
             }
-            Block::Bullet(item, number) => {
+            Block::Bullet { text, number, depth } => {
                 let row = hbox(SPACE_2);
-                let marker = gtk::Label::new(Some(number.as_deref().unwrap_or("•")));
+                row.set_margin_start(depth as i32 * SPACE_4);
+                let marker = gtk::Label::new(Some(number.as_deref().unwrap_or(if depth == 0 { "•" } else { "◦" })));
                 marker.add_css_class("text2");
                 marker.set_valign(gtk::Align::Start);
                 marker.set_xalign(1.0);
                 marker.set_size_request(12, -1);
-                let body = marked(&markdown::inline(&item), &["body"]);
+                let body = marked(&markdown::inline(&text), &["body"]);
                 body.set_hexpand(true);
                 row.append(&marker);
                 row.append(&body);
@@ -281,10 +287,56 @@ pub fn markdown(source: &str) -> gtk::Box {
             }
             Block::Code(code) => code_block(&code),
             Block::Paragraph(paragraph) => marked(&markdown::inline(&paragraph), &["body"]).upcast(),
+            Block::Table(table) => self::table(&table).upcast(),
+            Block::Quote(inner) => {
+                let quote = blocks(inner);
+                quote.add_css_class("md-quote");
+                quote.upcast()
+            }
+            Block::Rule => hairline().upcast(),
         };
         column.append(&widget);
     }
     column
+}
+
+/// A markdown table as a grid: the header semibold, a hairline under each
+/// row, each cell aligned as its column and wrapping within it.
+pub fn table(table: &markdown::Table) -> gtk::Widget {
+    let grid = gtk::Grid::new();
+    grid.add_css_class("md-table");
+    grid.set_halign(gtk::Align::Start);
+    let last = table.rows.len();
+    for (r, row) in std::iter::once(&table.head).chain(&table.rows).enumerate() {
+        for (c, cell) in row.iter().enumerate() {
+            let align = table.align.get(c).copied().unwrap_or(markdown::Align::Start);
+            let (x, justify) = match align {
+                markdown::Align::Start => (0.0, gtk::Justification::Left),
+                markdown::Align::Center => (0.5, gtk::Justification::Center),
+                markdown::Align::End => (1.0, gtk::Justification::Right),
+            };
+            let label = gtk::Label::builder()
+                .use_markup(true)
+                .label(markdown::inline(cell))
+                .xalign(x)
+                .yalign(0.0)
+                .justify(justify)
+                .wrap(true)
+                .wrap_mode(pango::WrapMode::WordChar)
+                .natural_wrap_mode(gtk::NaturalWrapMode::Word)
+                .max_width_chars(48)
+                .hexpand(true)
+                .build();
+            label.add_css_class("md-cell");
+            if r == 0 {
+                label.add_css_class("md-head");
+            } else if r == last {
+                label.add_css_class("last");
+            }
+            grid.attach(&label, c as i32, r as i32, 1, 1);
+        }
+    }
+    grid.upcast()
 }
 
 fn marked(markup: &str, classes: &[&str]) -> gtk::Label {

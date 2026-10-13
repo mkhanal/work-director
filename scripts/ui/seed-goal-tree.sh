@@ -56,6 +56,45 @@ q "INSERT INTO step (work, n, text, state) VALUES
   ('$S3', 3, 'Map module names to product names', 'done'),
   ('$S3', 4, 'Write the customer note template', 'doing'),
   ('$S3', 5, 'Generate the note for v1.0.0 as a sample', 'todo')"
+# The customer-note agent's session: Bash and Thinking steps, then a reply
+# with a table. A claude session is read from $HOME/.claude/projects, so it is
+# written only where HOME holds the seeded ledger, as in the UI containers.
+if [ "$(dirname "$WD_HOME")" = "$HOME" ]; then
+  mkdir -p "$HOME/.claude/projects/wd-seed"
+  python3 - "$HOME/.claude/projects/wd-seed/seed-s3.jsonl" <<'PY'
+import datetime, json, sys
+now = datetime.datetime.now(datetime.timezone.utc)
+def at(m): return (now - datetime.timedelta(minutes=m)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+def user(m, content): return {"type": "user", "timestamp": at(m), "message": {"content": content}}
+def agent(m, *parts): return {"type": "assistant", "timestamp": at(m), "message": {"content": list(parts), "stop_reason": "tool_use"}}
+def tool(i, name, inp): return {"type": "tool_use", "id": i, "name": name, "input": inp}
+def result(m, i, text): return user(m, [{"type": "tool_result", "tool_use_id": i, "content": text}])
+reply = """The template reads well for the three sample releases. What I checked:
+
+| Check | Run? | Result |
+|:---|:---:|---:|
+| `go test ./notes/...` | yes | **passed** |
+| Customer wording review | yes | 2 terms renamed |
+| Link check | no | skipped: offline |
+
+> Module names stay out of the customer note; only product names show.
+
+Next I generate the note for v1.0.0 as a sample."""
+rows = [
+    user(40, "Write the customer release note template, in plain language."),
+    agent(39, {"type": "thinking", "thinking": "Start from how past releases were announced, then map module names to product names."}),
+    agent(38, tool("t1", "Bash", {"command": "cd release-notes && ls templates/", "description": "List the templates"})),
+    result(38, "t1", "customer.md\ndeploy.md"),
+    agent(37, tool("t2", "Bash", {"command": "go test ./notes/...", "description": "Run the notes tests"})),
+    result(36, "t2", "ok  \trelease-notes/notes\t0.41s"),
+    agent(35, {"type": "thinking", "thinking": "The tests pass. A short table says what was checked."}),
+    {"type": "assistant", "timestamp": at(34), "message": {"content": [{"type": "text", "text": reply}], "stop_reason": "end_turn"}},
+]
+with open(sys.argv[1], "w") as f:
+    for r in rows:
+        f.write(json.dumps(r) + "\n")
+PY
+fi
 q "UPDATE work SET runner = 'codex', session = 'seed-s2b' WHERE id = '$S2b'"
 state "$S2b" running 35
 q "UPDATE work SET runner = 'claude', session = 'seed-s2c' WHERE id = '$S2c'"

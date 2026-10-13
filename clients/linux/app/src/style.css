@@ -211,6 +211,13 @@ progressbar.wd-progress progress { min-height: 4px; border-radius: 2px; backgrou
 .sunken > viewport > label, .sunken label { padding: 12px; }
 .director-line { padding: 6px 0; font-size: 13px; }
 
+/* Markdown tables, quotes */
+.md-table { border: 1px solid @wd_hairline; border-radius: 8px; }
+.md-cell { font-size: 13px; padding: 6px 12px; border-bottom: 1px solid @wd_separator; }
+.md-cell.md-head { font-weight: 600; border-bottom-color: @wd_hairline; }
+.md-cell.last { border-bottom: none; }
+.md-quote { border-left: 3px solid @wd_hairline; padding-left: 12px; color: @wd_text2; }
+
 /* The composer */
 .composer {
   background-color: @wd_page; border: 1px solid @wd_hairline; border-radius: 14px; padding: 12px 14px;

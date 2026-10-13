@@ -248,3 +248,10 @@ hold only that product's work; with none, every product's.
 - Dragging its edge resizes it between 260 and 480 pixels; it opens at 320 until a width is set, and the width set is remembered.
 - Its toggle hides and shows it, and whether it shows is remembered.
 - Only at a window width where the goals sidebar folds away does it open over the page.
+
+## A Table In A Reply Reads As A Table
+- A pipe table — a header row, a separator row of `---` cells, then its rows — shows as a table: the header semibold, a hairline between rows, each cell's words wrapping within its column.
+- A column's separator sets its alignment: `:---` start, `---:` end, `:---:` centred.
+- A cell's inline markdown is styled as anywhere else, and `\|` is a pipe inside a cell; a row short of cells is padded, one with too many is cut.
+- Copied, a table reads as its rows, its cells separated by tabs.
+- A blockquote, a horizontal rule and a bullet nested under another show as such.
