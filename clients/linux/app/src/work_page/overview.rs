@@ -270,6 +270,13 @@ fn sub_goal_row(row: &SubGoalRow, last: bool, app: &App, page: Weak<WorkPage>) -
         said.set_hexpand(!foldable || row.open);
         meta.append(&said);
     }
+    if let Some(plan) = &row.carry_on {
+        let carry = ui::inline_link(&plan.title);
+        carry.set_tooltip_text(Some(&plan.command_line()));
+        let (app, plan) = (app.clone(), plan.clone());
+        carry.connect_clicked(move |_| app.run(plan.clone()));
+        meta.append(&carry);
+    }
     if foldable && !row.open {
         let done = row.steps.iter().filter(|s| s.state == StepState::Done).count();
         let show = ui::inline_link(&format!("Show steps ({done} of {})", row.steps.len()));

@@ -947,6 +947,9 @@ fn a_goal_page_shows_what_done_means_what_needs_you_and_its_sub_goals() {
             node_json("a", "task", "queued", json!({"why_not_moving": "waits on Title d, Title c"})),
             node_json("x", "task", "running", json!({"steps": [step(1, "doing")]})),
             node_json("w", "task", "superseded", json!({"why_not_moving": "superseded: guides live with each release"})),
+            node_json("s", "task", "running", json!({"owner": claude, "doing": "Reading the changelog",
+                "stopped": {"said": "\nThe changelog has no dates\nso I stopped", "at": "2026-10-13T10:00:00Z"}})),
+            node_json("b", "task", "blocked", json!({"why_not_moving": "blocked", "blocked_because": "the release bot has no token"})),
         ],
     }));
     assert!(!goal.nested());
@@ -975,6 +978,14 @@ fn a_goal_page_shows_what_done_means_what_needs_you_and_its_sub_goals() {
     assert_eq!(row("a").badge, ("Waiting".to_string(), Tone::Waiting));
     assert_eq!(row("w").meta, "Replaced by a change of plan: guides live with each release");
     assert!(row("w").struck);
+    assert_eq!(row("s").meta, "claude · Stopped without finishing: The changelog has no dates");
+    assert_eq!(
+        row("s").carry_on.map(|p| (p.title, p.argv)),
+        Some(("Tell it to carry on".to_string(), strings(&["send", "s", "Carry on where you left off."]))),
+        "a stopped sub-goal is told to carry on from its row"
+    );
+    assert_eq!(row("c").carry_on, None);
+    assert_eq!(row("b").meta, "The release bot has no token", "a blocked sub-goal says why");
 
     let mut nested = goal.clone();
     nested.chain.push(Link { id: "d".into(), title: "Guide".into(), state: WorkState::Running });
@@ -1833,7 +1844,11 @@ fn a_notification_says_what_happened_and_where() {
                     export_now,
                     vec![node(
                         work("s", "Export as CSV", "needs-input", "goal", "u1"),
-                        vec![node(work("b", "Upload to S3", "blocked", "task", "u1"), vec![])],
+                        vec![{
+                            let mut b = node(work("b", "Upload to S3", "blocked", "task", "u1"), vec![]);
+                            b["blocked_because"] = json!("the bucket policy refuses writes");
+                            b
+                        }],
                     )],
                     vec![
                         ask("q1", "s", "Which columns go in?\nThe export has forty.", Value::Null),
@@ -1841,7 +1856,12 @@ fn a_notification_says_what_happened_and_where() {
                     ],
                 ),
             ),
-            ("p", detail(audit, vec![], vec![])),
+            ("p", {
+                let mut log = node(work("l", "Write the log", "running", "task", "u1"), vec![]);
+                log["stopped"] =
+                    json!({"said": "Halfway through the schema\nthen the tests", "at": "2026-10-13T10:00:00Z"});
+                detail(audit, vec![log], vec![])
+            }),
             ("r", detail(work("r", "Speed up search", "review", "goal", "u1"), vec![], vec![])),
             (
                 "c",
@@ -1866,8 +1886,9 @@ fn a_notification_says_what_happened_and_where() {
         said,
         vec![
             ["Question for you", "Ship the export\nWhich columns go in?\n1 more question", "g"],
-            ["Blocked", "Ship the export — Upload to S3", "g"],
+            ["Blocked", "Ship the export — Upload to S3\nthe bucket policy refuses writes", "g"],
             ["Approve the plan", "Audit trail · 3 sub-goals", "p"],
+            ["Stopped without finishing", "Audit trail — Write the log\nHalfway through the schema", "p"],
             ["Finished", "Fix sync — Complete PR #512", "d"],
             ["Ready for review", "Speed up search", "r"],
             ["Change of course proposed", "Why does sync drop events? — Sync never drops events", "c"],

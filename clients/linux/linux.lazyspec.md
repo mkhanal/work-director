@@ -110,6 +110,7 @@ hold only that product's work; with none, every product's.
 - A top goal's page shows its done-when, where it finishes and where that came from, and its course; a sub-goal's page shows its done-when and its course.
 - Each question waiting on the person anywhere under the goal is answered in place, or left to the director.
 - Each sub-goal reads its state, then what makes it done, what it is doing, or what it waits on, and a badge; a replaced one is struck through with why.
+- A sub-goal whose session stopped without finishing reads Stopped without finishing and the first line it last said, with Tell it to carry on, which runs `wd send <id> "Carry on where you left off."`; a blocked one reads why, when `wd` says.
 - A sub-goal that is a goal opens its own page; a task's steps fold open and closed, closed except the first working task's.
 - A sub-goal is added with its outcome and what makes it done.
 - What holds the goal back from done is listed, and a sub-goal's page lists what the director did under it.
@@ -198,8 +199,9 @@ hold only that product's work; with none, every product's.
 - The button says what it does: Check it, Deliver it, Confirm it's finished or Mark it done, or the words `wd` serves for the gate.
 
 ## A Notification Says What Happened And Where
-- Its title says what happened: Question for you, Approve the plan, Change of course proposed, Choose where it finishes, Plan change to approve, Blocked, Finished or Ready for review.
-- Its body names the goal, then what about it: a question's first line and how many more came with it, how many sub-goals a plan has, the course's proposed title, what under it is blocked, or where it finished.
+- Its title says what happened: Question for you, Approve the plan, Change of course proposed, Choose where it finishes, Plan change to approve, Blocked, Stopped without finishing, Finished or Ready for review.
+- Its body names the goal, then what about it: a question's first line and how many more came with it, how many sub-goals a plan has, the course's proposed title, what under it is blocked and why when `wd` says, what under it stopped and the first line it last said, or where it finished.
+- A stop is told once for each work and moment it stopped.
 - Ready for review is told when work reaches Ready to Push, In Review or Ready to Close.
 - Nothing is told from the first read, twice, or about work the person wrote to from the app in the last few seconds.
 - Clicking it opens its goal.

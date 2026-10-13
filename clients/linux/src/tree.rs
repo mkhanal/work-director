@@ -48,6 +48,21 @@ pub enum StepState {
     Dropped,
 }
 
+/// What running work last said when its session stopped without a report,
+/// and when that was noted.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+pub struct Stop {
+    pub said: String,
+    pub at: String,
+}
+
+impl Stop {
+    /// What it last said, in one line.
+    pub fn first_line(&self) -> &str {
+        self.said.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("")
+    }
+}
+
 /// One step of an agent's own plan for its sub-goal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
 pub struct PlanStep {
@@ -66,6 +81,10 @@ pub struct Node {
     pub after: Vec<String>,
     pub waiting_on: Vec<String>,
     pub why_not_moving: Option<String>,
+    /// Set while running work's session has stopped without a report.
+    pub stopped: Option<Stop>,
+    /// Why blocked work is blocked, when anything said.
+    pub blocked_because: Option<String>,
     pub owner: Option<Owner>,
     pub planned_into: Option<i64>,
     pub progress: Option<Progress>,

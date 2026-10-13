@@ -103,6 +103,7 @@ pub enum NoticeKind {
     Finish,
     PlanChange,
     Blocked,
+    Stopped,
     Finished,
     Review,
 }
@@ -244,15 +245,43 @@ impl Notice {
             if let (Some(detail), Some(known)) = (detail, earlier.known_blocked(id)) {
                 for n in nodes(&detail.tree) {
                     if n.work.state == WorkState::Blocked && !known.contains(&n.work.id) {
+                        let mut body = format!("{} — {}", w.title, n.work.title);
+                        if let Some(why) = n.blocked_because.as_deref().filter(|b| !b.trim().is_empty()) {
+                            body.push('\n');
+                            body.push_str(why.trim());
+                        }
                         said.push(notice(
                             NoticeKind::Blocked,
                             "Blocked",
-                            format!("{} — {}", w.title, n.work.title),
+                            body,
                             id,
                             vec![format!("blocked:{}:{}", n.work.id, n.work.updated)],
                             &[id, &n.work.id],
                         ));
                     }
+                }
+            }
+
+            // A session that stopped without finishing, once per stop; one
+            // already stopped at the earlier read is not news.
+            if let (Some(detail), Some(was)) = (detail, earlier.goals.get(id)) {
+                let stops_before: HashSet<(&str, &str)> = nodes(&was.tree)
+                    .into_iter()
+                    .filter_map(|n| n.stopped.as_ref().map(|s| (n.work.id.as_str(), s.at.as_str())))
+                    .collect();
+                for n in nodes(&detail.tree) {
+                    let Some(stop) = &n.stopped else { continue };
+                    if stops_before.contains(&(n.work.id.as_str(), stop.at.as_str())) {
+                        continue;
+                    }
+                    said.push(notice(
+                        NoticeKind::Stopped,
+                        "Stopped without finishing",
+                        format!("{} — {}\n{}", w.title, n.work.title, stop.first_line()),
+                        id,
+                        vec![format!("stopped:{}:{}", n.work.id, stop.at)],
+                        &[id, &n.work.id],
+                    ));
                 }
             }
 

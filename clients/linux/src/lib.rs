@@ -48,6 +48,6 @@ pub use store::{Change, Feed, FeedState, Spawner, Store, Watch};
 pub use thread::{AskedItem, FilterChip, SupervisorAction, SupervisorReply, ThreadFilter, ThreadItem, ThreadStep};
 pub use tree::{
     ChangeKind, Course, Fate, Finish, FinishLine, FinishSaid, FinishSource, GoalChange, Judgement, Link, NeedYou, Node,
-    Owner, PlanStep, Progress, Reasoning, Shape, StepState, SubGoalFate, Superseded,
+    Owner, PlanStep, Progress, Reasoning, Shape, StepState, Stop, SubGoalFate, Superseded,
 };
 pub use working::{doing, InFlight, WorkUnderWay, WorkingRow, Write};

@@ -30,6 +30,8 @@ pub struct SubGoalRow {
     pub open: bool,
     /// Whether a session works on it or under it now.
     pub working: bool,
+    /// What tells it to carry on, while its session has stopped without finishing.
+    pub carry_on: Option<Plan>,
 }
 
 /// Ledger text read as a sentence: its first letter capitalised.
@@ -82,13 +84,20 @@ impl Node {
             }
             Mark::Working => {
                 parts.extend(self.owner.iter().map(|o| o.runner.clone()));
-                if let Some(doing) = &self.doing {
+                if let Some(stop) = &self.stopped {
+                    parts.push(format!("Stopped without finishing: {}", stop.first_line()));
+                } else if let Some(doing) = &self.doing {
                     parts.push(crate::words::now(doing));
                 }
             }
             _ => {
                 parts.extend(self.owner.iter().map(|o| o.runner.clone()));
-                match &self.why_not_moving {
+                match self
+                    .blocked_because
+                    .as_ref()
+                    .filter(|_| state == WorkState::Blocked)
+                    .or(self.why_not_moving.as_ref())
+                {
                     Some(why) => parts.push(capitalised(why)),
                     None if state.mark() == Mark::Waiting => parts.push("Not started".to_string()),
                     None => parts.push(state.look().label.to_string()),
@@ -127,6 +136,7 @@ impl Node {
             steps: self.steps.clone(),
             open: false,
             working: false,
+            carry_on: self.stopped.as_ref().map(|_| Plan::carry_on(&self.work.id)),
         }
     }
 }

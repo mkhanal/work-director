@@ -165,6 +165,11 @@ impl Plan {
         Ok(plan("Send", vec!["send".into(), id.into(), said(text)?]))
     }
 
+    /// Tells work whose session stopped without finishing to pick up where it was.
+    pub fn carry_on(id: &str) -> Plan {
+        plan("Tell it to carry on", vec!["send".into(), id.into(), "Carry on where you left off.".into()])
+    }
+
     /// A message with files: each passed as `--attach <path>`. With files,
     /// the words may be empty.
     pub fn send_files(id: &str, text: &str, files: &[String]) -> Result<Plan, PlanError> {
