@@ -58,6 +58,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Course Change Serves What Was Found And What Happens To Each Sub-Goal", aCourseChangeServesWhatWasFoundAndWhatHappensToEachSubGoal)
 	t.Run("A Goal Serves Its Record", aGoalServesItsRecord)
 	t.Run("Sentences A Goal Serves Are Free Of Internal Terms", sentencesAGoalServesAreFreeOfInternalTerms)
+	t.Run("A Goal Serves Why Work Stopped Or Is Blocked", aGoalServesWhyWorkStoppedOrIsBlocked)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("A Running Session's Report Moves Its Work On", aRunningSessionsReportMovesItsWorkOn)
 	t.Run("A Running Session That Stops Without A Report Is Noted", aRunningSessionThatStopsWithoutAReportIsNoted)
@@ -2737,4 +2738,86 @@ func sentencesAGoalServesAreFreeOfInternalTerms(t *testing.T) {
 		t.Fatal(err)
 	}
 	gate()
+}
+
+func aGoalServesWhyWorkStoppedOrIsBlocked(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	g, err := l.Add("p", "Release notes", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := func(title string, states ...core.State) string {
+		t.Helper()
+		w, err := l.Add("p", title, ledger.AddOptions{Parent: &g.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		walk(t, l, w.ID, states...)
+		return w.ID
+	}
+	stopped := sub("Tag every release", core.StateRunning)
+	event(t, l, stopped, core.EventNote, "stopped without a report: I ran out of room before tagging v2")
+	cleared := sub("Group the change list", core.StateRunning)
+	event(t, l, cleared, core.EventNote, "stopped without a report: halfway through")
+	event(t, l, cleared, core.EventSent, "carry on")
+	reported := sub("List the flags", core.StateRunning, core.StateBlocked)
+	event(t, l, reported, core.EventReport, "BLOCKED\nSTATUS: BLOCKED the flag list lives in another repository")
+	noted := sub("Cover rollback", core.StateRunning, core.StateBlocked)
+	event(t, l, noted, core.EventReport, "BLOCKED\nSTATUS: BLOCKED\nNOTES: no access to staging")
+	concerned := sub("Publish the guide", core.StateRunning, core.StateBlocked)
+	if _, err := l.AddConcern(concerned, "the docs site is down"); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := l.AddConcern(concerned, "an old worry"); err != nil {
+		t.Fatal(err)
+	} else if _, err := l.ResolveConcern(c.ID, "settled"); err != nil {
+		t.Fatal(err)
+	}
+	sub("Write the customer note", core.StateRunning, core.StateBlocked)
+	running := sub("Announce it", core.StateRunning)
+	if _, err := l.AddConcern(running, "the channel may be wrong"); err != nil {
+		t.Fatal(err)
+	}
+
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	type stop struct {
+		Said string `json:"said"`
+		At   string `json:"at"`
+	}
+	var view struct {
+		Tree []struct {
+			Work           core.Work `json:"work"`
+			Stopped        *stop     `json:"stopped"`
+			BlockedBecause *string   `json:"blocked_because"`
+		} `json:"tree"`
+	}
+	getJSON(t, api.URL+"/api/goal/"+g.ID, http.StatusOK, &view)
+	evs, err := l.Events(stopped, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noteAt := evs[len(evs)-1].At
+	wantBlocked := map[string]string{reported: "the flag list lives in another repository", noted: "no access to staging", concerned: "the docs site is down"}
+	if len(view.Tree) != 7 {
+		t.Fatalf("tree has %d nodes, want 7", len(view.Tree))
+	}
+	for _, n := range view.Tree {
+		id := n.Work.ID
+		if id == stopped {
+			if n.Stopped == nil || n.Stopped.Said != "I ran out of room before tagging v2" || n.Stopped.At != noteAt {
+				t.Errorf("stopped of %s = %+v, want what it last said at %s", n.Work.Title, n.Stopped, noteAt)
+			}
+		} else if n.Stopped != nil {
+			t.Errorf("stopped of %s = %+v, want null", n.Work.Title, n.Stopped)
+		}
+		want, blocked := wantBlocked[id]
+		switch {
+		case blocked && (n.BlockedBecause == nil || *n.BlockedBecause != want):
+			t.Errorf("blocked_because of %s = %v, want %q", n.Work.Title, n.BlockedBecause, want)
+		case !blocked && n.BlockedBecause != nil:
+			t.Errorf("blocked_because of %s = %q, want null", n.Work.Title, *n.BlockedBecause)
+		}
+	}
 }

@@ -611,18 +611,26 @@ func Stopped(l *ledger.Ledger, w core.Work, h runner.Handle, texts []string) (bo
 // StoppedSaying is what work last said when its latest event is the note that
 // it stopped without a report, else "".
 func StoppedSaying(events []core.Event) string {
+	said, _, _ := StoppedNote(events)
+	return said
+}
+
+// StoppedNote is what work last said and the note filing it, when the work's
+// latest exchange is the note that it stopped without a report. events are
+// one work's.
+func StoppedNote(events []core.Event) (string, core.Event, bool) {
 	for i := len(events) - 1; i >= 0; i-- {
 		e := events[i]
 		switch e.Kind {
 		case core.EventNote:
 			if s, ok := strings.CutPrefix(e.Body, stoppedPrefix); ok {
-				return s
+				return s, e, true
 			}
 		case core.EventReport, core.EventSent, core.EventQuestion, core.EventAnswer:
-			return ""
+			return "", core.Event{}, false
 		}
 	}
-	return ""
+	return "", core.Event{}, false
 }
 
 // QuestionBody is a supervisor's questions as one question event: each on its

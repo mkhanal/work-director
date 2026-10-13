@@ -38,6 +38,13 @@ type judgement struct {
 	Why     string `json:"why"`
 }
 
+// stop is what running work last said when its session stopped without a
+// report, and when that was noted.
+type stop struct {
+	Said string `json:"said"`
+	At   string `json:"at"`
+}
+
 // node is one sub-goal in a goal's tree. A group node is the tasks of an
 // older plan that share a heading, gathered under a synthetic goal row.
 type node struct {
@@ -47,6 +54,8 @@ type node struct {
 	After        []string    `json:"after"`
 	WaitingOn    []string    `json:"waiting_on"`
 	WhyNotMoving *string     `json:"why_not_moving"`
+	Stopped      *stop       `json:"stopped"`
+	Blocked      *string     `json:"blocked_because"`
 	Owner        *owner      `json:"owner"`
 	PlannedInto  *int        `json:"planned_into"`
 	Progress     *progress   `json:"progress"`
@@ -234,6 +243,10 @@ func (s *Server) node(t tree, w core.Work) (node, error) {
 		}
 	}
 	n.WhyNotMoving = t.whyNotMoving(w, n.WaitingOn)
+	n.Stopped = t.stopped(w)
+	if n.Blocked, err = s.blockedBecause(t, w); err != nil {
+		return n, err
+	}
 	if w.Kind == core.WorkTask && w.Session != nil && w.Runner != nil {
 		n.Owner = &owner{Runner: *w.Runner}
 	}
@@ -301,6 +314,57 @@ func (t tree) whyNotMoving(w core.Work, waitingOn []string) *string {
 		return nil
 	}
 	return &why
+}
+
+// stopped is what running work last said when its session stopped without a
+// report, or nil.
+func (t tree) stopped(w core.Work) *stop {
+	if w.State != core.StateRunning {
+		return nil
+	}
+	var own []core.Event
+	for _, e := range t.events {
+		if e.Work == w.ID {
+			own = append(own, e)
+		}
+	}
+	said, e, ok := coordinator.StoppedNote(own)
+	if !ok {
+		return nil
+	}
+	return &stop{Said: said, At: e.At}
+}
+
+// blockedBecause is why blocked work is blocked: what its latest report said
+// when that report is BLOCKED, else its latest open concern, else nil.
+func (s *Server) blockedBecause(t tree, w core.Work) (*string, error) {
+	if w.State != core.StateBlocked {
+		return nil, nil
+	}
+	if e, ok := t.last(w.ID, core.EventReport, ""); ok {
+		if r := core.ParseReport(e.Body); r.Verdict == "blocked" {
+			why := r.Said
+			for _, sec := range r.Sections {
+				if why == "" && sec.Name == "NOTES" {
+					why = strings.TrimSpace(sec.Text)
+				}
+			}
+			if why != "" {
+				return &why, nil
+			}
+		}
+	}
+	concerns, err := s.ledger.Concerns(&w.ID)
+	if err != nil {
+		return nil, err
+	}
+	for i := len(concerns) - 1; i >= 0; i-- {
+		if concerns[i].Resolved == 0 {
+			why := concerns[i].Text
+			return &why, nil
+		}
+	}
+	return nil, nil
 }
 
 // judged is work's latest done-when judgement, or nil.

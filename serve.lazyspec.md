@@ -135,6 +135,10 @@ JSON message per line to stdout:
 - A goal short of its finish line reads `Not finished yet: ` and what has not happened, as in `the work isn't reported done, its checks haven't passed, and there's no pull request`; one not yet checked against its done-when reads `It hasn't been checked against what done means yet`.
 - A finish line set reads in the record as `Finishes at a complete pull request, as your taste says`; a report as `Reported finished`, `Reported stuck` or `Asked for your input` with what it said.
 
+## A Goal Serves Why Work Stopped Or Is Blocked
+- Each tree node serves `stopped`, `{said, at}`, while its work is running and its latest session stopped without a report: the first line it last said and when that was noted. Otherwise `stopped` is null; a later report, message, question or answer clears it.
+- Each node serves `blocked_because` while its work is blocked: what its latest report said when that report is BLOCKED, else the text of its latest open concern, else null. Work that is not blocked serves null.
+
 ## A Running Session's Question Puts Its Work In Needs You
 - While serving, a running work item whose session ends on a question has the question filed as a `question` event and moves to needs-input within seconds.
 - A question already filed at that point of the conversation is not filed again.
