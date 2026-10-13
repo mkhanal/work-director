@@ -50,6 +50,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Goal Serves What Done Means And Why It Is Not Done Yet", aGoalServesWhatDoneMeansAndWhyItIsNotDoneYet)
 	t.Run("A Goal Serves Everything Below It That Needs The Person", aGoalServesEverythingBelowItThatNeedsThePerson)
 	t.Run("A Goal Serves Its Course", aGoalServesItsCourse)
+	t.Run("A Goal Serves Its Record", aGoalServesItsRecord)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("A Running Session's Report Moves Its Work On", aRunningSessionsReportMovesItsWorkOn)
 	t.Run("A Running Session That Stops Without A Report Is Noted", aRunningSessionThatStopsWithoutAReportIsNoted)
@@ -1989,4 +1990,114 @@ func aGoalServesItsCourse(t *testing.T) {
 	if v.Course == nil || v.Course.Verdict != "unstated" || v.Course.Why != "" {
 		t.Fatalf("an unstated course = %+v", v.Course)
 	}
+}
+
+type servedEntry struct {
+	Event int    `json:"event"`
+	At    string `json:"at"`
+	Kind  string `json:"kind"`
+	What  string `json:"what"`
+	Where string `json:"where"`
+	By    string `json:"by"`
+}
+
+type servedSummary struct {
+	Decisions          int `json:"decisions"`
+	Yours              int `json:"yours"`
+	Course             int `json:"course"`
+	Corrections        int `json:"corrections"`
+	Questions          int `json:"questions"`
+	AnsweredByDirector int `json:"answered_by_director"`
+	Chores             int `json:"chores"`
+	Judged             int `json:"judged"`
+}
+
+func aGoalServesItsRecord(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	r := newReleaseTree(t, l)
+	event(t, l, r.top, core.EventDecision, "use the changelog as the source")
+	if err := l.SetFinish(r.top, core.FinishPR, core.FinishFromPerson); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Decide(r.collector, "group by type", core.Decision{Question: "how to group?", Answer: "by type", Source: "judge"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	event(t, l, r.top, core.EventCourse, "correct: narrow it to rollback")
+	if _, err := l.Answer(r.note, core.Decision{Question: "Which tone?", Answer: "formal", Source: core.AnsweredByPerson}); err != nil {
+		t.Fatal(err)
+	}
+	event(t, l, r.rollback, core.EventQuestion, "Which environments?")
+	if _, err := l.Answer(r.rollback, core.Decision{Question: "Which environments?", Answer: "staging and production", Source: core.AnsweredByDirector}); err != nil {
+		t.Fatal(err)
+	}
+	event(t, l, r.collector, core.EventReport, "DONE\nSTATUS: DONE the collector groups changes")
+	event(t, l, r.collector, core.EventJudged, "met: changes are grouped")
+	event(t, l, r.top, core.EventNote, "chore: refresh the lockfile")
+	event(t, l, r.top, core.EventNote, "not on the record")
+	event(t, l, r.top, core.EventPr, "pull-request https://github.com/o/r/pull/9")
+
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	var rec struct {
+		Summary servedSummary `json:"summary"`
+		Entries []servedEntry `json:"entries"`
+	}
+	getJSON(t, api.URL+"/api/record/"+r.top, http.StatusOK, &rec)
+	want := servedSummary{Decisions: 4, Yours: 2, Course: 1, Corrections: 1, Questions: 2, AnsweredByDirector: 1, Chores: 1, Judged: 1}
+	if rec.Summary != want {
+		t.Fatalf("summary = %+v, want %+v", rec.Summary, want)
+	}
+	var kinds []string
+	for _, e := range rec.Entries {
+		kinds = append(kinds, e.Kind)
+	}
+	wantKinds := []string{"delivery", "chore", "judged", "report", "answer", "question", "answer", "course", "decision", "finish", "decision", "superseded", "question", "decision", "asked"}
+	if !slices.Equal(kinds, wantKinds) {
+		t.Fatalf("kinds newest first = %q, want %q", kinds, wantKinds)
+	}
+	byKind := func(kind, what string) servedEntry {
+		t.Helper()
+		for _, e := range rec.Entries {
+			if e.Kind == kind && e.What == what {
+				return e
+			}
+		}
+		t.Fatalf("no %s entry %q in %+v", kind, what, rec.Entries)
+		return servedEntry{}
+	}
+	for _, c := range []struct{ kind, what, where, by string }{
+		{"asked", "Release notes", "Release notes (top)", "you"},
+		{"decision", "use the changelog as the source", "Release notes (top)", "you"},
+		{"finish", "finishes at: complete PR (from person)", "Release notes (top)", "you"},
+		{"decision", "done when: a guide covers rollback", "Deployment guide", "director"},
+		{"decision", "group by type", "Deployment guide › Collector", "director"},
+		{"course", "correct: narrow it to rollback", "Release notes (top)", "director"},
+		{"answer", "formal", "Customer note", "you"},
+		{"answer", "staging and production", "Deployment guide › Rollback", "director"},
+		{"report", "done: the collector groups changes", "Deployment guide › Collector", "director"},
+		{"judged", "met: changes are grouped", "Deployment guide › Collector", "director"},
+		{"chore", "refresh the lockfile", "Release notes (top)", "director"},
+		{"delivery", "https://github.com/o/r/pull/9", "Release notes (top)", "director"},
+		{"superseded", "the guide covers it", "Old route", "director"},
+	} {
+		e := byKind(c.kind, c.what)
+		if e.Where != c.where || e.By != c.by || e.At == "" {
+			t.Fatalf("%s %q = %+v, want where %q by %s", c.kind, c.what, e, c.where, c.by)
+		}
+		if c.kind != "asked" && e.Event == 0 {
+			t.Fatalf("%s %q carries no event", c.kind, c.what)
+		}
+	}
+
+	c := startStdio(t, s)
+	c.send(fmt.Sprintf(`{"id": 1, "method": "record", "params": {"id": %q}}`, r.top))
+	var viaStdio struct {
+		Summary servedSummary `json:"summary"`
+	}
+	if err := json.Unmarshal(c.reply(1)["result"], &viaStdio); err != nil || viaStdio.Summary != want {
+		t.Fatalf("record over stdio = %+v, %v", viaStdio, err)
+	}
+	var missing map[string]string
+	getJSON(t, api.URL+"/api/record/"+r.collector, http.StatusNotFound, &missing)
 }

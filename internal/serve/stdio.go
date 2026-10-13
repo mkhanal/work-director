@@ -144,6 +144,8 @@ func (s *Server) answer(req stdioRequest) stdioReply {
 		result, err = s.gate(req.Params.ID)
 	case "conversation":
 		result, err = s.conversation(req.Params.ID, req.Params.From, req.Params.Agent)
+	case "record":
+		result, err = s.record(req.Params.ID)
 	case "action":
 		if len(req.Params.Argv) == 0 {
 			err = badRequest{"action needs params.argv"}
@@ -151,7 +153,7 @@ func (s *Server) answer(req stdioRequest) stdioReply {
 		}
 		result, err = s.runCLI(req.Params.Argv)
 	default:
-		err = badRequest{fmt.Sprintf("unknown method %q: one of board, goal, work, events, gate, conversation, action", req.Method)}
+		err = badRequest{fmt.Sprintf("unknown method %q: one of board, goal, work, events, gate, conversation, record, action", req.Method)}
 	}
 	if err != nil {
 		return stdioReply{ID: *req.ID, Error: &stdioError{Kind: errorKind(err), Message: err.Error()}}

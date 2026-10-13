@@ -62,7 +62,7 @@ Archived goals and standalone items are left off the board.
 JSON message per line to stdout:
 - A request is `{"id": n, "method": m, "params": {...}}`; `m` is `board`,
   `goal` (`id`), `work` (`id`), `events` (`id`), `gate` (`id`), `conversation`
-  (`id`, `from`, `agent`) or `action` (`argv`).
+  (`id`, `from`, `agent`), `record` (`id`) or `action` (`argv`).
 - Its reply is `{"id": n, "result": ...}` with the value the HTTP route serves,
   or `{"id": n, "error": {"kind": k, "message": "..."}}`, `k` one of
   `not-found`, `bad-request`, `internal`.
@@ -101,6 +101,10 @@ JSON message per line to stdout:
 ## A Goal Serves Its Course
 - `course` is the latest course event of its top goal read into a verdict, why and when; null before any.
 - `superseded` lists the superseded sub-goals under it with why and when.
+
+## A Goal Serves Its Record
+- `GET /api/record/<goal>` and the `record` method return a summary of counts and one entry per decision, finish choice, course check, question, answer, judgement, chore, report, delivery and supersession under the goal, newest first, ending with what the person first asked.
+- Each entry says when, what, where in the tree, and whether the person or the director made it.
 
 ## A Running Session's Question Puts Its Work In Needs You
 - While serving, a running work item whose session ends on a question has the question filed as a `question` event and moves to needs-input within seconds.

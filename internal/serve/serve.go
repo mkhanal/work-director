@@ -108,6 +108,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/api/board", s.handleBoard)
 	mux.HandleFunc("/api/goals", s.handleBoard)
 	mux.HandleFunc("/api/goal/", s.handleGoal)
+	mux.HandleFunc("/api/record/", s.handleRecord)
 	mux.HandleFunc("/api/conversation/", s.handleConversation)
 	mux.HandleFunc("/api/work", s.handleWork)
 	mux.HandleFunc("/api/work/", s.handleWorkItem)
