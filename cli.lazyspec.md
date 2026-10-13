@@ -452,10 +452,18 @@ could not with their work, the bound that ran out, and the work still open.
 
 ## Wd Goal Supervise Carries Out What The Supervisor Decided
 - A supervisor that has replied since it was last read, and is not working, has the reply's actions carried out once.
-- `SEND` tells a task of the goal as `wd send` does; `TASK` files a task under the goal and starts it; `START` starts a task of the goal not yet started; `DROP` drops a task of the goal not yet started, noting why; `RESOLVE` resolves a concern.
+- `SEND` tells a sub-goal's agent as `wd send` does; `GOAL` files a sub-goal under the goal or one of its sub-goals and starts it unless it waits; `START` starts a sub-goal not yet started; `SUPERSEDE` supersedes a sub-goal with why and stops its sessions; `EDIT` and `AFTER` change a sub-goal and tell its agent; `RESOLVE` resolves a concern.
 - `ASK` files a `question` on the goal, each question with its choices, and moves it to needs-input; `wd answer <goal>` reaches the supervisor.
 - `DONE` files the summary as the goal's `report` and moves the goal to review.
 - `DONE` is refused while a task of the goal is working or not yet started, naming that task.
 - An action that cannot be carried out is refused with why, and the rest still are.
 - A reply is carried out once, however many passes read it at once.
 - The reply, what was done and what was refused are one `supervised` event on the goal.
+
+## A Sub-Goal Closes Only When Its Done-When Is Judged Met
+- A sub-goal in review closes on `MET` with the judgement filed.
+- `MISSED` files what is missing, tells its agent, and puts it back to work.
+- A sub-goal is never closed by its report alone.
+
+## A Chore Runs As A Session On The Goal, Not As Work
+- `CHORE` starts a session hung off the goal and files it and what it is for on the goal, adding no work.

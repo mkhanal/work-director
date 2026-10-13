@@ -238,7 +238,8 @@ func TestCoordinator(t *testing.T) {
 			"first duty is the top goal's done-when",
 			"COURSE: on course | correct | pivot — <why>",
 			"offer choices whenever the answer is one of a few",
-			"ACTIONS:", "SEND <", "START <", "RESOLVE <", "ASK: <", "DONE: <", "WAIT",
+			"ACTIONS:", "SEND <", "GOAL <parent>: <", "START <", "SUPERSEDE <", "EDIT <", "AFTER <", "MET <", "MISSED <", "CHORE: <", "PROPOSE: <",
+			"RESOLVE <", "ASK: <", "DONE: <", "WAIT",
 		} {
 			if !strings.Contains(brief, want) {
 				t.Fatalf("brief missing %q:\n%s", want, brief)
@@ -332,15 +333,30 @@ func TestCoordinator(t *testing.T) {
 	t.Run("A Supervision Reply Parses Into Actions", func(t *testing.T) {
 		reply := []string{
 			"The collector never calls the detector. ACTIONS: are below.",
-			"ACTIONS:\n- SEND t1: call detectOperationalImpacts and print impacts\nTASK: weekly running note",
-			"START t9\nDROP t8: the skill already does it\n`RESOLVE #18: the collector task wires it in`\nASK: tag v1.0.0 at 7720d09? I recommend yes\n- yes (recommended)\n* no, wait\nDONE: all parts fit\nWAIT\n\nthen I will look again",
+			"COURSE: correct — the guide has no owner",
+			"ACTIONS:\n- SEND t1: call detectOperationalImpacts and print impacts\nGOAL g1: Whoever deploys gets a guide | done when: a guide covers migrations and rollback | after: t1,t2 | split",
+			"GOAL s2: Notes are grouped | done when: each change sits under its type",
+			"START t9\nSUPERSEDE t8: the skill already does it\nEDIT t3: title: Collect every change | done when: no change is missed\nEDIT t4: done when: tags exist",
+			"AFTER t5: t1, t2\nAFTER t6: none\nMET t1: changes are grouped by type in the report\nMISSED t2: rollback is not covered",
+			"CHORE: refresh the lockfile\nPROPOSE: Ship release notes | done when: every release has notes | finish: merged — the person lands on main",
+			"`RESOLVE #18: the collector task wires it in`\nASK: tag v1.0.0 at 7720d09? I recommend yes\n- yes (recommended)\n* no, wait\nDONE: all parts fit\nWAIT\n\nthen I will look again",
+			"GOAL g1: no done-when here\nPROPOSE: Ship it | done when: x | finish: sideways — no",
 		}
 		actions, refused := ParseSupervision(reply)
 		want := []Action{
 			{Kind: ActSend, Work: "t1", Text: "call detectOperationalImpacts and print impacts"},
-			{Kind: ActTask, Text: "weekly running note"},
+			{Kind: ActGoal, Work: "g1", Title: "Whoever deploys gets a guide", DoneWhen: "a guide covers migrations and rollback", After: []string{"t1", "t2"}, Split: true},
+			{Kind: ActGoal, Work: "s2", Title: "Notes are grouped", DoneWhen: "each change sits under its type"},
 			{Kind: ActStart, Work: "t9"},
-			{Kind: ActDrop, Work: "t8", Text: "the skill already does it"},
+			{Kind: ActSupersede, Work: "t8", Text: "the skill already does it"},
+			{Kind: ActEdit, Work: "t3", Title: "Collect every change", DoneWhen: "no change is missed"},
+			{Kind: ActEdit, Work: "t4", DoneWhen: "tags exist"},
+			{Kind: ActAfter, Work: "t5", After: []string{"t1", "t2"}},
+			{Kind: ActAfter, Work: "t6", After: []string{}},
+			{Kind: ActMet, Work: "t1", Text: "changes are grouped by type in the report"},
+			{Kind: ActMissed, Work: "t2", Text: "rollback is not covered"},
+			{Kind: ActChore, Text: "refresh the lockfile"},
+			{Kind: ActPropose, Title: "Ship release notes", DoneWhen: "every release has notes", Finish: core.FinishMerged, Text: "the person lands on main"},
 			{Kind: ActResolve, Concern: 18, Text: "the collector task wires it in"},
 			{Kind: ActAsk, Text: "tag v1.0.0 at 7720d09? I recommend yes", Options: []string{"yes (recommended)", "no, wait"}},
 			{Kind: ActDone, Text: "all parts fit"},
@@ -349,8 +365,14 @@ func TestCoordinator(t *testing.T) {
 		if !reflect.DeepEqual(actions, want) {
 			t.Fatalf("actions = %+v\nwant %+v", actions, want)
 		}
-		if !slices.Equal(refused, []string{"then I will look again"}) {
-			t.Fatalf("refused = %q, want the line that is no action", refused)
+		if !slices.Equal(refused, []string{"then I will look again", "GOAL g1: no done-when here", "PROPOSE: Ship it | done when: x | finish: sideways — no"}) {
+			t.Fatalf("refused = %q, want the lines that are no action", refused)
+		}
+		for _, a := range want {
+			back, _ := ParseSupervision([]string{"ACTIONS:", a.Line()})
+			if a.Kind != ActAsk && (len(back) != 1 || !reflect.DeepEqual(back[0], a)) {
+				t.Fatalf("%q reads back as %+v, want %+v", a.Line(), back, a)
+			}
 		}
 		none, unread := ParseSupervision([]string{"I looked; nothing to do."})
 		if len(none) != 0 || len(unread) != 0 {

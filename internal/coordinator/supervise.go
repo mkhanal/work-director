@@ -3,6 +3,7 @@ package coordinator
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -151,10 +152,16 @@ then a line ACTIONS: and then one action per line:
 
 // actionList is every action a supervisor may take, one per line, as the
 // brief teaches them.
-const actionList = `SEND <id>: <what to do next>
-TASK: <title of a new task, started at once>
+const actionList = `SEND <id>: <what its agent does next>
+GOAL <parent>: <an outcome a person would say> | done when: <checkable from a report, verify or PR> [| after: <id>,<id>] [| split]  (a new sub-goal under the goal or one of its sub-goals; split plans it further)
 START <id>  (a sub-goal filed and never started)
-DROP <id>: <why it is not needed>  (a task filed and never started)
+SUPERSEDE <id>: <why the course no longer needs it>  (stops its agents)
+EDIT <id>: [title: <title>] [| done when: <done when>]
+AFTER <id>: <id>,<id> | none
+MET <id>: <why its done-when holds>  (closes a sub-goal in review; nothing closes on its report alone)
+MISSED <id>: <what is missing>  (sends it back to its agent)
+CHORE: <what the director needs done that is no sub-goal, run as a session on the goal>
+PROPOSE: <title> | done when: <done when> | finish: <discovery, research, local build, complete PR, merged or released> — <why>  (a change to the top goal; it waits for the person)
 RESOLVE <concern number>: <decision>
 ASK: <a question only the person can answer>
 - <a choice, your recommendation first, marked (recommended)>
@@ -206,18 +213,24 @@ func FileCourse(l *ledger.Ledger, goal string, texts []string) error {
 type ActionKind string
 
 const (
-	ActSend    ActionKind = "send"
-	ActTask    ActionKind = "task"
-	ActStart   ActionKind = "start"
-	ActDrop    ActionKind = "drop"
-	ActResolve ActionKind = "resolve"
-	ActAsk     ActionKind = "ask"
-	ActDone    ActionKind = "done"
-	ActWait    ActionKind = "wait"
+	ActSend      ActionKind = "send"
+	ActGoal      ActionKind = "goal"
+	ActStart     ActionKind = "start"
+	ActSupersede ActionKind = "supersede"
+	ActEdit      ActionKind = "edit"
+	ActAfter     ActionKind = "after"
+	ActMet       ActionKind = "met"
+	ActMissed    ActionKind = "missed"
+	ActChore     ActionKind = "chore"
+	ActPropose   ActionKind = "propose"
+	ActResolve   ActionKind = "resolve"
+	ActAsk       ActionKind = "ask"
+	ActDone      ActionKind = "done"
+	ActWait      ActionKind = "wait"
 )
 
-// Action is one parsed line of a supervisor's reply. Work is the task it names,
-// Concern the concern it settles, Text what it says.
+// Action is one parsed line of a supervisor's reply. Work is the sub-goal it
+// names (a GOAL's parent), Concern the concern it settles, Text what it says.
 type Action struct {
 	Kind    ActionKind `json:"kind"`
 	Work    string     `json:"work,omitempty"`
@@ -225,6 +238,15 @@ type Action struct {
 	Text    string     `json:"text,omitempty"`
 	// Options are the choices an ASK offers, in the order given.
 	Options []string `json:"options,omitempty"`
+	// Title and DoneWhen are what a GOAL files, an EDIT changes (empty is
+	// unchanged) and a PROPOSE proposes; After is what a GOAL or AFTER waits
+	// on; Split files a GOAL to be planned further; Finish is a PROPOSE's
+	// finish line.
+	Title    string          `json:"title,omitempty"`
+	DoneWhen string          `json:"done_when,omitempty"`
+	After    []string        `json:"after,omitempty"`
+	Split    bool            `json:"split,omitempty"`
+	Finish   core.FinishLine `json:"finish,omitempty"`
 }
 
 // Line is the action as the supervisor wrote it.
@@ -232,12 +254,42 @@ func (a Action) Line() string {
 	switch a.Kind {
 	case ActSend:
 		return fmt.Sprintf("SEND %s: %s", a.Work, a.Text)
-	case ActTask:
-		return "TASK: " + a.Text
+	case ActGoal:
+		parts := []string{a.Title, "done when: " + a.DoneWhen}
+		if len(a.After) > 0 {
+			parts = append(parts, "after: "+strings.Join(a.After, ","))
+		}
+		if a.Split {
+			parts = append(parts, "split")
+		}
+		return fmt.Sprintf("GOAL %s: %s", a.Work, strings.Join(parts, " | "))
 	case ActStart:
 		return "START " + a.Work
-	case ActDrop:
-		return fmt.Sprintf("DROP %s: %s", a.Work, a.Text)
+	case ActSupersede:
+		return fmt.Sprintf("SUPERSEDE %s: %s", a.Work, a.Text)
+	case ActEdit:
+		var parts []string
+		if a.Title != "" {
+			parts = append(parts, "title: "+a.Title)
+		}
+		if a.DoneWhen != "" {
+			parts = append(parts, "done when: "+a.DoneWhen)
+		}
+		return fmt.Sprintf("EDIT %s: %s", a.Work, strings.Join(parts, " | "))
+	case ActAfter:
+		waits := "none"
+		if len(a.After) > 0 {
+			waits = strings.Join(a.After, ",")
+		}
+		return fmt.Sprintf("AFTER %s: %s", a.Work, waits)
+	case ActMet:
+		return fmt.Sprintf("MET %s: %s", a.Work, a.Text)
+	case ActMissed:
+		return fmt.Sprintf("MISSED %s: %s", a.Work, a.Text)
+	case ActChore:
+		return "CHORE: " + a.Text
+	case ActPropose:
+		return fmt.Sprintf("PROPOSE: %s | done when: %s | finish: %s — %s", a.Title, a.DoneWhen, a.Finish, a.Text)
 	case ActResolve:
 		return fmt.Sprintf("RESOLVE %d: %s", a.Concern, a.Text)
 	case ActAsk:
@@ -252,18 +304,61 @@ func (a Action) Line() string {
 }
 
 var (
-	actionsRe = regexp.MustCompile(`^\s*\**ACTIONS:?\**\s*$`)
-	sendRe    = regexp.MustCompile(`^SEND\s+(\S+?):\s*(\S.*)$`)
-	taskActRe = regexp.MustCompile(`^TASK:\s*(\S.*)$`)
-	startRe   = regexp.MustCompile(`^START\s+(\S+)$`)
-	dropRe    = regexp.MustCompile(`^DROP\s+(\S+?):\s*(\S.*)$`)
-	resolveRe = regexp.MustCompile(`^RESOLVE\s+#?(\d+):\s*(\S.*)$`)
-	askActRe  = regexp.MustCompile(`^ASK:\s*(\S.*)$`)
-	doneRe    = regexp.MustCompile(`^DONE:\s*(\S.*)$`)
-	waitRe    = regexp.MustCompile(`^WAIT\b`)
-	bulletRe  = regexp.MustCompile("^(?:[-*]\\s+|\\d+\\.\\s+)?`?")
-	listRe    = regexp.MustCompile(`^(?:[-*]\s+|\d+\.\s+)`)
+	actionsRe    = regexp.MustCompile(`^\s*\**ACTIONS:?\**\s*$`)
+	sendRe       = regexp.MustCompile(`^SEND\s+(\S+?):\s*(\S.*)$`)
+	goalActRe    = regexp.MustCompile(`^GOAL\s+(\S+?):\s*(\S.*)$`)
+	startRe      = regexp.MustCompile(`^START\s+(\S+)$`)
+	supersedeRe  = regexp.MustCompile(`^SUPERSEDE\s+(\S+?):\s*(\S.*)$`)
+	editRe       = regexp.MustCompile(`^EDIT\s+(\S+?):\s*(\S.*)$`)
+	afterActRe   = regexp.MustCompile(`^AFTER\s+(\S+?):\s*(\S.*)$`)
+	metRe        = regexp.MustCompile(`^MET\s+(\S+?):\s*(\S.*)$`)
+	missedRe     = regexp.MustCompile(`^MISSED\s+(\S+?):\s*(\S.*)$`)
+	choreRe      = regexp.MustCompile(`^CHORE:\s*(\S.*)$`)
+	proposeActRe = regexp.MustCompile(`^PROPOSE:\s*(\S.*?)\s+—\s+(\S.*)$`)
+	resolveRe    = regexp.MustCompile(`^RESOLVE\s+#?(\d+):\s*(\S.*)$`)
+	askActRe     = regexp.MustCompile(`^ASK:\s*(\S.*)$`)
+	doneRe       = regexp.MustCompile(`^DONE:\s*(\S.*)$`)
+	waitRe       = regexp.MustCompile(`^WAIT\b`)
+	bulletRe     = regexp.MustCompile("^(?:[-*]\\s+|\\d+\\.\\s+)?`?")
+	listRe       = regexp.MustCompile(`^(?:[-*]\s+|\d+\.\s+)`)
 )
+
+// fields reads the ` | `-separated parts of an action after its first: each
+// `<name>: <value>` by its name, and a bare word as a flag. ok is false when
+// a part is not one of names.
+func fields(parts []string, names ...string) (map[string]string, bool) {
+	out := map[string]string{}
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		name, value, has := strings.Cut(p, ":")
+		name = strings.ToLower(strings.TrimSpace(name))
+		if !slices.Contains(names, name) {
+			return nil, false
+		}
+		if _, dup := out[name]; dup {
+			return nil, false
+		}
+		if has {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				return nil, false
+			}
+		}
+		out[name] = value
+	}
+	return out, true
+}
+
+// ids reads a comma-separated list of work ids; "none" is none.
+func ids(raw string) []string {
+	out := []string{}
+	for _, s := range strings.Split(raw, ",") {
+		if s = strings.TrimSpace(s); s != "" && s != "none" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
 
 // ParseSupervision reads the actions after the last ACTIONS: line of a reply,
 // and the lines that are no action.
@@ -321,14 +416,57 @@ func action(l string) (Action, bool) {
 	if m := sendRe.FindStringSubmatch(l); m != nil {
 		return Action{Kind: ActSend, Work: m[1], Text: strings.TrimSpace(m[2])}, true
 	}
-	if m := taskActRe.FindStringSubmatch(l); m != nil {
-		return Action{Kind: ActTask, Text: strings.TrimSpace(m[1])}, true
+	if m := goalActRe.FindStringSubmatch(l); m != nil {
+		parts := strings.Split(m[2], "|")
+		f, ok := fields(parts[1:], "done when", "after", "split")
+		title := strings.TrimSpace(parts[0])
+		if !ok || title == "" || f["done when"] == "" || f["split"] != "" {
+			return Action{}, false
+		}
+		_, split := f["split"]
+		a := Action{Kind: ActGoal, Work: m[1], Title: title, DoneWhen: f["done when"], Split: split}
+		if after := ids(f["after"]); len(after) > 0 {
+			a.After = after
+		}
+		return a, true
 	}
 	if m := startRe.FindStringSubmatch(l); m != nil {
 		return Action{Kind: ActStart, Work: m[1]}, true
 	}
-	if m := dropRe.FindStringSubmatch(l); m != nil {
-		return Action{Kind: ActDrop, Work: m[1], Text: strings.TrimSpace(m[2])}, true
+	if m := supersedeRe.FindStringSubmatch(l); m != nil {
+		return Action{Kind: ActSupersede, Work: m[1], Text: strings.TrimSpace(m[2])}, true
+	}
+	if m := editRe.FindStringSubmatch(l); m != nil {
+		f, ok := fields(strings.Split(m[2], "|"), "title", "done when")
+		if !ok || (f["title"] == "" && f["done when"] == "") {
+			return Action{}, false
+		}
+		return Action{Kind: ActEdit, Work: m[1], Title: f["title"], DoneWhen: f["done when"]}, true
+	}
+	if m := afterActRe.FindStringSubmatch(l); m != nil {
+		return Action{Kind: ActAfter, Work: m[1], After: ids(m[2])}, true
+	}
+	if m := metRe.FindStringSubmatch(l); m != nil {
+		return Action{Kind: ActMet, Work: m[1], Text: strings.TrimSpace(m[2])}, true
+	}
+	if m := missedRe.FindStringSubmatch(l); m != nil {
+		return Action{Kind: ActMissed, Work: m[1], Text: strings.TrimSpace(m[2])}, true
+	}
+	if m := choreRe.FindStringSubmatch(l); m != nil {
+		return Action{Kind: ActChore, Text: strings.TrimSpace(m[1])}, true
+	}
+	if m := proposeActRe.FindStringSubmatch(l); m != nil {
+		parts := strings.Split(m[1], "|")
+		f, ok := fields(parts[1:], "done when", "finish")
+		title := strings.TrimSpace(parts[0])
+		if !ok || title == "" || f["done when"] == "" {
+			return Action{}, false
+		}
+		finish, err := core.ParseFinishLine(f["finish"])
+		if err != nil {
+			return Action{}, false
+		}
+		return Action{Kind: ActPropose, Title: title, DoneWhen: f["done when"], Finish: finish, Text: strings.TrimSpace(m[2])}, true
 	}
 	if m := resolveRe.FindStringSubmatch(l); m != nil {
 		n, err := strconv.Atoi(m[1])

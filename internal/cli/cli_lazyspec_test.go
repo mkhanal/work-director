@@ -4677,7 +4677,7 @@ func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
 		"ACTIONS:",
 		"SEND "+o.a+": wire the detector into the collector",
 		fmt.Sprintf("RESOLVE %d: %s wires it in", o.concern, o.a),
-		"TASK: Add the weekly running note",
+		"GOAL "+o.goal+": Add the weekly running note | done when: a weekly note is written",
 		"START "+o.b,
 		"SEND nobody: hello",
 		"and then some prose")
@@ -4685,12 +4685,12 @@ func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
 	if !s.Applied || s.Looked {
 		t.Fatalf("supervise after a reply = %+v, want it carried out and no look", s)
 	}
-	wantDone := []string{"SEND " + o.a + ": wire the detector into the collector", fmt.Sprintf("RESOLVE %d: %s wires it in", o.concern, o.a), "TASK: Add the weekly running note"}
+	wantDone := []string{"SEND " + o.a + ": wire the detector into the collector", fmt.Sprintf("RESOLVE %d: %s wires it in", o.concern, o.a), "GOAL " + o.goal + ": Add the weekly running note | done when: a weekly note is written"}
 	if !slices.Equal(s.Actions, wantDone) {
 		t.Fatalf("actions = %q, want %q", s.Actions, wantDone)
 	}
 	if len(s.Refused) != 3 || !strings.Contains(strings.Join(s.Refused, "|"), "already under way") ||
-		!strings.Contains(strings.Join(s.Refused, "|"), "not a task of") || !strings.Contains(strings.Join(s.Refused, "|"), "and then some prose — not an action") {
+		!strings.Contains(strings.Join(s.Refused, "|"), "not a sub-goal of") || !strings.Contains(strings.Join(s.Refused, "|"), "and then some prose — not an action") {
 		t.Fatalf("refused = %q, want START of work under way, a task not of the goal and the prose refused", s.Refused)
 	}
 	if sent := readFile(t, filepath.Join(o.state, "sent-task-"+o.a)); !strings.Contains(sent, "wire the detector into the collector") {
@@ -4704,7 +4704,8 @@ func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
 		t.Fatal(err)
 	}
 	added := tasks[len(tasks)-1]
-	if len(tasks) != 3 || added.Title != "Add the weekly running note" || added.State != core.StateRunning || added.Session == nil {
+	if len(tasks) != 3 || added.Title != "Add the weekly running note" || added.State != core.StateRunning || added.Session == nil ||
+		!slices.Contains(f.bodies(t, added.ID, core.EventDecision), "done when: a weekly note is written") {
 		t.Fatalf("tasks = %+v, want the new task filed under the goal and started", tasks)
 	}
 	if sup := f.bodies(t, o.goal, core.EventSupervised); len(sup) != 2 || !strings.Contains(sup[1], "The collector never calls the detector.") || !strings.Contains(sup[1], "Refused:") {
@@ -4741,7 +4742,7 @@ func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
 		t.Fatalf("goal after the answer = %s, want running", got)
 	}
 
-	// Done is refused while a task is not started; a task not needed is dropped with why.
+	// Done is refused while a task is not started; a sub-goal not needed is superseded with why.
 	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -4755,16 +4756,29 @@ func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
 	if s := superviseOnce(t, f, o.goal); len(s.Refused) != 1 || !strings.Contains(s.Refused[0], unneeded.ID+" is not started") {
 		t.Fatalf("DONE while %s is not started = %+v, want it refused naming it", unneeded.ID, s)
 	}
-	o.say(t, supervisor, "ACTIONS:", "DROP "+unneeded.ID+": the skill already does it", "DROP "+o.a+": not needed")
+	o.say(t, supervisor, "ACTIONS:", "SUPERSEDE "+unneeded.ID+": the skill already does it")
 	s = superviseOnce(t, f, o.goal)
-	if !slices.Equal(s.Actions, []string{"DROP " + unneeded.ID + ": the skill already does it"}) || len(s.Refused) != 1 || !strings.Contains(s.Refused[0], "already under way") {
-		t.Fatalf("DROP = %+v, want the unstarted task dropped and the running one refused", s)
+	if !slices.Equal(s.Actions, []string{"SUPERSEDE " + unneeded.ID + ": the skill already does it"}) || len(s.Refused) != 0 {
+		t.Fatalf("SUPERSEDE = %+v, want the task superseded", s)
 	}
-	if got := stateOf(t, f, unneeded.ID); got != core.StateDropped {
-		t.Fatalf("%s after DROP = %s, want dropped", unneeded.ID, got)
+	if got := stateOf(t, f, unneeded.ID); got != core.StateSuperseded {
+		t.Fatalf("%s after SUPERSEDE = %s, want superseded", unneeded.ID, got)
 	}
 	if notes := f.bodies(t, unneeded.ID, core.EventNote); len(notes) != 1 || !strings.Contains(notes[0], "the skill already does it") {
-		t.Fatalf("notes on the dropped task = %q, want why", notes)
+		t.Fatalf("notes on the superseded task = %q, want why", notes)
+	}
+	if decided := f.bodies(t, o.goal, core.EventDecision); !slices.Contains(decided, "dropped "+unneeded.ID+": the skill already does it") {
+		t.Fatalf("decisions on the goal = %q, want the supersede recorded", decided)
+	}
+
+	// A started sub-goal is superseded too, its agent stopped; edits and order reach the agent.
+	o.say(t, supervisor, "ACTIONS:", "EDIT "+o.a+": done when: impacts are listed per release", "AFTER "+o.a+": "+o.b)
+	s = superviseOnce(t, f, o.goal)
+	if len(s.Actions) != 2 || len(s.Refused) != 0 {
+		t.Fatalf("EDIT and AFTER = %+v, want both carried out", s)
+	}
+	if sent := readFile(t, filepath.Join(o.state, "sent-task-"+o.a)); !strings.Contains(sent, "impacts are listed per release") || !strings.Contains(sent, "waits on: "+o.b) {
+		t.Fatalf("%s was sent %q, want the edit and the order", o.a, sent)
 	}
 
 	// Done is refused while a task works, and moves the goal to review once none does.
@@ -4781,6 +4795,83 @@ func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
 	}
 	if reports := f.bodies(t, o.goal, core.EventReport); len(reports) != 1 || !strings.Contains(reports[0], "every part is built and fits") {
 		t.Fatalf("goal reports = %q", reports)
+	}
+}
+
+func TestASubGoalClosesOnlyWhenItsDoneWhenIsJudgedMet(t *testing.T) {
+	f := newCLIFixture(t)
+	o := overseenGoal(t, f)
+	superviseOnce(t, f, o.goal)
+	o.say(t, supervisor, "ACTIONS:", "WAIT")
+	superviseOnce(t, f, o.goal)
+	if got := stateOf(t, f, o.b); got != core.StateReview {
+		t.Fatalf("%s with a DONE report and no judgement = %s, want it still in review", o.b, got)
+	}
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.AddEvent(o.a, core.EventReport, "DONE\nSTATUS: DONE\nFILES: impacts.ts"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Transition(o.a, core.StateReview); err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	o.say(t, supervisor, "ACTIONS:", "MET "+o.b+": changes are grouped by type", "MISSED "+o.a+": rollback impacts are not listed")
+	s := superviseOnce(t, f, o.goal)
+	if len(s.Actions) != 2 || len(s.Refused) != 0 {
+		t.Fatalf("MET and MISSED = %+v, want both carried out", s)
+	}
+	if got := stateOf(t, f, o.b); got != core.StateDone {
+		t.Fatalf("%s after MET = %s, want done", o.b, got)
+	}
+	if judged := f.bodies(t, o.b, core.EventJudged); !slices.Equal(judged, []string{"met: changes are grouped by type"}) {
+		t.Fatalf("judgements on %s = %q", o.b, judged)
+	}
+	if got := stateOf(t, f, o.a); got != core.StateRunning {
+		t.Fatalf("%s after MISSED = %s, want running", o.a, got)
+	}
+	if judged := f.bodies(t, o.a, core.EventJudged); !slices.Equal(judged, []string{"missed: rollback impacts are not listed"}) {
+		t.Fatalf("judgements on %s = %q", o.a, judged)
+	}
+	if sent := readFile(t, filepath.Join(o.state, "sent-task-"+o.a)); !strings.Contains(sent, "rollback impacts are not listed") {
+		t.Fatalf("%s was sent %q, want what is missing", o.a, sent)
+	}
+	o.say(t, supervisor, "ACTIONS:", "MET "+o.a+": looks fine")
+	if s := superviseOnce(t, f, o.goal); len(s.Refused) != 1 || !strings.Contains(s.Refused[0], "in review") {
+		t.Fatalf("MET on running work = %+v, want it refused", s)
+	}
+}
+
+func TestAChoreRunsAsASessionOnTheGoalNotAsWork(t *testing.T) {
+	f := newCLIFixture(t)
+	o := overseenGoal(t, f)
+	superviseOnce(t, f, o.goal)
+	before, err := json.Marshal(f.runOK(t, "tasks", o.goal, "--json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.say(t, supervisor, "ACTIONS:", "CHORE: refresh the lockfile")
+	if s := superviseOnce(t, f, o.goal); !slices.Equal(s.Actions, []string{"CHORE: refresh the lockfile"}) {
+		t.Fatalf("CHORE = %+v", s)
+	}
+	chore := "overseer-s00002"
+	if brief := readFile(t, filepath.Join(o.state, "brief-"+chore)); !strings.Contains(brief, "refresh the lockfile") {
+		t.Fatalf("the chore session was briefed %q", brief)
+	}
+	if spawns := f.bodies(t, o.goal, core.EventSpawn); !slices.Contains(spawns, "chore:overseer:"+chore) {
+		t.Fatalf("spawn events = %q, want the chore session", spawns)
+	}
+	if notes := f.bodies(t, o.goal, core.EventNote); !slices.Contains(notes, "chore: refresh the lockfile") {
+		t.Fatalf("notes = %q, want what the chore is for", notes)
+	}
+	after, err := json.Marshal(f.runOK(t, "tasks", o.goal, "--json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("a chore filed work: %s", after)
 	}
 }
 

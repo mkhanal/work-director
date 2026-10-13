@@ -100,6 +100,9 @@ const (
 	// EventCourse is a supervisor's verdict on whether its goal is on course:
 	// "<verdict>: <why>", or "unstated" when its reply gave none.
 	EventCourse EventKind = "course"
+	// EventJudged is the director's judgement of a sub-goal's done-when:
+	// "met: <why>" or "missed: <what is missing>".
+	EventJudged EventKind = "judged"
 )
 
 type FeedbackSource string
@@ -540,7 +543,7 @@ const (
 
 var (
 	WorkKinds       = []WorkKind{WorkTask, WorkEvolution, WorkWorkflow, WorkGoal, WorkRoadmap, WorkItem}
-	EventKinds      = []EventKind{EventState, EventReport, EventVerify, EventPr, EventNote, EventSent, EventSpawn, EventAttach, EventQuestion, EventAnswer, EventDecision, EventAbandon, EventLook, EventSupervised, EventCourse}
+	EventKinds      = []EventKind{EventState, EventReport, EventVerify, EventPr, EventNote, EventSent, EventSpawn, EventAttach, EventQuestion, EventAnswer, EventDecision, EventAbandon, EventLook, EventSupervised, EventCourse, EventJudged}
 	FeedbackSources = []FeedbackSource{FeedbackDirector, FeedbackNote, FeedbackAttached}
 	LandingKinds    = []LandingKind{LandingCommit, LandingPullRequest}
 	WorktreeKinds   = []WorktreeKind{WorktreeShared, WorktreePrivate}

@@ -7,7 +7,6 @@ import (
 
 	"wd/internal/coordinator"
 	"wd/internal/core"
-	"wd/internal/ledger"
 	"wd/internal/project"
 	"wd/internal/runner"
 )
@@ -416,7 +415,7 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 				return c.Ledger.Get(id)
 			}
 		}
-		return core.Work{}, fmt.Errorf("%s is not a task of %s", id, goal.ID)
+		return core.Work{}, fmt.Errorf("%s is not a sub-goal of %s", id, goal.ID)
 	}
 	var asked []coordinator.Action
 	var done *coordinator.Action
@@ -430,12 +429,26 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 				}
 				_, err = c.tellTask(t, a.Text)
 				return err
-			case coordinator.ActTask:
-				t, err := c.Ledger.Add(goal.Project, a.Text, ledger.AddOptions{Parent: &goal.ID})
+			case coordinator.ActGoal:
+				parent := goal
+				if a.Work != goal.ID {
+					var err error
+					if parent, err = child(a.Work); err != nil {
+						return err
+					}
+				}
+				w, err := c.addSubGoal(parent, a.Title, a.DoneWhen, a.After, a.Split)
 				if err != nil {
 					return err
 				}
-				return c.startUnder(goal, p, t)
+				if waits, err := c.waitingOn(w); err != nil || waits != "" {
+					return err
+				}
+				if core.IsGoal(w.Kind) {
+					_, err := c.startGoalRow(goal, p, w, true)
+					return err
+				}
+				return c.startUnder(goal, p, w)
 			case coordinator.ActStart:
 				t, err := child(a.Work)
 				if err != nil {
@@ -455,19 +468,65 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 					return err
 				}
 				return c.startUnder(goal, p, t)
-			case coordinator.ActDrop:
+			case coordinator.ActSupersede:
 				t, err := child(a.Work)
 				if err != nil {
 					return err
 				}
-				if t.State != core.StateQueued && t.State != core.StateBriefed {
-					return fmt.Errorf("%s is %s, already under way", t.ID, t.State)
-				}
-				if _, err := c.Ledger.AddEvent(t.ID, core.EventNote, "dropped by its goal's supervisor: "+a.Text); err != nil {
+				_, err = c.supersedeSubGoal(t, a.Text)
+				return err
+			case coordinator.ActEdit:
+				t, err := child(a.Work)
+				if err != nil {
 					return err
 				}
-				_, err = c.Ledger.Transition(t.ID, core.StateDropped)
+				var title, doneWhen *string
+				if a.Title != "" {
+					title = &a.Title
+				}
+				if a.DoneWhen != "" {
+					doneWhen = &a.DoneWhen
+				}
+				_, _, err = c.editSubGoal(t, title, doneWhen)
 				return err
+			case coordinator.ActAfter:
+				t, err := child(a.Work)
+				if err != nil {
+					return err
+				}
+				what, err := c.orderSubGoal(t, a.After)
+				if err != nil {
+					return err
+				}
+				_, err = c.tellWorking(t.ID, "Your sub-goal now waits on: "+what)
+				return err
+			case coordinator.ActMet:
+				t, err := c.judged(child, a)
+				if err != nil {
+					return err
+				}
+				gate, err := c.closeOne(t)
+				if err != nil || gate == "" {
+					return err
+				}
+				return fmt.Errorf("judged met, but its %s gate stopped it", gate)
+			case coordinator.ActMissed:
+				t, err := c.judged(child, a)
+				if err != nil {
+					return err
+				}
+				if _, err := c.tellTask(t, "Your sub-goal's done-when is not met yet: "+a.Text); err != nil {
+					return err
+				}
+				if t, err = c.Ledger.Get(t.ID); err != nil || t.State == core.StateRunning {
+					return err
+				}
+				_, err = c.Ledger.Transition(t.ID, core.StateRunning)
+				return err
+			case coordinator.ActChore:
+				return c.chore(goal, p, a.Text)
+			case coordinator.ActPropose:
+				return fmt.Errorf("a change to the top goal is not carried out yet")
 			case coordinator.ActResolve:
 				cx, err := c.concernUnder(goal, tasks, a.Concern)
 				if err != nil {
@@ -532,6 +591,58 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 		}
 	}
 	return out, nil
+}
+
+// judged files a MET or MISSED judgement on the sub-goal it names, which must
+// be a task in review, and returns that task.
+func (c *Cli) judged(child func(string) (core.Work, error), a coordinator.Action) (core.Work, error) {
+	t, err := child(a.Work)
+	if err != nil {
+		return t, err
+	}
+	if t.Kind != core.WorkTask || t.State != core.StateReview {
+		return t, fmt.Errorf("%s is %s; only a sub-goal in review is judged", t.ID, t.State)
+	}
+	verdict := "met: "
+	if a.Kind == coordinator.ActMissed {
+		verdict = "missed: "
+	}
+	_, err = c.Ledger.AddEvent(t.ID, core.EventJudged, verdict+a.Text)
+	return t, err
+}
+
+// chorePrefix opens the spawn event that records a chore's session on its goal.
+const chorePrefix = "chore:"
+
+// chore starts a session in goal's worktree to do what, on the project's
+// runner, and files the session and what it is for on the goal.
+func (c *Cli) chore(goal core.Work, p *project.Project, what string) error {
+	name := p.Runner
+	if goal.Runner != nil {
+		name = *goal.Runner
+	}
+	rn, err := runner.DetectedRunner(name)
+	if err != nil {
+		return err
+	}
+	cwd, err := coordinator.SharedWorktree(c.Ledger, goal.ID, p.Path)
+	if err != nil {
+		return err
+	}
+	h, err := rn.Spawn(runner.SpawnOptions{
+		Cwd:   cwd,
+		Name:  goal.ID + " chore",
+		Brief: fmt.Sprintf("You do one chore for goal %s (%s), for the director: %s\nDo only that, then say what you did.", goal.ID, goal.Title, what),
+		Model: p.Model,
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := c.Ledger.AddEvent(goal.ID, core.EventSpawn, chorePrefix+name+":"+h.Session); err != nil {
+		return err
+	}
+	_, err = c.Ledger.AddEvent(goal.ID, core.EventNote, "chore: "+what)
+	return err
 }
 
 // unfinished says which task of goal holds it back from done: one not started
