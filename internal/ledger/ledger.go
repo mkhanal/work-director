@@ -408,8 +408,10 @@ func (l *Ledger) Add(project, title string, opts AddOptions) (core.Work, error) 
 			id, project, title, opts.Detail, string(kind), string(core.StateQueued), parent, opts.Heading, t, t, goalTypeArg(opts.GoalType)); err != nil {
 			return err
 		}
-		_, err := addEvent(tx, id, core.EventState, string(core.StateQueued), t)
-		return err
+		if _, err := addEvent(tx, id, core.EventState, string(core.StateQueued), t); err != nil {
+			return err
+		}
+		return rollUp(tx, parent)
 	})
 	if err != nil {
 		return core.Work{}, err
@@ -646,8 +648,10 @@ func (l *Ledger) Abandon(id, reason, detail string) (core.Work, error) {
 		if _, err := addEvent(tx, id, core.EventAbandon, body, now()); err != nil {
 			return err
 		}
-		_, err = addEvent(tx, id, core.EventState, string(core.StateAbandoned), now())
-		return err
+		if _, err := addEvent(tx, id, core.EventState, string(core.StateAbandoned), now()); err != nil {
+			return err
+		}
+		return rollUp(tx, w.Parent)
 	})
 	if err != nil {
 		return core.Work{}, err
@@ -688,11 +692,13 @@ func (l *Ledger) Reopen(id, why string) (core.Work, error) {
 		// being worked on, and a claim is what a review reads and a reversal
 		// undoes. The first run's events stay exactly where they were, which is
 		// what makes a reopened goal's second history legible against the first.
-		_, err = addClaim(tx, id, core.EventDecision, "reopened: "+why, now(), nil, &core.Decision{
+		if _, err := addClaim(tx, id, core.EventDecision, "reopened: "+why, now(), nil, &core.Decision{
 			Question: "what is being worked on in " + id + " now it is done?",
 			Answer:   why,
-		})
-		return err
+		}); err != nil {
+			return err
+		}
+		return rollUp(tx, w.Parent)
 	})
 	if err != nil {
 		return core.Work{}, err
@@ -730,11 +736,13 @@ func (l *Ledger) Release(id, why string) (core.Work, error) {
 		if _, err := tx.Exec(`UPDATE work SET state = ? WHERE id = ?`, string(core.StateDropped), id); err != nil {
 			return err
 		}
-		_, err = addClaim(tx, id, core.EventDecision, "released: "+why, now(), nil, &core.Decision{
+		if _, err := addClaim(tx, id, core.EventDecision, "released: "+why, now(), nil, &core.Decision{
 			Question: "was the stop recorded against " + id + " a failure or a choice?",
 			Answer:   why,
-		})
-		return err
+		}); err != nil {
+			return err
+		}
+		return rollUp(tx, w.Parent)
 	})
 	if err != nil {
 		return core.Work{}, err
@@ -774,14 +782,23 @@ func (l *Ledger) transition(id string, to core.State) (core.Work, error) {
 		if w.State == core.StateDropped {
 			return fmt.Errorf("work %s is dropped; bringing it back goes through Restore, with everything dropped alongside it: wd resume %s", id, id)
 		}
+		sub, err := subGoal(tx, w)
+		if err != nil {
+			return err
+		}
+		if sub {
+			return fmt.Errorf("%s is a sub-goal; its state follows its children", id)
+		}
 		if !slices.Contains(core.Transitions[w.State], to) {
 			return core.IllegalTransition{From: w.State, To: to}
 		}
 		if _, err := tx.Exec(`UPDATE work SET state = ? WHERE id = ?`, string(to), id); err != nil {
 			return err
 		}
-		_, err = addEvent(tx, id, core.EventState, string(to), now())
-		return err
+		if _, err := addEvent(tx, id, core.EventState, string(to), now()); err != nil {
+			return err
+		}
+		return rollUp(tx, w.Parent)
 	})
 	if err != nil {
 		return core.Work{}, err
@@ -824,7 +841,7 @@ func (l *Ledger) Archive(id, why string) ([]core.Work, error) {
 				return err
 			}
 		}
-		return nil
+		return rollUp(tx, tree[0].Parent)
 	})
 	if err != nil {
 		return nil, err
@@ -849,8 +866,10 @@ func (l *Ledger) Drop(id, why string) ([]core.Work, error) {
 		if why == "" {
 			return fmt.Errorf("dropping %s needs a reason: say why", id)
 		}
-		dropped, err = dropOpen(tx, tree, why, now())
-		return err
+		if dropped, err = dropOpen(tx, tree, why, now()); err != nil {
+			return err
+		}
+		return rollUp(tx, tree[0].Parent)
 	})
 	if err != nil {
 		return nil, err
@@ -891,7 +910,7 @@ func (l *Ledger) Supersede(id, why string) ([]core.Work, error) {
 			}
 			superseded = append(superseded, w)
 		}
-		return nil
+		return rollUp(tx, tree[0].Parent)
 	})
 	if err != nil {
 		return nil, err
@@ -942,12 +961,78 @@ func (l *Ledger) Restore(id string) ([]core.Work, error) {
 			}
 			restored = append(restored, w)
 		}
-		return nil
+		return rollUp(tx, tree[0].Parent)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return l.reread(restored)
+}
+
+// subGoal reports whether w is a goal under a goal, whose state is rolled up
+// from its children rather than set.
+func subGoal(q queryer, w core.Work) (bool, error) {
+	if !core.IsGoal(w.Kind) || w.Parent == nil {
+		return false, nil
+	}
+	p, err := getWork(q, *w.Parent)
+	if err != nil {
+		return false, err
+	}
+	return core.IsGoal(p.Kind), nil
+}
+
+// rollUp sets a sub-goal's state from its children's, filing a state event
+// when it changes, and climbs while the work it reaches is a sub-goal. A top
+// goal, or any work that is not a sub-goal, is left as it is.
+func rollUp(tx *sql.Tx, id *string) error {
+	for id != nil {
+		w, err := getWork(tx, *id)
+		if err != nil {
+			return err
+		}
+		sub, err := subGoal(tx, w)
+		if err != nil || !sub {
+			return err
+		}
+		rows, err := tx.Query(`SELECT state FROM work WHERE parent = ?`, w.ID)
+		if err != nil {
+			return err
+		}
+		var states []core.State
+		for rows.Next() {
+			var raw string
+			if err := rows.Scan(&raw); err != nil {
+				rows.Close()
+				return err
+			}
+			st, err := core.ParseState(raw)
+			if err != nil {
+				rows.Close()
+				return fmt.Errorf("work under %s: %w", w.ID, err)
+			}
+			states = append(states, st)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		to := core.RollupState(states)
+		if to == w.State {
+			return nil
+		}
+		if _, err := tx.Exec(`UPDATE work SET state = ? WHERE id = ?`, string(to), w.ID); err != nil {
+			return err
+		}
+		if _, err := addEvent(tx, w.ID, core.EventState, string(to), now()); err != nil {
+			return err
+		}
+		id = w.Parent
+	}
+	return nil
 }
 
 // droppedFrom is when work was last dropped and the state it was dropped from.

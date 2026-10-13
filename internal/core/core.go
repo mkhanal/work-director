@@ -453,6 +453,34 @@ func Settled(s State) bool {
 	return s == StateDone || s == StateDropped || s == StateSuperseded
 }
 
+// RollupState is a nested goal's state from its children's: needs-input if
+// any child needs input; else blocked if any is blocked; else running if any
+// is briefed, running, review or soft-done; else done if every child is
+// settled and at least one is done; else superseded if every child is
+// superseded; else queued. No children: queued.
+func RollupState(children []State) State {
+	has := func(states ...State) bool {
+		return slices.ContainsFunc(children, func(s State) bool { return slices.Contains(states, s) })
+	}
+	all := func(f func(State) bool) bool {
+		return len(children) > 0 && !slices.ContainsFunc(children, func(s State) bool { return !f(s) })
+	}
+	switch {
+	case has(StateNeedsInput):
+		return StateNeedsInput
+	case has(StateBlocked):
+		return StateBlocked
+	case has(StateBriefed, StateRunning, StateReview, StateSoftDone):
+		return StateRunning
+	case all(Settled) && has(StateDone):
+		return StateDone
+	case all(func(s State) bool { return s == StateSuperseded }):
+		return StateSuperseded
+	default:
+		return StateQueued
+	}
+}
+
 func Reopenable(s State) bool {
 	return s == StateDone
 }

@@ -802,6 +802,63 @@ func TestLedger(t *testing.T) {
 		}
 	})
 
+	t.Run("A Sub-Goal's State Is Rolled Up From Its Children", func(t *testing.T) {
+		l := newTestLedger(t)
+		top := add(t, l, "p", "Top", AddOptions{Kind: core.WorkGoal})
+		mid := add(t, l, "p", "Mid", AddOptions{Kind: core.WorkGoal, Parent: &top.ID})
+		low := add(t, l, "p", "Low", AddOptions{Kind: core.WorkGoal, Parent: &mid.ID})
+		a := add(t, l, "p", "A", AddOptions{Parent: &mid.ID})
+		b := add(t, l, "p", "B", AddOptions{Parent: &mid.ID})
+		c := add(t, l, "p", "C", AddOptions{Parent: &low.ID})
+		state := func(id string) core.State {
+			t.Helper()
+			w, err := l.Get(id)
+			wantNoErr(t, err)
+			return w.State
+		}
+		stateKind := core.EventState
+		states := func(id string) []string {
+			t.Helper()
+			var out []string
+			for _, e := range allEvents(t, l, id, &stateKind) {
+				out = append(out, e.Body)
+			}
+			return out
+		}
+
+		move(t, l, a.ID, core.StateRunning)
+		if state(mid.ID) != core.StateRunning || state(top.ID) != core.StateQueued {
+			t.Fatalf("mid = %s, top = %s; want running and queued", state(mid.ID), state(top.ID))
+		}
+		if got := states(mid.ID); !slices.Equal(got, []string{"queued", "running"}) {
+			t.Fatalf("mid state events = %v, want [queued running]", got)
+		}
+		move(t, l, a.ID, core.StateNeedsInput)
+		if state(mid.ID) != core.StateNeedsInput {
+			t.Fatalf("mid = %s, want needs-input", state(mid.ID))
+		}
+		// A change two levels down climbs through every goal under a goal.
+		move(t, l, c.ID, core.StateBlocked)
+		if state(low.ID) != core.StateBlocked || state(mid.ID) != core.StateNeedsInput {
+			t.Fatalf("low = %s, mid = %s; want blocked and needs-input", state(low.ID), state(mid.ID))
+		}
+		move(t, l, c.ID, core.StateDone)
+		move(t, l, b.ID, core.StateDone)
+		_, err := l.Drop(a.ID, "not needed")
+		wantNoErr(t, err)
+		if state(low.ID) != core.StateDone || state(mid.ID) != core.StateDone {
+			t.Fatalf("low = %s, mid = %s; want both done", state(low.ID), state(mid.ID))
+		}
+		if state(top.ID) != core.StateQueued {
+			t.Fatalf("top = %s, want it never rolled up", state(top.ID))
+		}
+		_, err = l.Transition(mid.ID, core.StateReview)
+		wantErr(t, err, mid.ID+" is a sub-goal; its state follows its children")
+		if _, err := l.Transition(top.ID, core.StateRunning); err != nil {
+			t.Fatalf("a top goal's transition: %v", err)
+		}
+	})
+
 	t.Run("Soft Done Requires Goal Tasks Done", func(t *testing.T) {
 		l := newTestLedger(t)
 		epic := add(t, l, "p", "E", AddOptions{Kind: core.WorkEpic})

@@ -43,6 +43,12 @@ recent reopening; work never reopened is judged on all its events.
 - Work already done, dropped, abandoned or superseded is left as it is.
 - No transition leaves superseded.
 
+## A Sub-Goal's State Is Rolled Up From Its Children
+- A goal under a goal takes the state `RollupState` gives its children's states, whenever a child's state changes.
+- The change is filed as a state event on it, and climbs to its parent while that parent is also under a goal.
+- A top goal's state is never rolled up.
+- A bare transition of a goal under a goal is refused, naming what sets it.
+
 ## Dropped Work Is Restored With Everything Dropped Alongside It
 - `Restore(id)` returns dropped work to the state it was dropped from, with every work under it dropped at the same moment.
 - Work under it dropped at another moment stays dropped.
