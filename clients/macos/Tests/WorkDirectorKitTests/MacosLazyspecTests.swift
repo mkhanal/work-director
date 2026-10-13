@@ -964,4 +964,40 @@ struct SeededTree {
         #expect(here.entries.contains { $0.kind == "chore" && $0.by == "director" }, "a nested page's record holds what the director did there")
         #expect(here.entries.first { $0.kind == "chore" }?.sentence == "Chore: refreshed dependencies")
     }
+
+    @Test("The Record Lists What Was Decided And Done, Filtered By Kind And Sub-Goal")
+    func goalRecord() async throws {
+        let t = try SeededTree()
+        try t.home.wd("decide", t.top, "Notes are written in English only")
+        let store = await Store(channel: try t.home.channel())
+        let goal = try await store.goal(t.top)
+        let record = try await store.record(t.top)
+        let cards = record.summary.cards
+        #expect(cards.count == 5)
+        #expect(cards[1].number == 1 && cards[1].label == "course check · 0 corrections")
+        #expect(cards[3].label == "chore the director ran")
+        #expect(cards[4].label == "report judged")
+
+        #expect(RecordKind.allCases.map(\.label) == ["Everything", "Decisions", "Course", "Questions", "Reports", "Chores", "Delivery"])
+        #expect(record.entries(.everything) == record.entries, "everything, newest first, as served")
+        #expect(record.entries(.course).map(\.kind) == ["course", "superseded"], "a superseded branch is a course change")
+        #expect(record.entries(.questions).map(\.kind) == ["question"])
+        #expect(record.entries(.chores).map(\.text) == ["refreshed dependencies"])
+        #expect(record.entries(.decisions).contains { $0.what == "Notes are written in English only" && $0.by == "you" })
+        #expect(record.entries(.decisions).last?.kind == "asked", "the goal's first ask closes the record")
+
+        #expect(goal.recordPlaces == ["Every release is tagged", "Whoever deploys gets a guide", "Customers get a release note", "Any agent can produce the notes"])
+        let guide = record.entries(.everything, under: "Whoever deploys gets a guide")
+        #expect(Set(guide.map(\.kind)).isSuperset(of: ["question", "chore", "superseded"]), "a sub-goal holds what happened under it")
+        #expect(guide.allSatisfy { $0.where.hasPrefix("Whoever deploys gets a guide") })
+        #expect(record.entries(.everything, under: "Every release is tagged").map(\.badge) .contains(GoalBadge("Judged met", .settled)))
+
+        var gmt = Calendar(identifier: .gregorian)
+        gmt.timeZone = TimeZone(identifier: "UTC")!
+        let now = ISO8601DateFormatter().date(from: "2026-10-13T18:00:00Z")!
+        let e = { (at: String) in RecordEntry(event: 1, at: at, kind: "chore", what: "x", where: "w", by: "director") }
+        let days = GoalRecord.days([e("2026-10-13T12:00:00Z"), e("2026-10-13T09:00:00Z"), e("2026-10-12T10:00:00Z"), e("2026-10-01T10:00:00Z")], now: now, calendar: gmt)
+        #expect(days.map(\.day) == ["Today", "Yesterday", "Oct 1, 2026"])
+        #expect(days[0].entries.count == 2)
+    }
 }

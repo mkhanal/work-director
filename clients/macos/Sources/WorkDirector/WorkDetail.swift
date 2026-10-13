@@ -204,7 +204,7 @@ struct WorkDetail: View {
             case .conversation:
                 GoalThread(store: store, goal: goal, focus: focusTask, answered: { Task { await load() } }, filter: $filter)
             case .record:
-                EventsSection(events: goal.events, expanded: true)
+                GoalRecordView(store: store, goal: goal)
             }
         case .work(let work, let events):
             if hasSession(work) && tab == .conversation {

@@ -160,3 +160,9 @@ hold only that product's work; with none, every product's.
 - Adding a sub-goal runs `wd goal add <id> "<outcome>" --done-when "<done when>"`; both are required.
 - What holds the goal from done is listed as served.
 - A sub-goal's page lists what the director did there, from its record.
+
+## The Record Lists What Was Decided And Done, Filtered By Kind And Sub-Goal
+- The record opens with five counts: decisions and how many were yours, course checks and corrections, questions and how many the director answered, chores the director ran, and reports judged.
+- Kind chips narrow it to decisions, course, questions, reports, chores or delivery; a superseded branch counts as course.
+- A sub-goal picker narrows it to what happened at or under one of the goal's sub-goals.
+- Each row reads its time, its kind as a badge, what it says, where in the tree and by whom, newest first, grouped by day.
