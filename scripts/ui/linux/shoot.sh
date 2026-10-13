@@ -48,6 +48,11 @@ for scheme in light dark; do
     sleep 2.5
     name=$screen; [ "$scheme" = dark ] && name=$screen-dark
     import -window "$win" "/shots/$name.png"
+    if [ "$tab" = overview ]; then
+      xdotool mousemove --window "$win" 780 600 click --repeat 25 --delay 40 5
+      sleep 1
+      import -window "$win" "/shots/$name-bottom.png"
+    fi
     kill "$pid"; wait "$pid" 2>/dev/null || true
     if grep -q panicked /tmp/app-$screen.log; then echo "the app panicked on $screen"; cat /tmp/app-$screen.log; exit 1; fi
   done
