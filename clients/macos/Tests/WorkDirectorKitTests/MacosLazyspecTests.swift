@@ -920,7 +920,7 @@ struct SeededTree {
         #expect(goal.doneWhen == "every release has a guide and a note")
         #expect(goal.finish == FinishLine(line: "complete PR", source: "taste"))
         #expect(goal.progress == TreeProgress(done: 1, total: 4, superseded: 0))
-        #expect(goal.notDoneBecause.first == "3 sub-goals open")
+        #expect(goal.notDoneBecause.first == "3 sub-goals are still open")
         #expect(goal.course?.verdict == "on course")
         #expect(goal.course?.why == "the tag format suits the rest")
         #expect(goal.tree.map(\.id) == [tagged, guide, note, agent])
@@ -1122,7 +1122,7 @@ struct SeededTree {
         #expect(rows.map(\.node.id) == [keeps, export, locked, checklist])
         #expect(rows[0].chips == ["Starts first", "One agent"])
         #expect(rows[3].chips == ["After 2 and 3", "One agent"])
-        #expect(rows[1].node.whyNotMoving == "proposed — needs approval")
+        #expect(rows[1].node.whyNotMoving == "Proposed, waiting for your approval")
 
         let edit = try Plan.editGoal(export, doneWhen: "the export is a signed PDF and a CSV")
         #expect(edit.argv == ["goal", "edit", export, "--done-when", "the export is a signed PDF and a CSV"])
