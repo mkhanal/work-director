@@ -372,8 +372,12 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 	if err != nil {
 		return out, err
 	}
+	tree, err := c.Ledger.Under(goal.ID)
+	if err != nil {
+		return out, err
+	}
 	child := func(id string) (core.Work, error) {
-		for _, t := range tasks {
+		for _, t := range tree[1:] {
 			if t.ID == id {
 				return c.Ledger.Get(id)
 			}
@@ -405,6 +409,10 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 				}
 				if t.State != core.StateQueued && t.State != core.StateBriefed {
 					return fmt.Errorf("%s is %s, already under way", t.ID, t.State)
+				}
+				if core.IsGoal(t.Kind) {
+					_, err := c.startGoalRow(goal, p, t, true)
+					return err
 				}
 				return c.startUnder(goal, p, t)
 			case coordinator.ActDrop:
@@ -562,4 +570,62 @@ func (c *Cli) startUnder(goal core.Work, p *project.Project, t core.Work) error 
 	}
 	_, _, err = c.spawnTasks(goal, p, runners, detected, []core.Work{t}, cwd)
 	return err
+}
+
+// startSubGoals starts sub-goals of top goal: each task among them gets an
+// agent, and each goal among them is planned and its own sub-goals started,
+// unless propose holds that breakdown for approval. Runners are --runner,
+// else the project's.
+func (c *Cli) startSubGoals(top core.Work, p *project.Project, subs []core.Work, propose bool) ([]string, error) {
+	var leaves []core.Work
+	var lines []string
+	for _, s := range subs {
+		if !core.IsGoal(s.Kind) {
+			leaves = append(leaves, s)
+			continue
+		}
+		more, err := c.startGoalRow(top, p, s, propose)
+		if err != nil {
+			return nil, err
+		}
+		lines = append(lines, more...)
+	}
+	if len(leaves) == 0 {
+		return lines, nil
+	}
+	runners, err := project.ParseRunnerList(strOr(c.Args, "runner", p.Runner), p.Runner, runner.AllRunnerNames)
+	if err != nil {
+		return nil, err
+	}
+	detected, err := detectedRunners(runners)
+	if err != nil {
+		return nil, err
+	}
+	cwd, err := c.ensureSharedWorktree(top, p)
+	if err != nil {
+		return nil, err
+	}
+	if top, err = c.Ledger.Get(top.ID); err != nil {
+		return nil, err
+	}
+	_, spawned, err := c.spawnTasks(top, p, runners, detected, leaves, cwd)
+	return append(lines, spawned...), err
+}
+
+// startGoalRow starts a sub-goal stored as a goal: one not yet planned is
+// planned, and its sub-goals start unless the breakdown is held for approval.
+func (c *Cli) startGoalRow(top core.Work, p *project.Project, g core.Work, propose bool) ([]string, error) {
+	subs, err := c.Ledger.Children(g.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(subs) == 0 {
+		if subs, err = c.planGoal(g, p, propose); err != nil {
+			return nil, err
+		}
+		if propose && p.Mode == project.ModeAsk {
+			return []string{fmt.Sprintf("%s: %d sub-goals proposed — wd goal approve %s", g.ID, len(subs), g.ID)}, nil
+		}
+	}
+	return c.startSubGoals(top, p, subs, propose)
 }

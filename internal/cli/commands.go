@@ -853,34 +853,25 @@ type planAsked struct{ question string }
 
 func (e planAsked) Error() string { return "the planner asked: " + e.question }
 
-// planAndSpawn plans a goal and spawns its open tasks, returning the goal and
-// all its tasks as they now stand.
+// planAndSpawn plans a goal and starts its sub-goals, returning the goal and
+// all its tasks as they now stand. A goal left waiting on a person, for where
+// it finishes, starts nothing.
 func (c *Cli) planAndSpawn(goal core.Work, p *project.Project) (core.Work, []core.Work, []string, error) {
-	tasks, err := c.planGoal(goal, p)
-	if err != nil {
-		return goal, nil, nil, err
-	}
-	runners, err := project.ParseRunnerList(strOr(c.Args, "runner", p.Runner), p.Runner, runner.AllRunnerNames)
-	if err != nil {
-		return goal, nil, nil, err
-	}
-	detected, err := detectedRunners(runners)
-	if err != nil {
-		return goal, nil, nil, err
-	}
-	cwd, err := c.ensureSharedWorktree(goal, p)
+	rows, err := c.planGoal(goal, p, false)
 	if err != nil {
 		return goal, nil, nil, err
 	}
 	if goal, err = c.Ledger.Get(goal.ID); err != nil {
 		return goal, nil, nil, err
 	}
-	_, lines, err := c.spawnTasks(goal, p, runners, detected, tasks, cwd)
-	if err != nil {
-		return goal, nil, nil, err
-	}
-	if goal, err = c.Ledger.Get(goal.ID); err != nil {
-		return goal, nil, nil, err
+	var lines []string
+	if goal.State != core.StateNeedsInput {
+		if lines, err = c.startSubGoals(goal, p, rows, false); err != nil {
+			return goal, nil, nil, err
+		}
+		if goal, err = c.Ledger.Get(goal.ID); err != nil {
+			return goal, nil, nil, err
+		}
 	}
 	all, err := c.Ledger.Tasks(goal.ID)
 	return goal, all, lines, err
@@ -1045,28 +1036,116 @@ func (c *Cli) goalPlan(cmd string, goal core.Work) error {
 	if err != nil {
 		return err
 	}
-	rows, err := c.planGoal(goal, p)
+	rows, err := c.planGoal(goal, p, true)
 	if err != nil {
 		return err
 	}
 	type planRow struct {
-		ID      string  `json:"id"`
-		Heading *string `json:"heading"`
-		Title   string  `json:"title"`
+		ID       string        `json:"id"`
+		Kind     core.WorkKind `json:"kind"`
+		Title    string        `json:"title"`
+		DoneWhen *string       `json:"done_when"`
+		After    []string      `json:"after"`
 	}
 	out := make([]planRow, 0, len(rows))
 	table := make([]string, 0, len(rows))
 	for _, w := range rows {
-		out = append(out, planRow{ID: w.ID, Heading: w.Heading, Title: w.Title})
-		table = append(table, fmt.Sprintf("%s\t%s\t%s", w.ID, strOrEmpty(w.Heading), w.Title))
+		after, err := c.Ledger.After(w.ID)
+		if err != nil {
+			return err
+		}
+		out = append(out, planRow{ID: w.ID, Kind: w.Kind, Title: w.Title, DoneWhen: w.DoneWhen, After: after})
+		line := fmt.Sprintf("%s\t%s\t%s\tdone when: %s", w.ID, w.Kind, w.Title, textOr(w.DoneWhen, "not set"))
+		if len(after) > 0 {
+			line += "\tafter: " + strings.Join(after, ",")
+		}
+		table = append(table, line)
 	}
 	return c.out(out, strings.Join(table, "\n"))
 }
 
-// planGoal asks the project's runner, or --runner, for the goal's task list,
-// files each task under the goal, and returns them. --timeout bounds the wait
-// for the list, 120 seconds by default.
-func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) {
+func textOr(s *string, def string) string {
+	if s == nil || *s == "" {
+		return def
+	}
+	return *s
+}
+
+// chain is goal with what it serves: the goals above it, top first, and its
+// siblings.
+func (c *Cli) chain(goal core.Work) (coordinator.Chain, error) {
+	ch := coordinator.Chain{Ancestors: []core.Work{}, Siblings: []core.Work{}}
+	if goal.Parent == nil {
+		return ch, nil
+	}
+	sibs, err := c.Ledger.Children(*goal.Parent)
+	if err != nil {
+		return ch, err
+	}
+	for at := goal.Parent; at != nil; {
+		w, err := c.Ledger.Get(*at)
+		if err != nil {
+			return ch, err
+		}
+		if !core.IsGoal(w.Kind) {
+			break
+		}
+		ch.Ancestors = append([]core.Work{w}, ch.Ancestors...)
+		at = w.Parent
+	}
+	if len(ch.Ancestors) == 0 {
+		return ch, nil
+	}
+	for _, s := range sibs {
+		if s.ID != goal.ID {
+			ch.Siblings = append(ch.Siblings, s)
+		}
+	}
+	return ch, nil
+}
+
+// pastFinishes are the finish lines of the project's last five finished top
+// goals, oldest first.
+func (c *Cli) pastFinishes(name string) ([]core.FinishLine, error) {
+	done, err := c.Ledger.List(ledger.ListFilter{Project: &name, States: []core.State{core.StateDone}})
+	if err != nil {
+		return nil, err
+	}
+	var past []core.Work
+	for _, w := range done {
+		if core.IsGoal(w.Kind) && w.FinishLine != nil {
+			past = append(past, w)
+		}
+	}
+	slices.SortStableFunc(past, func(a, b core.Work) int { return strings.Compare(a.Updated, b.Updated) })
+	if len(past) > 5 {
+		past = past[len(past)-5:]
+	}
+	out := make([]core.FinishLine, 0, len(past))
+	for _, w := range past {
+		out = append(out, *w.FinishLine)
+	}
+	return out, nil
+}
+
+// finishQuestion opens the question a planner unsure where a goal finishes
+// leaves on it.
+const finishQuestion = "Where does this goal finish?"
+
+// proposedPrefix opens the note a breakdown awaiting approval leaves, and
+// approvedPrefix the decision that approves it.
+const (
+	proposedPrefix = "proposed: "
+	approvedPrefix = "approved: "
+)
+
+// planGoal asks the project's runner, or --runner, for the goal's outcomes,
+// files each under the goal as a sub-goal with its done-when and order, and
+// returns them. A top goal's finish line is stored, or asked when the planner
+// is unsure. propose holds the breakdown for approval when the project's mode
+// is ask. A sub-goal is not transitioned: its state follows its children.
+// --timeout bounds the wait for the reply, 120 seconds by default.
+func (c *Cli) planGoal(goal core.Work, p *project.Project, propose bool) ([]core.Work, error) {
 	a := c.Args
 	wait, err := positiveInt(a, "timeout", 120)
 	if err != nil {
@@ -1089,7 +1168,18 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 	if err != nil {
 		return nil, err
 	}
-	planBrief, err := coordinator.GoalPlanBrief(goal, coordinator.Chain{}, p, kit, nil)
+	chain, err := c.chain(goal)
+	if err != nil {
+		return nil, err
+	}
+	top := len(chain.Ancestors) == 0
+	var past []core.FinishLine
+	if top {
+		if past, err = c.pastFinishes(goal.Project); err != nil {
+			return nil, err
+		}
+	}
+	planBrief, err := coordinator.GoalPlanBrief(goal, chain, p, kit, past)
 	if err != nil {
 		return nil, fail("%v", err)
 	}
@@ -1106,7 +1196,7 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 	if _, err := c.Ledger.AddEvent(goal.ID, core.EventSpawn, coordinator.PlanEvent(h)); err != nil {
 		return nil, err
 	}
-	outcomes, name, err := awaitPlan(rn, h, time.Duration(wait)*time.Second)
+	outcomes, finish, name, err := awaitPlan(rn, h, time.Duration(wait)*time.Second)
 	// The planning session answers once; whatever it said, it is not left running.
 	if serr := runner.Dismiss(rn, h); serr != nil && err == nil {
 		err = serr
@@ -1122,49 +1212,113 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project) ([]core.Work, error) 
 	}
 	rows := make([]core.Work, 0, len(outcomes))
 	for _, o := range outcomes {
-		w, err := c.Ledger.Add(goal.Project, o.Title, ledger.AddOptions{Parent: &goal.ID})
+		opts := ledger.AddOptions{Parent: &goal.ID}
+		if o.Split {
+			opts.Kind = core.WorkGoal
+		}
+		w, err := c.Ledger.Add(goal.Project, o.Title, opts)
 		if err != nil {
+			return nil, err
+		}
+		if o.DoneWhen != "" {
+			if err := c.Ledger.SetDoneWhen(w.ID, o.DoneWhen); err != nil {
+				return nil, err
+			}
+		}
+		if len(o.After) > 0 {
+			waits := make([]string, 0, len(o.After))
+			for _, n := range o.After {
+				waits = append(waits, rows[n-1].ID)
+			}
+			if err := c.Ledger.SetAfter(w.ID, waits); err != nil {
+				return nil, err
+			}
+		}
+		if w, err = c.Ledger.Get(w.ID); err != nil {
 			return nil, err
 		}
 		rows = append(rows, w)
 	}
-	if _, err := c.Ledger.AddEvent(goal.ID, core.EventNote, fmt.Sprintf("plan: %d tasks", len(rows))); err != nil {
+	note := fmt.Sprintf("plan: %d sub-goals", len(rows))
+	if propose && p.Mode == project.ModeAsk {
+		note = fmt.Sprintf("%s%d sub-goals", proposedPrefix, len(rows))
+	}
+	if _, err := c.Ledger.AddEvent(goal.ID, core.EventNote, note); err != nil {
 		return nil, err
+	}
+	if !top {
+		return rows, nil
 	}
 	if goal.State == core.StateQueued {
 		if _, err := c.Ledger.Transition(goal.ID, core.StateBriefed); err != nil {
 			return nil, err
 		}
 	}
+	switch {
+	case finish.Unsure:
+		asked := coordinator.Action{Kind: coordinator.ActAsk, Text: finishQuestion, Options: finish.Choices}
+		if _, err := c.Ledger.AddEvent(goal.ID, core.EventQuestion, coordinator.QuestionBody([]coordinator.Action{asked})); err != nil {
+			return nil, err
+		}
+		if err := c.awaitPerson(goal.ID); err != nil {
+			return nil, err
+		}
+	case finish.Line != "":
+		if err := c.Ledger.SetFinish(goal.ID, finish.Line, finish.Source); err != nil {
+			return nil, err
+		}
+	}
 	return rows, nil
+}
+
+// awaitPerson moves a top goal not yet working to needs-input, through
+// running: a goal waits on a person only once it has started.
+func (c *Cli) awaitPerson(id string) error {
+	w, err := c.Ledger.Get(id)
+	if err != nil {
+		return err
+	}
+	for _, to := range []core.State{core.StateBriefed, core.StateRunning, core.StateNeedsInput} {
+		if w.State == core.StateNeedsInput {
+			return nil
+		}
+		if !slices.Contains(core.Transitions[w.State], to) {
+			continue
+		}
+		if w, err = c.Ledger.Transition(id, to); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // awaitPlan reads the planning session until it lists outcomes or asks a
 // question; nil outcomes is a wait that ran out.
-func awaitPlan(rn runner.Runner, h runner.Handle, wait time.Duration) ([]coordinator.PlanOutcome, string, error) {
+func awaitPlan(rn runner.Runner, h runner.Handle, wait time.Duration) ([]coordinator.PlanOutcome, coordinator.PlanFinish, string, error) {
 	deadline := time.Now().Add(wait)
 	for time.Now().Before(deadline) {
 		texts, err := runner.Transcript(rn, h)
 		if err != nil {
-			return nil, "", err
+			return nil, coordinator.PlanFinish{}, "", err
 		}
 		if ts := coordinator.ParseOutcomes(texts); len(ts) > 0 {
 			name, _ := coordinator.PlanName(texts)
-			return ts, name, nil
+			finish, _ := coordinator.ParseFinish(texts)
+			return ts, finish, name, nil
 		}
 		if q, ok := coordinator.PlanQuestion(texts); ok {
-			return nil, "", planAsked{q}
+			return nil, coordinator.PlanFinish{}, "", planAsked{q}
 		}
 		// A planning session that stopped, or was stopped, has given all the
 		// plan it will give.
 		if st, err := rn.Status(h); err != nil {
-			return nil, "", err
+			return nil, coordinator.PlanFinish{}, "", err
 		} else if st == runner.StatusStopped || st == runner.StatusExited {
-			return nil, "", fail("planning session %s ended without a plan", h.Session)
+			return nil, coordinator.PlanFinish{}, "", fail("planning session %s ended without a plan", h.Session)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return nil, "", nil
+	return nil, coordinator.PlanFinish{}, "", nil
 }
 
 // renamedPrefix opens the note a person's rename leaves; a goal carrying one

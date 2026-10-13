@@ -5090,3 +5090,125 @@ func titleOf(t *testing.T, f *cliFixture, id string) string {
 	t.Fatalf("%s is not listed", id)
 	return ""
 }
+
+// planReply has the fake planner answer with text.
+func (f *cliFixture) planReply(t *testing.T, text string) {
+	t.Helper()
+	state := filepath.Join(f.dir, "fake-state")
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, "planner-reply"), []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setMode rewrites the fixture project's mode.
+func (f *cliFixture) setMode(t *testing.T, mode string) {
+	t.Helper()
+	path := filepath.Join(f.wdHome, "projects", "sample-app.md")
+	text := readFile(t, path)
+	text = strings.Replace(text, "mode: ask", "mode: "+mode, 1)
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// tree is the ledger's view of a goal: its direct children, and what each waits on.
+func (f *cliFixture) tree(t *testing.T, id string) ([]core.Work, map[string][]string) {
+	t.Helper()
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	kids, err := l.Children(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := map[string][]string{}
+	for _, k := range kids {
+		if after[k.ID], err = l.After(k.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return kids, after
+}
+
+const releasePlan = `NAME: Release notes
+FINISH: merged | from: goal
+- Every release is tagged and records what changed
+  done when: each release has a vX.Y.Z tag and a change list
+- Whoever deploys gets a guide for each release
+  done when: a release's guide covers migrations and rollback
+  split: yes
+- Customers read what changed
+  done when: the changelog page lists the release
+  after: 1
+`
+
+func TestPlanningFilesSubGoalsWithTheirDoneWhenAndOrder(t *testing.T) {
+	f := newCLIFixture(t)
+	f.planReply(t, releasePlan)
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Release notes", "--json"), "id")
+	f.runOK(t, "goal", "plan", goal, "--runner", "planner", "--json")
+	kids, after := f.tree(t, goal)
+	if len(kids) != 3 {
+		t.Fatalf("children = %+v, want the three outcomes", kids)
+	}
+	wantKinds := []core.WorkKind{core.WorkTask, core.WorkGoal, core.WorkTask}
+	wantDone := []string{"each release has a vX.Y.Z tag and a change list", "a release's guide covers migrations and rollback", "the changelog page lists the release"}
+	for i, k := range kids {
+		if k.Kind != wantKinds[i] || k.DoneWhen == nil || *k.DoneWhen != wantDone[i] || k.State != core.StateQueued {
+			t.Errorf("child %d = %s %s done when %v, want a queued %s done when %q", i, k.Kind, k.State, k.DoneWhen, wantKinds[i], wantDone[i])
+		}
+	}
+	if !slices.Equal(after[kids[2].ID], []string{kids[0].ID}) || len(after[kids[0].ID]) != 0 {
+		t.Errorf("order = %v, want the third waiting on the first", after)
+	}
+	g, err := f.work(t, goal)
+	if err != nil || g.FinishLine == nil || *g.FinishLine != core.FinishMerged || g.FinishSource == nil || *g.FinishSource != core.FinishFromGoal {
+		t.Fatalf("goal = %+v (%v), want it finishing merged, from the goal", g, err)
+	}
+	// Ask mode: the breakdown is proposed, and nothing starts.
+	if notes := f.bodies(t, goal, core.EventNote); !slices.Contains(notes, "proposed: 3 sub-goals") {
+		t.Errorf("notes = %v, want the breakdown proposed", notes)
+	}
+
+	// A sub-goal is planned under itself, its state left to its children, and
+	// it is not asked where it finishes.
+	sub := kids[1].ID
+	f.planReply(t, "NAME: Deploy guides\nFINISH: released | from: taste\n- Each release has a migration guide\n  done when: the guide lists every migration\n")
+	f.runOK(t, "goal", "plan", sub, "--runner", "planner")
+	subKids, _ := f.tree(t, sub)
+	if len(subKids) != 1 || subKids[0].Kind != core.WorkTask || subKids[0].DoneWhen == nil {
+		t.Fatalf("sub-goal children = %+v, want its one outcome", subKids)
+	}
+	if s, err := f.work(t, sub); err != nil || s.FinishLine != nil || s.State != core.StateQueued {
+		t.Fatalf("sub-goal = %+v (%v), want it queued with no finish line of its own", s, err)
+	}
+
+	// Auto mode: the plan is filed as a plan.
+	f.setMode(t, "auto")
+	auto := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Release notes again", "--json"), "id")
+	f.planReply(t, releasePlan)
+	f.runOK(t, "goal", "plan", auto, "--runner", "planner")
+	if notes := f.bodies(t, auto, core.EventNote); !slices.Contains(notes, "plan: 3 sub-goals") {
+		t.Errorf("notes = %v, want the plan filed", notes)
+	}
+
+	// An unsure finish line is asked, with its choices, and the goal waits.
+	unsure := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Look into the cache", "--json"), "id")
+	f.planReply(t, "NAME: Cache findings\nFINISH: ?\n- research (recommended)\n- local build\n- The cache's misses are explained\n  done when: a report names each miss's cause\n")
+	f.runOK(t, "goal", "plan", unsure, "--runner", "planner")
+	questions := f.bodies(t, unsure, core.EventQuestion)
+	if len(questions) != 1 || !strings.Contains(questions[0], "\n- research (recommended)\n- local build") {
+		t.Fatalf("questions = %q, want where it finishes asked with its choices", questions)
+	}
+	if s := f.stateOf(t, unsure); s != core.StateNeedsInput {
+		t.Errorf("goal state = %s, want needs-input", s)
+	}
+	if kids, _ := f.tree(t, unsure); len(kids) != 1 {
+		t.Errorf("children = %+v, want the sub-goal filed all the same", kids)
+	}
+}

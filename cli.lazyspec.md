@@ -121,6 +121,11 @@ verify event.
 - `wd stop <goal>` stops the goal's own live session as well as its tasks'.
 - The goal's own session is its latest planning or supervising session.
 
+## Planning Files Sub-Goals With Their Done-When And Order
+- `wd goal plan` files each outcome under the goal: a task, or a goal when it is to be split, each with its done-when and what it waits on.
+- A top goal's finish line is stored with where it came from; an unsure one is asked as a question with its choices, and the goal waits on it.
+- In ask mode the breakdown is proposed and nothing starts until `wd goal approve`.
+
 ## A Goal Is Named By Its Planner Until A Person Renames It
 - A goal its planner names takes that name as its title, noting it.
 - A goal a person has renamed keeps their name when it is planned.
