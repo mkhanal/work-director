@@ -557,6 +557,7 @@ struct QuestionCard: View {
                         HStack(spacing: 10) {
                             Text(draft.typed[i].isEmpty ? "○" : "◉").font(TypeScale.calloutMedium).foregroundStyle(Palette.text)
                             TextField(item.options.isEmpty ? "Your answer…" : "Something else…", text: $draft.typed[i], axis: .vertical)
+                                .accessibilityLabel(item.options.isEmpty ? "Your answer" : ControlName.somethingElse)
                                 .textFieldStyle(.plain)
                                 .font(TypeScale.calloutMedium)
                                 .lineLimit(1...6)
@@ -601,7 +602,8 @@ struct QuestionCard: View {
 
     private func optionRow(_ option: QuestionOption, item: QuestionItem, at i: Int, chosen: Bool) -> some View {
         let choice = Choice(option.label)
-        let meaning = change?.kind == .finish || item.asksFinish ? FinishMeaning.of(choice.label) : nil
+        let finish = change?.kind == .finish || item.asksFinish
+        let meaning = finish ? FinishMeaning.of(choice.label) : nil
         return Button {
             draft.toggle(option.label, item: i)
         } label: {
@@ -625,6 +627,9 @@ struct QuestionCard: View {
         }
         .buttonStyle(.plain)
         .disabled(!question.pending || sending)
+        .accessibilityLabel(ControlName.option(option.label, finish: finish))
+        .accessibilityHint(meaning?.meaning ?? option.description)
+        .accessibilityAddTraits(item.multi ? (chosen ? [.isToggle, .isSelected] : .isToggle) : (chosen ? .isSelected : []))
     }
 
     private func chosen(_ label: String, answer: String?, item: Int) -> Bool {
@@ -661,46 +666,52 @@ struct QuestionCard: View {
                     Spacer(minLength: Space.s2)
                     Button(choices.keep) { Task { await send([try? Plan.answer(workID, question, answers: [choices.keep])]) } }
                         .buttonStyle(.canvas)
-                    Button("Edit the change…") { editing = true }
+                        .accessibilityLabel(choices.keep)
+                    Button(ControlName.editChange) { editing = true }
                         .buttonStyle(.canvas)
                         .disabled(change?.proposed == nil)
+                        .accessibilityLabel(ControlName.editChange)
                     Button {
                         Task { await send([try? Plan.answer(workID, question, answers: [choices.change])]) }
                     } label: {
-                        if sending { ProgressView().controlSize(.small) } else { Text(choices.change + " · Recommended") }
+                        if sending { ProgressView().controlSize(.small) } else { Text(ControlName.recommended(choices.change)) }
                     }
                     .buttonStyle(.canvasPrimary)
+                    .accessibilityLabel(ControlName.recommended(choices.change))
                     .keyboardShortcut(.defaultAction)
                 }
                 .disabled(sending)
             } else {
                 HStack(spacing: Space.s2) {
                     if many {
-                        Button("Back") { page -= 1 }.buttonStyle(.canvas).disabled(page == 0)
-                        Button("Next") { page += 1 }.buttonStyle(.canvas).disabled(page == question.items.count - 1)
+                        Button("Back") { page -= 1 }.buttonStyle(.canvas).disabled(page == 0).accessibilityLabel("Back")
+                        Button("Next") { page += 1 }.buttonStyle(.canvas).disabled(page == question.items.count - 1).accessibilityLabel("Next")
                     }
                     if remembers {
                         Toggle(FinishMeaning.remember(in: product ?? "this product"), isOn: $remember)
                             .toggleStyle(.checkbox)
+                            .accessibilityLabel(FinishMeaning.remember(in: product ?? "this product"))
                             .font(TypeScale.callout)
                             .foregroundStyle(Palette.text)
                     }
                     Spacer(minLength: Space.s2)
-                    Button("Let the director decide") {
+                    Button(ControlName.directorDecides) {
                         Task { await decide() }
                     }
                     .buttonStyle(.canvas)
+                    .accessibilityLabel(ControlName.directorDecides)
                     .disabled(sending)
                     .help(Plan.directorDecides(workID).commandLine)
                     Button {
                         Task { await send(plan) }
                     } label: {
-                        if sending { ProgressView().controlSize(.small) } else { Text(many && unanswered > 0 ? "Answer (\(unanswered) left open)" : "Answer") }
+                        if sending { ProgressView().controlSize(.small) } else { Text(many && unanswered > 0 ? "\(ControlName.answer) (\(unanswered) left open)" : ControlName.answer) }
                     }
                     .buttonStyle(.canvasPrimary)
                     .keyboardShortcut(.defaultAction)
                     .disabled(plan == nil || sending)
                     .help(plan?.commandLine ?? "Pick an answer")
+                    .accessibilityLabel(many && unanswered > 0 ? "\(ControlName.answer) (\(unanswered) left open)" : ControlName.answer)
                 }
             }
             if let failure {

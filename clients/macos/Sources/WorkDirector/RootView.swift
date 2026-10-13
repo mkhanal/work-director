@@ -248,6 +248,7 @@ struct ThreadSidebar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 }
 
@@ -300,6 +301,8 @@ struct SidebarRowView: View {
         .onTapGesture { open(row.work.id) }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(row.work.title)
+        .accessibilityAction { open(row.work.id) }
     }
 
     private var dot: Color {

@@ -70,6 +70,7 @@ hold only that product's work; with none, every product's.
 - A pick is sent as its label without a `(recommended)` mark.
 - Nothing can be sent until some item has an answer; an item left without one is sent as `(no answer)`.
 - Sending runs `wd answer <id>` with one answer per item, in the order asked.
+- Each option is announced by the title it shows, without a `(recommended)` mark; Answer and Let the director decide by their words.
 
 ## The Person Chooses A Light, Dark Or The System's Appearance
 - Settings offers System, Light and Dark, kept as `appearance`; System is the default.
@@ -198,21 +199,25 @@ hold only that product's work; with none, every product's.
 - A drag writes only the waits that change, from the top, each as `wd goal after <id> <id|none>`.
 - Merging two cards runs `wd goal merge <earlier> <later>`: the earlier card is kept.
 - Re-planning with a note runs `wd decide <goal> "<note>"`, then `wd goal plan <goal>`; an empty note is not sent.
+- Each card's Edit, Split, Merge and Drop is announced with the card's number and title; Discard, Re-plan with a note… and Approve and start by their words.
 
 ## A Person Changes Where A Top Goal Finishes
 - The proposal's and the Overview's Finishes at offer the six finish lines, named as a finish-line question names them.
 - Choosing one runs `wd goal finish <goal> "<line>"`.
 - A sub-goal's page offers none.
+- The menu is announced as Finishes at and the line it shows, or Not decided yet.
 
 ## A Course Change Shows What Was Found And What Happens To Each Sub-Goal
 - What was found and why change course show side by side.
 - Each sub-goal after the change is a row badged Kept · done, Kept · working, Kept · not started, New, or Superseded with why.
 - Keep answers with the keep choice and is labelled with it; Change course answers with the first choice.
 - Editing the change answers with the first choice, then runs `wd goal edit <goal>` for a title or done-when and `wd goal finish <goal> "<line>"` for a finish line the person changed from the proposal; what they left is not written.
+- Its buttons are announced by their words: the keep choice, Edit the change… and the first choice with · Recommended.
 
 ## A Finish-Line Question Says Why It Asks And Can Be Remembered
 - Under its choices, Why I'm asking: these disagree lists what The goal, Your taste and This repo said, only those that said something.
 - A checkbox, Finish goals in <product> this way from now on, sends the answer with `--remember`; unchecked, the answer is sent without it.
+- The checkbox is announced by its words.
 
 ## Letting The Director Decide Shows What It Decided Or Why It Declined
 - Letting the director decide runs `wd answer <id> --director --json`.

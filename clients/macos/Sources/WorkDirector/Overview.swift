@@ -98,7 +98,7 @@ struct GoalOverview: View {
             if !nested {
                 VStack(alignment: .leading, spacing: 4) {
                     CardLabel("Finishes at")
-                    FinishMenu(goal: goal.goal.id, current: goal.finish?.line, run: run) {
+                    FinishMenu(goal: goal.goal.id, current: goal.finish?.line, name: ControlName.finishMenu(goal.finishWords?.line), run: run) {
                         HStack(spacing: 4) {
                             if let finish = goal.finishWords {
                                 Text(finish.line).font(TypeScale.headline).foregroundStyle(Palette.text)
@@ -146,7 +146,7 @@ struct GoalOverview: View {
                 }
                 Spacer()
                 if !goal.goal.atRest {
-                    Button("+ Add sub-goal") { adding = true }.buttonStyle(.canvas)
+                    Button("+ Add sub-goal") { adding = true }.buttonStyle(.canvas).accessibilityLabel("Add sub-goal")
                 }
             }
             if goal.tree.isEmpty {

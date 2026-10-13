@@ -470,6 +470,9 @@ struct SeededTree {
         var picked = AnswerDraft(yesNo)
         picked.toggle("Yes (recommended)", item: 0)
         #expect(picked.answers == ["Yes"])
+        #expect(ControlName.option("Yes (recommended)", finish: false) == "Yes", "an option is announced by the title it shows")
+        #expect(ControlName.option("research (recommended)", finish: true) == "Research complete: a written comparison and a pick")
+        #expect([ControlName.answer, ControlName.directorDecides] == ["Answer", "Let the director decide"])
 
         let plan = try Plan.answer("w1", q, answers: ["teal", "Red, Green"])
         #expect(plan.argv == ["answer", "w1", "teal", "Red, Green"])
@@ -1179,6 +1182,10 @@ struct SeededTree {
         goal = try await store.goal(top)
         let rows = try #require(goal.proposal)
         #expect(rows.map(\.id) == [d, c, a, b])
+        #expect(ControlName.card("Split", rows[1]) == "Split 2 · The trail cannot be edited", "a card's action is announced with its number and title")
+        #expect(ControlName.card("Merge", rows[3], then: " with 3") == "Merge 4 · An admin can export the trail with 3")
+        #expect(ControlName.card("Merge", rows[0], then: " with…") == "Merge 1 · A checklist maps to the export with…")
+        #expect([ControlName.discard, ControlName.replan, ControlName.approve] == ["Discard", "Re-plan with a note…", "Approve and start"])
         #expect(goal.reorder(moving: a, to: 0).first?.argv == ["goal", "after", a, "none"], "the first waits on none")
 
         let merge = Plan.merge(rows[3], rows[2])
@@ -1205,6 +1212,8 @@ struct SeededTree {
         let goal = try await store.goal(top)
         #expect(goal.finish?.line == "complete PR")
         #expect(goal.finishWords?.line == "A complete PR")
+        #expect(ControlName.finishMenu(goal.finishWords?.line) == "Finishes at: A complete PR", "announced by the line it shows")
+        #expect(ControlName.finishMenu(nil) == "Finishes at: Not decided yet")
         #expect(try await store.goal(under).chain.count > 1, "a sub-goal's page offers none")
         #expect(try await store.run(Plan.finish(under, "research")).code != 0)
     }
@@ -1247,6 +1256,8 @@ struct SeededTree {
         #expect(fates[2].why == "no longer needed: the vendor is fine once retried")
         let choices = try #require(ask.question.changeChoices)
         #expect(choices.change == "Change course" && choices.keep == "Keep it a discovery", "each button answers with its choice, labelled with it")
+        #expect(ControlName.recommended(choices.change) == "Change course · Recommended", "its buttons are announced by their words")
+        #expect(ControlName.editChange == "Edit the change…")
         #expect(try Plan.answer(first.goal, ask.question, answers: [choices.keep]).argv == ["answer", first.goal, "Keep it a discovery"])
 
         let proposed = try #require(change.proposed)

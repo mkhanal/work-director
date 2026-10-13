@@ -73,9 +73,12 @@ struct ProposalView: View {
                     Text("Nothing starts until you approve").font(TypeScale.caption).foregroundStyle(Palette.text3)
                 }
                 Spacer()
-                Button("Discard") { run(Plan.cancel(goal.goal.id, reason: "the proposed breakdown was discarded")) }.buttonStyle(.canvas)
-                Button("Re-plan with a note…") { sheet = .replan }.buttonStyle(.canvas)
-                Button("Approve and start") { run(Plan.approve(goal.goal.id)) }.buttonStyle(.canvasPrimary)
+                Button(ControlName.discard) { run(Plan.cancel(goal.goal.id, reason: "the proposed breakdown was discarded")) }
+                    .buttonStyle(.canvas).accessibilityLabel(ControlName.discard)
+                Button(ControlName.replan) { sheet = .replan }
+                    .buttonStyle(.canvas).accessibilityLabel(ControlName.replan)
+                Button(ControlName.approve) { run(Plan.approve(goal.goal.id)) }
+                    .buttonStyle(.canvasPrimary).accessibilityLabel(ControlName.approve)
             }
             .disabled(busy != nil)
             if let failure {
@@ -99,7 +102,7 @@ struct ProposalView: View {
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     CardLabel("Finishes at")
-                    FinishMenu(goal: goal.goal.id, current: goal.finish?.line, run: run) {
+                    FinishMenu(goal: goal.goal.id, current: goal.finish?.line, name: ControlName.finishMenu(goal.finishWords?.line), run: run) {
                         HStack {
                             Text(goal.finishWords?.line ?? "Not decided yet")
                                 .font(TypeScale.calloutStrong)
@@ -138,7 +141,7 @@ struct ProposalView: View {
                         dropTarget = over ? row.id : (dropTarget == row.id ? nil : dropTarget)
                     }
             }
-            Button("+ Add sub-goal") { sheet = .add }.buttonStyle(.canvas)
+            Button("+ Add sub-goal") { sheet = .add }.buttonStyle(.canvas).accessibilityLabel("Add sub-goal")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -196,6 +199,8 @@ struct ReasoningPanel: View {
 struct FinishMenu<Label: View>: View {
     let goal: String
     let current: String?
+    /// What it is announced as: Finishes at and the line it shows.
+    let name: String
     let run: (Plan) -> Void
     @ViewBuilder let label: () -> Label
 
@@ -213,6 +218,7 @@ struct FinishMenu<Label: View>: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .help("Where this goal finishes")
+        .accessibilityLabel(name)
     }
 }
 
@@ -249,10 +255,11 @@ struct ProposedCard: View {
             }
             Spacer(minLength: Space.s2)
             HStack(spacing: 8) {
-                Button("Edit", action: edit)
-                if !row.node.work.kind.isGoal { Button("Split", action: split) }
+                Button("Edit", action: edit).accessibilityLabel(ControlName.card("Edit", row))
+                if !row.node.work.kind.isGoal { Button("Split", action: split).accessibilityLabel(ControlName.card("Split", row)) }
                 if others.count == 1, let other = others.first {
                     Button("Merge with \(other.number)") { merge(other) }
+                        .accessibilityLabel(ControlName.card("Merge", row, then: " with \(other.number)"))
                 } else if !others.isEmpty {
                     Menu("Merge with…") {
                         ForEach(others) { other in
@@ -262,8 +269,9 @@ struct ProposedCard: View {
                     .menuStyle(.button)
                     .menuIndicator(.hidden)
                     .fixedSize()
+                    .accessibilityLabel(ControlName.card("Merge", row, then: " with…"))
                 }
-                Button("Drop", action: drop)
+                Button("Drop", action: drop).accessibilityLabel(ControlName.card("Drop", row))
             }
             .buttonStyle(.plain)
             .font(TypeScale.caption)
