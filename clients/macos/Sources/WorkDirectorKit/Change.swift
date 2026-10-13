@@ -56,6 +56,9 @@ public struct PendingChange: Codable, Sendable, Hashable {
 
 /// What each finish line means, as a finish-line question offers it.
 public enum FinishMeaning {
+    /// Every finish line, in the order a person climbs them.
+    public static let lines = ["discovery", "research", "local build", "complete PR", "merged", "released"]
+
     /// How the director asks where a goal finishes.
     public static let question = "Where does this goal finish?"
 

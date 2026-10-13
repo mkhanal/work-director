@@ -21,7 +21,7 @@ struct GoalOverview: View {
 
     var body: some View {
         if let proposal = goal.proposal {
-            ProposalView(goal: goal, rows: proposal, run: run)
+            ProposalView(store: store, goal: goal, rows: proposal, run: run, reload: answered)
         } else {
             overview
         }
@@ -98,11 +98,19 @@ struct GoalOverview: View {
             if !nested {
                 VStack(alignment: .leading, spacing: 4) {
                     CardLabel("Finishes at")
+                    FinishMenu(goal: goal.goal.id, current: goal.finish?.line, run: run) {
+                        HStack(spacing: 4) {
+                            if let finish = goal.finishWords {
+                                Text(finish.line).font(TypeScale.headline).foregroundStyle(Palette.text)
+                            } else {
+                                Text("Not decided yet").font(TypeScale.callout).foregroundStyle(Palette.text3)
+                            }
+                            Text("▾").font(TypeScale.small).foregroundStyle(Palette.text2)
+                        }
+                    }
+                    .disabled(goal.goal.atRest)
                     if let finish = goal.finishWords {
-                        Text(finish.line).font(TypeScale.headline).foregroundStyle(Palette.text)
                         Text(finish.source).font(TypeScale.caption).foregroundStyle(Palette.text3)
-                    } else {
-                        Text("Not decided yet").font(TypeScale.callout).foregroundStyle(Palette.text3)
                     }
                 }
                 .canvasCard(stretch: true)

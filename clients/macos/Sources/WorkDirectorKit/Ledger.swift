@@ -221,10 +221,12 @@ public struct GoalDetail: Codable, Sendable, Hashable {
     public let superseded: [SupersededWork]
     /// Whether the goal's breakdown waits for the person's approval.
     public let proposed: Bool
+    /// Why its latest planning broke it down so; nil when the planner said nothing.
+    public let reasoning: Reasoning?
 
     enum CodingKeys: String, CodingKey {
         case goal, tasks, rollup, events, claims, landings, delivery, activity, asking, reports, waiting
-        case chain, tree, paths, finish, progress, course, superseded, proposed
+        case chain, tree, paths, finish, progress, course, superseded, proposed, reasoning
         case doneWhen = "done_when"
         case notDoneBecause = "not_done_because"
         case needsYou = "needs_you"

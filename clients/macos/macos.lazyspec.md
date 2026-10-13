@@ -188,3 +188,19 @@ hold only that product's work; with none, every product's.
 - A course change on the top goal shows the goal, its done-when and its finish line as they are and as they would be, with why, and the plan changes it brings.
 - A plan change shows each change as a sentence; a finish-line question offers each finish line as a choice, named and explained.
 - Each is answered through the question's own answer path, its recommended choice applying the change.
+
+## A Proposal Says Why It Is Broken Down So
+- Beside the proposal, Why this breakdown, Left out and How you'd judge it read the planner's reasoning, each only when the planner said it.
+- With no reasoning, nothing shows beside it.
+
+## A Proposal Is Reordered, Merged And Planned Again From Its Cards
+- Proposed sub-goals show each after the siblings it waits on, otherwise in the order served.
+- Dragging a card sets the order as dropped: each sub-goal waits on the one before it, the first on none; until a drag the planned waits stay.
+- A drag writes only the waits that change, from the top, each as `wd goal after <id> <id|none>`.
+- Merging two cards runs `wd goal merge <earlier> <later>`: the earlier card is kept.
+- Re-planning with a note runs `wd decide <goal> "<note>"`, then `wd goal plan <goal>`; an empty note is not sent.
+
+## A Person Changes Where A Top Goal Finishes
+- The proposal's and the Overview's Finishes at offer the six finish lines, named as a finish-line question names them.
+- Choosing one runs `wd goal finish <goal> "<line>"`.
+- A sub-goal's page offers none.

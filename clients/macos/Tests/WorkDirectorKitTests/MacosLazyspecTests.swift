@@ -1095,9 +1095,9 @@ struct SeededTree {
         let after = try await store.goal(top)
         let changed = try #require(after.proposal)
         #expect(changed.first { $0.id == export }?.node.doneWhen == "the export is a signed PDF and a CSV")
-        #expect(changed.last?.node.work.title == "Every record change keeps who and why", "a split sub-goal becomes a goal of its own")
-        #expect(changed.last?.chips == ["Will be planned further"])
-        #expect(changed.first { $0.id == export }?.chips == ["After \(changed.count)", "One agent"], "what waited on it waits on the goal it became")
+        #expect(changed.first?.node.work.title == "Every record change keeps who and why", "a split sub-goal becomes a goal of its own")
+        #expect(changed.first?.chips == ["Starts first", "Will be planned further"])
+        #expect(changed.first { $0.id == export }?.chips == ["After 1", "One agent"], "what waited on it waits on the goal it became")
         #expect(!changed.contains { $0.id == locked }, "a dropped sub-goal leaves the proposal")
         #expect(Plan.approve(top).argv == ["goal", "approve", top])
 
@@ -1139,5 +1139,75 @@ struct SeededTree {
         #expect(["discovery", "research", "local build", "complete PR", "merged", "released"].allSatisfy { FinishMeaning.of($0) != nil })
         #expect(AnswerDraft(try #require(pivot.needsYou.first { $0.work == found }?.question)).directorDecides == ["research"],
                 "answering goes through the question's own answer path")
+    }
+
+    @Test("A Proposal Says Why It Is Broken Down So")
+    func proposalReasoning() async throws {
+        let home = try Home()
+        let top = try home.goal("demo", "An inspector can get a full audit trail")
+        _ = try home.sub(top, "Every record change keeps who and why")
+        try home.sql("INSERT INTO event (work,kind,body,at) VALUES ('\(top)','note','proposed: 1 sub-goals','2026-10-13T10:00:00Z');")
+        let store = await Store(channel: try home.channel())
+        #expect(try await store.goal(top).reasoning == nil, "with no reasoning, nothing shows")
+        try home.sql("""
+        INSERT INTO event (work,kind,body,at,payload) VALUES ('\(top)','note','reasoning: why: three checks','2026-10-13T10:00:01Z',
+          '{"why":"An inspector checks three things.","left_out":null,"judge_by":"Export last month for one org."}');
+        """)
+        let reasoning = try #require(try await store.goal(top).reasoning)
+        #expect(reasoning.sections.map(\.label) == ["Why this breakdown", "How you'd judge it"], "a part the planner did not say is left out")
+        #expect(reasoning.sections.map(\.text) == ["An inspector checks three things.", "Export last month for one org."])
+    }
+
+    @Test("A Proposal Is Reordered, Merged And Planned Again From Its Cards")
+    func proposalReshaped() async throws {
+        let home = try Home()
+        let top = try home.goal("demo", "An inspector can get a full audit trail")
+        let a = try home.sub(top, "Every record change keeps who and why")
+        let b = try home.sub(top, "An admin can export the trail", "--after", a)
+        let c = try home.sub(top, "The trail cannot be edited", "--after", a)
+        let d = try home.sub(top, "A checklist maps to the export")
+        try home.wd("goal", "after", a, d)
+        try home.sql("INSERT INTO event (work,kind,body,at) VALUES ('\(top)','note','proposed: 4 sub-goals','2026-10-13T10:00:00Z');")
+        let store = await Store(channel: try home.channel())
+        var goal = try await store.goal(top)
+        #expect(try #require(goal.proposal).map(\.id) == [d, a, b, c], "each after what it waits on, else as served")
+
+        let moves = goal.reorder(moving: c, to: 1)
+        #expect(moves.map(\.argv) == [["goal", "after", c, d], ["goal", "after", a, c]],
+                "each waits on the one before it; only waits that change are written, from the top")
+        #expect(goal.reorder(moving: d, to: 0).map(\.argv) == [["goal", "after", c, b]],
+                "a drop in place still sets the order as shown")
+        for plan in moves { #expect(try await store.run(plan).code == 0) }
+        goal = try await store.goal(top)
+        let rows = try #require(goal.proposal)
+        #expect(rows.map(\.id) == [d, c, a, b])
+        #expect(goal.reorder(moving: a, to: 0).first?.argv == ["goal", "after", a, "none"], "the first waits on none")
+
+        let merge = Plan.merge(rows[3], rows[2])
+        #expect(merge.argv == ["goal", "merge", a, b], "the earlier card is kept")
+        #expect(try await store.run(merge).code == 0)
+        #expect(try #require(try await store.goal(top).proposal).map(\.id) == [d, c, a])
+
+        let replan = try Plan.replan(top, note: "keep the export read-only")
+        #expect(replan.map(\.argv) == [["decide", top, "keep the export read-only"], ["goal", "plan", top]])
+        #expect(throws: PlanError.self) { try Plan.replan(top, note: "  ") }
+    }
+
+    @Test("A Person Changes Where A Top Goal Finishes")
+    func finishChanged() async throws {
+        let home = try Home()
+        let top = try home.goal("demo", "Why does sync drop events?")
+        let under = try home.sub(top, "The cause is found", "--split")
+        let store = await Store(channel: try home.channel())
+        #expect(FinishMeaning.lines == ["discovery", "research", "local build", "complete PR", "merged", "released"])
+        #expect(FinishMeaning.lines.allSatisfy { FinishMeaning.of($0) != nil }, "each is named as a finish-line question names it")
+        let plan = Plan.finish(top, "complete PR")
+        #expect(plan.argv == ["goal", "finish", top, "complete PR"])
+        #expect(try await store.run(plan).code == 0)
+        let goal = try await store.goal(top)
+        #expect(goal.finish?.line == "complete PR")
+        #expect(goal.finishWords?.line == "A complete PR")
+        #expect(try await store.goal(under).chain.count > 1, "a sub-goal's page offers none")
+        #expect(try await store.run(Plan.finish(under, "research")).code != 0)
     }
 }
