@@ -55,6 +55,12 @@ public struct Plan: Hashable, Sendable, Identifiable {
         Plan(title: "Record decision", argv: ["decide", id, try required(text, for: "a decision")])
     }
 
+    /// Adds a sub-goal under a goal: an outcome and what makes it done.
+    public static func addSubGoal(_ id: String, outcome: String, doneWhen: String) throws -> Plan {
+        Plan(title: "Add sub-goal", argv: ["goal", "add", id, try required(outcome, for: "a sub-goal"),
+                                            "--done-when", try required(doneWhen, for: "a sub-goal's done-when")])
+    }
+
     public static func abandon(_ id: String, detail: String) -> Plan {
         let detail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
         return Plan(title: "Abandon", argv: ["abandon", id] + (detail.isEmpty ? [] : ["--reason", detail]))

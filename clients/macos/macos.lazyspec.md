@@ -151,3 +151,13 @@ hold only that product's work; with none, every product's.
 - A node that is a goal opens as a goal page of its own; a task, or a group of an older plan's tasks, does not.
 - The board reads each top goal's progress, how many questions below it wait on the person, and where it finished.
 - A goal's record reads as its counts and its entries, newest first.
+
+## A Goal Page Shows What Done Means, What Needs You And Its Sub-Goals
+- A goal page is headed by its breadcrumb from the product down, each ancestor a way to its page, and its title with a badge that says Needs you while a question waits below it.
+- The overview opens with the goal's done-when, where its top goal finishes and who decided it, and its course with its verdict; a sub-goal's page leaves out where it finishes.
+- Every question below the goal is answered in place, headed by its place in the tree, each level that is a goal a way to its page.
+- Sub-goals are listed as served, each with its state, its line and its badge; a question below a row marks it as needing the person.
+- A goal row opens its own page; a task row folds its steps open and closed, all closed but the first working row's.
+- Adding a sub-goal runs `wd goal add <id> "<outcome>" --done-when "<done when>"`; both are required.
+- What holds the goal from done is listed as served.
+- A sub-goal's page lists what the director did there, from its record.

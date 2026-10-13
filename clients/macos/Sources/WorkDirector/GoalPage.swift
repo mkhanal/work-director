@@ -25,194 +25,27 @@ enum GoalView: String, CaseIterable {
     }
 }
 
-/// A row of tabs under a page's header, each with what it holds as a count,
-/// and a mark on the one that needs you.
+/// A row of tabs under a page's header, the chosen one filled.
 struct PageTabs<Tab: Hashable>: View {
     let tabs: [Tab]
     @Binding var selection: Tab
     let label: (Tab) -> String
-    let symbol: (Tab) -> String
-    var count: (Tab) -> Int? = { _ in nil }
-    var alert: (Tab) -> Bool = { _ in false }
 
     var body: some View {
         HStack(spacing: Space.s1) {
             ForEach(tabs, id: \.self) { tab in
                 Button { selection = tab } label: {
-                    HStack(spacing: Space.s1 + 2) {
-                        Image(systemName: symbol(tab)).font(.system(size: IconSize.small, weight: .medium))
-                        Text(label(tab))
-                        if let n = count(tab), n > 0 {
-                            Text("\(n)").monospacedDigit().foregroundStyle(.tertiary)
-                        }
-                        if alert(tab) {
-                            Circle().fill(Palette.attention).frame(width: 6, height: 6)
-                        }
-                    }
-                    .font(selection == tab ? TypeScale.calloutStrong : TypeScale.calloutMedium)
-                    .foregroundStyle(selection == tab ? .primary : .secondary)
-                    .padding(.horizontal, Space.s3)
-                    .padding(.vertical, Space.s1 + 2)
-                    .background(selection == tab ? Palette.sunken.opacity(2) : .clear, in: RoundedRectangle(cornerRadius: Radius.chip + 2))
-                    .contentShape(Rectangle())
+                    Text(label(tab))
+                        .font(selection == tab ? TypeScale.calloutStrong : TypeScale.callout)
+                        .foregroundStyle(selection == tab ? Palette.text : Palette.text2)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(selection == tab ? Palette.inner : .clear, in: RoundedRectangle(cornerRadius: Radius.button))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-    }
-}
-
-/// Where a goal stands, at a glance: what waits on you, how far its tasks have
-/// come, who is working now, the supervisor's latest word and what you decided.
-struct GoalOverview: View {
-    let store: Store
-    let goal: GoalDetail
-    let gate: Gate?
-    let pass: (Plan) -> Void
-    let focus: (String) -> Void
-    let answered: () -> Void
-    let show: (GoalView) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Space.s6) {
-            if goal.waitingOnYou > 0 {
-                OverviewSection(title: "Needs you", tint: Palette.attention) {
-                    Waiting(store: store, goal: goal, open: focus, answered: answered)
-                }
-            }
-            if let gate, let plan = Plan.passing(gate) {
-                OverviewSection(title: "Next step") {
-                    HStack(alignment: .center, spacing: Space.s4) {
-                        VStack(alignment: .leading, spacing: Space.s1) {
-                            Text(plan.title).font(TypeScale.title)
-                            if let why = gate.why { Text(why).font(TypeScale.callout).foregroundStyle(.secondary) }
-                        }
-                        Spacer()
-                        Button(plan.title) { pass(plan) }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.large)
-                            .help(plan.commandLine)
-                    }
-                    .card()
-                }
-            }
-            OverviewSection(title: "Progress", trailing: {
-                Button("All tasks") { show(.tasks) }.buttonStyle(.link)
-            }) {
-                ProgressCard(progress: goal.taskProgress)
-            }
-            if !goal.working.isEmpty {
-                OverviewSection(title: "Working now") {
-                    VStack(alignment: .leading, spacing: Space.s2) {
-                        ForEach(goal.working) { task in
-                            Button { focus(task.id) } label: {
-                                AgentChip(task: task, activity: goal.activity[task.id], line: "")
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-            }
-            if let latest = goal.latestSupervision {
-                OverviewSection(title: "Latest from the supervisor", trailing: {
-                    Button("Conversation") { show(.conversation) }.buttonStyle(.link)
-                }) {
-                    VStack(alignment: .leading, spacing: Space.s2) {
-                        Text(when(latest.event.at)).font(TypeScale.meta).foregroundStyle(.tertiary)
-                        SupervisorBody(reply: latest.reply, goal: goal, focus: focus)
-                    }
-                    .card()
-                }
-            }
-            let decisions = goal.yours.filter { $0.kind == "decision" }
-            if !decisions.isEmpty {
-                OverviewSection(title: "What you decided") {
-                    VStack(alignment: .leading, spacing: Space.s3) {
-                        ForEach(decisions.reversed()) { e in
-                            HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
-                                Image(systemName: "checkmark.seal").foregroundStyle(Color.accentColor)
-                                Text(e.body).font(TypeScale.callout).lineLimit(3).textSelection(.enabled)
-                                Spacer(minLength: Space.s2)
-                                Text(when(e.at)).font(TypeScale.meta).foregroundStyle(.tertiary)
-                            }
-                        }
-                    }
-                    .card()
-                }
-            }
-            if !goal.goal.detail.isEmpty {
-                OverviewSection(title: "What you asked") {
-                    Text(goal.goal.detail).readable().textSelection(.enabled).lineLimit(10).card()
-                }
-            }
-        }
-    }
-}
-
-/// One section of the overview: a small title, then what it holds.
-struct OverviewSection<Content: View, Trailing: View>: View {
-    let title: String
-    var tint: Color? = nil
-    @ViewBuilder var trailing: Trailing
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Space.s3) {
-            HStack {
-                MicroLabel(title).foregroundStyle(tint ?? .secondary)
-                Spacer()
-                trailing.font(TypeScale.meta)
-            }
-            content
-        }
-    }
-}
-
-extension OverviewSection where Trailing == EmptyView {
-    init(title: String, tint: Color? = nil, @ViewBuilder content: () -> Content) {
-        self.init(title: title, tint: tint, trailing: { EmptyView() }, content: content)
-    }
-}
-
-/// How far a goal's tasks have come: one bar, coloured by where each stands,
-/// and the counts under it.
-struct ProgressCard: View {
-    let progress: TaskProgress
-
-    private var parts: [(String, Int, Color)] {
-        [("Done", progress.done, Palette.settled), ("Working", progress.working, .accentColor),
-         ("Review", progress.review, .purple), ("Blocked", progress.blocked, Palette.failure),
-         ("Waiting", progress.waiting, .secondary.opacity(0.5)), ("Dropped", progress.dropped, .secondary.opacity(0.25))]
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Space.s3) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("\(progress.done) of \(progress.total)").font(TypeScale.title).monospacedDigit()
-                Text("tasks done").font(TypeScale.callout).foregroundStyle(.secondary)
-            }
-            GeometryReader { g in
-                HStack(spacing: 2) {
-                    ForEach(parts.filter { $0.1 > 0 }, id: \.0) { part in
-                        Rectangle().fill(part.2)
-                            .frame(width: max(4, (g.size.width - 2 * CGFloat(parts.count)) * CGFloat(part.1) / CGFloat(max(progress.total, 1))))
-                    }
-                }
-            }
-            .frame(height: 8)
-            .clipShape(Capsule())
-            HStack(spacing: Space.s4) {
-                ForEach(parts.filter { $0.1 > 0 }, id: \.0) { part in
-                    HStack(spacing: Space.s1 + 2) {
-                        Circle().fill(part.2).frame(width: 7, height: 7)
-                        Text("\(part.1)").monospacedDigit()
-                        Text(part.0).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .font(TypeScale.meta)
-        }
-        .card()
     }
 }
 

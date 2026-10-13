@@ -153,6 +153,41 @@ func fakeRunner(_ home: Home) throws {
     """.write(to: home.dir.appendingPathComponent("runners/fake.toml"), atomically: true, encoding: .utf8)
 }
 
+/// A goal tree as the canvas draws it: a done task, a sub-goal split in two
+/// (one waiting on the person, one superseded), a working task with steps and
+/// a task waiting on two siblings.
+struct SeededTree {
+    let home: Home
+    let top, tagged, guide, note, agent, rollback, wiki: String
+
+    init() throws {
+        home = try Home()
+        top = try home.goal("demo", "Release notes for every release")
+        try home.wd("goal", "edit", top, "--done-when", "every release has a guide and a note")
+        tagged = try home.sub(top, "Every release is tagged")
+        guide = try home.sub(top, "Whoever deploys gets a guide", "--split")
+        note = try home.sub(top, "Customers get a release note")
+        agent = try home.sub(top, "Any agent can produce the notes", "--after", "\(tagged),\(guide)")
+        rollback = try home.sub(guide, "The guide says how to roll back")
+        wiki = try home.sub(guide, "Guides are published to the wiki")
+        try home.wd("goal", "drop", wiki, "guides live with each release")
+        try home.sql("""
+        UPDATE work SET finish_line='complete PR', finish_source='taste', state='running' WHERE id='\(top)';
+        UPDATE work SET state='done', runner='claude', session='s1' WHERE id='\(tagged)';
+        UPDATE work SET state='running', runner='claude', session='s2' WHERE id='\(note)';
+        UPDATE work SET state='needs-input', runner='codex', session='s3' WHERE id='\(rollback)';
+        INSERT INTO step VALUES ('\(tagged)',1,'Tag','done'),('\(tagged)',2,'List','done');
+        INSERT INTO step VALUES ('\(note)',1,'Read past notes','done'),('\(note)',2,'Write the template','doing'),('\(note)',3,'Generate a sample','todo'),('\(note)',4,'Old idea','dropped');
+        INSERT INTO event (work,kind,body,at) VALUES ('\(top)','course','on course: the tag format suits the rest','2026-10-13T11:52:00Z');
+        INSERT INTO event (work,kind,body,at) VALUES ('\(tagged)','judged','met: every release has a tag','2026-10-13T11:48:00Z');
+        INSERT INTO event (work,kind,body,at) VALUES ('\(guide)','note','chore: refreshed dependencies','2026-10-13T11:31:00Z');
+        INSERT INTO event (work,kind,body,at) VALUES ('\(rollback)','question','Cover down-migrations?
+        - Only redeploy (recommended)
+        - Both','2026-10-13T12:14:00Z');
+        """)
+    }
+}
+
 @Suite struct Macos {
     @Test("The App Runs The wd Bundled Beside It")
     func appRunsBundledWD() throws {
@@ -834,43 +869,26 @@ func fakeRunner(_ home: Home) throws {
     }
     @Test("The Kit Reads A Goal As A Tree")
     func goalAsTree() async throws {
-        let home = try Home()
-        let top = try home.goal("demo", "Release notes for every release")
-        try home.wd("goal", "edit", top, "--done-when", "every release has a guide and a note")
-        let tagged = try home.sub(top, "Every release is tagged")
-        let guide = try home.sub(top, "Whoever deploys gets a guide", "--split")
-        let agent = try home.sub(top, "Any agent can produce the notes", "--after", "\(tagged),\(guide)")
-        let rollback = try home.sub(guide, "The guide says how to roll back")
-        let wiki = try home.sub(guide, "Guides are published to the wiki")
-        try home.wd("goal", "drop", wiki, "guides live with each release")
-        try home.sql("""
-        UPDATE work SET finish_line='complete PR', finish_source='taste' WHERE id='\(top)';
-        UPDATE work SET state='done' WHERE id='\(tagged)';
-        UPDATE work SET state='needs-input' WHERE id='\(rollback)';
-        INSERT INTO step VALUES ('\(agent)',1,'Read past notes','done'),('\(agent)',2,'Write the template','doing'),('\(agent)',3,'Old idea','dropped');
-        INSERT INTO event (work,kind,body,at) VALUES ('\(top)','course','on course: the tag format suits the rest','2026-10-13T11:52:00Z');
-        INSERT INTO event (work,kind,body,at) VALUES ('\(rollback)','question','Cover down-migrations?
-        - Only redeploy (recommended)
-        - Both','2026-10-13T12:14:00Z');
-        """)
+        let t = try SeededTree()
+        let (home, top, tagged, guide, note, agent, rollback, wiki) = (t.home, t.top, t.tagged, t.guide, t.note, t.agent, t.rollback, t.wiki)
         let store = await Store(channel: try home.channel())
         let goal = try await store.goal(top)
         #expect(goal.chain.map(\.id) == [top])
         #expect(goal.doneWhen == "every release has a guide and a note")
         #expect(goal.finish == FinishLine(line: "complete PR", source: "taste"))
-        #expect(goal.progress == TreeProgress(done: 1, total: 3, superseded: 0))
-        #expect(goal.notDoneBecause.first == "2 sub-goals open")
+        #expect(goal.progress == TreeProgress(done: 1, total: 4, superseded: 0))
+        #expect(goal.notDoneBecause.first == "3 sub-goals open")
         #expect(goal.course?.verdict == "on course")
         #expect(goal.course?.why == "the tag format suits the rest")
-        #expect(goal.tree.map(\.id) == [tagged, guide, agent])
+        #expect(goal.tree.map(\.id) == [tagged, guide, note, agent])
         let guideNode = goal.tree[1]
         #expect(guideNode.opensAsGoal && !goal.tree[0].opensAsGoal)
         #expect(guideNode.children.map(\.id) == [rollback, wiki])
         #expect(guideNode.plannedInto == 2)
         #expect(guideNode.needsYou == 1)
         #expect(guideNode.children[1].work.state == .superseded)
-        #expect(goal.tree[2].waitingOn == ["Whoever deploys gets a guide"], "a settled sibling is no longer waited on")
-        #expect(goal.tree[2].steps.map(\.state) == [.done, .doing, .dropped])
+        #expect(goal.tree[3].waitingOn == ["Whoever deploys gets a guide"], "a settled sibling is no longer waited on")
+        #expect(goal.tree[2].steps.map(\.state) == [.done, .doing, .todo, .dropped])
         #expect(goal.tree[2].doing == "Write the template")
         #expect(goal.paths[rollback] == "Whoever deploys gets a guide › The guide says how to roll back")
         #expect(goal.branch(to: rollback).map(\.id) == [guide, rollback])
@@ -887,7 +905,7 @@ func fakeRunner(_ home: Home) throws {
         let board = try #require(await store.board)
         let row = try #require(board.goals.first { $0.work.id == top })
         #expect(board.goals.map(\.work.id) == [top], "only top goals are on the board")
-        #expect(row.progress == TreeProgress(done: 1, total: 3, superseded: 0))
+        #expect(row.progress == TreeProgress(done: 1, total: 4, superseded: 0))
         #expect(row.needsYou == 1)
         #expect(row.finish?.line == "complete PR")
         #expect(row.finished == nil)
@@ -897,5 +915,56 @@ func fakeRunner(_ home: Home) throws {
         #expect(record.entries.first?.kind == "question")
         #expect(record.entries.first?.where == "Whoever deploys gets a guide › The guide says how to roll back")
         #expect(record.entries.last?.kind == "asked")
+    }
+
+    @Test("A Goal Page Shows What Done Means, What Needs You And Its Sub-Goals")
+    func goalPage() async throws {
+        let t = try SeededTree()
+        let store = await Store(channel: try t.home.channel())
+        let goal = try await store.goal(t.top)
+        #expect(goal.titleBadge == GoalBadge("Needs you", .attention), "a question below the goal shows on its title")
+        #expect(goal.finishWords?.line == "A complete PR")
+        #expect(goal.finishWords?.source == "From your taste.")
+        #expect(goal.course?.badge == GoalBadge("On course", .settled))
+        #expect(goal.progressLine == "1 of 4 done")
+
+        let ask = try #require(goal.needsYou.first)
+        #expect(goal.pathParts(of: ask).map(\.title) == ["Whoever deploys gets a guide", "The guide says how to roll back"])
+        #expect(goal.pathParts(of: ask).map(\.opens) == [t.guide, nil], "a level that is a goal opens its page")
+
+        let rows = Dictionary(uniqueKeysWithValues: goal.tree.map { ($0.id, $0) })
+        let tagged = try #require(rows[t.tagged]), guide = try #require(rows[t.guide])
+        let note = try #require(rows[t.note]), agent = try #require(rows[t.agent])
+        #expect(tagged.mark == .done && tagged.badge == GoalBadge("Done", .settled))
+        #expect(tagged.meta() == "Done when Every release is tagged is checked · claude · 2 steps · judged met")
+        #expect(guide.mark == .needsYou && guide.badge == GoalBadge("1 needs you", .attention))
+        #expect(guide.meta() == "Planned into 2 sub-goals · 0 of 1 done")
+        #expect(guide.opensAsGoal && !guide.folds, "a goal row opens its page")
+        #expect(note.mark == .working && note.badge == GoalBadge("Working · 1 of 3", .live), "dropped steps are not counted")
+        #expect(note.meta() == "claude · now: Write the template")
+        #expect(note.folds, "a task row folds its steps")
+        #expect(agent.mark == .waiting && agent.badge == GoalBadge("Waiting", .waiting))
+        #expect(agent.meta() == "Waits on: Whoever deploys gets a guide")
+        #expect(goal.openSteps == t.note, "the first working row starts open")
+
+        let nested = try await store.goal(t.guide)
+        let wiki = try #require(nested.tree.first { $0.id == t.wiki })
+        #expect(wiki.mark == .superseded)
+        #expect(wiki.meta(superseded: nested.superseded) == "Superseded: guides live with each release · its work stays readable")
+        let rollback = try #require(nested.tree.first { $0.id == t.rollback })
+        #expect(rollback.meta() == "codex · waits for you")
+        #expect(nested.progressLine == "0 of 1 done · 1 superseded")
+        #expect(goal.notDoneBecause.count == 3, "open sub-goals, the done-when and the finish line")
+
+        #expect(goal.askedAt(ask.question) == "2026-10-13T12:14:00Z")
+        let add = try Plan.addSubGoal(t.top, outcome: " Notes are translated ", doneWhen: "each note has a French copy")
+        #expect(add.argv == ["goal", "add", t.top, "Notes are translated", "--done-when", "each note has a French copy"])
+        #expect(throws: PlanError.self) { try Plan.addSubGoal(t.top, outcome: "Notes", doneWhen: " ") }
+        #expect(try await store.run(add).code == 0)
+        #expect(try await store.goal(t.top).tree.last?.work.title == "Notes are translated")
+
+        let here = try await store.record(t.guide)
+        #expect(here.entries.contains { $0.kind == "chore" && $0.by == "director" }, "a nested page's record holds what the director did there")
+        #expect(here.entries.first { $0.kind == "chore" }?.sentence == "Chore: refreshed dependencies")
     }
 }

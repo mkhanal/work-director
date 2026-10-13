@@ -169,6 +169,8 @@ struct WorkDetail: View {
                 ProgressView()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Palette.page)
         .navigationTitle(loaded?.work.title ?? id)
         .navigationSubtitle(loaded.map { "\($0.work.project) · \($0.work.state.look.label)" } ?? "")
         .task(id: store.reads) { await load() }
@@ -197,8 +199,8 @@ struct WorkDetail: View {
             let focusTask = { (id: String) in choose(id, in: loaded) }
             switch goalView {
             case .overview:
-                GoalOverview(store: store, goal: goal, gate: gate, pass: { plan = $0 }, focus: focusTask,
-                             answered: { Task { await load() } }, show: { goalView = $0 })
+                GoalOverview(store: store, goal: goal, open: open, focus: focusTask,
+                             answered: { Task { await load() } }, run: { plan = $0 })
             case .conversation:
                 GoalThread(store: store, goal: goal, focus: focusTask, answered: { Task { await load() } }, filter: $filter)
             case .tasks:
@@ -277,33 +279,24 @@ struct WorkDetail: View {
     /// The page's fixed top: its name and where it stands, and the views it
     /// is read in. It stays while the view under it scrolls.
     @ViewBuilder private func pageTop(_ loaded: Loaded) -> some View {
-        VStack(alignment: .leading, spacing: Space.s4) {
+        VStack(alignment: .leading, spacing: 14) {
             Header(work: loaded.work, goal: goalDetail(loaded), open: open,
                    rename: { title in plan = try? Plan.rename(loaded.work.id, title: title) })
             switch loaded {
-            case .goal(let g):
-                PageTabs(tabs: GoalView.allCases, selection: $goalView, label: \.label, symbol: \.symbol,
-                         count: { view in
-                             switch view {
-                             case .tasks: g.tasks.count
-                             case .record: g.events.count
-                             default: nil
-                             }
-                         },
-                         alert: { $0 == .overview && g.waitingOnYou > 0 })
+            case .goal:
+                PageTabs(tabs: GoalView.allCases, selection: $goalView, label: \.label)
             case .work(let w, _):
                 if hasSession(w) {
                     PageTabs(tabs: [Tab.conversation, Tab.record], selection: $tab,
-                             label: { $0 == .conversation ? "Conversation" : "Record" },
-                             symbol: { $0 == .conversation ? "bubble.left.and.bubble.right" : "list.bullet.rectangle" })
+                             label: { $0 == .conversation ? "Conversation" : "Record" })
                 }
             }
         }
-        .padding(.horizontal, Space.s6)
-        .padding(.top, Space.s4)
+        .padding(.horizontal, Space.gutter)
+        .padding(.top, Space.section)
         .padding(.bottom, Space.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        Divider()
+        Rectangle().fill(Palette.hairline).frame(height: 1)
     }
 
     private func goalDetail(_ loaded: Loaded) -> GoalDetail? {
@@ -453,14 +446,30 @@ struct Header: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.s2) {
-            if let parent = work.parent {
+        VStack(alignment: .leading, spacing: 6) {
+            if let goal {
+                HStack(spacing: 6) {
+                    Text(work.project)
+                    ForEach(Array(goal.chain.enumerated()), id: \.element.id) { i, link in
+                        Text("›")
+                        if i == goal.chain.count - 1 {
+                            Text(link.title).foregroundStyle(Palette.text)
+                        } else {
+                            Button(link.title) { open(link.id) }.buttonStyle(.plain).foregroundStyle(Palette.link)
+                        }
+                    }
+                }
+                .font(TypeScale.caption)
+                .foregroundStyle(Palette.text3)
+                .lineLimit(1)
+            } else if let parent = work.parent {
                 Button { open(parent) } label: {
                     Label("Goal", systemImage: "chevron.backward")
                 }
                 .buttonStyle(.link)
                 .font(TypeScale.meta)
             }
+            HStack(alignment: .center, spacing: Space.s3) {
             if editing {
                 TextField("Name", text: $draft)
                     .textFieldStyle(.plain)
@@ -477,6 +486,9 @@ struct Header: View {
                     .contextMenu { Button("Rename…", action: begin) }
                     .help("Double-click to rename")
             }
+                if let goal { Badge(goal.titleBadge) }
+            }
+            if goal == nil {
             HStack(spacing: Space.s2) {
                 StatePill(state: work.state)
                 Group {
@@ -494,6 +506,7 @@ struct Header: View {
                 }
                 .font(TypeScale.meta)
                 .foregroundStyle(.secondary)
+            }
             }
             if let goal, let delivery = goal.delivery, delivery.status != "none" || delivery.error != nil || !goal.landings.isEmpty {
                 DeliveryLine(delivery: delivery, landings: goal.landings)
