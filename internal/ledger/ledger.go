@@ -2070,8 +2070,9 @@ func (l *Ledger) Conflicts(epicID string) ([]core.Conflict, error) {
 	return out, nil
 }
 
-// review → soft-done. Epic: needs every task done/dropped, DONE report, passing
-// verify, PR. Task: needs only the DONE report. Standalone: DONE + verify, and
+// review → soft-done. Goal: needs every task under it settled, and its finish
+// line reached (FinishReached), or with none a DONE report, passing verify and
+// PR. Task: needs only the DONE report. Standalone: DONE + verify, and
 // PR when code changed.
 func (l *Ledger) SoftDone(id string, codeChanged bool) (core.Work, error) {
 	w, err := l.Get(id)
@@ -2105,14 +2106,20 @@ func (l *Ledger) SoftDone(id string, codeChanged bool) (core.Work, error) {
 		if n > 0 {
 			missing = append(missing, fmt.Sprintf("%d task(s) not done", n))
 		}
-		if r := last(core.EventReport); r == nil || !strings.HasPrefix(r.Body, "DONE") {
-			missing = append(missing, "DONE report")
-		}
-		if v := last(core.EventVerify); v == nil || !strings.HasPrefix(v.Body, "pass") {
-			missing = append(missing, "passing verify")
-		}
-		if last(core.EventPr) == nil {
-			missing = append(missing, "pull request")
+		if w.FinishLine != nil {
+			if ok, what := core.FinishReached(*w.FinishLine, evs); !ok {
+				missing = append(missing, strings.Split(what, ", ")...)
+			}
+		} else {
+			if r := last(core.EventReport); r == nil || !strings.HasPrefix(r.Body, "DONE") {
+				missing = append(missing, "DONE report")
+			}
+			if v := last(core.EventVerify); v == nil || !strings.HasPrefix(v.Body, "pass") {
+				missing = append(missing, "passing verify")
+			}
+			if last(core.EventPr) == nil {
+				missing = append(missing, "pull request")
+			}
 		}
 	} else if w.Parent != nil {
 		if r := last(core.EventReport); r == nil || !strings.HasPrefix(r.Body, "DONE") {

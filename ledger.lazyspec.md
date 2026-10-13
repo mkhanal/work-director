@@ -154,6 +154,10 @@ impact paths overlap, listing the overlapping paths.
 ## Soft Done Requires Goal Tasks Done
 For a goal, `SoftDone` also requires every task under it done, dropped or superseded.
 
+## A Goal's Finish Line Decides What Soft Done Requires
+- A goal finishing at discovery or research needs a DONE report; at a local build also a passing verify; at a complete PR also a pull request; at merged a commit landing; at released a commit landing and a released note.
+- A goal with no finish line needs a DONE report, a passing verify and a pull request.
+
 ## The Ledger Persists Across Reopen
 Work added to a file-backed ledger is still there after closing and reopening it.
 

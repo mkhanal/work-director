@@ -4789,12 +4789,83 @@ func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
 	}
 	o.busy(t, "task-"+o.a, false)
 	o.say(t, supervisor, "ACTIONS:", "DONE: every part is built and fits")
+	if s := superviseOnce(t, f, o.goal); len(s.Refused) != 1 || !strings.Contains(s.Refused[0], o.a+" is running, not settled") {
+		t.Fatalf("DONE while %s is running = %+v, want it refused", o.a, s)
+	}
+	o.say(t, supervisor, "ACTIONS:", "SUPERSEDE "+o.a+": folded into the collector", "SUPERSEDE "+o.b+": folded into the note", "SUPERSEDE "+added.ID+": not needed after all",
+		"DONE: every part is built and fits")
 	superviseOnce(t, f, o.goal)
 	if got := stateOf(t, f, o.goal); got != core.StateReview {
 		t.Fatalf("goal after DONE = %s, want review", got)
 	}
 	if reports := f.bodies(t, o.goal, core.EventReport); len(reports) != 1 || !strings.Contains(reports[0], "every part is built and fits") {
 		t.Fatalf("goal reports = %q", reports)
+	}
+}
+
+func TestAGoalIsDeclaredDoneOnlyWhenEveryPartOfDoneHolds(t *testing.T) {
+	f := newCLIFixture(t)
+	o := overseenGoal(t, f)
+	superviseOnce(t, f, o.goal)
+	done := func() supervised {
+		t.Helper()
+		o.say(t, supervisor, "ACTIONS:", "DONE: every part is built and fits")
+		return superviseOnce(t, f, o.goal)
+	}
+	if s := done(); len(s.Refused) != 1 || !strings.Contains(s.Refused[0], o.a+" is running, not settled") {
+		t.Fatalf("DONE with %s open = %+v, want it refused naming it", o.a, s)
+	}
+	o.say(t, supervisor, "ACTIONS:", "MET "+o.b+": changes are grouped", "SUPERSEDE "+o.a+": folded into the collector")
+	superviseOnce(t, f, o.goal)
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, err := l.Add("overseen", "Tag the release", ledger.AddOptions{Parent: &o.goal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range []core.State{core.StateBriefed, core.StateRunning, core.StateReview} {
+		if _, err := l.Transition(closed.ID, st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := l.AddEvent(closed.ID, core.EventReport, "DONE\nSTATUS: DONE"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.SoftDone(closed.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Transition(closed.ID, core.StateDone); err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	if s := done(); len(s.Refused) != 1 || !strings.Contains(s.Refused[0], closed.ID+" is done but its done-when was never judged met") {
+		t.Fatalf("DONE with %s unjudged = %+v, want it refused naming it", closed.ID, s)
+	}
+	if l, err = ledger.New(filepath.Join(f.wdHome, "ledger.db")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.AddEvent(closed.ID, core.EventJudged, "met: the tag exists"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetFinish(o.goal, core.FinishLocalBuild, core.FinishFromPerson); err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	proj := func(verify string) {
+		body := "---\npath: " + f.sample + "\nrunner: overseer\nmode: auto\nverify: [" + verify + "]\n---\n"
+		if err := os.WriteFile(filepath.Join(f.wdHome, "projects", "overseen.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	proj("test -f NOT-THERE")
+	if s := done(); len(s.Refused) != 1 || !strings.Contains(s.Refused[0], "the finish line (local build) is not reached: passing verify") {
+		t.Fatalf("DONE with a failing verify = %+v, want it refused naming the finish line", s)
+	}
+	proj("test -f README.md")
+	if s := done(); len(s.Refused) != 0 || stateOf(t, f, o.goal) != core.StateReview {
+		t.Fatalf("DONE with every part holding = %+v, goal %s; want review", s, stateOf(t, f, o.goal))
 	}
 }
 

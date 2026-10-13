@@ -702,10 +702,14 @@ func (c *Cli) chore(goal core.Work, p *project.Project, what string) error {
 	return err
 }
 
-// unfinished says which task of goal holds it back from done: one not started
-// yet, or one running with a session that is; else "".
+// unfinished says what holds goal back from done, else "": the first of a
+// sub-goal not started or still working, any other sub-goal not settled, a finished sub-goal whose done-when was never judged
+// met, and its finish line not reached as far as review goes. Landing waits
+// for the person, so a finish line past a local build is held to a local
+// build here and to the whole line at soft-done; the director runs the
+// project's verify for it when this run has none passing.
 func (c *Cli) unfinished(goal core.Work) (string, error) {
-	tasks, err := c.Ledger.Tasks(goal.ID)
+	tree, err := c.Ledger.Under(goal.ID)
 	if err != nil {
 		return "", err
 	}
@@ -713,35 +717,79 @@ func (c *Cli) unfinished(goal core.Work) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, t := range tasks {
+	for _, t := range tree[1:] {
 		if t.State == core.StateQueued || t.State == core.StateBriefed {
-			return t.ID + " is not started yet: START it, or DROP it with why", nil
+			return t.ID + " is not started yet: START it, or SUPERSEDE it with why", nil
 		}
-		if t.State != core.StateRunning {
-			continue
-		}
-		h, ok, err := coordinator.Handle(c.Ledger, t, p)
-		if err != nil || !ok {
-			return t.ID + " is still working", err
-		}
-		r, err := runner.RunnerNamed(h.Runner)
-		if err != nil {
-			return "", err
-		}
-		if n, err := c.Ledger.Undelivered(t.ID); err != nil {
-			return "", err
-		} else if len(n) > 0 {
-			return t.ID + " is still working", nil
-		}
-		status, err := r.Status(h)
-		if err != nil {
-			return "", err
-		}
-		if status == runner.StatusRunning {
-			return t.ID + " is still working", nil
+		if t.State == core.StateRunning && t.Kind == core.WorkTask {
+			if working, err := c.stillWorking(t, p); err != nil || working {
+				return t.ID + " is still working", err
+			}
 		}
 	}
+	for _, t := range tree[1:] {
+		if !core.Settled(t.State) {
+			return fmt.Sprintf("%s is %s, not settled", t.ID, t.State), nil
+		}
+	}
+	judged := core.EventJudged
+	for _, t := range tree[1:] {
+		if t.Kind != core.WorkTask || t.State != core.StateDone {
+			continue
+		}
+		evs, err := c.Ledger.Events(t.ID, &judged)
+		if err != nil {
+			return "", err
+		}
+		if len(evs) == 0 || !strings.HasPrefix(evs[len(evs)-1].Body, "met: ") {
+			return t.ID + " is done but its done-when was never judged met: MET it with why", nil
+		}
+	}
+	if goal.FinishLine == nil {
+		return "", nil
+	}
+	line := *goal.FinishLine
+	if line.ChangesCode() {
+		line = core.FinishLocalBuild
+	}
+	run, err := c.Ledger.CurrentRun(goal.ID)
+	if err != nil {
+		return "", err
+	}
+	report := core.Event{Kind: core.EventReport, Body: "DONE"}
+	if ok, _ := core.FinishReached(line, append(run, report)); !ok && line.ChangesCode() {
+		_, body, _, err := c.runVerify(goal.ID)
+		if err != nil {
+			return "", err
+		}
+		e, err := c.Ledger.AddEvent(goal.ID, core.EventVerify, body)
+		if err != nil {
+			return "", err
+		}
+		run = append(run, e)
+	}
+	if ok, what := core.FinishReached(line, append(run, report)); !ok {
+		return fmt.Sprintf("the finish line (%s) is not reached: %s", *goal.FinishLine, what), nil
+	}
 	return "", nil
+}
+
+// stillWorking reports whether running task t's session is working or has
+// messages waiting for it.
+func (c *Cli) stillWorking(t core.Work, p *project.Project) (bool, error) {
+	h, ok, err := coordinator.Handle(c.Ledger, t, p)
+	if err != nil || !ok {
+		return true, err
+	}
+	r, err := runner.RunnerNamed(h.Runner)
+	if err != nil {
+		return false, err
+	}
+	if n, err := c.Ledger.Undelivered(t.ID); err != nil || len(n) > 0 {
+		return true, err
+	}
+	status, err := r.Status(h)
+	return status == runner.StatusRunning, err
 }
 
 // concernUnder is concern n when it was raised on goal or one of its tasks.

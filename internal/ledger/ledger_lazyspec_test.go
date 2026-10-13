@@ -985,6 +985,59 @@ func TestLedger(t *testing.T) {
 		}
 	})
 
+	t.Run("A Goal's Finish Line Decides What Soft Done Requires", func(t *testing.T) {
+		l := newTestLedger(t)
+		goal := func(f *core.FinishLine) core.Work {
+			g := add(t, l, "p", "G", AddOptions{Kind: core.WorkGoal})
+			if f != nil {
+				wantNoErr(t, l.SetFinish(g.ID, *f, core.FinishFromPerson))
+			}
+			move(t, l, g.ID, core.StateRunning)
+			move(t, l, g.ID, core.StateReview)
+			return g
+		}
+		missing := func(id string) []string {
+			t.Helper()
+			var nr core.NotReady
+			if _, err := l.SoftDone(id, true); err == nil {
+				return nil
+			} else if !errors.As(err, &nr) {
+				t.Fatalf("error = %v, want NotReady", err)
+			}
+			return nr.Missing
+		}
+		pr, commit := "pull-request https://github.com/x/y/pull/1", "commit https://github.com/x/y/commit/abc"
+		for _, c := range []struct {
+			finish core.FinishLine
+			steps  []core.Event
+			want   []string
+		}{
+			{core.FinishDiscovery, nil, []string{"DONE report"}},
+			{core.FinishResearch, []core.Event{{Kind: core.EventReport, Body: "DONE"}}, nil},
+			{core.FinishLocalBuild, []core.Event{{Kind: core.EventReport, Body: "DONE"}}, []string{"passing verify"}},
+			{core.FinishLocalBuild, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}}, nil},
+			{core.FinishPR, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}}, []string{"pull request"}},
+			{core.FinishPR, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}, {Kind: core.EventPr, Body: pr}}, nil},
+			{core.FinishMerged, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}, {Kind: core.EventPr, Body: pr}}, []string{"commit landing"}},
+			{core.FinishMerged, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}, {Kind: core.EventPr, Body: commit}}, nil},
+			{core.FinishReleased, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}, {Kind: core.EventPr, Body: commit}}, []string{"released note"}},
+			{core.FinishReleased, []core.Event{{Kind: core.EventReport, Body: "DONE"}, {Kind: core.EventVerify, Body: "pass"}, {Kind: core.EventPr, Body: commit}, {Kind: core.EventNote, Body: "released: v1.0.0"}}, nil},
+		} {
+			g := goal(&c.finish)
+			for _, e := range c.steps {
+				_, err := l.AddEvent(g.ID, e.Kind, e.Body)
+				wantNoErr(t, err)
+			}
+			if got := missing(g.ID); !slices.Equal(got, c.want) {
+				t.Fatalf("%s after %d events: missing %q, want %q", c.finish, len(c.steps), got, c.want)
+			}
+		}
+		bare := goal(nil)
+		if got := missing(bare.ID); !slices.Equal(got, []string{"DONE report", "passing verify", "pull request"}) {
+			t.Fatalf("a goal with no finish line misses %q", got)
+		}
+	})
+
 	t.Run("Soft Done Requires Goal Tasks Done", func(t *testing.T) {
 		l := newTestLedger(t)
 		epic := add(t, l, "p", "E", AddOptions{Kind: core.WorkEpic})

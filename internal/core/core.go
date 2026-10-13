@@ -201,6 +201,53 @@ const (
 // ChangesCode reports whether reaching f changes the repository's code.
 func (f FinishLine) ChangesCode() bool { return f != FinishDiscovery && f != FinishResearch }
 
+// FinishReached says whether this run's events show the finish line reached, and if not, what is missing.
+// Discovery and research need a DONE report; a local build also a passing
+// verify; a complete PR also a landing; merged a commit landing; released
+// also a note starting "released:". Report and verify are the latest of
+// their kind.
+func FinishReached(f FinishLine, run []Event) (bool, string) {
+	var report, verify *Event
+	var landings []Landing
+	released := false
+	for i := range run {
+		switch e := run[i]; e.Kind {
+		case EventReport:
+			report = &run[i]
+		case EventVerify:
+			verify = &run[i]
+		case EventPr:
+			landings = append(landings, ParseLanding(e.Body))
+		case EventNote:
+			released = released || strings.HasPrefix(e.Body, "released:")
+		}
+	}
+	landed := func(k LandingKind) bool {
+		return slices.ContainsFunc(landings, func(l Landing) bool { return l.Kind == k })
+	}
+	var missing []string
+	if report == nil || !strings.HasPrefix(report.Body, "DONE") {
+		missing = append(missing, "DONE report")
+	}
+	if f.ChangesCode() && (verify == nil || !strings.HasPrefix(verify.Body, "pass")) {
+		missing = append(missing, "passing verify")
+	}
+	switch f {
+	case FinishPR:
+		if !landed(LandingPullRequest) && !landed(LandingCommit) {
+			missing = append(missing, "pull request")
+		}
+	case FinishMerged, FinishReleased:
+		if !landed(LandingCommit) {
+			missing = append(missing, "commit landing")
+		}
+	}
+	if f == FinishReleased && !released {
+		missing = append(missing, "released note")
+	}
+	return len(missing) == 0, strings.Join(missing, ", ")
+}
+
 // NeedsPR reports whether reaching f takes a pull request.
 func (f FinishLine) NeedsPR() bool { return f == FinishPR || f == FinishMerged || f == FinishReleased }
 
