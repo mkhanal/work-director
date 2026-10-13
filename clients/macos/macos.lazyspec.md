@@ -110,7 +110,6 @@ hold only that product's work; with none, every product's.
 
 ## A Goal Is Read As Its Overview, Its Conversation Or Its Record
 - A goal page's tabs are Overview, Conversation and Record.
-- The conversation narrows to the person's words, the supervisor, reports or questions.
 - Everything folds each run of two or more updates — looks, state changes, checks, landings and messages told to a task — into one row.
 - A report reads as its verdict, what it said with it, its files and its named sections.
 
@@ -166,3 +165,10 @@ hold only that product's work; with none, every product's.
 - Kind chips narrow it to decisions, course, questions, reports, chores or delivery; a superseded branch counts as course.
 - A sub-goal picker narrows it to what happened at or under one of the goal's sub-goals.
 - Each row reads its time, its kind as a badge, what it says, where in the tree and by whom, newest first, grouped by day.
+
+## The Conversation Tags Each Turn With Its Sub-Goal And Filters By It
+- Every turn said under the goal is tagged with its sub-goal's path; the goal's own turns are not.
+- Chips narrow it to everything, to what passed between the person and the director, or to what was said at or under one sub-goal.
+- A sub-goal finishing is a line of its own; an agent's question the director answered reads as one turn.
+- The goal's plan opens it as a card of its sub-goals, each with its state.
+- A message from the goal's page goes to the whole goal, or to one open sub-goal chosen in the composer, as `wd send <id>`.

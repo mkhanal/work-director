@@ -28,6 +28,8 @@ struct WorkDetail: View {
     @AppStorage("detail.tab") private var tab: Tab = .conversation
     @AppStorage("goal.view") private var goalView: GoalView = .overview
     @State private var filter: ThreadFilter = .all
+    /// Who a message from a goal's page goes to: the goal, or one sub-goal.
+    @State private var sendTo: String?
     /// Whether the reader is at the bottom of the conversation, where it
     /// follows what comes in.
     @State private var atBottom = true
@@ -114,7 +116,8 @@ struct WorkDetail: View {
                 }
                 .animation(.easeOut(duration: 0.15), value: atBottom)
                 if let target = messaged(loaded), !target.atRest || (target.kind.isGoal && target.state == .done) {
-                    MessageBar(store: store, work: target, working: working(loaded), about: about(target, in: loaded))
+                    MessageBar(store: store, work: target, working: working(loaded), about: about(target, in: loaded),
+                               addressees: focus == nil ? goalDetail(loaded)?.addressees ?? [] : [], sendTo: $sendTo)
                         .id(target.id)
                 }
                 }
@@ -202,7 +205,7 @@ struct WorkDetail: View {
                 GoalOverview(store: store, goal: goal, open: open, focus: focusTask,
                              answered: { Task { await load() } }, run: { plan = $0 })
             case .conversation:
-                GoalThread(store: store, goal: goal, focus: focusTask, answered: { Task { await load() } }, filter: $filter)
+                GoalThread(store: store, goal: goal, focus: focusTask, answered: { Task { await load() } }, filter: filter)
             case .record:
                 GoalRecordView(store: store, goal: goal)
             }
@@ -281,8 +284,11 @@ struct WorkDetail: View {
             Header(work: loaded.work, goal: goalDetail(loaded), open: open,
                    rename: { title in plan = try? Plan.rename(loaded.work.id, title: title) })
             switch loaded {
-            case .goal:
+            case .goal(let g):
                 PageTabs(tabs: GoalView.allCases, selection: $goalView, label: \.label)
+                if goalView == .conversation {
+                    FilterChips(filter: $filter, goal: g).padding(.top, -2)
+                }
             case .work(let w, _):
                 if hasSession(w) {
                     PageTabs(tabs: [Tab.conversation, Tab.record], selection: $tab,
@@ -316,6 +322,7 @@ struct WorkDetail: View {
     /// Who a message goes to: the agent in focus's task, else this work.
     private func messaged(_ loaded: Loaded) -> Work? {
         if let focus { return task(focus.task, in: loaded) }
+        if case .goal(let g) = loaded, let sendTo, let node = g.nodes.first(where: { $0.id == sendTo }) { return node.work }
         return loaded.work
     }
 
@@ -668,6 +675,9 @@ struct MessageBar: View {
     /// Whether a session under this work is working now.
     let working: Bool
     var about: [String] = []
+    /// Who else on a goal's page a message can go to, the whole goal first.
+    var addressees: [(id: String, title: String)] = []
+    @Binding var sendTo: String?
     @State private var text = ""
     @State private var sending = false
     @State private var outcome: String?
@@ -679,13 +689,14 @@ struct MessageBar: View {
         InputBar(
             text: $text,
             placeholder: continuing ? "Continue this goal… say what is being worked on; it is planned and started again"
-                : work.kind.isGoal ? "Tell this goal… its supervisor reads it, and it is kept as a decision" : "Message this task… it reads it when it is ready",
+                : work.kind.isGoal ? "Message the director about this goal…" : "Message this task… it reads it when it is ready",
             command: plan?.commandLine,
             busy: sending,
             note: outcome,
             noteIsError: failed,
             stop: working && !continuing ? Plan.stop(work.id) : nil,
             about: about,
+            addressee: addressees.count > 1 ? Addressee(options: addressees, chosen: $sendTo) : nil,
             remember: continuing ? nil : $remember,
             stopped: { Task { await stop() } }
         ) { Task { await send() } }
@@ -756,6 +767,8 @@ struct InputBar: View {
     var stop: Plan? = nil
     /// What the message goes to: runner, model, where it works.
     var about: [String] = []
+    /// On a goal's page, the menu that sends to the whole goal or one sub-goal.
+    var addressee: Addressee? = nil
     /// When given, a toggle to keep the message as feedback too.
     var remember: Binding<Bool>? = nil
     var stopped: () -> Void = {}
@@ -799,6 +812,19 @@ struct InputBar: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: Space.s2)
+                    if let addressee {
+                        Menu {
+                            ForEach(Array(addressee.options.enumerated()), id: \.offset) { i, option in
+                                Button(option.title) { addressee.chosen.wrappedValue = i == 0 ? nil : option.id }
+                            }
+                        } label: {
+                            Text("to: \(addressee.title) ▾").font(TypeScale.caption).foregroundStyle(Palette.text3).lineLimit(1)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help("Send to the whole goal, or to one sub-goal")
+                    }
                     if busy {
                         ProgressView().controlSize(.small)
                     } else {
@@ -888,6 +914,14 @@ struct InputBar: View {
             return nil
         }
     }
+}
+
+/// Who a message from a goal's page goes to, and the choices.
+struct Addressee {
+    let options: [(id: String, title: String)]
+    let chosen: Binding<String?>
+
+    var title: String { options.first { $0.id == chosen.wrappedValue }?.title ?? options.first?.title ?? "" }
 }
 
 /// What a double Escape stops right now. The key monitor outlives the view

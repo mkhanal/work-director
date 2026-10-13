@@ -180,30 +180,29 @@ struct YouBubble<Status: View>: View {
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             Spacer(minLength: 0)
-            VStack(alignment: .trailing, spacing: Space.s2) {
+            VStack(alignment: .trailing, spacing: Space.s1) {
                 HStack(spacing: Space.s1 + 2) {
                     status
-                    Text(at).foregroundStyle(.tertiary)
-                    Text(label).foregroundStyle(.primary)
-                    Speaker.you.mark.font(.system(size: IconSize.turn))
+                    Text("\(label) · \(at)")
                 }
-                .font(TypeScale.meta)
-                .foregroundStyle(.secondary)
+                .font(TypeScale.caption)
+                .foregroundStyle(Palette.text3)
                 Text(text)
                     .readable()
+                    .foregroundStyle(Palette.text)
                     .lineLimit(expanded || !folds ? nil : 8)
                     .textSelection(.enabled)
-                    .padding(.horizontal, Space.s4 - 2)
-                    .padding(.vertical, Space.s3 - 1)
-                    .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.bubble))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.bubble).strokeBorder(Color.accentColor.opacity(0.3)))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Palette.bubbleFill, in: RoundedRectangle(cornerRadius: Radius.bubble))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.bubble).strokeBorder(Palette.bubbleBorder))
                 if folds {
                     Button(expanded ? "Show less" : "Show all") { expanded.toggle() }
                         .buttonStyle(.link)
                         .font(TypeScale.meta)
                 }
             }
-            .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in width * 0.8 }
+            .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in width * 0.7 }
         }
     }
 

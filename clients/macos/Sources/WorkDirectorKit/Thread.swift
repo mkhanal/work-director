@@ -73,7 +73,7 @@ extension GoalDetail {
 
     private func step(_ e: Event) -> ThreadStep? {
         switch e.kind {
-        case "decision", "report", "sent", "answer", "verify", "pr":
+        case "decision", "report", "sent", "answer", "verify", "pr", "judged":
             return .event(e)
         case "state":
             return ["done", "dropped", "abandoned", "paused", "blocked"].contains(e.body) ? .event(e) : nil
@@ -186,19 +186,12 @@ extension Event {
     }
 }
 
-/// What a goal's conversation is narrowed to.
-public enum ThreadFilter: String, CaseIterable, Sendable {
-    case all, you, supervisor, reports, questions
-
-    public var label: String {
-        switch self {
-        case .all: "Everything"
-        case .you: "You"
-        case .supervisor: "Supervisor"
-        case .reports: "Reports"
-        case .questions: "Questions"
-        }
-    }
+/// What a goal's conversation is narrowed to: everything, what passed
+/// between the person and the director, or what was said at or under one
+/// sub-goal.
+public enum ThreadFilter: Hashable, Sendable {
+    case all, yours
+    case subGoal(String)
 }
 
 /// One row of a goal's conversation as it reads: a step, or a run of
@@ -238,25 +231,57 @@ extension GoalDetail {
         return out
     }
 
+    /// The chips a conversation is narrowed by: everything, you and the
+    /// director, then each sub-goal directly under the goal.
+    public var filters: [(filter: ThreadFilter, label: String)] {
+        [(.all, "Everything"), (.yours, "You and the director")]
+            + tree.filter { !$0.group }.map { (.subGoal($0.id), $0.work.title) }
+    }
+
+    /// Where in the goal's tree work sits, by the titles down to it; nil for
+    /// the goal itself.
+    public func tag(of work: String) -> String? { paths[work] }
+
+    /// Who a message from the goal's page can go to: the whole goal, or one
+    /// sub-goal still open at any depth.
+    public var addressees: [(id: String, title: String)] {
+        [(goal.id, "whole goal")] + nodes.filter { !$0.group && !$0.work.atRest }.map { ($0.id, paths[$0.id] ?? $0.work.title) }
+    }
+
     private func shows(_ step: ThreadStep, _ filter: ThreadFilter) -> Bool {
-        switch (filter, step) {
-        case (.all, _): true
-        case (.you, .event(let e)): isYours(e)
-        case (.you, .exchange(_, let a?)): isYours(a)
-        case (.supervisor, .supervisor): true
-        case (.supervisor, .exchange(let q, _)): q.work == goal.id
-        case (.reports, .event(let e)): e.kind == "report"
-        case (.questions, .exchange): true
-        default: false
+        switch filter {
+        case .all:
+            return true
+        case .yours:
+            switch step {
+            case .event(let e): return e.work == goal.id || isYours(e) || e.answeredByDirector
+            case .exchange(let q, let a): return q.work == goal.id || a.map { isYours($0) || $0.answeredByDirector } == true
+            case .supervisor, .look: return true
+            case .stopped: return false
+            }
+        case .subGoal(let id):
+            return within(step.event.work, id)
         }
+    }
+
+    /// Whether work is the sub-goal or anywhere under it.
+    private func within(_ work: String, _ id: String) -> Bool {
+        guard work != id else { return true }
+        guard let mine = paths[work], let theirs = paths[id] else { return false }
+        return mine.hasPrefix(theirs + " › ")
     }
 
     private func isUpdate(_ step: ThreadStep) -> Bool {
         switch step {
         case .look: true
-        case .event(let e): ["state", "verify", "pr", "sent"].contains(e.kind)
+        case .event(let e): ["state", "verify", "pr", "sent"].contains(e.kind) && !finishes(e)
         default: false
         }
+    }
+
+    /// Whether the event is a sub-goal finishing, which reads as its own line.
+    public func finishes(_ e: Event) -> Bool {
+        e.kind == "state" && e.body == "done" && e.work != goal.id
     }
 
     /// Tasks waiting on the person with no question open in their session,

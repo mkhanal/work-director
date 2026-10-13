@@ -27,27 +27,15 @@ struct PageTabs<Tab: Hashable>: View {
     }
 }
 
-/// The conversation's kinds of turn, as chips to narrow it to one.
+/// The chips a goal's conversation is narrowed by.
 struct FilterChips: View {
     @Binding var filter: ThreadFilter
-    let counts: [ThreadFilter: Int]
+    let goal: GoalDetail
 
     var body: some View {
-        HStack(spacing: Space.s2) {
-            ForEach(ThreadFilter.allCases, id: \.self) { f in
-                Button { filter = f } label: {
-                    HStack(spacing: Space.s1) {
-                        Text(f.label)
-                        if let n = counts[f] { Text("\(n)").monospacedDigit().foregroundStyle(filter == f ? .secondary : .tertiary) }
-                    }
-                    .font(TypeScale.meta)
-                    .padding(.horizontal, Space.s3)
-                    .padding(.vertical, 5)
-                    .background(filter == f ? Color.accentColor.opacity(0.14) : Palette.sunken, in: Capsule())
-                    .overlay(Capsule().strokeBorder(filter == f ? Color.accentColor.opacity(0.4) : .clear))
-                    .foregroundStyle(filter == f ? Color.accentColor : .primary)
-                }
-                .buttonStyle(.plain)
+        FlowLayout(spacing: 6) {
+            ForEach(Array(goal.filters.enumerated()), id: \.offset) { _, f in
+                FilterChip(label: f.label, selected: filter == f.filter) { filter = f.filter }
             }
         }
     }

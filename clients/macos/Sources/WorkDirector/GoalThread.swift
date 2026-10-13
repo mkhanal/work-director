@@ -2,25 +2,27 @@ import SwiftUI
 import WorkDirectorKit
 
 /// A goal read as one conversation: what was asked, the plan it became, what
-/// its supervisor and its agents did since, and what waits on you, last, next
-/// to where you answer. Every turn says who spoke.
+/// the director and its agents did since, each agent turn tagged with its
+/// sub-goal, and what waits on you, last, next to where you answer.
 struct GoalThread: View {
     let store: Store
     let goal: GoalDetail
     /// Shows a task's conversation.
     let focus: (String) -> Void
     let answered: () -> Void
-    @Binding var filter: ThreadFilter
+    let filter: ThreadFilter
 
     var body: some View {
         let items = goal.items(filter)
         LazyVStack(alignment: .leading, spacing: Space.s5) {
-            FilterChips(filter: $filter, counts: counts)
-            if filter == .all && !goal.goal.detail.isEmpty {
-                YouBubble(text: goal.goal.detail, at: when(goal.goal.created), label: "You asked")
+            if opening && !goal.goal.detail.isEmpty {
+                YouBubble(text: goal.goal.detail, at: when(goal.goal.created))
+            }
+            if opening && !goal.tree.isEmpty {
+                PlanCard(goal: goal)
             }
             if items.isEmpty && filter != .all {
-                Text("Nothing here yet.").font(TypeScale.callout).foregroundStyle(.secondary)
+                Text("Nothing here yet.").font(TypeScale.callout).foregroundStyle(Palette.text3)
             }
             ForEach(Array(items.enumerated()), id: \.element.id) { n, item in
                 if let day = DayLine.day(of: item, after: n > 0 ? items[n - 1] : nil) {
@@ -32,7 +34,7 @@ struct GoalThread: View {
                 }
             }
             if filter == .all {
-                ForEach(store.outbox.filter { $0.work == goal.goal.id && !$0.arrived(in: goal) }) { message in
+                ForEach(store.outbox.filter { m in m.work == goal.goal.id || goal.nodes.contains { $0.id == m.work } }.filter { !$0.arrived(in: goal) }) { message in
                     OutgoingBubble(store: store, message: message)
                 }
                 Waiting(store: store, goal: goal, open: focus, answered: answered)
@@ -40,19 +42,20 @@ struct GoalThread: View {
         }
     }
 
-    private var counts: [ThreadFilter: Int] {
-        Dictionary(uniqueKeysWithValues: ThreadFilter.allCases.filter { $0 != .all }.map { f in
-            (f, goal.items(f).count)
-        })
+    /// Whether the goal's own ask and plan open what is shown: not when it
+    /// is narrowed to one sub-goal.
+    private var opening: Bool {
+        if case .subGoal = filter { return false }
+        return true
     }
 
     /// One update as a line: a look, a state change, a check, a landing.
     private func line(_ step: ThreadStep) -> AnyView {
         switch step {
-        case .look(let e): AnyView(EventLine(text: "Supervisor looking: \(e.body)", symbol: "eye", at: e.at))
+        case .look(let e): AnyView(EventLine(text: "Director looking: \(e.body)", at: e.at))
         case .event(let e) where e.kind == "sent":
-            AnyView(EventLine(text: "Told \(speaker(of: e.work).name): \(firstLine(e.body))", symbol: "arrow.turn.down.right", at: e.at))
-        case .event(let e): AnyView(EventLine(text: line(e), symbol: symbol(e), at: e.at, tint: tint(e)))
+            AnyView(EventLine(text: "Told \(name(of: e.work)): \(firstLine(e.body))", at: e.at))
+        case .event(let e): AnyView(EventLine(text: line(e), at: e.at, tint: tint(e)))
         default: AnyView(row(step))
         }
     }
@@ -62,50 +65,63 @@ struct GoalThread: View {
         case .event(let event) where goal.isYours(event):
             YouBubble(text: event.decision?.answer ?? event.answerText, at: when(event.at), label: event.kind == "answer" ? "You answered" : "You")
         case .event(let event) where event.kind == "report":
-            Turn(speaker: speaker(of: event.work), at: event.at, open: opener(event.work)) {
+            Turn(speaker: speaker(of: event.work), at: event.at, open: opener(event.work), tag: goal.tag(of: event.work)) {
                 ReportCard(text: event.body, report: goal.reports[String(event.id)])
             }
         case .event(let event) where event.kind == "answer":
             DirectorTurn(answer: event)
         case .event(let event) where event.kind == "sent":
             if event.work != goal.goal.id {
-                EventLine(text: "Told \(speaker(of: event.work).name): \(firstLine(event.body))", symbol: "arrow.turn.down.right", at: event.at)
+                EventLine(text: "Told \(name(of: event.work)): \(firstLine(event.body))", at: event.at)
             }
         case .event(let event):
-            EventLine(text: line(event), symbol: symbol(event), at: event.at, tint: tint(event))
+            EventLine(text: line(event), at: event.at, tint: tint(event))
         case .exchange(let question, let answer):
             // The question waiting on you is answered below, in place.
             if answer != nil || goal.asking?.id != "event-\(question.id)" {
-                VStack(alignment: .leading, spacing: Space.s5) {
-                    Turn(speaker: speaker(of: question.work), at: question.at, open: opener(question.work), detail: { Text("asked").foregroundStyle(.secondary) }) {
-                        AskedBody(question: question)
+                if let answer, answer.answeredByDirector, question.work != goal.goal.id {
+                    Turn(speaker: speaker(of: question.work), at: question.at, open: opener(question.work), tag: goal.tag(of: question.work)) {
+                        AskedTheDirector(question: question, answer: answer)
                     }
-                    if let answer {
-                        if answer.answeredByDirector {
-                            DirectorTurn(answer: answer)
-                        } else {
-                            YouBubble(text: answer.answerText, at: when(answer.at), label: "You answered")
+                } else {
+                    VStack(alignment: .leading, spacing: Space.s5) {
+                        Turn(speaker: speaker(of: question.work), at: question.at, open: opener(question.work), tag: goal.tag(of: question.work),
+                             detail: { Text("asked") }) {
+                            AskedBody(question: question)
+                        }
+                        if let answer {
+                            if answer.answeredByDirector {
+                                DirectorTurn(answer: answer)
+                            } else {
+                                YouBubble(text: answer.answerText, at: when(answer.at), label: "You answered")
+                            }
                         }
                     }
                 }
             }
         case .look(let event):
-            EventLine(text: "Supervisor looking: \(event.body)", symbol: "eye", at: event.at)
+            EventLine(text: "Director looking: \(event.body)", at: event.at)
         case .supervisor(let event, let reply):
             Turn(speaker: .supervisor, at: event.at, open: { focus(goal.goal.id) }) {
                 SupervisorBody(reply: reply, goal: goal, focus: focus)
             }
         case .stopped(let event, let said):
-            Turn(speaker: speaker(of: event.work), at: event.at, open: opener(event.work), detail: { Text("stopped without a report").foregroundStyle(.secondary) }) {
-                Text(said).readable().foregroundStyle(.secondary).lineLimit(4).textSelection(.enabled)
+            Turn(speaker: speaker(of: event.work), at: event.at, open: opener(event.work), tag: goal.tag(of: event.work),
+                 detail: { Text("stopped without a report") }) {
+                Text(said).readable().foregroundStyle(Palette.text2).lineLimit(4).textSelection(.enabled)
             }
         }
     }
 
     private func speaker(of id: String) -> Speaker {
         if id == goal.goal.id { return goal.supervised ? .supervisor : .plan }
-        if let task = goal.tasks.first(where: { $0.id == id }) { return .task(task) }
+        if let task = goal.tasks.first(where: { $0.id == id }) ?? goal.nodes.first(where: { $0.id == id })?.work { return .task(task) }
         return .agent(id)
+    }
+
+    /// What a line calls work: its place in the tree, else its title.
+    private func name(of id: String) -> String {
+        goal.tag(of: id) ?? (id == goal.goal.id ? "the goal" : speaker(of: id).name)
     }
 
     private func opener(_ id: String) -> (() -> Void)? {
@@ -117,9 +133,11 @@ struct GoalThread: View {
     }
 
     private func line(_ e: Event) -> String {
-        let who = e.work == goal.goal.id ? "Goal" : speaker(of: e.work).name
+        let who = e.work == goal.goal.id ? "Goal" : name(of: e.work)
+        if goal.finishes(e) { return "\(who) · done" }
         switch e.kind {
         case "decision": return "Decided: \(firstLine(e.body))"
+        case "judged": return "\(who) · judged \(e.body.components(separatedBy: ": ").first ?? e.body)"
         case "verify": return "\(who) \(e.body.hasPrefix("pass") ? "passed its checks" : "failed its checks")"
         case "pr": return "\(who) landed"
         case "state": return "\(who) is now \(e.body)"
@@ -127,22 +145,61 @@ struct GoalThread: View {
         }
     }
 
-    private func symbol(_ e: Event) -> String {
-        switch e.kind {
-        case "decision": "checkmark.seal"
-        case "verify": e.body.hasPrefix("pass") ? "checkmark.shield" : "xmark.shield"
-        case "pr": "arrow.triangle.pull"
-        case "state": "circle.dashed"
-        default: "circle"
-        }
-    }
-
     private func tint(_ e: Event) -> Color {
         switch e.kind {
         case "verify": e.body.hasPrefix("pass") ? Palette.settled : Palette.failure
         case "pr": Palette.settled
-        default: .secondary
+        default: Palette.text3
         }
+    }
+}
+
+/// The plan a goal became, as the director said it: each sub-goal with
+/// where it stands.
+struct PlanCard: View {
+    let goal: GoalDetail
+
+    var body: some View {
+        Turn(speaker: .director, at: nil) {
+            Text("Planned it as \(goal.tree.count) sub-goal\(goal.tree.count == 1 ? "" : "s")" + (goal.finishWords.map { ", finishing at \($0.line.lowercased())." } ?? "."))
+                .readable().foregroundStyle(Palette.text)
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(goal.tree) { node in
+                    HStack(spacing: Space.s2) {
+                        Badge(node.needsYou > 0 ? GoalBadge("Needs you", .attention) : node.work.state.badge)
+                        Text(node.work.title).font(TypeScale.callout).foregroundStyle(Palette.text)
+                            .strikethrough(node.work.state.mark == .superseded)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .canvasCard(fill: Palette.plainCard, padding: EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
+        }
+    }
+}
+
+/// An agent's question the director answered, in one card.
+struct AskedTheDirector: View {
+    let question: Event
+    let answer: Event
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            CardLabel("Asked the director")
+            Text(question.askedItems.map(\.question).joined(separator: "\n"))
+                .font(TypeScale.callout).lineSpacing(TypeScale.calloutLeading).foregroundStyle(Palette.text).textSelection(.enabled)
+            (Text("Director answered").foregroundStyle(BadgeTone.settled.text).fontWeight(.medium) + Text(" · " + answer.answerText).foregroundStyle(Palette.text))
+                .font(TypeScale.callout)
+                .lineSpacing(TypeScale.calloutLeading)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Palette.answeredFill, in: RoundedRectangle(cornerRadius: Radius.option))
+                .overlay(RoundedRectangle(cornerRadius: Radius.option).strokeBorder(Palette.answeredBorder))
+                .padding(.top, 4)
+        }
+        .canvasCard(padding: EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
     }
 }
 
@@ -210,52 +267,6 @@ struct AgentChip: View {
         }
         .card(padding: Space.s3)
         .contentShape(Rectangle())
-    }
-}
-
-/// The plan a goal became: its tasks grouped as planned, each a way into its
-/// conversation.
-struct PlanTurn: View {
-    let goal: GoalDetail
-    let focus: (String) -> Void
-
-    var body: some View {
-        Turn(speaker: .plan, at: nil, detail: {
-            Text(goal.tasks.isEmpty ? "not planned yet" : "\(goal.rollup.done) of \(goal.rollup.total) done").foregroundStyle(.secondary)
-        }) {
-            if !goal.tasks.isEmpty {
-                VStack(alignment: .leading, spacing: Space.s2) {
-                    ForEach(headings, id: \.self) { heading in
-                        if !heading.isEmpty && heading != "(no heading)" {
-                            MicroLabel(heading).padding(.top, Space.s1)
-                        }
-                        ForEach(goal.tasks.filter { ($0.heading ?? "") == heading }) { task in
-                            Button { focus(task.id) } label: {
-                                HStack(spacing: Space.s2) {
-                                    StateSymbol(state: task.state)
-                                    Text(task.title)
-                                        .font(TypeScale.callout)
-                                        .strikethrough(task.state == .dropped)
-                                        .foregroundStyle(task.atRest ? .secondary : .primary)
-                                        .lineLimit(2)
-                                        .multilineTextAlignment(.leading)
-                                    Spacer(minLength: 0)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .help("Show this task's conversation")
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private var headings: [String] {
-        var seen: [String] = []
-        for t in goal.tasks where !seen.contains(t.heading ?? "") { seen.append(t.heading ?? "") }
-        return seen
     }
 }
 

@@ -854,10 +854,6 @@ struct SeededTree {
         #expect(all.map(\.id) == [1, 2, 5, 6, 7, 9], "updates 2–4 fold into one row; a lone update stays a step")
         guard case .updates(let run) = all[1] else { Issue.record("row 2 is \(all[1])"); return }
         #expect(run.map(\.id) == [2, 3, 4])
-        #expect(goal.items(.you).map(\.id) == [1, 7], "a decision, and a question the person answered")
-        #expect(goal.items(.supervisor).map(\.id) == [6, 7])
-        #expect(goal.items(.reports).map(\.id) == [5])
-        #expect(goal.items(.questions).map(\.id) == [7])
 
         let r = try #require(goal.reports["5"])
         #expect(r.verdict == "done")
@@ -999,5 +995,53 @@ struct SeededTree {
         let days = GoalRecord.days([e("2026-10-13T12:00:00Z"), e("2026-10-13T09:00:00Z"), e("2026-10-12T10:00:00Z"), e("2026-10-01T10:00:00Z")], now: now, calendar: gmt)
         #expect(days.map(\.day) == ["Today", "Yesterday", "Oct 1, 2026"])
         #expect(days[0].entries.count == 2)
+    }
+
+    @Test("The Conversation Tags Each Turn With Its Sub-Goal And Filters By It")
+    func conversationTags() throws {
+        func event(_ id: Int, _ work: String, _ kind: String, _ body: String, decision: String = "null") -> String {
+            let quoted = String(data: try! JSONEncoder().encode(body), encoding: .utf8)!
+            return #"{"id":\#(id),"work":"\#(work)","kind":"\#(kind)","body":\#(quoted),"at":"2026-10-12T01:\#(String(format: "%02d", id)):00Z","effective":null,"decision":\#(decision)}"#
+        }
+        func work(_ id: String, _ state: String, kind: String = "task", parent: String? = "g") -> String {
+            workJSON(state: state)
+                .replacingOccurrences(of: #""id":"w1""#, with: #""id":"\#(id)""#)
+                .replacingOccurrences(of: #""title":"T""#, with: #""title":"\#(id.uppercased())""#)
+                .replacingOccurrences(of: #""kind":"task""#, with: #""kind":"\#(kind)""#)
+                .replacingOccurrences(of: #""parent":null"#, with: parent.map { #""parent":"\#($0)""# } ?? #""parent":null"#)
+        }
+        func node(_ w: String, children: [String] = []) -> String {
+            #"{"work":\#(w),"group":false,"done_when":null,"after":[],"waiting_on":[],"why_not_moving":null,"owner":null,"planned_into":null,"progress":null,"doing":null,"steps":[],"judged":null,"needs_you":0,"children":[\#(children.joined(separator: ","))]}"#
+        }
+        let director = #"{"question":"q","answer":"no","source":"director","runner":"","model":"","tokens":0,"reverses":0,"reversed_by":0}"#
+        let events = [
+            event(1, "g", "decision", "keep it small"),
+            event(2, "a", "state", "done"),
+            event(3, "a", "judged", "met: it is tagged"),
+            event(4, "b1", "question", "Down scripts?"),
+            event(5, "b1", "answer", "no", decision: director),
+            event(6, "g", "supervised", "All fits."),
+            event(7, "b1", "report", "DONE\nSTATUS: DONE"),
+        ].joined(separator: ",")
+        let tree = [node(work("a", "done")), node(work("b", "running", kind: "goal"), children: [node(work("b1", "running", parent: "b"))])].joined(separator: ",")
+        let json = """
+        {"goal":\(work("g", "running", kind: "goal", parent: nil)),"tasks":[\(work("a", "done"))],
+         "rollup":{"counts":{},"done":1,"total":2},"events":[\(events)],"claims":[],"landings":[],"delivery":null,
+         "activity":{},"reports":{},"waiting":[],
+         "chain":[],"tree":[\(tree)],"paths":{"a":"A","b":"B","b1":"B › B1"},"done_when":null,"finish":null,
+         "progress":{"done":1,"total":2,"superseded":0},"not_done_because":[],"needs_you":[],"course":null,"superseded":[]}
+        """
+        let goal = try JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
+        #expect(goal.filters.map(\.label) == ["Everything", "You and the director", "A", "B"])
+        #expect(goal.tag(of: "b1") == "B › B1")
+        #expect(goal.tag(of: "g") == nil, "the goal's own turns carry no tag")
+        #expect(goal.items(.subGoal("b")).map(\.id) == [4, 7], "a sub-goal's filter holds what was said under it")
+        #expect(goal.items(.subGoal("a")).map(\.id) == [2, 3])
+        #expect(goal.items(.yours).map(\.id) == [1, 4, 6], "you, the director's turns, and what the director answered")
+        #expect(goal.items(.all).map(\.id) == [1, 2, 3, 4, 6, 7], "a sub-goal finishing is a line of its own, not folded")
+        guard case .step(.exchange(_, let answer?)) = goal.items(.all)[3] else { Issue.record("no exchange"); return }
+        #expect(answer.answeredByDirector, "an agent's question and the director's answer read as one")
+        #expect(goal.addressees.map(\.id) == ["g", "b", "b1"], "the whole goal, then each open sub-goal")
+        #expect(try Plan.send("b1", text: "use forward-only").argv.prefix(2) == ["send", "b1"])
     }
 }
