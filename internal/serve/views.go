@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"wd/internal/coordinator"
 	"wd/internal/core"
@@ -102,6 +103,9 @@ type goalView struct {
 	Superseded []supersededWork `json:"superseded"`
 	// Proposed is whether the goal's breakdown waits for the person's approval.
 	Proposed bool `json:"proposed"`
+	// Reasoning is why its latest planning broke it down so, or nil when
+	// that planning gave none.
+	Reasoning *core.Reasoning `json:"reasoning"`
 }
 
 // waitingTask is a task waiting on the person, and what it waits on.
@@ -266,6 +270,7 @@ func (s *Server) goal(id string) (goalView, error) {
 	}
 	view.Superseded = t.superseded()
 	view.Proposed = core.Proposed(goal.ID, events)
+	view.Reasoning = reasoningOf(goal.ID, events)
 	courses := events
 	if len(chain) > 1 {
 		if courses, err = s.ledger.Events(chain[0].ID, nil); err != nil {
@@ -278,6 +283,24 @@ func (s *Server) goal(id string) (goalView, error) {
 		view.Delivery = &d
 	}
 	return view, nil
+}
+
+// reasoningOf is the reasoning filed after goal's latest plan or proposal
+// note, or nil when that planning filed none.
+func reasoningOf(goal string, events []core.Event) *core.Reasoning {
+	var r *core.Reasoning
+	for _, e := range events {
+		if e.Work != goal || e.Kind != core.EventNote {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(e.Body, "plan: "), strings.HasPrefix(e.Body, core.ProposedPrefix):
+			r = nil
+		case strings.HasPrefix(e.Body, core.ReasoningPrefix) && e.Reasoning != nil:
+			r = e.Reasoning
+		}
+	}
+	return r
 }
 
 // goalDir is where a goal's work happens: its tasks' directory, else its own,

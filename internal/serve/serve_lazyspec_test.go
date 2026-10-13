@@ -52,6 +52,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Goal Serves Everything Below It That Needs The Person", aGoalServesEverythingBelowItThatNeedsThePerson)
 	t.Run("A Goal Serves Its Course", aGoalServesItsCourse)
 	t.Run("A Proposed Breakdown Is Served As Proposed", aProposedBreakdownIsServedAsProposed)
+	t.Run("A Goal Serves Why It Was Broken Down So", aGoalServesWhyItWasBrokenDownSo)
 	t.Run("A Change Waiting For The Person Is Served With What Would Change", aChangeWaitingForThePersonIsServedWithWhatWouldChange)
 	t.Run("A Goal Serves Its Record", aGoalServesItsRecord)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
@@ -2217,6 +2218,40 @@ func aChangeWaitingForThePersonIsServedWithWhatWouldChange(t *testing.T) {
 	ask = coordinator.Action{Kind: coordinator.ActAsk, Text: coordinator.FinishQuestion, Options: []string{"research (recommended)", "complete PR"}}
 	event(t, l, finish.ID, core.EventQuestion, coordinator.QuestionBody([]coordinator.Action{ask}))
 	same("finish change", changeOn(finish.ID, finish.ID), `{"choices":["research (recommended)","complete PR"],"kind":"finish"}`)
+}
+
+func aGoalServesWhyItWasBrokenDownSo(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	goal, err := l.Add("p", "Release notes", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	reasoning := func() string {
+		t.Helper()
+		var v struct {
+			Reasoning json.RawMessage `json:"reasoning"`
+		}
+		getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &v)
+		return string(v.Reasoning)
+	}
+	if got := reasoning(); got != "null" {
+		t.Errorf("reasoning before any planning = %s, want null", got)
+	}
+	why, left := "each outcome is one handover", "a release dashboard"
+	event(t, l, goal.ID, core.EventNote, core.ProposedPrefix+"2 sub-goals")
+	if _, err := l.Reason(goal.ID, core.Reasoning{Why: &why, LeftOut: &left}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := reasoning(), `{"why":"each outcome is one handover","left_out":"a release dashboard","judge_by":null}`; got != want {
+		t.Errorf("reasoning = %s, want %s", got, want)
+	}
+	event(t, l, goal.ID, core.EventNote, "plan: 2 sub-goals")
+	if got := reasoning(); got != "null" {
+		t.Errorf("reasoning after a planning that gave none = %s, want null", got)
+	}
 }
 
 func aGoalServesItsRecord(t *testing.T) {

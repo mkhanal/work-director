@@ -5488,10 +5488,28 @@ func TestPlanningFilesSubGoalsWithTheirDoneWhenAndOrder(t *testing.T) {
 	// Auto mode: the plan is filed as a plan.
 	f.setMode(t, "auto")
 	auto := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Release notes again", "--json"), "id")
-	f.planReply(t, releasePlan)
+	f.planReply(t, releasePlan+"WHY: each outcome is one handover\nLEFT OUT: a release dashboard\nJUDGE BY: the next release ships with notes\n")
 	f.runOK(t, "goal", "plan", auto, "--runner", "planner")
 	if notes := f.bodies(t, auto, core.EventNote); !slices.Contains(notes, "plan: 3 sub-goals") {
 		t.Errorf("notes = %v, want the plan filed", notes)
+	}
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	evs, err := l.Events(auto, nil)
+	l.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reasons []core.Reasoning
+	for _, e := range evs {
+		if e.Kind == core.EventNote && strings.HasPrefix(e.Body, core.ReasoningPrefix) && e.Reasoning != nil {
+			reasons = append(reasons, *e.Reasoning)
+		}
+	}
+	if len(reasons) != 1 || reasons[0].Why == nil || *reasons[0].Why != "each outcome is one handover" || reasons[0].LeftOut == nil || *reasons[0].LeftOut != "a release dashboard" || reasons[0].JudgeBy == nil || *reasons[0].JudgeBy != "the next release ships with notes" {
+		t.Errorf("reasoning notes = %+v, want the planner's why, left out and judge by filed once", reasons)
 	}
 
 	// An unsure finish line is asked, with its choices, and the goal waits.

@@ -1198,7 +1198,7 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project, propose bool) ([]core
 	if _, err := c.Ledger.AddEvent(goal.ID, core.EventSpawn, coordinator.PlanEvent(h)); err != nil {
 		return nil, err
 	}
-	outcomes, finish, name, err := awaitPlan(rn, h, time.Duration(wait)*time.Second)
+	outcomes, finish, reply, err := awaitPlan(rn, h, time.Duration(wait)*time.Second)
 	// The planning session answers once; whatever it said, it is not left running.
 	if serr := runner.Dismiss(rn, h); serr != nil && err == nil {
 		err = serr
@@ -1211,6 +1211,7 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project, propose bool) ([]core
 	}
 	// A sub-goal keeps the outcome its parent's plan named it by.
 	if top {
+		name, _ := coordinator.PlanName(reply)
 		if err := c.nameGoal(goal, name); err != nil {
 			return nil, err
 		}
@@ -1250,6 +1251,11 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project, propose bool) ([]core
 	}
 	if _, err := c.Ledger.AddEvent(goal.ID, core.EventNote, note); err != nil {
 		return nil, err
+	}
+	if r, ok := coordinator.ParseReasoning(reply); ok {
+		if _, err := c.Ledger.Reason(goal.ID, r); err != nil {
+			return nil, err
+		}
 	}
 	if !top {
 		return rows, nil
@@ -1298,39 +1304,38 @@ func (c *Cli) awaitPerson(id string) error {
 }
 
 // awaitPlan reads the planning session until it lists outcomes or asks a
-// question; nil outcomes is a wait that ran out.
-func awaitPlan(rn runner.Runner, h runner.Handle, wait time.Duration) ([]coordinator.PlanOutcome, coordinator.PlanFinish, string, error) {
+// question, with the reply it gave; nil outcomes is a wait that ran out.
+func awaitPlan(rn runner.Runner, h runner.Handle, wait time.Duration) ([]coordinator.PlanOutcome, coordinator.PlanFinish, []string, error) {
 	deadline := time.Now().Add(wait)
 	for time.Now().Before(deadline) {
 		entries, err := rn.Conversation(h)
 		if err != nil {
-			return nil, coordinator.PlanFinish{}, "", err
+			return nil, coordinator.PlanFinish{}, nil, err
 		}
 		if why, failed := runner.Failure(entries); failed {
-			return nil, coordinator.PlanFinish{}, "", fail("planning session %s failed: %s", h.Session, why)
+			return nil, coordinator.PlanFinish{}, nil, fail("planning session %s failed: %s", h.Session, why)
 		}
 		texts, err := runner.Transcript(rn, h)
 		if err != nil {
-			return nil, coordinator.PlanFinish{}, "", err
+			return nil, coordinator.PlanFinish{}, nil, err
 		}
 		if ts := coordinator.ParseOutcomes(texts); len(ts) > 0 {
-			name, _ := coordinator.PlanName(texts)
 			finish, _ := coordinator.ParseFinish(texts)
-			return ts, finish, name, nil
+			return ts, finish, texts, nil
 		}
 		if q, ok := coordinator.PlanQuestion(texts); ok {
-			return nil, coordinator.PlanFinish{}, "", planAsked{q}
+			return nil, coordinator.PlanFinish{}, nil, planAsked{q}
 		}
 		// A planning session that stopped, or was stopped, has given all the
 		// plan it will give.
 		if st, err := rn.Status(h); err != nil {
-			return nil, coordinator.PlanFinish{}, "", err
+			return nil, coordinator.PlanFinish{}, nil, err
 		} else if st == runner.StatusStopped || st == runner.StatusExited {
-			return nil, coordinator.PlanFinish{}, "", fail("planning session %s ended without a plan", h.Session)
+			return nil, coordinator.PlanFinish{}, nil, fail("planning session %s ended without a plan", h.Session)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return nil, coordinator.PlanFinish{}, "", nil
+	return nil, coordinator.PlanFinish{}, nil, nil
 }
 
 // renamedPrefix opens the note a person's rename leaves; a goal carrying one

@@ -129,6 +129,7 @@ verify event.
 - A top goal's finish line is stored with where it came from; an unsure one is asked as a question with its choices, and the goal waits on it.
 - Answering that question with one of its finish lines stores it, from the person.
 - In ask mode the breakdown is proposed and nothing starts until `wd goal approve`.
+- The planner's why, left out and judge by are filed on the goal as one `reasoning:` note carrying them.
 
 ## A Sub-Goal Starts Only Once What It Waits On Is Settled
 - Starting a sub-goal that waits on an unsettled sibling is refused naming the sibling.

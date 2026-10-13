@@ -99,6 +99,9 @@ NAME: <the goal's name in a few words>
   done when: <one or two sentences checkable from a report, verify output or a PR>
   after: <numbers of earlier outcomes it waits on>      (optional)
   split: yes                                             (optional: too big for one agent)
+WHY: <why the goal is broken down this way>
+LEFT OUT: <what the goal does not ask for and you left out>
+JUDGE BY: <how a person would judge the goal done>
 
 Each title is an outcome, not a change. Every outcome has a done-when. Give 1 to 7 outcomes, each about one agent session; a goal one agent can finish gets exactly one outcome. No outcome may only set up, install, land, tag or run checks: the director does those itself, and runs the checks after each outcome reports: %s.
 Specifications this repository keeps: %s.%s
@@ -212,6 +215,33 @@ func ParseOutcomes(texts []string) []PlanOutcome {
 		}
 	}
 	return out
+}
+
+var reasoningRe = regexp.MustCompile(`^\s*\**(WHY|LEFT OUT|JUDGE BY):\**\s*(\S.*)`)
+
+// ParseReasoning reads why the planner broke the goal down as it did, from
+// the last WHY, LEFT OUT and JUDGE BY lines of its reply; a reply with none
+// of them gives no reasoning.
+func ParseReasoning(texts []string) (core.Reasoning, bool) {
+	var r core.Reasoning
+	ok := false
+	for _, line := range strings.Split(strings.Join(texts, "\n"), "\n") {
+		m := reasoningRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		text := strings.TrimSpace(m[2])
+		switch m[1] {
+		case "WHY":
+			r.Why = &text
+		case "LEFT OUT":
+			r.LeftOut = &text
+		case "JUDGE BY":
+			r.JudgeBy = &text
+		}
+		ok = true
+	}
+	return r, ok
 }
 
 // FinishChoice reads one offered finish line, marked (recommended) or not.

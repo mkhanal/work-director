@@ -108,6 +108,10 @@ JSON message per line to stdout:
 - Its board entry serves `proposed` the same way, and sits in `needs-you`.
 - Once approved, none of these holds.
 
+## A Goal Serves Why It Was Broken Down So
+- A goal serves `reasoning` `{why, left_out, judge_by}` from the `reasoning:` note its latest planning filed, each part null when the planner did not give it.
+- `reasoning` is null before any planning, and when its latest planning gave none.
+
 ## A Change Waiting For The Person Is Served With What Would Change
 - Each `needs_you` item serves `change`, null when answering it changes nothing by itself.
 - A plan change serves `kind` `plan`, its `actions` as written and `lines`, each action as a sentence naming work by its title.

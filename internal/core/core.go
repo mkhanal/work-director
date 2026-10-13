@@ -350,7 +350,22 @@ type Event struct {
 	// answered with its first choice; nil on any other event. It stays off the
 	// event's wire schema, whose keys are fixed.
 	Change *Change `json:"-"`
+	// Reasoning is why a planner broke a goal down as it did, on the note
+	// planning files; nil on any other event.
+	Reasoning *Reasoning `json:"-"`
 }
+
+// Reasoning is a planner's account of a breakdown: why it is broken down so,
+// what the goal does not ask for and was left out, and how a person would
+// judge it done. A part the planner did not give is nil.
+type Reasoning struct {
+	Why     *string `json:"why"`
+	LeftOut *string `json:"left_out"`
+	JudgeBy *string `json:"judge_by"`
+}
+
+// ReasoningPrefix opens the note planning files with its planner's reasoning.
+const ReasoningPrefix = "reasoning: "
 
 // Change is what answering a director's question with its first choice
 // carries out: a supervisor's plan changes, as its action lines, and a

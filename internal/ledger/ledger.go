@@ -292,6 +292,12 @@ func scanEvent(s rowScanner) (core.Event, error) {
 			return core.Event{}, fmt.Errorf("event %d: change payload: %w", e.ID, err)
 		}
 		e.Change = &ch
+	} else if payload.Valid && payload.String != "" && e.Kind == core.EventNote {
+		var r core.Reasoning
+		if err := json.Unmarshal([]byte(payload.String), &r); err != nil {
+			return core.Event{}, fmt.Errorf("event %d: reasoning payload: %w", e.ID, err)
+		}
+		e.Reasoning = &r
 	} else if payload.Valid && payload.String != "" {
 		var d core.Decision
 		if err := json.Unmarshal([]byte(payload.String), &d); err != nil {
@@ -1616,6 +1622,35 @@ func (l *Ledger) Ask(work, body string, change core.Change) (core.Event, error) 
 		}
 		e, err = scanEvent(tx.QueryRow(`INSERT INTO event (work, kind, body, at, payload) VALUES (?, ?, ?, ?, ?)
 			RETURNING id, work, kind, body, at, effective, payload`, work, string(core.EventQuestion), body, at, string(raw)))
+		return err
+	})
+	return e, err
+}
+
+// Reason records on goal why its planner broke it down as it did, as a note
+// carrying the reasoning.
+func (l *Ledger) Reason(goal string, r core.Reasoning) (core.Event, error) {
+	raw, err := json.Marshal(r)
+	if err != nil {
+		return core.Event{}, err
+	}
+	parts := []string{}
+	for _, p := range []struct {
+		name string
+		text *string
+	}{{"why", r.Why}, {"left out", r.LeftOut}, {"judge by", r.JudgeBy}} {
+		if p.text != nil {
+			parts = append(parts, p.name+": "+*p.text)
+		}
+	}
+	var e core.Event
+	err = l.inTx(func(tx *sql.Tx) error {
+		at := now()
+		if err := updateWork(tx, goal, `UPDATE work SET updated = ? WHERE id = ?`, at, goal); err != nil {
+			return err
+		}
+		e, err = scanEvent(tx.QueryRow(`INSERT INTO event (work, kind, body, at, payload) VALUES (?, ?, ?, ?, ?)
+			RETURNING id, work, kind, body, at, effective, payload`, goal, string(core.EventNote), core.ReasoningPrefix+strings.Join(parts, " | "), at, string(raw)))
 		return err
 	})
 	return e, err

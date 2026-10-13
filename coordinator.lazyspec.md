@@ -36,6 +36,11 @@ are specified in `ledger.lazyspec.md`.
 - `FINISH: ?` with listed choices reads as unsure, keeping the choices in order.
 - A line or source outside its set reads as no finish at all.
 
+## A Plan Reply Says Why It Is Broken Down So
+- `GoalPlanBrief` asks, after the outcomes, for `WHY:`, `LEFT OUT:` and `JUDGE BY:` lines.
+- `ParseReasoning(texts)` reads the last of each into why, left out and judge by; a part not given is null.
+- A reply with none of them has no reasoning.
+
 ## An Agent's Steps Are Read From Its Last STEPS Block
 - `ParseSteps` reads the last `STEPS:` block: `[ ]` todo, `[~]` doing, `[x]` done, `[-]` dropped.
 - A transcript with no `STEPS:` block has no steps.

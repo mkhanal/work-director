@@ -208,6 +208,29 @@ func TestCoordinator(t *testing.T) {
 		}
 	})
 
+	t.Run("A Plan Reply Says Why It Is Broken Down So", func(t *testing.T) {
+		brief, err := GoalPlanBrief(core.Work{Title: "Release notes"}, Chain{}, &project.Project{Name: "wd", Path: "/repo", Mode: project.ModeAsk}, project.Toolkit{}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"\nWHY: <", "\nLEFT OUT: <", "\nJUDGE BY: <"} {
+			if !strings.Contains(brief, want) {
+				t.Fatalf("plan brief missing %q:\n%s", want, brief)
+			}
+		}
+		reply := []string{"NAME: Release notes\n- Every release is tagged\n  done when: a tag\nWHY: an early guess\n", "**WHY:** each outcome is one handover\nLEFT OUT: a release dashboard\n"}
+		r, ok := ParseReasoning(reply)
+		if !ok || r.Why == nil || *r.Why != "each outcome is one handover" || r.LeftOut == nil || *r.LeftOut != "a release dashboard" || r.JudgeBy != nil {
+			t.Fatalf("reasoning = %+v, %v; want the last why, the left out and no judge by", r, ok)
+		}
+		if outs := ParseOutcomes(reply); len(outs) != 1 {
+			t.Fatalf("outcomes = %+v, want the reasoning lines not read as outcomes", outs)
+		}
+		if r, ok := ParseReasoning([]string{"NAME: x\n- an outcome\n  done when: y"}); ok {
+			t.Fatalf("a reply with no reasoning read as %+v", r)
+		}
+	})
+
 	t.Run("The Supervision Brief Gives A Goal's Supervisor The Whole Picture", func(t *testing.T) {
 		finish := core.FinishPR
 		pic := Picture{
