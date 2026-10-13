@@ -43,6 +43,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Goal Serves Each Report In Sections", aGoalServesEachReportInSections)
 	t.Run("A Goal Waiting On The Person Serves Its Question", aGoalWaitingOnThePersonServesItsQuestion)
 	t.Run("A Goal's Delivery Is Read In The Goal's Own Directory", aGoalsDeliveryIsReadInTheGoalsOwnDirectory)
+	t.Run("A Goal Read Again Does Not Wait On Git", aGoalReadAgainDoesNotWaitOnGit)
 	t.Run("The Board Places Every Item In One Band", theBoardPlacesEveryItemInOneBand)
 	t.Run("Archived Work Is Not On The Board", archivedWorkIsNotOnTheBoard)
 	t.Run("A Client Can Hold The Server On Its Standard Streams", aClientCanHoldTheServerOnItsStandardStreams)
@@ -1268,6 +1269,74 @@ func aGoalsDeliveryIsReadInTheGoalsOwnDirectory(t *testing.T) {
 	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &placed)
 	if placed.Delivery == nil || placed.Delivery.Branch != "goal-branch" {
 		t.Fatalf("delivery = %+v, want it read in the task's directory on goal-branch", placed.Delivery)
+	}
+}
+
+func aGoalReadAgainDoesNotWaitOnGit(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	repo := t.TempDir()
+	inRepo := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	inRepo("init", "-q", "-b", "main")
+	inRepo("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
+	inRepo("switch", "-q", "-c", "first")
+	goal, err := l.Add("p", "Goal", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	task, err := l.Add("p", "Task", ledger.AddOptions{Parent: &goal.ID})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := l.SetCwd(task.ID, repo); err != nil {
+		t.Fatalf("cwd: %v", err)
+	}
+	branch := func() string {
+		t.Helper()
+		v, err := s.goal(goal.ID)
+		if err != nil {
+			t.Fatalf("goal: %v", err)
+		}
+		if v.Delivery == nil {
+			t.Fatalf("goal has no delivery")
+		}
+		return v.Delivery.Branch
+	}
+	if got := branch(); got != "first" {
+		t.Fatalf("first read branch = %q, want first", got)
+	}
+
+	inRepo("switch", "-q", "-c", "second")
+	if got := branch(); got != "first" {
+		t.Fatalf("read again branch = %q, want the delivery already read, on first", got)
+	}
+
+	s.delivered.mu.Lock()
+	s.delivered.m[goal.ID].at = time.Now().Add(-3 * time.Second)
+	s.delivered.mu.Unlock()
+	if got := branch(); got != "first" {
+		t.Fatalf("stale read branch = %q, want the one held while it is read again", got)
+	}
+	for deadline := time.Now().Add(5 * time.Second); branch() != "second"; {
+		if time.Now().After(deadline) {
+			t.Fatalf("delivery never read again in the background")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	inRepo("switch", "-q", "-c", "third")
+	if _, err := l.AddEvent(goal.ID, core.EventPr, "commit 0000000"); err != nil {
+		t.Fatalf("landing: %v", err)
+	}
+	if got := branch(); got != "third" {
+		t.Fatalf("after a landing branch = %q, want it read anew on third", got)
 	}
 }
 

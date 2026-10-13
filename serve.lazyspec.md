@@ -42,6 +42,11 @@ never binds to 0.0.0.0 or a public interface.
 - `delivery` on `GET /api/goal/<id>` is derived from git in the goal's working directory: its tasks' directory, else the goal's own.
 - A goal with no working directory has no `delivery` key.
 
+## A Goal Read Again Does Not Wait On Git
+- A goal's `delivery`, once read, answers its later reads at once while its directory, its state and its latest landing are unchanged.
+- One more than two seconds old is read again in the background, for the next read.
+- A new landing, a new state or a new directory is read before the goal is served.
+
 ## The Board Places Every Item In One Band
 Every goal and standalone item on the board carries `band`:
 - `needs-you` — the item is needs-input or blocked, or is a goal with a task that is, or whose breakdown is proposed.

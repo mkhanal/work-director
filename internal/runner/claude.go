@@ -2,7 +2,9 @@ package runner
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -23,13 +25,21 @@ type agentRow struct {
 
 // agentListing is the last `claude agents` listing, shared for ttl by a
 // process that reads many sessions' status at once: one listing a few times a
-// second rather than one per session per read. Zero ttl shares nothing.
+// second rather than one per session per read. Zero ttl shares nothing. Past
+// ttl, and up to staleFor ttls old, a read is answered with the listing it has
+// while one listing runs in the background: a person opening a page never
+// waits on claude listing its agents, and the page's next read sees the new
+// listing.
 var agentListing struct {
 	sync.Mutex
-	ttl  time.Duration
-	at   time.Time
-	rows []agentRow
+	ttl     time.Duration
+	at      time.Time
+	rows    []agentRow
+	reading bool
 }
+
+// staleFor is how many ttls old a shared listing may be and still answer.
+const staleFor = 10
 
 // ShareAgentListing has every status read within ttl of a listing use it.
 func ShareAgentListing(ttl time.Duration) {
@@ -49,7 +59,17 @@ func forgetAgents() {
 func agents(cwd string) ([]agentRow, error) {
 	agentListing.Lock()
 	defer agentListing.Unlock()
-	if agentListing.ttl > 0 && time.Since(agentListing.at) < agentListing.ttl {
+	age := time.Since(agentListing.at)
+	ttl := agentListing.ttl
+	if ttl > 0 && age < ttl {
+		return agentListing.rows, nil
+	}
+	if ttl > 0 && age < staleFor*ttl {
+		if !agentListing.reading {
+			agentListing.reading = true
+			at := agentListing.at
+			go relist(cwd, at)
+		}
 		return agentListing.rows, nil
 	}
 	rows, err := listAgents(cwd)
@@ -58,6 +78,18 @@ func agents(cwd string) ([]agentRow, error) {
 	}
 	agentListing.rows, agentListing.at = rows, time.Now()
 	return rows, nil
+}
+
+// relist lists the agents again in the background, keeping the listing read
+// at at unless something read or forgot it since.
+func relist(cwd string, at time.Time) {
+	rows, err := listAgents(cwd)
+	agentListing.Lock()
+	defer agentListing.Unlock()
+	agentListing.reading = false
+	if err == nil && agentListing.at.Equal(at) {
+		agentListing.rows, agentListing.at = rows, time.Now()
+	}
 }
 
 func listAgents(cwd string) ([]agentRow, error) {
@@ -231,9 +263,16 @@ func transcriptFile(session string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	files, err := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", session+".jsonl"))
+	dirs, err := projectDirs(filepath.Join(home, ".claude", "projects"))
 	if err != nil {
 		return "", err
+	}
+	var files []string
+	for _, dir := range dirs {
+		file := filepath.Join(dir, session+".jsonl")
+		if _, err := os.Lstat(file); err == nil {
+			files = append(files, file)
+		}
 	}
 	switch len(files) {
 	case 0:
@@ -242,6 +281,45 @@ func transcriptFile(session string) (string, error) {
 		return files[0], nil
 	}
 	return "", &RunnerError{Runner: "claude", Detail: fmt.Sprintf("session %s has %d transcripts: %s", session, len(files), strings.Join(files, ", "))}
+}
+
+// projectListing is the last listing of claude's projects directory, with
+// the directory's modification time when it was read. Adding or removing a
+// project directory changes that time, so a listing read at the same time is
+// still the whole list; a server reading every session of a goal on each read
+// lists the directory once rather than once per session per read.
+var projectListing struct {
+	sync.Mutex
+	root string
+	at   time.Time
+	dirs []string
+}
+
+// projectDirs is every entry under root, in name order; a session's store is
+// looked for in each.
+func projectDirs(root string) ([]string, error) {
+	st, err := os.Stat(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	projectListing.Lock()
+	defer projectListing.Unlock()
+	if projectListing.root == root && projectListing.at.Equal(st.ModTime()) {
+		return projectListing.dirs, nil
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	dirs := make([]string, 0, len(entries))
+	for _, e := range entries {
+		dirs = append(dirs, filepath.Join(root, e.Name()))
+	}
+	projectListing.root, projectListing.at, projectListing.dirs = root, st.ModTime(), dirs
+	return dirs, nil
 }
 
 // claudeRecord is one line of a session's store; only the fields a

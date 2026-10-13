@@ -41,8 +41,11 @@ type transcriptKey struct {
 }
 
 // keptTranscripts is how many stores stay parsed; the least recently read
-// beyond it is let go and parsed again if it is read again.
-const keptTranscripts = 32
+// beyond it is let go and parsed again if it is read again. A goal's view
+// reads every store of its tasks and their subagents, so this holds the
+// stores of the several goals a person moves between: fewer, and moving
+// between goals parses every store again on every read.
+const keptTranscripts = 128
 
 var transcripts = struct {
 	sync.Mutex

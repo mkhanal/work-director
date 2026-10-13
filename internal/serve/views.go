@@ -303,7 +303,7 @@ func (s *Server) goal(id string) (goalView, error) {
 	}
 	view.Course = courseOf(courses, chain[0].ID)
 	if dir := goalDir(goal, children); dir != "" {
-		d := delivery.StatusFor(dir, events, goal, children)
+		d := s.delivered.of(dir, events, goal, children)
 		view.Delivery = &d
 	}
 	return view, nil

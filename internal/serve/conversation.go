@@ -3,6 +3,7 @@ package serve
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"wd/internal/coordinator"
@@ -119,41 +120,61 @@ func inspected(r runner.Inspector, h runner.Handle) (runner.Usage, []runner.Suba
 	return u, subs, err
 }
 
-// activities reads the session of every task still working, keyed by task.
+// activities reads the session of every task, keyed by task. Sessions are
+// read at once, a few at a time: a goal's tasks are many, and a runner may
+// answer from another process.
 func (s *Server) activities(tasks []core.Work) map[string]activity {
 	out := map[string]activity{}
 	if s.sessions == nil {
 		return out
 	}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, sessionReads)
 	for _, t := range tasks {
-		r, h, ok, err := s.sessions(t)
-		if err != nil {
-			out[t.ID] = activity{Error: err.Error()}
-			continue
-		}
-		if !ok {
-			continue
-		}
-		entries, err := r.Conversation(h)
-		if err != nil {
-			out[t.ID] = activity{Error: err.Error()}
-			continue
-		}
-		a := activityOf(entries)
-		if a.Status, err = r.Status(h); err != nil {
-			a.Status = runner.StatusUnknown
-		}
-		if inspect, ok := r.(runner.Inspector); ok {
-			u, subs, err := inspected(inspect, h)
-			if err != nil {
-				out[t.ID] = activity{Error: err.Error()}
-				continue
+		wg.Add(1)
+		slots <- struct{}{}
+		go func() {
+			defer func() { <-slots; wg.Done() }()
+			if a, ok := s.activity(t); ok {
+				mu.Lock()
+				out[t.ID] = a
+				mu.Unlock()
 			}
-			a.Usage, a.Subagents = &u, subs
-		}
-		out[t.ID] = a
+		}()
 	}
+	wg.Wait()
 	return out
+}
+
+// sessionReads is how many sessions one view reads at once.
+const sessionReads = 8
+
+// activity reads one work's session; ok is false when it has none.
+func (s *Server) activity(t core.Work) (activity, bool) {
+	r, h, ok, err := s.sessions(t)
+	if err != nil {
+		return activity{Error: err.Error()}, true
+	}
+	if !ok {
+		return activity{}, false
+	}
+	entries, err := r.Conversation(h)
+	if err != nil {
+		return activity{Error: err.Error()}, true
+	}
+	a := activityOf(entries)
+	if a.Status, err = r.Status(h); err != nil {
+		a.Status = runner.StatusUnknown
+	}
+	if inspect, ok := r.(runner.Inspector); ok {
+		u, subs, err := inspected(inspect, h)
+		if err != nil {
+			return activity{Error: err.Error()}, true
+		}
+		a.Usage, a.Subagents = &u, subs
+	}
+	return a, true
 }
 
 // activityOf is the latest step of a conversation as a line.

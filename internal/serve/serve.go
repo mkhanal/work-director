@@ -30,6 +30,7 @@ type Server struct {
 	// nothing.
 	supervise Supervise
 	hub       *wsHub
+	delivered deliveries
 }
 
 // New creates a serve server over the given ledger; cliPath is the path to
