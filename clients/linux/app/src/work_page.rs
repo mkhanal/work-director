@@ -28,6 +28,7 @@ use self::record::record_turns;
 use crate::agents::AgentsPanel;
 use crate::app::{work_menu, App, Place};
 use crate::composer::Composer;
+use crate::side_panel::SidePanel;
 use crate::turns::{Turn, Turns};
 use crate::ui::{self, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6};
 
@@ -117,7 +118,9 @@ pub struct WorkPage {
     app: App,
     id: String,
     me: Weak<WorkPage>,
-    pub widget: adw::OverlaySplitView,
+    pub widget: adw::ToolbarView,
+    /// The agents panel beside the page.
+    _side: Rc<SidePanel>,
     scroller: gtk::ScrolledWindow,
     column: gtk::Box,
     header: Header,
@@ -1065,33 +1068,48 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
     bar.pack_end(&pause);
     bar.pack_end(&gate);
 
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&bar);
-    toolbar.set_content(Some(&body));
-
     let agents = AgentsPanel::build();
-    let widget = adw::OverlaySplitView::builder()
-        .sidebar_position(gtk::PackType::End)
-        .min_sidebar_width(260.0)
-        .max_sidebar_width(480.0)
-        .sidebar_width_fraction(0.28)
-        .show_sidebar(app.settings.agents_shown())
-        .content(&toolbar)
-        .sidebar(&agents.widget)
-        .build();
-    widget.bind_property("show-sidebar", &agents_toggle, "active").bidirectional().sync_create().build();
+    let shown = app.settings.agents_shown();
     let a = app.clone();
+    let side = SidePanel::new(&body, &agents.widget, app.settings.agents_width(), shown, move |width| {
+        if let Err(e) = a.settings.set_agents_width(width) {
+            a.complain(&format!("cannot keep the agents panel's width: {e}"));
+        }
+    });
+    side.set_over(app.sidebar_split.is_collapsed());
+    let weak = Rc::downgrade(&side);
+    let narrowed = app.sidebar_split.connect_collapsed_notify(move |split| {
+        if let Some(side) = weak.upgrade() {
+            side.set_over(split.is_collapsed());
+        }
+    });
+    let (split, narrowed) = (app.sidebar_split.clone(), Cell::new(Some(narrowed)));
+    side.widget.connect_destroy(move |_| {
+        if let Some(id) = narrowed.take() {
+            split.disconnect(id);
+        }
+    });
+    agents_toggle.set_active(shown);
+    let (a, s) = (app.clone(), Rc::downgrade(&side));
     agents_toggle.connect_toggled(move |t| {
+        if let Some(side) = s.upgrade() {
+            side.set_shown(t.is_active());
+        }
         if let Err(e) = a.settings.set_agents_shown(t.is_active()) {
             a.complain(&format!("cannot keep the agents panel shown or hidden: {e}"));
         }
     });
+    // The panel sits under the header bar, so its toggle is never under it.
+    let widget = adw::ToolbarView::new();
+    widget.add_top_bar(&bar);
+    widget.set_content(Some(&side.widget));
 
     WorkPage {
         app: app.clone(),
         id: id.to_string(),
         me,
         widget,
+        _side: side,
         scroller,
         column,
         header,

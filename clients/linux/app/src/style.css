@@ -249,6 +249,9 @@ button.jump { min-width: 34px; min-height: 34px; }
 
 /* The agents inspector */
 .inspector { background-color: @wd_sidebar; }
+separator.panel-edge { min-width: 1px; background-color: @wd_hairline; border-left: 3px solid transparent; border-right: 3px solid transparent; background-clip: content-box; }
+separator.panel-edge:hover, separator.panel-edge:focus-visible { background-color: @wd_accent; }
+.side-panel.over { box-shadow: -2px 0 12px alpha(black, 0.18); }
 .agent-card { padding: 6px 4px; }
 
 /* Proposal, finish lines and changes waiting on the person */

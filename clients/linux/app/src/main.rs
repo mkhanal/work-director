@@ -8,6 +8,7 @@ mod new_goal_page;
 mod pages;
 mod question;
 mod settings;
+mod side_panel;
 mod sidebar;
 mod turns;
 mod ui;

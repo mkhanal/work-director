@@ -213,3 +213,9 @@ hold only that product's work; with none, every product's.
 ## Work Is Renamed From Its Page Or Its Menu
 - Renaming runs `wd rename <id> "<title>"` with the title trimmed; the page and the sidebar show the new name once `wd` has it.
 - A blank title is not sent.
+
+## The Agents Panel Sits Beside The Page, Never Over It
+- The panel sits beside the page, which narrows to make room for it.
+- Dragging its edge resizes it between 260 and 480 pixels; it opens at 320 until a width is set, and the width set is remembered.
+- Its toggle hides and shows it, and whether it shows is remembered.
+- Only at a window width where the goals sidebar folds away does it open over the page.

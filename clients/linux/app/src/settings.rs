@@ -8,7 +8,7 @@ use std::io;
 use std::path::PathBuf;
 
 use gtk::glib;
-use kit::SendKey;
+use kit::{PanelWidth, SendKey};
 
 pub struct Settings {
     path: PathBuf,
@@ -91,5 +91,14 @@ impl Settings {
 
     pub fn set_agents_shown(&self, shown: bool) -> io::Result<()> {
         self.set("agents", if shown { "shown" } else { "hidden" })
+    }
+
+    /// How wide the agents panel was last made.
+    pub fn agents_width(&self) -> PanelWidth {
+        PanelWidth::remembered(self.get("agents-width").as_deref())
+    }
+
+    pub fn set_agents_width(&self, width: PanelWidth) -> io::Result<()> {
+        self.set("agents-width", &width.setting())
     }
 }

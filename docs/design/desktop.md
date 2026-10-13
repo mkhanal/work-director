@@ -337,7 +337,7 @@ one of `type.callout` text2, at most one button.
 
 | Design | macOS (SwiftUI) | Linux (GTK4 + libadwaita) |
 |---|---|---|
-| Window, three panes | `NavigationSplitView` + `.inspector` | `AdwOverlaySplitView` (sidebar) inside `AdwOverlaySplitView` (inspector), `AdwToolbarView` |
+| Window, three panes | `NavigationSplitView` + `.inspector` | `AdwOverlaySplitView` (sidebar); in its content an `AdwToolbarView` whose page and inspector share a row with a draggable edge (over the page only while the sidebar is folded) |
 | Sidebar list | `List(.sidebar)` | `GtkListBox` with `.navigation-sidebar` |
 | Conversation | `ScrollView` + `LazyVStack` | `GtkScrolledWindow` + `GtkListView` (factory per turn kind) |
 | Bubble, cards | shapes with fills | `GtkBox` with CSS classes (`.bubble-you`, `.card`, `.attention`, `.settled`) |

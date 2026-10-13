@@ -1837,3 +1837,23 @@ fn work_is_renamed_from_its_page_or_its_menu() {
     assert_eq!(Plan::rename(&id, " \n "), Err(PlanError::Empty));
     store.stop();
 }
+
+/// The Agents Panel Sits Beside The Page, Never Over It
+#[test]
+fn the_agents_panel_sits_beside_the_page_never_over_it() {
+    assert_eq!(PanelWidth::remembered(None), PanelWidth(320), "it opens at 320 until a width is set");
+    assert_eq!(PanelWidth::remembered(Some("400")), PanelWidth(400), "a width set is remembered");
+    assert_eq!(PanelWidth::remembered(Some("wide")), PanelWidth(320), "a width that is not one is the default");
+    assert_eq!(PanelWidth::remembered(Some("90")), PanelWidth(260), "never narrower than 260");
+    assert_eq!(PanelWidth::remembered(Some("2000")), PanelWidth(480), "never wider than 480");
+    let w = PanelWidth(320);
+    assert_eq!(w.dragged(-40.0), PanelWidth(360), "dragging its edge toward the page widens it");
+    assert_eq!(w.dragged(30.0), PanelWidth(290), "dragging its edge away narrows it");
+    assert_eq!(w.dragged(-900.0), PanelWidth(480));
+    assert_eq!(w.dragged(900.0), PanelWidth(260));
+    assert_eq!(PanelWidth::remembered(Some(&PanelWidth(400).setting())), PanelWidth(400));
+    assert!(!PanelWidth::over_page(PanelWidth::NARROW + 1.0), "wherever the goals sidebar shows, it sits beside");
+    assert!(!PanelWidth::over_page(1280.0));
+    assert!(PanelWidth::over_page(PanelWidth::NARROW), "where the goals sidebar folds away, it opens over the page");
+    assert!(PanelWidth::over_page(400.0));
+}
