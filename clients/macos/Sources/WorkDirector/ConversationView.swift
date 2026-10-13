@@ -559,7 +559,7 @@ struct QuestionCard: View {
 
     private func optionRow(_ option: QuestionOption, item: QuestionItem, at i: Int, chosen: Bool) -> some View {
         let choice = Choice(option.label)
-        let meaning = change?.kind == .finish ? FinishMeaning.of(choice.label) : nil
+        let meaning = change?.kind == .finish || item.asksFinish ? FinishMeaning.of(choice.label) : nil
         return Button {
             draft.toggle(option.label, item: i)
         } label: {

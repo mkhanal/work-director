@@ -1131,6 +1131,8 @@ struct SeededTree {
         #expect(finish.kind == .finish)
         #expect(finish.choices == ["research (recommended)", "complete PR"])
         #expect(FinishMeaning.of("research")?.title == "Research complete: a written comparison and a pick")
+        #expect(pivot.needsYou.first { $0.work == found }?.question.items.first?.asksFinish == true, "a finish-line question is known by what it asks, wherever it shows")
+        #expect(pivot.needsYou.first { $0.work == why }?.question.items.first?.asksFinish == false)
         #expect(FinishMeaning.of("complete PR")?.title == "A complete PR")
         #expect(["discovery", "research", "local build", "complete PR", "merged", "released"].allSatisfy { FinishMeaning.of($0) != nil })
         #expect(AnswerDraft(try #require(pivot.needsYou.first { $0.work == found }?.question)).directorDecides == ["research"],

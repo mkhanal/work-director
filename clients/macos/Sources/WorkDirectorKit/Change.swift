@@ -56,6 +56,9 @@ public struct PendingChange: Codable, Sendable, Hashable {
 
 /// What each finish line means, as a finish-line question offers it.
 public enum FinishMeaning {
+    /// How the director asks where a goal finishes.
+    public static let question = "Where does this goal finish?"
+
     /// A finish line's title and what it hands back, or nil for a line outside the set.
     public static func of(_ line: String) -> (title: String, meaning: String)? {
         switch line.lowercased().trimmingCharacters(in: .whitespaces) {
@@ -71,6 +74,9 @@ public enum FinishMeaning {
 }
 
 extension QuestionItem {
+    /// Whether it asks where a goal finishes, so its choices are finish lines.
+    public var asksFinish: Bool { head == FinishMeaning.question }
+
     /// What it asks, without the lines a change spells out under it.
     public var head: String {
         String(question.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")

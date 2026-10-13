@@ -280,7 +280,7 @@ struct AskedBody: View {
                 VStack(alignment: .leading, spacing: Space.s2) {
                     Text(item.question).readable().textSelection(.enabled)
                     if !item.choices.isEmpty {
-                        ChoiceChips(choices: item.choices)
+                        ChoiceChips(choices: item.choices, finish: item.question == FinishMeaning.question)
                     }
                 }
             }
@@ -291,14 +291,20 @@ struct AskedBody: View {
 /// The choices a question offered, read-only.
 struct ChoiceChips: View {
     let choices: [String]
+    /// Whether the choices are finish lines, named and explained.
+    var finish = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s1 + 2) {
             ForEach(choices, id: \.self) { choice in
-                HStack(spacing: Space.s2) {
+                let meaning = finish ? FinishMeaning.of(Choice(choice).label) : nil
+                HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
                     Image(systemName: "circle").font(.system(size: IconSize.tiny)).foregroundStyle(.tertiary)
-                    Text(Choice(choice).label).font(TypeScale.callout).foregroundStyle(.secondary)
-                    if Choice(choice).recommended { RecommendedTag() }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(meaning?.title ?? Choice(choice).label).font(TypeScale.callout).foregroundStyle(Palette.text2)
+                        if let meaning { Text(meaning.meaning).font(TypeScale.caption).foregroundStyle(Palette.text3) }
+                    }
+                    if Choice(choice).recommended { Badge("Recommended", .settled) }
                 }
             }
         }
