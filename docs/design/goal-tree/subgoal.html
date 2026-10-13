@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A sub-goal, one level down</title>
+<style>
+body{margin:0}
+a{color:#0a5cc7;text-decoration:none}a:hover{color:#084a9f}
+.win{width:1280px;height:900px;display:flex;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;color:#1d1d1f;background:#fff;font-size:14px;line-height:22px;overflow:hidden}
+.side{width:268px;flex:none;background:#f2f2f6;border-right:1px solid #e3e3e8;display:flex;flex-direction:column;padding:14px 10px;gap:4px;box-sizing:border-box}
+.micro{font-size:11px;line-height:14px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:#6c6c72}
+.row{display:flex;gap:8px;padding:8px 10px;border-radius:10px;align-items:flex-start}
+.row.sel{background:#dcdce3}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:7px}
+.t{font-size:13px;line-height:18px;font-weight:500}
+.meta{font-size:12px;line-height:16px;color:#6c6c72}
+.badge{font-size:10.5px;line-height:13px;font-weight:600;padding:2px 6px;border-radius:6px;white-space:nowrap}
+.att{background:#fff1e0;color:#9a3b00}
+.ok{background:#e6f6ec;color:#11692f}
+.live{background:#e8effc;color:#0a4fb0}
+.wait{background:#efeff3;color:#55555b}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.bar{height:52px;border-bottom:1px solid #e3e3e8;display:flex;align-items:center;padding:0 24px;gap:10px;flex:none}
+.btn{font:inherit;font-size:13px;line-height:18px;padding:5px 12px;border-radius:7px;border:1px solid #d6d6dc;background:#fff;color:#1d1d1f}
+.btn.pri{background:#0a64d6;border-color:#0a64d6;color:#fff;font-weight:500}
+.head{padding:20px 32px 0;flex:none}
+.crumb{font-size:12px;line-height:16px;color:#6c6c72;display:flex;gap:6px;align-items:center}
+.title{font-size:22px;line-height:28px;font-weight:600;margin:6px 0 0}
+.tabs{display:flex;gap:4px;margin-top:14px}
+.tab{font-size:13px;padding:6px 10px;border-radius:7px;color:#55555b}
+.tab.on{background:#ececf1;color:#1d1d1f;font-weight:600}
+.body{flex:1;overflow:hidden;padding:20px 32px;display:flex;flex-direction:column;gap:20px;border-top:1px solid #e3e3e8}
+.card{border:1px solid #e3e3e8;border-radius:10px;padding:14px 16px;background:#fff}
+.lab{font-size:12px;line-height:16px;font-weight:500;color:#6c6c72}
+.sg{display:flex;gap:12px;padding:14px 16px;border-bottom:1px solid #ececf1;align-items:flex-start}
+.ico{width:20px;height:20px;flex:none;margin-top:1px}
+.ev{display:flex;gap:12px;font-size:13px;line-height:19px;padding:6px 0}
+.ev .when{width:52px;flex:none;color:#6c6c72;font-size:12px}
+</style>
+</head>
+<body>
+<div class="win">
+  <aside class="side" aria-label="Goals">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 6px 8px">
+      <span style="font-size:13px;font-weight:600">metariki-eqms</span>
+      <button class="btn" style="padding:3px 8px">+ New Goal</button>
+    </div>
+    <div style="background:#e6e6ec;border-radius:8px;padding:5px 10px;font-size:13px;color:#6c6c72;margin:0 4px 10px">Search goals</div>
+    <div class="micro" style="padding:6px 10px">Needs you</div>
+    <div class="row sel">
+      <span class="dot" style="background:#e8820c"></span>
+      <div style="flex:1;min-width:0">
+        <div class="t">Release notes for every release</div>
+        <div class="meta" style="display:flex;gap:6px;align-items:center;margin-top:2px">1 of 4 · <span class="badge att">1 needs you</span></div>
+        <div style="margin-top:8px;padding-left:2px;border-left:2px solid #c9c9d1;padding:2px 0 2px 10px">
+          <div class="meta" style="color:#1d1d1f;font-weight:500">Whoever deploys gets a guide</div>
+        </div>
+      </div>
+    </div>
+    <div class="micro" style="padding:14px 10px 6px">Working</div>
+    <div class="row">
+      <span class="dot" style="background:#0a64d6"></span>
+      <div style="flex:1"><div class="t">Resolve today's GitHub issues</div><div class="meta" style="margin-top:2px">5 of 11 · 4 agents</div></div>
+    </div>
+    <div class="row">
+      <span class="dot" style="background:#0a64d6"></span>
+      <div style="flex:1"><div class="t">Why does sync drop events?</div><div class="meta" style="margin-top:2px">Discovery · 1 agent</div></div>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="bar"><span style="flex:1"></span><button class="btn">Actions</button><button class="btn">Agents · 2</button></div>
+    <div class="head">
+      <nav class="crumb" aria-label="Breadcrumb"><span>metariki-eqms</span><span>›</span><a href="main.html">Release notes for every release</a><span>›</span><span style="color:#1d1d1f">Whoever deploys gets a guide</span></nav>
+      <div style="display:flex;align-items:center;gap:12px">
+        <h1 class="title">Whoever deploys gets a guide for each release</h1>
+        <span class="badge att" style="margin-top:6px">Needs you</span>
+      </div>
+      <div class="meta" style="margin-top:6px">Serves the top goal's "whoever deploys gets a guide" · sub-goal 2 of 4</div>
+      <div class="tabs" role="tablist"><span class="tab on">Overview</span><span class="tab">Conversation</span><span class="tab">Record</span></div>
+      <div style="height:12px"></div>
+    </div>
+    <div class="body">
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
+        <div class="card">
+          <div class="lab">Done when</div>
+          <div style="font-size:13px;line-height:19px;margin-top:4px">A release's guide lists its migrations, env and infra changes, feature flags, per-org config, how to verify it and how to roll it back.</div>
+        </div>
+        <div class="card">
+          <div class="lab">Course</div>
+          <div style="display:flex;gap:6px;align-items:center;margin-top:4px"><span class="badge live">Corrected</span><span class="meta">40 min ago</span></div>
+          <div class="meta" style="margin-top:6px">Guides live with each release, not in the wiki: the wiki sub-goal was superseded once tagging chose a docs/releases/ folder.</div>
+        </div>
+      </div>
+
+      <section>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+          <h2 style="font-size:16px;line-height:22px;margin:0;font-weight:600">Sub-goals</h2>
+          <span class="meta">1 of 3 done</span>
+          <span style="flex:1"></span>
+          <button class="btn">+ Add sub-goal</button>
+        </div>
+        <div class="card" style="padding:0">
+          <div class="sg">
+            <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="#1f9d55"/><path d="M6 10.5l2.6 2.5L14 7.5" stroke="#fff" stroke-width="2" fill="none"/></svg>
+            <div style="flex:1"><div class="t" style="font-size:14px">The guide lists migrations and env changes</div><div class="meta" style="margin-top:2px">claude · 7 steps · judged met 25 min ago</div></div>
+            <span class="badge ok">Done</span>
+          </div>
+          <div class="sg">
+            <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" stroke="#0a64d6" stroke-width="2" fill="none"/><path d="M10 2a8 8 0 0 1 8 8h-8z" fill="#0a64d6"/></svg>
+            <div style="flex:1"><div class="t" style="font-size:14px">The guide lists feature flags and per-org config</div><div class="meta" style="margin-top:2px">codex · now: Reading feature_flags.csv history · <a href="#">Show steps (2 of 6)</a></div></div>
+            <span class="badge live">Working</span>
+          </div>
+          <div class="sg" style="background:#fffaf4">
+            <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" stroke="#e8820c" stroke-width="2" fill="none"/><circle cx="10" cy="10" r="3" fill="#e8820c"/></svg>
+            <div style="flex:1"><div class="t" style="font-size:14px">The guide says how to verify and roll back</div><div class="meta" style="margin-top:2px">claude · paused on your answer: rollback scope · <a href="main.html">Answer</a></div></div>
+            <span class="badge att">Needs you</span>
+          </div>
+          <div class="sg" style="border-bottom:0;opacity:.75">
+            <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" stroke="#9a9aa0" stroke-width="2" fill="none"/><path d="M5 10h10" stroke="#9a9aa0" stroke-width="2"/></svg>
+            <div style="flex:1"><div class="t" style="font-size:14px;text-decoration:line-through;color:#55555b">Guides are published to the team wiki</div><div class="meta" style="margin-top:2px">Superseded 40 min ago: guides live with each release in docs/releases/ · its work stays readable</div></div>
+            <span class="badge wait">Superseded</span>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2 style="font-size:16px;line-height:22px;margin:0 0 6px;font-weight:600">What the director did here</h2>
+        <div class="ev"><span class="when">11:52</span><span>Checked course after "migrations and env changes" finished: <b>on course</b>.</span></div>
+        <div class="ev"><span class="when">11:31</span><span>Refreshed dependencies in the main checkout so the flags agent could run validate. Not a sub-goal: a chore for this one.</span></div>
+        <div class="ev"><span class="when">11:12</span><span>Corrected course: superseded "Guides are published to the team wiki". <a href="#">Why</a></span></div>
+      </section>
+    </div>
+  </main>
+</div>
+</body>
+</html>

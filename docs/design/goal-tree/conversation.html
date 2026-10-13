@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Conversation tab</title>
+<style>
+body{margin:0}
+a{color:#0a5cc7;text-decoration:none}a:hover{color:#084a9f}
+.win{width:1280px;height:900px;display:flex;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;color:#1d1d1f;background:#fff;font-size:14px;line-height:22px;overflow:hidden}
+.side{width:268px;flex:none;background:#f2f2f6;border-right:1px solid #e3e3e8;display:flex;flex-direction:column;padding:14px 10px;gap:4px;box-sizing:border-box}
+.micro{font-size:11px;line-height:14px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:#6c6c72}
+.row{display:flex;gap:8px;padding:8px 10px;border-radius:10px;align-items:flex-start}
+.row.sel{background:#dcdce3}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:7px}
+.t{font-size:13px;line-height:18px;font-weight:500}
+.meta{font-size:12px;line-height:16px;color:#6c6c72}
+.badge{font-size:10.5px;line-height:13px;font-weight:600;padding:2px 6px;border-radius:6px;white-space:nowrap}
+.att{background:#fff1e0;color:#9a3b00}
+.ok{background:#e6f6ec;color:#11692f}
+.live{background:#e8effc;color:#0a4fb0}
+.wait{background:#efeff3;color:#55555b}
+.btn{font:inherit;font-size:13px;line-height:18px;padding:5px 12px;border-radius:7px;border:1px solid #d6d6dc;background:#fff;color:#1d1d1f}
+.btn.pri{background:#0a64d6;border-color:#0a64d6;color:#fff;font-weight:500}
+.lab{font-size:12px;line-height:16px;font-weight:500;color:#6c6c72}
+.tab{font-size:13px;padding:6px 10px;border-radius:7px;color:#55555b}
+.tab.on{background:#ececf1;color:#1d1d1f;font-weight:600}
+.fchip{font:inherit;font-size:12px;line-height:16px;padding:4px 10px;border-radius:14px;border:1px solid #e3e3e8;background:#fff;color:#3a3a3f;white-space:nowrap}
+.fchip.on{background:#1d1d1f;border-color:#1d1d1f;color:#fff}
+.turn{display:flex;gap:12px}
+.av{width:24px;height:24px;flex:none}
+.who{font-size:12px;line-height:16px;font-weight:500;color:#55555b;display:flex;gap:6px;align-items:center}
+.sgtag{font-size:11px;line-height:14px;font-weight:500;padding:2px 7px;border-radius:6px;background:#f2f2f6;color:#3a3a3f;border:1px solid #e3e3e8}
+.card{border:1px solid #e3e3e8;border-radius:10px;padding:12px 14px;background:#fafafc}
+.ev{display:flex;align-items:center;gap:10px;font-size:12px;line-height:16px;color:#6c6c72}
+.ev span.l{flex:1;height:1px;background:#e3e3e8}
+.tool{font-size:13px;line-height:18px;color:#55555b;display:flex;gap:8px;align-items:center}
+</style>
+</head>
+<body>
+<div class="win">
+  <aside class="side" aria-label="Goals">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 6px 8px">
+      <span style="font-size:13px;font-weight:600">metariki-eqms</span>
+      <button class="btn" style="padding:3px 8px">+ New Goal</button>
+    </div>
+    <div style="background:#e6e6ec;border-radius:8px;padding:5px 10px;font-size:13px;color:#6c6c72;margin:0 4px 10px">Search goals</div>
+    <div class="micro" style="padding:6px 10px">Needs you</div>
+    <div class="row sel">
+      <span class="dot" style="background:#e8820c"></span>
+      <div style="flex:1"><div class="t">Release notes for every release</div><div class="meta" style="display:flex;gap:6px;align-items:center;margin-top:2px">1 of 4 · <span class="badge att">1 needs you</span></div></div>
+    </div>
+    <div class="micro" style="padding:14px 10px 6px">Working</div>
+    <div class="row">
+      <span class="dot" style="background:#0a64d6"></span>
+      <div style="flex:1"><div class="t">Resolve today's GitHub issues</div><div class="meta" style="margin-top:2px">5 of 11 · 4 agents</div></div>
+    </div>
+    <div class="micro" style="padding:14px 10px 6px">Completed</div>
+    <div class="row">
+      <span class="dot" style="background:#1f9d55"></span>
+      <div style="flex:1"><div class="t">Printed forms keep every signature</div><div class="meta" style="margin-top:2px">Complete PR #512 · 2h</div></div>
+    </div>
+  </aside>
+  <main style="flex:1;display:flex;flex-direction:column;min-width:0">
+    <div style="height:52px;border-bottom:1px solid #e3e3e8;display:flex;align-items:center;padding:0 24px;gap:10px;flex:none"><span style="flex:1"></span><button class="btn">Pause</button><button class="btn">Actions</button><button class="btn">Your messages</button><button class="btn">Agents · 2</button></div>
+    <div style="padding:20px 32px 0;flex:none">
+      <nav class="meta" aria-label="Breadcrumb">metariki-eqms › Release notes for every release</nav>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:6px"><h1 style="font-size:22px;line-height:28px;font-weight:600;margin:0">Release notes for every release</h1><span class="badge live">Working</span></div>
+      <div style="display:flex;gap:4px;margin-top:14px"><a class="tab" href="main.html">Overview</a><span class="tab on">Conversation</span><a class="tab" href="record.html">Record</a></div>
+      <div style="display:flex;gap:6px;margin:12px 0;align-items:center;flex-wrap:wrap">
+        <button class="fchip on">Everything</button>
+        <button class="fchip">You and the director</button>
+        <button class="fchip">Tagged releases</button>
+        <button class="fchip">Deployment guide · 3</button>
+        <button class="fchip">Customer note</button>
+        <button class="fchip">Agent workflow</button>
+      </div>
+    </div>
+    <div style="flex:1;border-top:1px solid #e3e3e8;padding:24px 32px;display:flex;flex-direction:column;gap:24px;overflow:hidden">
+      <div style="align-self:flex-end;max-width:70%;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+        <span class="meta">You · 09:58</span>
+        <div style="background:#e5effc;border:1px solid #bcd3f3;border-radius:14px;padding:10px 14px">A mechanism that creates a release note for 1. technical forward deployers and 2. customers, for every release.</div>
+      </div>
+
+      <div class="turn">
+        <svg class="av" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#1f9d55"/><path d="M7 12.5l3 3 7-7" stroke="#fff" stroke-width="2" fill="none"/></svg>
+        <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+          <div class="who">Director · 10:01</div>
+          <div>Planned it as 4 sub-goals, finishing at a complete PR (your taste in auto mode). Starting the first two now.</div>
+          <div class="card" style="display:flex;flex-direction:column;gap:6px;font-size:13px;line-height:19px">
+            <div style="display:flex;gap:8px;align-items:center"><span class="badge ok">Done</span>Every release is tagged and records what changed</div>
+            <div style="display:flex;gap:8px;align-items:center"><span class="badge att">Needs you</span>Whoever deploys gets a guide for each release</div>
+            <div style="display:flex;gap:8px;align-items:center"><span class="badge live">Working</span>Customers get a plain-language release note</div>
+            <div style="display:flex;gap:8px;align-items:center"><span class="badge wait">Waiting</span>Any agent can produce the notes from the workflow</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ev"><span class="l"></span>Every release is tagged · done · judged met · 11:48<span class="l"></span></div>
+
+      <div class="turn">
+        <svg class="av" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke="#0a64d6" stroke-width="2" fill="none"/><path d="M12 2a10 10 0 0 1 10 10h-10z" fill="#0a64d6"/></svg>
+        <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+          <div class="who">claude <span class="sgtag">Customer note</span> · 12:10</div>
+          <div>The changes customers see map to modules by name, so I'm adding a small table from module to product name before writing the template.</div>
+          <div class="tool"><span aria-hidden="true">▸</span><b style="font-weight:500">4 tool calls</b> · read docs/releases/, edited release-notes/names.ts</div>
+        </div>
+      </div>
+
+      <div class="turn">
+        <svg class="av" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke="#e8820c" stroke-width="2" fill="none"/><circle cx="12" cy="12" r="4" fill="#e8820c"/></svg>
+        <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+          <div class="who">claude <span class="sgtag">Deployment guide › Rollback</span> · 12:14</div>
+          <div class="card" style="background:#fff">
+            <div class="lab">Asked the director</div>
+            <div style="font-size:13px;line-height:19px;margin-top:4px">Do migrations in this repo have down scripts?</div>
+            <div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#f0faf3;border:1px solid #cdebd7;font-size:13px;line-height:19px"><span class="lab" style="color:#11692f">Director answered</span> · No: migrations are forward-only, per the repo's migration guide.</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="border:1px solid #f3c99a;background:#fff8f0;border-radius:10px;padding:12px 16px 12px 13px;border-left:3px solid #e8820c;display:flex;align-items:center;gap:12px">
+        <div style="flex:1"><div class="lab" style="color:#9a3b00">Needs you · Deployment guide › Rollback</div><div style="font-weight:500;margin-top:2px">Rollback: cover database down-migrations, or only redeploying the previous build?</div></div>
+        <button class="btn">Only redeploy · Recommended</button><button class="btn">Both</button>
+      </div>
+    </div>
+    <div style="padding:12px 32px 22px;flex:none">
+      <div style="border:1px solid #e3e3e8;border-radius:14px;padding:12px 14px;box-shadow:0 2px 10px rgba(0,0,0,.07);display:flex;align-items:center;gap:10px">
+        <span style="flex:1;color:#6c6c72">Message the director about this goal…</span>
+        <span class="meta">to: whole goal ▾</span>
+        <button class="btn pri" aria-label="Send" style="border-radius:50%;width:28px;height:28px;padding:0">↑</button>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Where does this goal finish?</title>
+<style>
+body{margin:0}
+a{color:#0a5cc7;text-decoration:none}a:hover{color:#084a9f}
+.win{width:1280px;height:900px;display:flex;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;color:#1d1d1f;background:#fff;font-size:14px;line-height:22px;overflow:hidden}
+.side{width:268px;flex:none;background:#f2f2f6;border-right:1px solid #e3e3e8;display:flex;flex-direction:column;padding:14px 10px;gap:4px;box-sizing:border-box}
+.micro{font-size:11px;line-height:14px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:#6c6c72}
+.row{display:flex;gap:8px;padding:8px 10px;border-radius:10px;align-items:flex-start}
+.row.sel{background:#dcdce3}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:7px}
+.t{font-size:13px;line-height:18px;font-weight:500}
+.meta{font-size:12px;line-height:16px;color:#6c6c72}
+.badge{font-size:10.5px;line-height:13px;font-weight:600;padding:2px 6px;border-radius:6px;white-space:nowrap}
+.att{background:#fff1e0;color:#9a3b00}
+.ok{background:#e6f6ec;color:#11692f}
+.btn{font:inherit;font-size:13px;line-height:18px;padding:5px 12px;border-radius:7px;border:1px solid #d6d6dc;background:#fff;color:#1d1d1f}
+.btn.pri{background:#0a64d6;border-color:#0a64d6;color:#fff;font-weight:500}
+.lab{font-size:12px;line-height:16px;font-weight:500;color:#6c6c72}
+.q{border:1px solid #f3c99a;background:#fff8f0;border-radius:10px;padding:16px 18px 16px 15px;border-left:3px solid #e8820c;display:flex;flex-direction:column;gap:10px}
+.opt{display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border-radius:8px;border:1px solid transparent}
+.opt.on{background:#fff;border-color:#f3c99a}
+.src{display:flex;gap:10px;font-size:13px;line-height:19px}
+</style>
+</head>
+<body>
+<div class="win">
+  <aside class="side" aria-label="Goals">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 6px 8px">
+      <span style="font-size:13px;font-weight:600">event-bus</span>
+      <button class="btn" style="padding:3px 8px">+ New Goal</button>
+    </div>
+    <div style="background:#e6e6ec;border-radius:8px;padding:5px 10px;font-size:13px;color:#6c6c72;margin:0 4px 10px">Search goals</div>
+    <div class="micro" style="padding:6px 10px">Needs you</div>
+    <div class="row sel">
+      <span class="dot" style="background:#e8820c"></span>
+      <div style="flex:1"><div class="t">Pick a queue library for the event bus</div><div class="meta" style="margin-top:2px;display:flex;gap:6px;align-items:center"><span class="badge att">Before planning</span></div></div>
+    </div>
+  </aside>
+  <main style="flex:1;display:flex;flex-direction:column;min-width:0">
+    <div style="height:52px;border-bottom:1px solid #e3e3e8;flex:none"></div>
+    <div style="padding:20px 32px 12px;flex:none;border-bottom:1px solid #e3e3e8">
+      <nav class="meta" aria-label="Breadcrumb">event-bus › Pick a queue library for the event bus</nav>
+      <h1 style="font-size:22px;line-height:28px;font-weight:600;margin:6px 0 0">Pick a queue library for the event bus</h1>
+    </div>
+    <div style="flex:1;padding:24px 32px;display:flex;flex-direction:column;gap:22px;overflow:hidden">
+      <div style="align-self:flex-end;max-width:70%;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+        <span class="meta">You · 14:02</span>
+        <div style="background:#e5effc;border:1px solid #bcd3f3;border-radius:14px;padding:10px 14px;font-size:14px;line-height:22px">Compare NATS, Redis Streams and Kafka for the event bus and pick one. We push about 2k events a second at peak.</div>
+      </div>
+      <div style="display:flex;gap:12px">
+        <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="flex:none"><circle cx="12" cy="12" r="11" fill="#1f9d55"/><path d="M7 12.5l3 3 7-7" stroke="#fff" stroke-width="2" fill="none"/></svg>
+        <div style="flex:1;display:flex;flex-direction:column;gap:10px">
+          <span class="meta">Director · 14:02</span>
+          <section class="q" aria-label="Needs you">
+            <div class="lab" style="color:#9a3b00">Before I plan it · where does this goal finish?</div>
+            <div class="opt on"><span aria-hidden="true" style="margin-top:1px">◉</span><div style="flex:1"><div class="t" style="font-size:14px">Research complete: a written comparison and a pick</div><div class="meta" style="margin-top:2px">Benchmarks at your load, trade-offs and a recommendation with its reasons. No code changes.</div></div><span class="badge ok">Recommended</span></div>
+            <div class="opt"><span aria-hidden="true" style="margin-top:1px">○</span><div style="flex:1"><div class="t" style="font-size:14px">A local build you can try</div><div class="meta" style="margin-top:2px">The comparison, plus the pick wired in on a branch with how to run it.</div></div></div>
+            <div class="opt"><span aria-hidden="true" style="margin-top:1px">○</span><div style="flex:1"><div class="t" style="font-size:14px">A complete PR switching to the pick</div><div class="meta" style="margin-top:2px">Comparison, migration and tests, ready to merge.</div></div></div>
+            <div class="opt"><span aria-hidden="true" style="margin-top:1px">○</span><div style="flex:1"><div class="t" style="font-size:14px;color:#55555b">Somewhere else…</div></div></div>
+            <div style="border-top:1px solid #f3dfc8;padding-top:10px;display:flex;flex-direction:column;gap:6px">
+              <div class="lab">Why I'm asking: these disagree</div>
+              <div class="src"><span style="width:110px;flex:none;color:#6c6c72">The goal</span><span>"Compare and pick one" reads as research.</span></div>
+              <div class="src"><span style="width:110px;flex:none;color:#6c6c72">Your taste</span><span>In auto mode, a complete PR is done.</span></div>
+              <div class="src"><span style="width:110px;flex:none;color:#6c6c72">This repo</span><span>No finished goals yet to learn from.</span></div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <label style="display:flex;gap:8px;align-items:center;font-size:13px"><input type="checkbox" checked="checked"> Finish comparisons in event-bus this way from now on</label>
+              <span style="flex:1"></span>
+              <button class="btn">Let the director decide</button>
+              <button class="btn pri">Answer</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+    <div style="padding:12px 32px 24px;flex:none">
+      <div style="border:1px solid #e3e3e8;border-radius:14px;padding:12px 14px;box-shadow:0 2px 10px rgba(0,0,0,.07);display:flex;align-items:center;gap:10px">
+        <span style="flex:1;color:#6c6c72;font-size:14px">Message the director…</span>
+        <span class="meta">claude · opus</span>
+        <button class="btn pri" aria-label="Send" style="border-radius:50%;width:28px;height:28px;padding:0">↑</button>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

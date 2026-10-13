@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Proposed breakdown</title>
+<style>
+body{margin:0}
+a{color:#0a5cc7;text-decoration:none}a:hover{color:#084a9f}
+.win{width:1280px;height:900px;display:flex;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;color:#1d1d1f;background:#fff;font-size:14px;line-height:22px;overflow:hidden}
+.side{width:268px;flex:none;background:#f2f2f6;border-right:1px solid #e3e3e8;display:flex;flex-direction:column;padding:14px 10px;gap:4px;box-sizing:border-box}
+.micro{font-size:11px;line-height:14px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:#6c6c72}
+.row{display:flex;gap:8px;padding:8px 10px;border-radius:10px;align-items:flex-start}
+.row.sel{background:#dcdce3}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:7px}
+.t{font-size:13px;line-height:18px;font-weight:500}
+.meta{font-size:12px;line-height:16px;color:#6c6c72}
+.badge{font-size:10.5px;line-height:13px;font-weight:600;padding:2px 6px;border-radius:6px;white-space:nowrap}
+.att{background:#fff1e0;color:#9a3b00}
+.live{background:#e8effc;color:#0a4fb0}
+.wait{background:#efeff3;color:#55555b}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.bar{height:52px;border-bottom:1px solid #e3e3e8;display:flex;align-items:center;padding:0 24px;gap:10px;flex:none}
+.btn{font:inherit;font-size:13px;line-height:18px;padding:5px 12px;border-radius:7px;border:1px solid #d6d6dc;background:#fff;color:#1d1d1f}
+.btn.pri{background:#0a64d6;border-color:#0a64d6;color:#fff;font-weight:500}
+.lnk{font:inherit;font-size:12px;border:0;background:none;color:#0a5cc7;padding:2px 4px}
+.lab{font-size:12px;line-height:16px;font-weight:500;color:#6c6c72}
+.field{border:1px solid #d6d6dc;border-radius:8px;padding:8px 10px;font-size:13px;line-height:19px;background:#fff}
+.pc{display:flex;gap:12px;border:1px solid #e3e3e8;border-radius:10px;padding:14px 14px 12px 8px;background:#fff}
+.grip{width:16px;flex:none;color:#a5a5ab;font-size:14px;line-height:20px;text-align:center;cursor:grab}
+.num{width:22px;height:22px;border-radius:50%;background:#ececf1;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;flex:none}
+.chip{font-size:12px;line-height:16px;padding:2px 8px;border-radius:6px;background:#f2f2f6;color:#3a3a3f;border:1px solid #e3e3e8}
+</style>
+</head>
+<body>
+<div class="win">
+  <aside class="side" aria-label="Goals">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 6px 8px">
+      <span style="font-size:13px;font-weight:600">metariki-eqms</span>
+      <button class="btn" style="padding:3px 8px">+ New Goal</button>
+    </div>
+    <div style="background:#e6e6ec;border-radius:8px;padding:5px 10px;font-size:13px;color:#6c6c72;margin:0 4px 10px">Search goals</div>
+    <div class="micro" style="padding:6px 10px">Needs you</div>
+    <div class="row sel">
+      <span class="dot" style="background:#e8820c"></span>
+      <div style="flex:1"><div class="t">An inspector can get a full audit trail</div><div class="meta" style="margin-top:2px;display:flex;gap:6px;align-items:center"><span class="badge att">Proposed</span> 4 sub-goals</div></div>
+    </div>
+    <div class="row">
+      <span class="dot" style="background:#e8820c"></span>
+      <div style="flex:1"><div class="t">Release notes for every release</div><div class="meta" style="margin-top:2px">1 of 4 · 1 needs you</div></div>
+    </div>
+    <div class="micro" style="padding:14px 10px 6px">Working</div>
+    <div class="row">
+      <span class="dot" style="background:#0a64d6"></span>
+      <div style="flex:1"><div class="t">Resolve today's GitHub issues</div><div class="meta" style="margin-top:2px">5 of 11 · 4 agents</div></div>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="bar"><span class="meta">Ask mode: nothing starts until you approve</span><span style="flex:1"></span><button class="btn">Discard</button><button class="btn">Re-plan with a note…</button><button class="btn pri">Approve and start</button></div>
+    <div style="display:flex;flex:1;min-height:0">
+      <div style="flex:1;padding:22px 32px;display:flex;flex-direction:column;gap:14px;overflow:hidden">
+        <nav class="meta" aria-label="Breadcrumb">metariki-eqms › New goal</nav>
+        <h1 style="font-size:22px;line-height:28px;font-weight:600;margin:0">An inspector can get a full audit trail</h1>
+        <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:12px">
+          <label style="display:flex;flex-direction:column;gap:4px"><span class="lab">Done when</span><span class="field">An org admin exports, for any date range, every record change with who, when, what and why, in a file an inspector accepts.</span></label>
+          <label style="display:flex;flex-direction:column;gap:4px"><span class="lab">Finishes at</span><span class="field" style="display:flex;justify-content:space-between"><b style="font-weight:600">A complete PR</b><span aria-hidden="true">▾</span></span><span class="meta">From your taste · auto would start at once</span></label>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+          <h2 style="font-size:16px;line-height:22px;margin:0;font-weight:600">Proposed sub-goals</h2>
+          <span class="meta">drag to reorder · each is about one agent's work</span>
+        </div>
+
+        <div class="pc">
+          <span class="grip" aria-hidden="true">⋮⋮</span><span class="num">1</span>
+          <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+            <div class="t" style="font-size:14px">Every record change keeps who, when, what and why</div>
+            <div class="meta">Done when a change to any form, template or setting stores its before and after, its author and a reason</div>
+            <div style="display:flex;gap:6px"><span class="chip">Starts first</span><span class="chip">Will be planned further: touches 3 modules</span></div>
+          </div>
+          <div style="display:flex;gap:2px;align-items:flex-start"><button class="lnk">Edit</button><button class="lnk">Split</button><button class="lnk">Drop</button></div>
+        </div>
+        <div class="pc">
+          <span class="grip" aria-hidden="true">⋮⋮</span><span class="num">2</span>
+          <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+            <div class="t" style="font-size:14px">An admin can export the trail for a date range</div>
+            <div class="meta">Done when the export is a signed PDF and a CSV, filtered by range, module and person</div>
+            <div style="display:flex;gap:6px"><span class="chip">After 1</span><span class="chip">One agent</span></div>
+          </div>
+          <div style="display:flex;gap:2px;align-items:flex-start"><button class="lnk">Edit</button><button class="lnk">Merge with 3</button><button class="lnk">Drop</button></div>
+        </div>
+        <div class="pc">
+          <span class="grip" aria-hidden="true">⋮⋮</span><span class="num">3</span>
+          <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+            <div class="t" style="font-size:14px">The trail cannot be edited or deleted</div>
+            <div class="meta">Done when no role, API or migration can change or remove a stored entry, and a test proves it</div>
+            <div style="display:flex;gap:6px"><span class="chip">After 1</span><span class="chip">One agent</span></div>
+          </div>
+          <div style="display:flex;gap:2px;align-items:flex-start"><button class="lnk">Edit</button><button class="lnk">Split</button><button class="lnk">Drop</button></div>
+        </div>
+        <div class="pc" style="border-style:dashed;background:#fafafc">
+          <span class="grip" aria-hidden="true">⋮⋮</span><span class="num">4</span>
+          <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+            <div class="t" style="font-size:14px">An inspector's checklist maps to the export</div>
+            <div class="meta">Done when each 21 CFR Part 11 audit-trail clause points to where the export satisfies it</div>
+            <div style="display:flex;gap:6px"><span class="chip">After 2 and 3</span><span class="chip">Research: no code</span></div>
+          </div>
+          <div style="display:flex;gap:2px;align-items:flex-start"><button class="lnk">Edit</button><button class="lnk">Drop</button></div>
+        </div>
+        <button class="btn" style="align-self:flex-start">+ Add sub-goal</button>
+      </div>
+      <aside style="width:320px;flex:none;border-left:1px solid #e3e3e8;background:#fafafc;padding:22px 20px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box" aria-label="Director's reasoning">
+        <div class="micro">Why this breakdown</div>
+        <p style="margin:0;font-size:13px;line-height:20px">An inspector checks three things: that every change is captured, that it can be produced on demand, and that nobody can alter it. Each is its own sub-goal, so each is judged on its own.</p>
+        <p style="margin:0;font-size:13px;line-height:20px">Number 1 is large, so it will be planned into its own sub-goals when it starts, once the modules it touches are known.</p>
+        <div class="micro" style="margin-top:6px">Left out</div>
+        <p style="margin:0;font-size:13px;line-height:20px">Electronic signatures: they already exist and the goal doesn't ask to change them.</p>
+        <div class="micro" style="margin-top:6px">How you'd judge it</div>
+        <p style="margin:0;font-size:13px;line-height:20px">Exporting last month's trail for one org and handing it to an inspector with the checklist.</p>
+      </aside>
+    </div>
+  </main>
+</div>
+</body>
+</html>

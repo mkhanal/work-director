@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Record tab</title>
+<style>
+body{margin:0}
+a{color:#0a5cc7;text-decoration:none}a:hover{color:#084a9f}
+.win{width:1280px;height:900px;display:flex;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;color:#1d1d1f;background:#fff;font-size:14px;line-height:22px;overflow:hidden}
+.side{width:268px;flex:none;background:#f2f2f6;border-right:1px solid #e3e3e8;display:flex;flex-direction:column;padding:14px 10px;gap:4px;box-sizing:border-box}
+.micro{font-size:11px;line-height:14px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:#6c6c72}
+.row{display:flex;gap:8px;padding:8px 10px;border-radius:10px;align-items:flex-start}
+.row.sel{background:#dcdce3}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:7px}
+.t{font-size:13px;line-height:18px;font-weight:500}
+.meta{font-size:12px;line-height:16px;color:#6c6c72}
+.badge{font-size:10.5px;line-height:13px;font-weight:600;padding:2px 6px;border-radius:6px;white-space:nowrap}
+.att{background:#fff1e0;color:#9a3b00}
+.ok{background:#e6f6ec;color:#11692f}
+.live{background:#e8effc;color:#0a4fb0}
+.wait{background:#efeff3;color:#55555b}
+.dec{background:#f1ebfb;color:#5b2aa8}
+.btn{font:inherit;font-size:13px;line-height:18px;padding:5px 12px;border-radius:7px;border:1px solid #d6d6dc;background:#fff;color:#1d1d1f}
+.tab{font-size:13px;padding:6px 10px;border-radius:7px;color:#55555b}
+.tab.on{background:#ececf1;color:#1d1d1f;font-weight:600}
+.fchip{font:inherit;font-size:12px;line-height:16px;padding:4px 10px;border-radius:14px;border:1px solid #e3e3e8;background:#fff;color:#3a3a3f;white-space:nowrap}
+.fchip.on{background:#1d1d1f;border-color:#1d1d1f;color:#fff}
+.day{font-size:12px;line-height:16px;font-weight:600;color:#3a3a3f;padding:14px 0 6px}
+.r{display:grid;grid-template-columns:52px 96px minmax(0,1fr) 220px 90px;gap:12px;padding:9px 0;border-bottom:1px solid #f0f0f3;align-items:start;font-size:13px;line-height:19px}
+.r .when{color:#6c6c72;font-size:12px}
+.r .path{color:#55555b;font-size:12px;line-height:17px}
+.r .by{color:#6c6c72;font-size:12px;text-align:right}
+.sum{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.sum div{border:1px solid #e3e3e8;border-radius:10px;padding:10px 12px}
+.n{font-size:20px;line-height:24px;font-weight:600}
+</style>
+</head>
+<body>
+<div class="win">
+  <aside class="side" aria-label="Goals">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 6px 8px">
+      <span style="font-size:13px;font-weight:600">metariki-eqms</span>
+      <button class="btn" style="padding:3px 8px">+ New Goal</button>
+    </div>
+    <div style="background:#e6e6ec;border-radius:8px;padding:5px 10px;font-size:13px;color:#6c6c72;margin:0 4px 10px">Search goals</div>
+    <div class="micro" style="padding:6px 10px">Needs you</div>
+    <div class="row sel">
+      <span class="dot" style="background:#e8820c"></span>
+      <div style="flex:1"><div class="t">Release notes for every release</div><div class="meta" style="display:flex;gap:6px;align-items:center;margin-top:2px">1 of 4 · <span class="badge att">1 needs you</span></div></div>
+    </div>
+    <div class="micro" style="padding:14px 10px 6px">Working</div>
+    <div class="row">
+      <span class="dot" style="background:#0a64d6"></span>
+      <div style="flex:1"><div class="t">Resolve today's GitHub issues</div><div class="meta" style="margin-top:2px">5 of 11 · 4 agents</div></div>
+    </div>
+    <div class="micro" style="padding:14px 10px 6px">Completed</div>
+    <div class="row">
+      <span class="dot" style="background:#1f9d55"></span>
+      <div style="flex:1"><div class="t">Printed forms keep every signature</div><div class="meta" style="margin-top:2px">Complete PR #512 · 2h</div></div>
+    </div>
+    <div class="row">
+      <span class="dot" style="background:#1f9d55"></span>
+      <div style="flex:1"><div class="t">Which PDF fonts cover Sinhala?</div><div class="meta" style="margin-top:2px">Research · yesterday</div></div>
+    </div>
+  </aside>
+  <main style="flex:1;display:flex;flex-direction:column;min-width:0">
+    <div style="height:52px;border-bottom:1px solid #e3e3e8;display:flex;align-items:center;padding:0 24px;gap:10px;flex:none"><span style="flex:1"></span><button class="btn">Pause</button><button class="btn">Actions</button><button class="btn">Agents · 2</button></div>
+    <div style="padding:20px 32px 0;flex:none">
+      <nav class="meta" aria-label="Breadcrumb">metariki-eqms › Release notes for every release</nav>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:6px"><h1 style="font-size:22px;line-height:28px;font-weight:600;margin:0">Release notes for every release</h1><span class="badge live">Working</span></div>
+      <div style="display:flex;gap:4px;margin-top:14px"><a class="tab" href="main.html">Overview</a><a class="tab" href="conversation.html">Conversation</a><span class="tab on">Record</span></div>
+      <div style="height:12px"></div>
+    </div>
+    <div style="flex:1;border-top:1px solid #e3e3e8;padding:20px 32px;display:flex;flex-direction:column;gap:14px;overflow:hidden">
+      <div class="sum">
+        <div><div class="n">5</div><div class="meta">decisions · 2 yours</div></div>
+        <div><div class="n">3</div><div class="meta">course checks · 1 correction</div></div>
+        <div><div class="n">2</div><div class="meta">questions · 1 answered by the director</div></div>
+        <div><div class="n">2</div><div class="meta">chores the director ran</div></div>
+        <div><div class="n">1</div><div class="meta">report judged · met</div></div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="fchip on">Everything</button><button class="fchip">Decisions</button><button class="fchip">Course</button><button class="fchip">Questions</button><button class="fchip">Reports</button><button class="fchip">Chores</button><button class="fchip">Delivery</button>
+        <span style="flex:1"></span><span class="meta">Sub-goal: all ▾</span>
+      </div>
+      <div role="table" aria-label="Record">
+        <div class="r" style="border-bottom:1px solid #e3e3e8;padding-top:0" role="row"><span class="meta">Time</span><span class="meta">Kind</span><span class="meta">What</span><span class="meta">Where</span><span class="meta" style="text-align:right">By</span></div>
+        <div class="day">Today</div>
+        <div class="r" role="row"><span class="when">12:14</span><span><span class="badge ok">Answered</span></span><span>Migrations are forward-only, so rollback can't run down scripts.</span><span class="path">Deployment guide › Rollback</span><span class="by">director</span></div>
+        <div class="r" role="row"><span class="when">11:52</span><span><span class="badge ok">On course</span></span><span>After "migrations and env changes" finished: the guide's sections still match the done-when.</span><span class="path">Deployment guide</span><span class="by">director</span></div>
+        <div class="r" role="row"><span class="when">11:48</span><span><span class="badge ok">Judged met</span></span><span>Every release has a vX.Y.Z tag and a grouped change list. Verify passed; 9 steps.</span><span class="path">Tagged releases</span><span class="by">director</span></div>
+        <div class="r" role="row"><span class="when">11:31</span><span><span class="badge wait">Chore</span></span><span>Refreshed dependencies in the main checkout so validate runs. Lockfile unchanged.</span><span class="path">Deployment guide › Flags</span><span class="by">director</span></div>
+        <div class="r" role="row"><span class="when">11:12</span><span><span class="badge live">Corrected</span></span><span>Superseded "Guides are published to the team wiki": guides live with each release in docs/releases/. <a href="#">Why</a></span><span class="path">Deployment guide</span><span class="by">director</span></div>
+        <div class="r" role="row"><span class="when">10:20</span><span><span class="badge dec">Decision</span></span><span>Release notes are written in English only for now.</span><span class="path">Release notes (top)</span><span class="by">you</span></div>
+        <div class="r" role="row"><span class="when">10:01</span><span><span class="badge dec">Finish line</span></span><span>Finishes at a complete PR, from your taste: in auto mode a complete PR is done.</span><span class="path">Release notes (top)</span><span class="by">director</span></div>
+        <div class="r" role="row"><span class="when">10:01</span><span><span class="badge ok">On course</span></span><span>Planned into 4 sub-goals; each serves a part of the done-when.</span><span class="path">Release notes (top)</span><span class="by">director</span></div>
+        <div class="r" role="row" style="border-bottom:0"><span class="when">09:58</span><span><span class="badge dec">Asked</span></span><span>A mechanism that creates a release note for technical forward deployers and for customers, for every release.</span><span class="path">Release notes (top)</span><span class="by">you</span></div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>
