@@ -27,10 +27,10 @@ screens=(
   "conversation $goal conversation"
   "record $goal record"
 )
-for scheme in Light Dark; do
+for scheme in light dark; do
   for row in "${screens[@]}"; do
     read -r screen id view <<<"$row"
-    "$app" -place.work "$id" -goal.view "$view" -detail.agents NO -AppleInterfaceStyle "$scheme" >"$work/app-$screen.log" 2>&1 &
+    "$app" -place.work "$id" -goal.view "$view" -detail.agents NO -appearance "$scheme" >"$work/app-$screen.log" 2>&1 &
     pid=$!
     bounds=""
     for _ in $(seq 50); do
@@ -47,7 +47,7 @@ for scheme in Light Dark; do
       sleep 0.2
     done
     [ -n "$bounds" ] || { echo "no window for $screen"; cat "$work/app-$screen.log"; kill "$pid"; exit 1; }
-    name=$screen; [ "$scheme" = Dark ] && name=$screen-dark
+    name=$screen; [ "$scheme" = dark ] && name=$screen-dark
     screencapture -x -R "$bounds" "$out/$name.png"
     sips -z 900 1280 "$out/$name.png" >/dev/null
     kill "$pid"; wait "$pid" 2>/dev/null || true
