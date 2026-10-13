@@ -285,6 +285,67 @@ func (t tree) judged(work string) *judgement {
 	return &judgement{Verdict: verdict, Why: why}
 }
 
+// finish is where a goal finishes and where that was decided.
+type finish struct {
+	Line   core.FinishLine   `json:"line"`
+	Source core.FinishSource `json:"source"`
+}
+
+// finishOf is top's finish line, or nil while it is undecided.
+func finishOf(top core.Work) *finish {
+	if top.FinishLine == nil || top.FinishSource == nil {
+		return nil
+	}
+	return &finish{Line: *top.FinishLine, Source: *top.FinishSource}
+}
+
+// notDoneBecause says what holds the root back from done, in order: its open
+// sub-goals, its done-when not judged met, and, for a top goal, its finish
+// line not reached. A goal's done-when counts as met by a judgement or by a
+// DONE report in its current run.
+func (s *Server) notDoneBecause(t tree, top bool) ([]string, error) {
+	out := []string{}
+	goal := t.root
+	if goal.State == core.StateDone {
+		return out, nil
+	}
+	open := 0
+	for _, c := range t.kids[goal.ID] {
+		if !core.Settled(c.State) {
+			open++
+		}
+	}
+	switch open {
+	case 0:
+	case 1:
+		out = append(out, "1 sub-goal open")
+	default:
+		out = append(out, fmt.Sprintf("%d sub-goals open", open))
+	}
+	run, err := s.ledger.CurrentRun(goal.ID)
+	if err != nil {
+		return nil, err
+	}
+	if goal.DoneWhen != nil {
+		met := false
+		if j := t.judged(goal.ID); j != nil {
+			met = j.Verdict == "met"
+		}
+		for _, e := range run {
+			met = met || (e.Kind == core.EventReport && strings.HasPrefix(e.Body, "DONE"))
+		}
+		if !met {
+			out = append(out, "done-when not judged met yet")
+		}
+	}
+	if top && goal.FinishLine != nil {
+		if ok, missing := core.FinishReached(*goal.FinishLine, run); !ok {
+			out = append(out, fmt.Sprintf("finish line (%s) not reached: %s", *goal.FinishLine, missing))
+		}
+	}
+	return out, nil
+}
+
 // last is the latest event of kind on work whose body opens with prefix.
 func (t tree) last(work string, kind core.EventKind, prefix string) (core.Event, bool) {
 	for i := len(t.events) - 1; i >= 0; i-- {

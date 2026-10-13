@@ -80,6 +80,13 @@ type goalView struct {
 	// goal by where it sits in that tree.
 	Tree  []node            `json:"tree"`
 	Paths map[string]string `json:"paths"`
+	// DoneWhen is what makes the goal done; Finish is where its top goal
+	// finishes.
+	DoneWhen *string  `json:"done_when"`
+	Finish   *finish  `json:"finish"`
+	Progress progress `json:"progress"`
+	// NotDoneBecause is what holds the goal back from done, empty once done.
+	NotDoneBecause []string `json:"not_done_because"`
 }
 
 // waitingTask is a task waiting on the person, and what it waits on.
@@ -230,6 +237,12 @@ func (s *Server) goal(id string) (goalView, error) {
 		return goalView{}, err
 	}
 	view.Paths = t.paths()
+	view.DoneWhen = goal.DoneWhen
+	view.Finish = finishOf(chain[0])
+	view.Progress = progressOf(t.kids[goal.ID])
+	if view.NotDoneBecause, err = s.notDoneBecause(t, len(chain) == 1); err != nil {
+		return goalView{}, err
+	}
 	if dir := goalDir(goal, children); dir != "" {
 		d := delivery.StatusFor(dir, events, goal, children)
 		view.Delivery = &d

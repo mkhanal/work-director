@@ -47,6 +47,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Work Item Serves Its Session's Conversation", aWorkItemServesItsSessionsConversation)
 	t.Run("A Goal Serves What Each Of Its Tasks Is Doing", aGoalServesWhatEachOfItsTasksIsDoing)
 	t.Run("A Goal Serves Its Sub-Goals As A Tree", aGoalServesItsSubGoalsAsATree)
+	t.Run("A Goal Serves What Done Means And Why It Is Not Done Yet", aGoalServesWhatDoneMeansAndWhyItIsNotDoneYet)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("A Running Session's Report Moves Its Work On", aRunningSessionsReportMovesItsWorkOn)
 	t.Run("A Running Session That Stops Without A Report Is Noted", aRunningSessionThatStopsWithoutAReportIsNoted)
@@ -1776,5 +1777,62 @@ func aGoalServesItsSubGoalsAsATree(t *testing.T) {
 	}
 	if len(nested.Tree) != 2 || nested.Paths[r.rollback] != "Rollback" || len(nested.Paths) != 2 {
 		t.Fatalf("nested tree %d nodes, paths %v", len(nested.Tree), nested.Paths)
+	}
+}
+
+type doneView struct {
+	DoneWhen *string `json:"done_when"`
+	Finish   *struct {
+		Line   core.FinishLine   `json:"line"`
+		Source core.FinishSource `json:"source"`
+	} `json:"finish"`
+	Progress       treeProgress `json:"progress"`
+	NotDoneBecause []string     `json:"not_done_because"`
+}
+
+func aGoalServesWhatDoneMeansAndWhyItIsNotDoneYet(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	r := newReleaseTree(t, l)
+	if err := l.SetDoneWhen(r.top, "the notes are out"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetFinish(r.top, core.FinishPR, core.FinishFromTaste); err != nil {
+		t.Fatal(err)
+	}
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	var top doneView
+	getJSON(t, api.URL+"/api/goal/"+r.top, http.StatusOK, &top)
+	if top.DoneWhen == nil || *top.DoneWhen != "the notes are out" || top.Finish == nil || top.Finish.Line != core.FinishPR || top.Finish.Source != core.FinishFromTaste {
+		t.Fatalf("top done-when %v, finish %+v", top.DoneWhen, top.Finish)
+	}
+	if top.Progress != (treeProgress{Done: 0, Total: 5, Superseded: 1}) {
+		t.Fatalf("top progress = %+v, want 0 of 5 with 1 superseded apart", top.Progress)
+	}
+	want := []string{"5 sub-goals open", "done-when not judged met yet", "finish line (complete PR) not reached: DONE report, passing verify, pull request"}
+	if !slices.Equal(top.NotDoneBecause, want) {
+		t.Fatalf("top not done because %q, want %q", top.NotDoneBecause, want)
+	}
+
+	var guide doneView
+	getJSON(t, api.URL+"/api/goal/"+r.guide, http.StatusOK, &guide)
+	if guide.DoneWhen == nil || *guide.DoneWhen != "a guide covers rollback" || guide.Finish == nil || guide.Finish.Line != core.FinishPR {
+		t.Fatalf("nested done-when %v, finish %+v; want its own done-when and its top goal's finish", guide.DoneWhen, guide.Finish)
+	}
+	if want := []string{"2 sub-goals open", "done-when not judged met yet"}; !slices.Equal(guide.NotDoneBecause, want) {
+		t.Fatalf("nested not done because %q, want %q", guide.NotDoneBecause, want)
+	}
+
+	walk(t, l, r.rollback, core.StateDone)
+	walk(t, l, r.collector, core.StateReview)
+	event(t, l, r.collector, core.EventReport, "DONE\nSTATUS: DONE")
+	if _, err := l.SoftDone(r.collector, false); err != nil {
+		t.Fatal(err)
+	}
+	walk(t, l, r.collector, core.StateDone)
+	getJSON(t, api.URL+"/api/goal/"+r.guide, http.StatusOK, &guide)
+	if guide.NotDoneBecause == nil || len(guide.NotDoneBecause) != 0 || guide.Progress != (treeProgress{Done: 2, Total: 2}) {
+		t.Fatalf("a done sub-goal: not done because %q, progress %+v; want [] and 2 of 2", guide.NotDoneBecause, guide.Progress)
 	}
 }
