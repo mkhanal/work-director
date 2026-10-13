@@ -156,7 +156,7 @@ func (c *Cli) roadmapShow(rest []string, word string) error {
 		}
 		open := 0
 		for _, t := range tasks {
-			if t.State != core.StateDone && t.State != core.StateDropped {
+			if !core.Settled(t.State) {
 				open++
 			}
 		}

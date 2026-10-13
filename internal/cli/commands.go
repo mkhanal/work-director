@@ -443,7 +443,7 @@ func (c *Cli) tasks(rest []string) error {
 	}
 	tasks := []core.Work{}
 	for _, t := range all {
-		if flag(c.Args, "all") || (t.State != core.StateDone && t.State != core.StateDropped) {
+		if flag(c.Args, "all") || !core.Settled(t.State) {
 			tasks = append(tasks, t)
 		}
 	}
@@ -1342,7 +1342,7 @@ func (c *Cli) goalRun(cmd, kindWord string, goal core.Work) error {
 	}
 	var children []core.Work
 	for _, t := range all {
-		if t.State == core.StateDone || t.State == core.StateDropped {
+		if core.Settled(t.State) {
 			continue
 		}
 		if len(only) > 0 && !contains(only, t.ID) {
@@ -1505,7 +1505,7 @@ func (c *Cli) goalStatus(kindWord string, goal core.Work) error {
 	}
 	tasks := []core.Work{}
 	for _, t := range all {
-		if t.State != core.StateDone && t.State != core.StateDropped {
+		if !core.Settled(t.State) {
 			tasks = append(tasks, t)
 		}
 	}
@@ -2138,7 +2138,7 @@ func (c *Cli) status(rest []string) error {
 	open := []statusRow{}
 	at := time.Now()
 	for _, w := range items {
-		if archived || flag(a, "all") || (w.State != core.StateDone && w.State != core.StateDropped) {
+		if archived || flag(a, "all") || !core.Settled(w.State) {
 			stale, err := core.Stale(w, at)
 			if err != nil {
 				return err

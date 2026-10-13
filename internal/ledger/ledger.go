@@ -746,6 +746,9 @@ func (l *Ledger) Transition(id string, to core.State) (core.Work, error) {
 	if to == core.StateSoftDone {
 		return core.Work{}, fmt.Errorf("work %s: soft-done is reached only through SoftDone, which checks readiness", id)
 	}
+	if to == core.StateSuperseded {
+		return core.Work{}, fmt.Errorf("work %s: use Supersede to supersede work, which says why the course changed", id)
+	}
 	return l.transition(id, to)
 }
 
@@ -853,6 +856,47 @@ func (l *Ledger) Drop(id, why string) ([]core.Work, error) {
 		return nil, err
 	}
 	return l.reread(dropped)
+}
+
+// Supersede marks work and everything open under it as abandoned by a course
+// change, filing why on each. Work at rest under it is left as it is. It
+// returns the work it superseded.
+func (l *Ledger) Supersede(id, why string) ([]core.Work, error) {
+	why = strings.TrimSpace(why)
+	var superseded []core.Work
+	err := l.inTx(func(tx *sql.Tx) error {
+		tree, err := subtree(tx, id)
+		if err != nil {
+			return err
+		}
+		if core.AtRest(tree[0].State) {
+			return fmt.Errorf("work %s is %s: it is already at rest", id, tree[0].State)
+		}
+		if why == "" {
+			return fmt.Errorf("superseding %s needs a reason: say why the course changed", id)
+		}
+		at := now()
+		for _, w := range tree {
+			if core.AtRest(w.State) {
+				continue
+			}
+			if _, err := tx.Exec(`UPDATE work SET state = ? WHERE id = ?`, string(core.StateSuperseded), w.ID); err != nil {
+				return err
+			}
+			if _, err := addEvent(tx, w.ID, core.EventState, string(core.StateSuperseded), at); err != nil {
+				return err
+			}
+			if _, err := addEvent(tx, w.ID, core.EventNote, "superseded: "+why, at); err != nil {
+				return err
+			}
+			superseded = append(superseded, w)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return l.reread(superseded)
 }
 
 // Restore brings dropped work back to the state it was dropped from, with
@@ -1714,7 +1758,7 @@ func (l *Ledger) Conflicts(epicID string) ([]core.Conflict, error) {
 	}
 	var claimed []core.Work
 	for _, t := range tasks {
-		if t.Claim != nil && t.State != core.StateDone && t.State != core.StateDropped {
+		if t.Claim != nil && !core.Settled(t.State) {
 			claimed = append(claimed, t)
 		}
 	}
@@ -1769,7 +1813,7 @@ func (l *Ledger) SoftDone(id string, codeChanged bool) (core.Work, error) {
 		}
 		var n int
 		for _, t := range open {
-			if t.State != core.StateDone && t.State != core.StateDropped {
+			if !core.Settled(t.State) {
 				n++
 			}
 		}

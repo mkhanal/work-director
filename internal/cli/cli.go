@@ -592,7 +592,7 @@ func (c *Cli) briefFor(id string) (string, error) {
 		}
 		var openTasks []core.Work
 		for _, t := range open {
-			if t.State != core.StateDone && t.State != core.StateDropped {
+			if !core.Settled(t.State) {
 				openTasks = append(openTasks, t)
 			}
 		}
@@ -609,7 +609,7 @@ func (c *Cli) briefFor(id string) (string, error) {
 		}
 		var claimList []core.Work
 		for _, t := range claims {
-			if t.ID != id && t.Claim != nil && t.State != core.StateDone && t.State != core.StateDropped {
+			if t.ID != id && t.Claim != nil && !core.Settled(t.State) {
 				claimList = append(claimList, t)
 			}
 		}

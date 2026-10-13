@@ -605,7 +605,7 @@ func (d *Driver) settled() ([]core.Work, error) {
 	}
 	out := []core.Work{}
 	for _, w := range all {
-		if w.State == core.StateDone || w.State == core.StateDropped || w.State == core.StateAbandoned {
+		if core.AtRest(w.State) {
 			continue
 		}
 		out = append(out, w)
@@ -625,7 +625,7 @@ func (d *Driver) unfinished(goal string) ([]string, error) {
 	out := []string{}
 	for _, t := range tasks {
 		switch t.State {
-		case core.StateDone, core.StateDropped, core.StateAbandoned:
+		case core.StateDone, core.StateDropped, core.StateAbandoned, core.StateSuperseded:
 		default:
 			out = append(out, t.ID)
 		}

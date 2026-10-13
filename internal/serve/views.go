@@ -112,7 +112,7 @@ func (s *Server) board() (boardView, error) {
 				return boardView{}, err
 			}
 			b.Goals = append(b.Goals, boardGoal{Work: w, Rollup: goalRollup(children), Band: band})
-		} else if w.Parent == nil && w.State != core.StateDone && w.State != core.StateDropped {
+		} else if w.Parent == nil && !core.Settled(w.State) {
 			band, err := s.band(w, nil)
 			if err != nil {
 				return boardView{}, err
@@ -138,7 +138,7 @@ func (s *Server) band(w core.Work, tasks []core.Work) (Band, error) {
 		return BandPaused, nil
 	case w.State == core.StateSoftDone:
 		return BandReadyToClose, nil
-	case w.State == core.StateDone || w.State == core.StateDropped || w.State == core.StateAbandoned:
+	case core.AtRest(w.State):
 		return BandAtRest, nil
 	case w.State == core.StateReview:
 		evs, err := s.ledger.CurrentRun(w.ID)

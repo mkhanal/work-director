@@ -38,7 +38,7 @@ type Board struct {
 // stateOrder is the fixed order rollups render states in.
 var stateOrder = []core.State{
 	core.StateRunning, core.StateReview, core.StateNeedsInput, core.StateBriefed,
-	core.StateQueued, core.StateBlocked, core.StateSoftDone, core.StateDone, core.StateDropped,
+	core.StateQueued, core.StateBlocked, core.StateSoftDone, core.StateDone, core.StateDropped, core.StateSuperseded,
 }
 
 // NewBoard rolls the ledger's work items into board rows: every goal and
@@ -59,7 +59,7 @@ func NewBoard(items []core.Work, tasks func(string) ([]core.Work, error)) (Board
 		if core.IsGoal(w.Kind) || w.Parent != nil {
 			continue
 		}
-		if w.State == core.StateDone || w.State == core.StateDropped {
+		if core.Settled(w.State) {
 			continue
 		}
 		b.Rows = append(b.Rows, BoardRow{Work: w})

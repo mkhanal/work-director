@@ -31,6 +31,9 @@ const (
 	// conversation kept. It is not blocked: nothing is waiting on an answer,
 	// someone chose to hold it.
 	StatePaused State = "paused"
+	// StateSuperseded is work a course change abandoned: the plan moved on
+	// without it. Its history and anything it produced stay readable.
+	StateSuperseded State = "superseded"
 )
 
 type WorkKind string
@@ -416,6 +419,10 @@ var Transitions = map[State][]State{
 	// claim and has to be said out loud. Reopening is not on this list: a goal
 	// that never shipped is not a goal being worked on again.
 	StateAbandoned: {StateDropped},
+	// Superseded is terminal. It is reached only through Supersede, which
+	// files why the course changed; a later course that wants the work again
+	// plans it anew.
+	StateSuperseded: {},
 }
 
 // Reopenable reports whether work in state s may be worked on again. Only done
@@ -433,9 +440,17 @@ type Message struct {
 	Delivered *string `json:"delivered"`
 }
 
-// AtRest reports whether work has come to rest: done, dropped or abandoned.
+// AtRest reports whether work has come to rest: done, dropped, abandoned or
+// superseded.
 func AtRest(s State) bool {
-	return s == StateDone || s == StateDropped || s == StateAbandoned
+	return s == StateDone || s == StateDropped || s == StateAbandoned || s == StateSuperseded
+}
+
+// Settled reports whether work no longer counts as open to its parent: done,
+// dropped or superseded. Abandoned is not settled: it stopped without
+// shipping, and its parent still owes that work.
+func Settled(s State) bool {
+	return s == StateDone || s == StateDropped || s == StateSuperseded
 }
 
 func Reopenable(s State) bool {
@@ -522,7 +537,7 @@ const TimeLayout = "2006-01-02T15:04:05.000Z07:00"
 // Stale reports whether w is still open and its last activity is older than
 // StaleAfter at now.
 func Stale(w Work, now time.Time) (bool, error) {
-	if w.State == StateDone || w.State == StateDropped {
+	if Settled(w.State) {
 		return false, nil
 	}
 	updated, err := time.Parse(TimeLayout, w.Updated)

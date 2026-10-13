@@ -235,6 +235,20 @@ func TestLedger(t *testing.T) {
 			_, err := l.Transition(w.ID, core.StateDone)
 			wantErr(t, err, "illegal transition paused → done")
 		})
+		t.Run("superseded is reached only through Supersede and never left", func(t *testing.T) {
+			l := newTestLedger(t)
+			w := add(t, l, "p", "t", AddOptions{})
+			_, err := l.Transition(w.ID, core.StateSuperseded)
+			wantErrNaming(t, err, "use Supersede to supersede work")
+			_, err = l.Supersede(w.ID, "course changed")
+			wantNoErr(t, err)
+			var it core.IllegalTransition
+			for _, to := range []core.State{core.StateQueued, core.StateRunning, core.StateDone, core.StateDropped} {
+				if _, err := l.Transition(w.ID, to); !errors.As(err, &it) || it.From != core.StateSuperseded || it.To != to {
+					t.Fatalf("superseded -> %s: error = %v, want IllegalTransition", to, err)
+				}
+			}
+		})
 		t.Run("dropped is left only through Restore", func(t *testing.T) {
 			l := newTestLedger(t)
 			w := add(t, l, "p", "t", AddOptions{})
@@ -725,6 +739,69 @@ func TestLedger(t *testing.T) {
 		}
 	})
 
+	t.Run("Superseded Work Keeps Its History And Counts As Settled", func(t *testing.T) {
+		l := newTestLedger(t)
+		goal := add(t, l, "p", "G", AddOptions{Kind: core.WorkGoal})
+		running := add(t, l, "p", "R", AddOptions{Parent: &goal.ID})
+		move(t, l, running.ID, core.StateRunning)
+		done := add(t, l, "p", "D", AddOptions{Parent: &goal.ID})
+		move(t, l, done.ID, core.StateDone)
+		nested := add(t, l, "p", "N", AddOptions{Kind: core.WorkGoal, Parent: &goal.ID})
+		queued := add(t, l, "p", "Q", AddOptions{Parent: &nested.ID})
+
+		_, err := l.Supersede(goal.ID, "")
+		wantErrNaming(t, err, "reason")
+		if got, _ := l.Get(running.ID); got.State != core.StateRunning {
+			t.Fatalf("a refused supersede moved %s to %s", running.ID, got.State)
+		}
+
+		superseded, err := l.Supersede(goal.ID, "the premise broke")
+		wantNoErr(t, err)
+		var ids []string
+		for _, w := range superseded {
+			ids = append(ids, w.ID)
+			if w.State != core.StateSuperseded {
+				t.Fatalf("%s returned as %s, want superseded", w.ID, w.State)
+			}
+		}
+		slices.Sort(ids)
+		want := []string{goal.ID, running.ID, nested.ID, queued.ID}
+		slices.Sort(want)
+		if !slices.Equal(ids, want) {
+			t.Fatalf("superseded = %v, want %v", ids, want)
+		}
+		note := core.EventNote
+		for _, id := range want {
+			got, err := l.Get(id)
+			wantNoErr(t, err)
+			if got.State != core.StateSuperseded {
+				t.Fatalf("%s is %s, want superseded", id, got.State)
+			}
+			notes := allEvents(t, l, id, &note)
+			if len(notes) == 0 || notes[len(notes)-1].Body != "superseded: the premise broke" {
+				t.Fatalf("%s notes = %v, want the reason filed", id, notes)
+			}
+		}
+		// History stays: the running task still has its earlier state events.
+		stateKind := core.EventState
+		var bodies []string
+		for _, e := range allEvents(t, l, running.ID, &stateKind) {
+			bodies = append(bodies, e.Body)
+		}
+		if !slices.Equal(bodies, []string{"queued", "running", "superseded"}) {
+			t.Fatalf("running task's states = %v, want its history kept", bodies)
+		}
+		if got, _ := l.Get(done.ID); got.State != core.StateDone {
+			t.Fatalf("done task is %s, want it left done", got.State)
+		}
+		// Settled work is left as it is.
+		_, err = l.Supersede(goal.ID, "again")
+		wantErrNaming(t, err, "at rest")
+		if !core.Settled(core.StateSuperseded) || !core.Settled(core.StateDone) || !core.Settled(core.StateDropped) || core.Settled(core.StateRunning) {
+			t.Fatalf("Settled is done, dropped or superseded")
+		}
+	})
+
 	t.Run("Soft Done Requires Goal Tasks Done", func(t *testing.T) {
 		l := newTestLedger(t)
 		epic := add(t, l, "p", "E", AddOptions{Kind: core.WorkEpic})
@@ -749,6 +826,24 @@ func TestLedger(t *testing.T) {
 		move(t, l, task.ID, core.StateDone)
 		if got := softDone(t, l, epic.ID, true); got.State != core.StateSoftDone {
 			t.Fatalf("state = %q, want soft-done", got.State)
+		}
+		// A task under a sub-goal counts, and a superseded one is settled.
+		goal := add(t, l, "p", "G", AddOptions{Kind: core.WorkGoal})
+		sub := add(t, l, "p", "S", AddOptions{Kind: core.WorkGoal, Parent: &goal.ID})
+		deep := add(t, l, "p", "D", AddOptions{Parent: &sub.ID})
+		move(t, l, goal.ID, core.StateRunning)
+		move(t, l, goal.ID, core.StateReview)
+		l.AddEvent(goal.ID, core.EventReport, "DONE")
+		l.AddEvent(goal.ID, core.EventVerify, "pass")
+		l.AddEvent(goal.ID, core.EventPr, "https://github.com/x/y/pull/2")
+		if _, err := l.SoftDone(goal.ID, true); !errors.As(err, &nr) || !slices.Equal(nr.Missing, []string{"1 task(s) not done"}) {
+			t.Fatalf("error = %v, want the nested task not done", err)
+		}
+		if _, err := l.Supersede(deep.ID, "folded into another"); err != nil {
+			t.Fatalf("supersede: %v", err)
+		}
+		if got := softDone(t, l, goal.ID, true); got.State != core.StateSoftDone {
+			t.Fatalf("state = %q, want soft-done once its only task is superseded", got.State)
 		}
 	})
 

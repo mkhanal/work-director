@@ -391,7 +391,7 @@ func (c *Cli) drive(rest []string) error {
 	switch goal.State {
 	case core.StatePaused:
 		return fail("goal %s is paused: wd resume %s carries it on", goal.ID, goal.ID)
-	case core.StateDone, core.StateDropped, core.StateAbandoned:
+	case core.StateDone, core.StateDropped, core.StateAbandoned, core.StateSuperseded:
 		// A goal that has come to rest has no loop to run, and running one
 		// anyway would report a run that never happened as a run that finished.
 		return fail("goal %s is %s: there is nothing left to run", goal.ID, goal.State)

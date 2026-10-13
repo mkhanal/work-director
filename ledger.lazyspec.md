@@ -19,7 +19,8 @@ and the work state machine. It opens every ledger an earlier wd wrote.
 - queued→running is allowed, for attaching a conversation already under way.
 - queued, briefed and blocked work may go straight to done.
 - Any other transition fails with IllegalTransition naming both states.
-- `Transition` onto soft-done, done→running, abandoned→dropped, or out of dropped is refused naming the command that takes it: `SoftDone`, `Reopen`, `Release`, `Restore`.
+- `Transition` onto soft-done, done→running, abandoned→dropped, or out of dropped is refused naming the command that takes it: `SoftDone`, `Reopen`, `Release`, `Restore`; out of superseded no command takes it, and it fails with IllegalTransition.
+- superseded is reached only through `Supersede`; a bare transition onto it is refused naming `Supersede`.
 
 ## Finished Work Is Reopened With A Reason Or Not At All
 - `Reopen(id, why)` moves done work to running and records the reason as a decision.
@@ -35,6 +36,12 @@ recent reopening; work never reopened is judged on all its events.
 - `AddWorkspace` stores an id, a name, the resolved absolute path, and whether new workspaces may be created under it; `~/work/foo` and its absolute form are one workspace.
 - `Workspace` reads one by id or path; `Workspaces` lists parents first.
 - `CreateWorkspacePath(parent, name)` refuses, by name: a parent not registered as one; a name that is not a single directory (a separator, `.`, `..`, an absolute path); a joined path not under the parent.
+
+## Superseded Work Keeps Its History And Counts As Settled
+- `Supersede(id, why)` moves the work and every open work under it to superseded and files the reason on each.
+- An empty reason is refused.
+- Work already done, dropped, abandoned or superseded is left as it is.
+- No transition leaves superseded.
 
 ## Dropped Work Is Restored With Everything Dropped Alongside It
 - `Restore(id)` returns dropped work to the state it was dropped from, with every work under it dropped at the same moment.
@@ -125,7 +132,7 @@ the same work; a merged or abandoned one does not count.
 impact paths overlap, listing the overlapping paths.
 
 ## Soft Done Requires Goal Tasks Done
-For a goal, `SoftDone` also requires every task done or dropped.
+For a goal, `SoftDone` also requires every task under it done, dropped or superseded.
 
 ## The Ledger Persists Across Reopen
 Work added to a file-backed ledger is still there after closing and reopening it.

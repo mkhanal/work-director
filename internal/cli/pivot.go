@@ -416,7 +416,7 @@ func (c *Cli) goalContinue(goal core.Work, text string) error {
 	}
 	var lines []string
 	switch {
-	case goal.State == core.StateDropped || goal.State == core.StateAbandoned:
+	case goal.State == core.StateDropped || goal.State == core.StateAbandoned || goal.State == core.StateSuperseded:
 		return fail("goal %s is %s and is not picked up again; start a new one: wd goal start %s \"<what you want done>\"", goal.ID, goal.State, goal.Project)
 	case goal.State == core.StatePaused:
 		if _, err := c.resumeWork(goal, text); err != nil {
