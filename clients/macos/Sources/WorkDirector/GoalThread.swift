@@ -69,7 +69,7 @@ struct GoalThread: View {
                 ReportCard(text: event.body, report: goal.reports[String(event.id)])
             }
         case .event(let event) where event.kind == "answer":
-            DirectorTurn(answer: event)
+            DirectorTurn(answer: event, decided: goal.decided(for: event))
         case .event(let event) where event.kind == "sent":
             if event.work != goal.goal.id {
                 EventLine(text: "Told \(name(of: event.work)): \(firstLine(event.body))", at: event.at)
@@ -91,7 +91,7 @@ struct GoalThread: View {
                         }
                         if let answer {
                             if answer.answeredByDirector {
-                                DirectorTurn(answer: answer)
+                                DirectorTurn(answer: answer, decided: goal.decided(for: answer))
                             } else {
                                 YouBubble(text: answer.answerText, at: when(answer.at), label: "You answered")
                             }
@@ -101,6 +101,8 @@ struct GoalThread: View {
             }
         case .look(let event):
             EventLine(text: "Director looking: \(event.body)", at: event.at)
+        case .declined(let event, let choice):
+            DeclinedTurn(at: event.at, choice: choice)
         case .supervisor(let event, let reply):
             Turn(speaker: .supervisor, at: event.at, open: { focus(goal.goal.id) }) {
                 SupervisorBody(reply: reply, goal: goal, focus: focus)
@@ -312,21 +314,78 @@ struct ChoiceChips: View {
 }
 
 /// The director answering in your place, from what was already decided or by
-/// its judgement.
+/// its judgement: each part it decided with why, else what it answered.
 struct DirectorTurn: View {
     let answer: Event
+    var decided: [DirectorChoice] = []
 
     var body: some View {
         Turn(speaker: .director, at: answer.at, detail: {
             Text(answer.decision.map { $0.model.isEmpty ? "answered from what was decided" : "answered · \($0.model)" } ?? "answered")
                 .foregroundStyle(.secondary)
         }) {
-            Text(answer.answerText)
-                .readable()
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .card(Palette.settled, padding: Space.s3)
+            VStack(alignment: .leading, spacing: Space.s3) {
+                if decided.isEmpty {
+                    Text(answer.answerText).readable().textSelection(.enabled)
+                } else {
+                    ForEach(Array(decided.enumerated()), id: \.offset) { _, choice in
+                        DirectorChoiceView(choice: choice)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .card(Palette.settled, padding: Space.s3)
         }
+    }
+}
+
+/// One part of a question the director decided: what was asked, its answer and why.
+struct DirectorChoiceView: View {
+    let choice: DirectorChoice
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(choice.question).font(TypeScale.caption).foregroundStyle(Palette.text3)
+            if let answer = choice.answer {
+                Text(answer).font(TypeScale.bodyMedium).foregroundStyle(Palette.text)
+            }
+            if !choice.why.isEmpty {
+                Text(choice.why.prefix(1).uppercased() + choice.why.dropFirst())
+                    .font(TypeScale.callout).foregroundStyle(Palette.text2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .textSelection(.enabled)
+    }
+}
+
+/// The director leaving part of a question to the person, and why; the
+/// question stays open.
+struct DeclinedTurn: View {
+    let at: String?
+    let choice: DirectorChoice
+
+    var body: some View {
+        Turn(speaker: .director, at: at, detail: { Text("left it to you").foregroundStyle(.secondary) }) {
+            DeclinedNote(choice: choice)
+        }
+    }
+}
+
+/// Why the director would not answer one part of a question.
+struct DeclinedNote: View {
+    let choice: DirectorChoice
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(choice.question).font(TypeScale.caption).foregroundStyle(Palette.text3)
+            Text(choice.why.prefix(1).uppercased() + choice.why.dropFirst())
+                .font(TypeScale.callout).foregroundStyle(Palette.text)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .canvasCard(fill: Palette.plainCard, padding: EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
     }
 }
 

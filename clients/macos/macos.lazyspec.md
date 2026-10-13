@@ -70,7 +70,6 @@ hold only that product's work; with none, every product's.
 - A pick is sent as its label without a `(recommended)` mark.
 - Nothing can be sent until some item has an answer; an item left without one is sent as `(no answer)`.
 - Sending runs `wd answer <id>` with one answer per item, in the order asked.
-- Letting the director decide answers each item with its recommended choice, or with the director's own judgement where none is recommended.
 
 ## The Person Chooses A Light, Dark Or The System's Appearance
 - Settings offers System, Light and Dark, kept as `appearance`; System is the default.
@@ -214,3 +213,8 @@ hold only that product's work; with none, every product's.
 ## A Finish-Line Question Says Why It Asks And Can Be Remembered
 - Under its choices, Why I'm asking: these disagree lists what The goal, Your taste and This repo said, only those that said something.
 - A checkbox, Finish goals in <product> this way from now on, sends the answer with `--remember`; unchecked, the answer is sent without it.
+
+## Letting The Director Decide Shows What It Decided Or Why It Declined
+- Letting the director decide runs `wd answer <id> --director --json`.
+- An answer the director gave reads as its turn, each part with its answer and why.
+- When it declines any part nothing is answered: a note says why for each part, and the question stays open.

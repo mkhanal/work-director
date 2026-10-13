@@ -13,10 +13,12 @@ public enum ThreadStep: Sendable, Hashable, Identifiable {
     case stopped(Event, said: String)
     /// A question asked on the goal or a task, with its answer once it has one.
     case exchange(Event, answer: Event?)
+    /// The director declined to answer part of a question put to the person, and why.
+    case declined(Event, DirectorChoice)
 
     public var event: Event {
         switch self {
-        case .event(let e), .look(let e), .supervisor(let e, _), .stopped(let e, _), .exchange(let e, _): e
+        case .event(let e), .look(let e), .supervisor(let e, _), .stopped(let e, _), .exchange(let e, _), .declined(let e, _): e
         }
     }
 
@@ -73,7 +75,7 @@ extension GoalDetail {
 
     private func step(_ e: Event) -> ThreadStep? {
         switch e.kind {
-        case "decision" where e.reshapes:
+        case "decision" where e.reshapes || e.directorDecided:
             return nil
         case "decision", "report", "sent", "answer", "verify", "pr", "judged":
             return .event(e)
@@ -85,6 +87,8 @@ extension GoalDetail {
             return .supervisor(e, reply(e.body))
         case "note" where e.body.hasPrefix(stoppedPrefix):
             return .stopped(e, said: String(e.body.dropFirst(stoppedPrefix.count)))
+        case "note":
+            return e.directorDeclined.map { .declined(e, $0) }
         default:
             return nil
         }
@@ -275,7 +279,7 @@ extension GoalDetail {
             switch step {
             case .event(let e): return e.work == goal.id || isYours(e) || e.answeredByDirector
             case .exchange(let q, let a): return q.work == goal.id || a.map { isYours($0) || $0.answeredByDirector } == true
-            case .supervisor, .look: return true
+            case .supervisor, .look, .declined: return true
             case .stopped: return false
             }
         case .subGoal(let id):

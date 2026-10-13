@@ -470,8 +470,6 @@ struct SeededTree {
         var picked = AnswerDraft(yesNo)
         picked.toggle("Yes (recommended)", item: 0)
         #expect(picked.answers == ["Yes"])
-        #expect(AnswerDraft(yesNo).directorDecides == ["Yes"], "the director decides with its recommendation")
-        #expect(AnswerDraft(q).directorDecides == ["Decide this yourself.", "Decide this yourself."])
 
         let plan = try Plan.answer("w1", q, answers: ["teal", "Red, Green"])
         #expect(plan.argv == ["answer", "w1", "teal", "Red, Green"])
@@ -1137,7 +1135,7 @@ struct SeededTree {
         #expect(pivot.needsYou.first { $0.work == why }?.question.items.first?.asksFinish == false)
         #expect(FinishMeaning.of("complete PR")?.title == "A complete PR")
         #expect(["discovery", "research", "local build", "complete PR", "merged", "released"].allSatisfy { FinishMeaning.of($0) != nil })
-        #expect(AnswerDraft(try #require(pivot.needsYou.first { $0.work == found }?.question)).directorDecides == ["research"],
+        #expect(try Plan.answer(found, try #require(pivot.needsYou.first { $0.work == found }?.question), answers: ["research"]).argv == ["answer", found, "research"],
                 "answering goes through the question's own answer path")
     }
 
@@ -1301,5 +1299,43 @@ struct SeededTree {
         let file = try String(contentsOf: home.dir.appendingPathComponent("projects/demo.md"), encoding: .utf8)
         #expect(file.contains("finish: research"))
         #expect(try await store.goal(pick).finish?.line == "research")
+    }
+
+    @Test("Letting The Director Decide Shows What It Decided Or Why It Declined")
+    func directorDecides() async throws {
+        #expect(Plan.directorDecides("g1").argv == ["answer", "g1", "--director", "--json"])
+        let declined = try DirectorOutcome.read(#"""
+        {"ok":true,"answered":false,"told":null,"answer":null,"applied":[],
+         "decided":[{"question":"Where does this goal finish?","answer":"research","why":"the goal asks for a pick"}],
+         "declined":[{"question":"Which vendor?","why":"only you know the contract terms"}]}
+        """#)
+        #expect(!declined.answered)
+        #expect(declined.declined == [DirectorChoice(question: "Which vendor?", answer: nil, why: "only you know the contract terms")])
+        let answered = try DirectorOutcome.read(#"""
+        {"ok":true,"answered":true,"told":"g1","answer":"research","applied":["finishes at: research"],
+         "decided":[{"question":"Where does this goal finish?","answer":"research","why":"the goal asks for a pick"}],"declined":[]}
+        """#)
+        #expect(answered.answered && answered.decided.first?.answer == "research")
+
+        let home = try Home()
+        let goal = try home.goal("demo", "Pick a queue library")
+        let decision = #"{"question":"Where does this goal finish?","answer":"research","source":"director","runner":"claude","model":"opus","tokens":10,"reverses":0,"reversed_by":0}"#
+        try home.sql("""
+        INSERT INTO event (work,kind,body,at) VALUES ('\(goal)','question','Where does this goal finish?
+        - research (recommended)
+        - complete PR','2026-10-13T14:02:00Z');
+        INSERT INTO event (work,kind,body,at,payload) VALUES ('\(goal)','answer','research','2026-10-13T14:03:00Z','\(decision)');
+        INSERT INTO event (work,kind,body,at,payload) VALUES ('\(goal)','decision','the director decided "Where does this goal finish?": research, because the goal asks for a pick','2026-10-13T14:03:00Z','\(decision)');
+        INSERT INTO event (work,kind,body,at) VALUES ('\(goal)','question','Which vendor?','2026-10-13T14:04:00Z');
+        INSERT INTO event (work,kind,body,at) VALUES ('\(goal)','note','the director declined "Which vendor?": only you know the contract terms','2026-10-13T14:05:00Z');
+        """)
+        let store = await Store(channel: try home.channel())
+        let detail = try await store.goal(goal)
+        let steps = detail.thread
+        guard case .exchange(_, let answer?) = steps.first else { Issue.record("the first question reads with its answer: \(steps)"); return }
+        #expect(answer.answeredByDirector)
+        #expect(detail.decided(for: answer) == [DirectorChoice(question: "Where does this goal finish?", answer: "research", why: "the goal asks for a pick")])
+        #expect(!steps.contains { if case .event(let e) = $0 { e.kind == "decision" } else { false } }, "its decisions read with its answer, not apart")
+        #expect(steps.contains { if case .declined(_, let c) = $0 { c == DirectorChoice(question: "Which vendor?", answer: nil, why: "only you know the contract terms") } else { false } })
     }
 }

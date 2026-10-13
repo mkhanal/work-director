@@ -445,6 +445,8 @@ struct QuestionCard: View {
     @State private var failure: String?
     @State private var editing = false
     @State private var remember = false
+    /// What the director did when the question was left to it.
+    @State private var outcome: DirectorOutcome?
 
     init(store: Store, workID: String, question: Question, title: String? = nil, asker: String? = nil,
          path: [PathPart] = [], at: String? = nil, change: PendingChange? = nil, product: String? = nil, answered: @escaping () -> Void) {
@@ -469,6 +471,13 @@ struct QuestionCard: View {
                 header
                 itemView(question.items[page], at: page)
                     .id(page)
+                if let outcome, !outcome.declined.isEmpty {
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        Text("The director left this to you").font(TypeScale.meta).foregroundStyle(Palette.text2)
+                        ForEach(Array(outcome.declined.enumerated()), id: \.offset) { _, choice in DeclinedNote(choice: choice) }
+                    }
+                    .padding(.top, 8)
+                }
                 footer
             }
             .questionFrame()
@@ -480,6 +489,9 @@ struct QuestionCard: View {
                 }
                 if let reply = question.reply {
                     Text(reply).font(TypeScale.callout).foregroundStyle(Palette.text2).lineLimit(4).textSelection(.enabled)
+                }
+                if let outcome, outcome.answered {
+                    ForEach(Array(outcome.decided.enumerated()), id: \.offset) { _, choice in DirectorChoiceView(choice: choice) }
                 }
             }
             .canvasCard(fill: Palette.plainCard)
@@ -675,11 +687,11 @@ struct QuestionCard: View {
                     }
                     Spacer(minLength: Space.s2)
                     Button("Let the director decide") {
-                        Task { await send(try? Plan.answer(workID, question, answers: draft.directorDecides)) }
+                        Task { await decide() }
                     }
                     .buttonStyle(.canvas)
                     .disabled(sending)
-                    .help("Answers with the director's recommendation, or leaves it to its judgement")
+                    .help(Plan.directorDecides(workID).commandLine)
                     Button {
                         Task { await send(plan) }
                     } label: {
@@ -711,6 +723,27 @@ struct QuestionCard: View {
 
     private func send(_ plan: Plan?) async {
         await send([plan])
+    }
+
+    /// Leaves the question to the director: it answers every part, or none
+    /// and says why for each it declined.
+    private func decide() async {
+        sending = true
+        defer { sending = false }
+        failure = nil
+        do {
+            let result = try await store.run(Plan.directorDecides(workID))
+            if result.code != 0 {
+                failure = result.stderr.isEmpty ? result.stdout : result.stderr
+            } else {
+                let read = try DirectorOutcome.read(result.stdout)
+                outcome = read
+                if read.answered { answered() }
+            }
+        } catch {
+            failure = "\(error)"
+        }
+        await store.refresh()
     }
 
     /// Runs writes in order, stopping at the first refused; a nil write sends nothing.
