@@ -572,8 +572,9 @@ impl WorkPage {
 
     fn send(self: &Rc<Self>, text: String) {
         let Some(target) = self.target() else { return };
+        let files = self.composer.files();
         if target.kind.is_goal() && target.state == WorkState::Done {
-            let plan = match Plan::continue_goal(&target.id, &text) {
+            let plan = match Plan::continue_goal(&target.id, &text).map(|p| p.attaching(&files)) {
                 Ok(plan) => plan,
                 Err(e) => return self.composer.set_note(Some((&e.to_string(), true))),
             };
@@ -591,7 +592,7 @@ impl WorkPage {
             });
             return;
         }
-        let plan = match Plan::send(&target.id, &text) {
+        let plan = match Plan::send_files(&target.id, &text, &files) {
             Ok(plan) => plan,
             Err(e) => return self.composer.set_note(Some((&e.to_string(), true))),
         };

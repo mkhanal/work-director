@@ -85,6 +85,10 @@ fn required(text: &str, what: &'static str) -> Result<String, PlanError> {
     }
 }
 
+fn words_of(words: &[&str]) -> Vec<String> {
+    words.iter().map(|w| w.to_string()).collect()
+}
+
 fn said(text: &str) -> Result<String, PlanError> {
     let text = text.trim();
     if text.is_empty() {
@@ -159,6 +163,52 @@ impl Plan {
     /// task and keeps it as a decision; a running session gets it when idle.
     pub fn send(id: &str, text: &str) -> Result<Plan, PlanError> {
         Ok(plan("Send", vec!["send".into(), id.into(), said(text)?]))
+    }
+
+    /// A message with files: each passed as `--attach <path>`. With files,
+    /// the words may be empty.
+    pub fn send_files(id: &str, text: &str, files: &[String]) -> Result<Plan, PlanError> {
+        if files.is_empty() {
+            return Plan::send(id, text);
+        }
+        let words: Vec<String> = Some(text.trim()).filter(|t| !t.is_empty()).map(str::to_string).into_iter().collect();
+        Ok(plan("Send", [words_of(&["send", id]), words].concat()).attaching(files))
+    }
+
+    /// A goal started with files; with files, the words may be empty.
+    pub fn start_files(project: &str, text: &str, files: &[String]) -> Result<Plan, PlanError> {
+        if files.is_empty() {
+            return Plan::start(project, text);
+        }
+        let mut argv = words_of(&["goal", "start", project]);
+        argv.extend(Some(text.trim()).filter(|t| !t.is_empty()).map(str::to_string));
+        argv.extend(words_of(&["--detach", "--json"]));
+        Ok(plan("Start goal", argv).attaching(files))
+    }
+
+    /// The same write with each file passed as `--attach <path>`.
+    pub fn attaching(mut self, files: &[String]) -> Plan {
+        for f in files {
+            self.argv.push("--attach".into());
+            self.argv.push(f.clone());
+        }
+        self
+    }
+
+    /// What a message says and the files it carries, as its argv holds them:
+    /// the words after the work's id, and each `--attach` path.
+    pub fn message(&self) -> (String, Vec<String>) {
+        let mut files = Vec::new();
+        let mut words = Vec::new();
+        let mut args = self.argv.iter().skip(2);
+        while let Some(a) = args.next() {
+            if a == "--attach" {
+                files.extend(args.next().cloned());
+            } else {
+                words.push(a.clone());
+            }
+        }
+        (words.first().cloned().unwrap_or_default(), files)
     }
 
     /// The answers to the question work waits on, one per item in the order asked.

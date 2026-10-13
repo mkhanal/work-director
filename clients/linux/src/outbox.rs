@@ -26,6 +26,8 @@ pub struct Outgoing {
     pub work: String,
     /// What was said, as sent.
     pub text: String,
+    /// The files sent with it, by path.
+    pub files: Vec<String>,
     pub at: DateTime<Utc>,
     pub state: OutgoingState,
     pub(crate) plan: Plan,

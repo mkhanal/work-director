@@ -158,6 +158,7 @@ impl GoalDetail {
             "decision" | "report" | "sent" | "answer" | "verify" | "pr" => Some(ThreadStep::Event(e.clone())),
             "state" => ENDING_STATES.contains(&e.body.as_str()).then(|| ThreadStep::Event(e.clone())),
             "look" => Some(ThreadStep::Look(e.clone())),
+            "attachment" => (!self.attached_alone(e).is_empty()).then(|| ThreadStep::Event(e.clone())),
             "supervised" => Some(ThreadStep::Supervisor(e.clone(), self.reply(&e.body))),
             "note" => match e.director_declined() {
                 Some(declined) => Some(ThreadStep::Declined(e.clone(), declined)),
@@ -242,6 +243,7 @@ impl GoalDetail {
         match e.kind.as_str() {
             "decision" => e.work == self.goal.id,
             "answer" => !e.answered_by_director(),
+            "attachment" => true,
             _ => false,
         }
     }

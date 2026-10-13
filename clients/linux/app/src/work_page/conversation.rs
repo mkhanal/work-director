@@ -6,8 +6,8 @@ use std::rc::{Rc, Weak};
 use adw::prelude::*;
 
 use kit::{
-    Event, Feed, FilterChip, GoalDetail, Mark, Outgoing, OutgoingState, Phase, Report, SessionStatus, Step, StepKind,
-    ThreadFilter, ThreadItem, ThreadRow, ThreadStep, ToolCall, Work, WorkState, WorkUnderWay, WorkingRow,
+    Attachment, Event, Feed, FilterChip, GoalDetail, Mark, Outgoing, OutgoingState, Phase, Report, SessionStatus, Step,
+    StepKind, ThreadFilter, ThreadItem, ThreadRow, ThreadStep, ToolCall, Work, WorkState, WorkUnderWay, WorkingRow,
 };
 
 use super::{Loaded, WorkPage, MERGE_SECONDS};
@@ -112,13 +112,22 @@ impl WorkPage {
         let id = format!("e{}", step.id());
         let supervised = g.supervised();
         Some(match step {
+            ThreadStep::Event(e) if e.kind == "attachment" => {
+                let files: Vec<Attachment> = g.attached_alone(&e).into_iter().cloned().collect();
+                let names = files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>().join(", ");
+                yours.push((format!("Attached {names}"), id.clone()));
+                Turn::key(&id, &(&e, &files))
+                    .copying(&files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>().join("\n"))
+                    .with(move || yours_with_files("", "You attached", Some(e.at.as_str()), None, &files))
+            }
             ThreadStep::Event(e) if g.is_yours(&e) => {
                 let said = e.decision.as_ref().map(|d| d.answer.clone()).unwrap_or_else(|| e.body.clone());
-                yours.push((said.clone(), id.clone()));
+                let files: Vec<Attachment> = g.attached_to(&e).into_iter().cloned().collect();
+                yours.push((if said.is_empty() { "Sent files".to_string() } else { said.clone() }, id.clone()));
                 let label = if e.kind == "answer" { "You answered" } else { "You" };
-                Turn::key(&id, &e)
+                Turn::key(&id, &(&e, &files))
                     .copying(&said)
-                    .with(move || ui::you_bubble(&said, label, Some(e.at.as_str()), None).upcast())
+                    .with(move || yours_with_files(&said, label, Some(e.at.as_str()), None, &files))
             }
             ThreadStep::Event(e) if g.finished_line(&e).is_some() => {
                 let text = format!("{} · {}", g.finished_line(&e).unwrap_or_default(), kit::time::when(&e.at));
@@ -155,9 +164,11 @@ impl WorkPage {
                     .flatten()
                     .collect::<Vec<_>>()
                     .join("\n\n");
-                Turn::key(&id, &(&q, &answer, &decided))
+                let files: Vec<Attachment> =
+                    answer.as_ref().map(|a| g.attached_to(a).into_iter().cloned().collect()).unwrap_or_default();
+                Turn::key(&id, &(&q, &answer, &decided, &files))
                     .copying(&said)
-                    .with(move || exchange_turn(&q, answer.as_ref(), &decided, &asker, target, weak))
+                    .with(move || exchange_turn(&q, answer.as_ref(), &decided, &files, &asker, target, weak))
             }
             ThreadStep::Look(e) => {
                 let text = format!("Supervisor looking · {} · {}", e.body, kit::time::when(&e.at));
@@ -423,6 +434,28 @@ pub(super) fn director_answers(loaded: &Loaded, id: &str) -> Vec<String> {
     events.iter().filter(|e| e.work == id && e.answered_by_director()).map(|e| e.body.clone()).collect()
 }
 
+/// Your words as a bubble, with the files you sent under it; files alone
+/// show under the meta line.
+pub(super) fn yours_with_files(
+    said: &str,
+    label: &str,
+    at: Option<&str>,
+    status: Option<&gtk::Widget>,
+    files: &[Attachment],
+) -> gtk::Widget {
+    let column = ui::you_bubble(said, label, at, status);
+    if said.trim().is_empty() {
+        // The bubble is the last child; with nothing said there is none to show.
+        if let Some(bubble) = column.last_child() {
+            column.remove(&bubble);
+        }
+    }
+    if !files.is_empty() {
+        column.append(&ui::attachments(files));
+    }
+    column.upcast()
+}
+
 /// The director's plan: each sub-goal with where it stands, a way into it.
 pub(super) fn plan_block(
     plan: &[(String, String, WorkState, Option<String>)],
@@ -597,6 +630,7 @@ pub(super) fn exchange_turn(
     q: &Event,
     answer: Option<&Event>,
     decided: &[kit::DirectorChoice],
+    files: &[Attachment],
     asker: &str,
     task: Option<String>,
     page: Weak<WorkPage>,
@@ -637,7 +671,7 @@ pub(super) fn exchange_turn(
                 card.append(&ui::said(&kit::sentence(&why), &["meta", "text2"]));
             }
         }
-        Some(a) => card.append(&ui::you_bubble(&a.answer_text(), "You answered", Some(a.at.as_str()), None)),
+        Some(a) => card.append(&yours_with_files(&a.answer_text(), "You answered", Some(a.at.as_str()), None, files)),
         None => card.append(&ui::line("Not answered yet", &["meta", "text3"])),
     }
     let who = ui::hbox(6);
@@ -861,6 +895,21 @@ pub(super) fn outgoing_bubble(app: &App, m: &Outgoing, waiting: &str) -> gtk::Wi
     };
     let status: gtk::Widget = ui::line(&status, &["text3"]).upcast();
     let column = ui::you_bubble(&m.text, "You", None, Some(&status));
+    if m.text.trim().is_empty() {
+        if let Some(bubble) = column.last_child() {
+            column.remove(&bubble);
+        }
+    }
+    if !m.files.is_empty() {
+        let names = ui::hbox(SPACE_1);
+        names.set_halign(gtk::Align::End);
+        for path in &m.files {
+            let name =
+                std::path::Path::new(path).file_name().map_or(path.clone(), |n| n.to_string_lossy().into_owned());
+            names.append(&ui::tag(&name, &["meta", "text2"]));
+        }
+        column.append(&names);
+    }
     if let OutgoingState::Failed { why, .. } = &m.state {
         let row = ui::hbox(SPACE_2);
         row.set_halign(gtk::Align::End);

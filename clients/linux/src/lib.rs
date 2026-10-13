@@ -2,6 +2,7 @@
 //! `wd serve --stdio`, the ledger as it serves it, and the plans a person runs.
 
 pub mod agents;
+pub mod attach;
 pub mod channel;
 pub mod conversation;
 pub mod copy;
@@ -27,6 +28,7 @@ pub mod tree;
 pub mod working;
 
 pub use agents::{span, token_count, AgentCard, AgentRoster, Phase};
+pub use attach::{size_label, AttachError, Attachment, PendingFile};
 pub use channel::{Channel, ChannelError};
 pub use conversation::*;
 pub use escape::EscapeTaps;

@@ -1,13 +1,14 @@
 //! The one place a person types to Work Director: a new goal and a running
 //! one read the same. The key that sends is the person's choice.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::{gdk, glib};
+use gtk::{gdk, gio, glib};
 
-use kit::{Chord, ReturnPress};
+use kit::{Chord, PendingFile, ReturnPress};
 
 use crate::settings::Settings;
 use crate::ui::{self, SPACE_2};
@@ -28,6 +29,10 @@ pub struct Composer {
     /// Who a goal's message goes to: the whole goal or one sub-goal.
     pub to: gtk::DropDown,
     note: gtk::Label,
+    /// The files waiting to go with the next message, shown above the field.
+    files: RefCell<Vec<PendingFile>>,
+    tray: gtk::Box,
+    pasted: Cell<u32>,
     on_send: Rc<RefCell<Option<Sender>>>,
     on_stop: Rc<RefCell<Option<Stopper>>>,
 }
@@ -85,8 +90,13 @@ impl Composer {
         bar.append(&stop);
         bar.append(&send);
 
+        let tray = ui::hbox(SPACE_2);
+        tray.set_halign(gtk::Align::Start);
+        tray.set_visible(false);
+        tray.add_css_class("attachments");
         let card = ui::vbox(SPACE_2);
         card.add_css_class("composer");
+        card.append(&tray);
         card.append(&scroller);
         card.append(&bar);
 
@@ -110,6 +120,9 @@ impl Composer {
             chips,
             to,
             note,
+            files: RefCell::new(Vec::new()),
+            tray,
+            pasted: Cell::new(0),
             on_send: Rc::new(RefCell::new(None)),
             on_stop: Rc::new(RefCell::new(None)),
         });
@@ -119,12 +132,48 @@ impl Composer {
         hint_now();
 
         let buffer = composer.view.buffer();
-        let (placeholder, send) = (composer.placeholder.clone(), composer.send.clone());
+        let weak = Rc::downgrade(&composer);
         buffer.connect_changed(move |b| {
-            let empty = b.text(&b.start_iter(), &b.end_iter(), false).trim().is_empty();
-            placeholder.set_visible(b.char_count() == 0);
-            send.set_sensitive(!empty);
+            if let Some(composer) = weak.upgrade() {
+                composer.placeholder.set_visible(b.char_count() == 0);
+                composer.refresh_send();
+            }
         });
+
+        // Ctrl+V of an image or of files attaches them; of text, pastes it.
+        let paste = gtk::EventControllerKey::new();
+        paste.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = Rc::downgrade(&composer);
+        paste.connect_key_pressed(move |_, key, _, state| {
+            let pasting = state.contains(gdk::ModifierType::CONTROL_MASK) && matches!(key, gdk::Key::v | gdk::Key::V);
+            let Some(composer) = weak.upgrade().filter(|_| pasting) else { return glib::Propagation::Proceed };
+            if composer.paste() {
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        composer.view.add_controller(paste);
+
+        let actions = gio::SimpleActionGroup::new();
+        let remove = gio::SimpleAction::new("remove", Some(glib::VariantTy::STRING));
+        let weak = Rc::downgrade(&composer);
+        remove.connect_activate(move |_, path| {
+            if let (Some(composer), Some(path)) = (weak.upgrade(), path.and_then(|p| p.get::<String>())) {
+                composer.remove_file(&path);
+            }
+        });
+        actions.add_action(&remove);
+        composer.widget.insert_action_group("composer", Some(&actions));
+
+        let drop = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
+        let weak = Rc::downgrade(&composer);
+        drop.connect_drop(move |_, value, _, _| {
+            let (Some(composer), Ok(list)) = (weak.upgrade(), value.get::<gdk::FileList>()) else { return false };
+            composer.attach(&list.files());
+            true
+        });
+        card.add_controller(drop);
 
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -186,7 +235,7 @@ impl Composer {
 
     fn submit(&self) {
         let text = self.text();
-        if text.trim().is_empty() {
+        if text.trim().is_empty() && self.files.borrow().is_empty() {
             return;
         }
         let send = self.on_send.borrow().clone();
@@ -206,6 +255,133 @@ impl Composer {
 
     pub fn clear(&self) {
         self.set_text("");
+        self.files.borrow_mut().clear();
+        self.show_files();
+    }
+
+    /// The paths of the files waiting to be sent.
+    pub fn files(&self) -> Vec<String> {
+        self.files.borrow().iter().map(|f| f.path.clone()).collect()
+    }
+
+    fn refresh_send(&self) {
+        let empty = self.text().trim().is_empty() && self.files.borrow().is_empty();
+        self.send.set_sensitive(self.view.is_sensitive() && !empty);
+    }
+
+    /// Attaches what the clipboard holds when it is an image or files;
+    /// whether it did, so text is pasted as text.
+    fn paste(self: &Rc<Self>) -> bool {
+        let clipboard = self.view.clipboard();
+        // Another app offers types by name; what they can be read as is what counts.
+        let formats = clipboard.formats().union_deserialize_types();
+        let weak = Rc::downgrade(self);
+        if formats.contains_type(gdk::FileList::static_type()) {
+            clipboard.read_value_async(
+                gdk::FileList::static_type(),
+                glib::Priority::DEFAULT,
+                gio::Cancellable::NONE,
+                move |read| {
+                    let Some(composer) = weak.upgrade() else { return };
+                    match read.map(|v| v.get::<gdk::FileList>()) {
+                        Ok(Ok(list)) => composer.attach(&list.files()),
+                        Ok(Err(e)) => composer.set_note(Some((&format!("cannot paste those files: {e}"), true))),
+                        Err(e) => composer.set_note(Some((&format!("cannot paste those files: {e}"), true))),
+                    }
+                },
+            );
+            return true;
+        }
+        if formats.contains_type(gdk::Texture::static_type()) {
+            clipboard.read_texture_async(gio::Cancellable::NONE, move |read| {
+                let Some(composer) = weak.upgrade() else { return };
+                match read {
+                    Ok(Some(texture)) => composer.attach_image(&texture),
+                    Ok(None) => {}
+                    Err(e) => composer.set_note(Some((&format!("cannot paste that image: {e}"), true))),
+                }
+            });
+            return true;
+        }
+        false
+    }
+
+    /// A pasted image, written as a PNG of its own to send.
+    fn attach_image(&self, texture: &gdk::Texture) {
+        let n = self.pasted.get() + 1;
+        self.pasted.set(n);
+        let dir = glib::user_cache_dir().join("work-director").join("pasted");
+        let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+        let path = dir.join(format!("pasted-{stamp}-{n}.png"));
+        let saved = std::fs::create_dir_all(&dir)
+            .map_err(|e| e.to_string())
+            .and_then(|_| texture.save_to_png(&path).map_err(|e| e.to_string()));
+        match saved {
+            Ok(()) => self.attach_paths(&[path]),
+            Err(e) => self.set_note(Some((&format!("cannot keep the pasted image: {e}"), true))),
+        }
+    }
+
+    fn attach(&self, files: &[gio::File]) {
+        let paths: Vec<PathBuf> = files.iter().filter_map(gio::File::path).collect();
+        if paths.len() < files.len() {
+            self.set_note(Some(("only files on this computer can be attached", true)));
+        }
+        self.attach_paths(&paths);
+    }
+
+    fn attach_paths(&self, paths: &[PathBuf]) {
+        for path in paths {
+            match PendingFile::at(Path::new(path)) {
+                Ok(file) => kit::attach::add(&mut self.files.borrow_mut(), file),
+                Err(e) => self.set_note(Some((&e.to_string(), true))),
+            }
+        }
+        self.show_files();
+    }
+
+    fn remove_file(&self, path: &str) {
+        self.files.borrow_mut().retain(|f| f.path != path);
+        self.show_files();
+    }
+
+    /// The files waiting, each removable: an image as a thumbnail, any other
+    /// file by its name and size.
+    fn show_files(&self) {
+        ui::clear(&self.tray);
+        let files = self.files.borrow().clone();
+        self.tray.set_visible(!files.is_empty());
+        for file in &files {
+            let chip = ui::hbox(SPACE_2);
+            chip.add_css_class("attachment-chip");
+            if file.image {
+                let picture = gtk::Picture::for_filename(&file.path);
+                picture.set_content_fit(gtk::ContentFit::Cover);
+                picture.set_size_request(48, 48);
+                picture.set_can_shrink(true);
+                picture.set_tooltip_text(Some(&format!("{} · {}", file.name, file.size_label())));
+                picture.update_property(&[gtk::accessible::Property::Label(&file.name)]);
+                chip.append(&picture);
+            } else {
+                chip.append(&ui::icon("text-x-generic-symbolic", &["text2"]));
+                let words = ui::vbox(0);
+                let name = ui::name_line(&file.name, &["callout"]);
+                words.append(&name);
+                words.append(&ui::text(&file.size_label(), &["meta", "text3"]));
+                chip.append(&words);
+            }
+            let remove = gtk::Button::from_icon_name("window-close-symbolic");
+            remove.add_css_class("flat");
+            remove.add_css_class("circular");
+            remove.set_valign(gtk::Align::Start);
+            remove.set_tooltip_text(Some(&format!("Remove {}", file.name)));
+            ui::announce(&remove, &format!("Remove {}", file.name));
+            remove.set_action_name(Some("composer.remove"));
+            remove.set_action_target_value(Some(&file.path.to_variant()));
+            chip.append(&remove);
+            self.tray.append(&chip);
+        }
+        self.refresh_send();
     }
 
     pub fn focus(&self) {
@@ -223,7 +399,7 @@ impl Composer {
 
     pub fn set_busy(&self, busy: bool) {
         self.view.set_sensitive(!busy);
-        self.send.set_sensitive(!busy && !self.text().trim().is_empty());
+        self.refresh_send();
     }
 
     /// Context chips: runner, model, the folder it works in.

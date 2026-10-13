@@ -278,3 +278,8 @@ button.choice, button.choice:checked, button.choice:hover {
 .working-mark { -gtk-icon-size: 14px; color: @wd_accent; }
 .sidebar-working { -gtk-icon-size: 10px; min-width: 10px; min-height: 10px; }
 .under-way { padding: 4px 0 4px 6px; }
+
+/* Files sent with a message */
+.attachment-chip { padding: 4px 4px 4px 8px; border-radius: 8px; background-color: @wd_sidebar; }
+button.attachment { padding: 4px 8px; border-radius: 8px; border: 1px solid @wd_hairline; background-color: @wd_page; box-shadow: none; min-height: 0; }
+button.attachment label { font-weight: normal; }

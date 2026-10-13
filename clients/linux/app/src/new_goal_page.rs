@@ -151,7 +151,7 @@ impl NewGoalPage {
         self.app.spawn(async move {
             page.composer.set_busy(true);
             page.render_phase(&NewGoalPhase::Finding);
-            page.flow.submit(&product, &text).await;
+            page.flow.submit(&product, &text, &page.composer.files()).await;
             page.after(&product, &text);
         });
     }
@@ -213,6 +213,7 @@ impl NewGoalPage {
             }
             _ => {}
         }
+        ui::copyable(&self.status, None);
     }
 
     /// Starts the goal as asked, without continuing one already there.
@@ -224,7 +225,7 @@ impl NewGoalPage {
             let (product, text) = (product.clone(), text.clone());
             page.clone().app.spawn(async move {
                 page.render_phase(&NewGoalPhase::Starting);
-                page.flow.start_new(&product, &text).await;
+                page.flow.start_new(&product, &text, &page.composer.files()).await;
                 page.after(&product, &text);
             });
         });
@@ -252,7 +253,7 @@ impl NewGoalPage {
             let (goal, text) = (goal.clone(), text.clone());
             page.clone().app.spawn(async move {
                 page.render_phase(&NewGoalPhase::Starting);
-                page.flow.continue_goal(&goal, &text).await;
+                page.flow.continue_goal(&goal, &text, &page.composer.files()).await;
                 page.after(&goal, &text);
             });
         });

@@ -227,6 +227,12 @@ hold only that product's work; with none, every product's.
 - A turn's menu copies it as plain text, or as the markdown it was written in.
 - Ctrl+C on a goal selected in the sidebar, or its menu's Copy, copies its title and id.
 
+## Files And Images Go With What The Person Sends
+- A file pasted or dropped on a composer waits above the field until sent or removed: an image as a thumbnail, any other file by its name and size; a pasted image is written as a PNG of its own; a folder is refused.
+- Sending passes each file as `--attach <path>` to the command it runs: `wd send`, `wd goal start` or `wd goal continue`; files alone can be sent, except to continue a goal.
+- A file shows on the message it was sent with: the one on the same work at the same moment; a file no message carries shows on its own, once per moment.
+- An image opens in the person's default app; any other file opens the folder it is kept in.
+
 ## The Agents Panel Sits Beside The Page, Never Over It
 - The panel sits beside the page, which narrows to make room for it.
 - Dragging its edge resizes it between 260 and 480 pixels; it opens at 320 until a width is set, and the width set is remembered.

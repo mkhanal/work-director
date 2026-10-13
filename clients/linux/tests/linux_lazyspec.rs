@@ -156,7 +156,7 @@ fn work(id: &str, state: &str) -> Work {
 fn goal_view(mut v: Value) -> GoalDetail {
     let empty = json!({"chain": [], "tree": [], "paths": {}, "done_when": null, "finish": null,
         "progress": {"done": 0, "total": 0, "superseded": 0}, "not_done_because": [], "needs_you": [],
-        "course": null, "superseded": [], "proposed": false, "reasoning": null});
+        "course": null, "superseded": [], "proposed": false, "reasoning": null, "attachments": []});
     for (k, value) in empty.as_object().expect("an object") {
         if v.get(k).is_none() {
             v[k] = value.clone();
@@ -474,7 +474,7 @@ fn a_new_goal_first_offers_the_goals_it_may_continue() {
     run.wait(store.start());
     let flow = NewGoal::new(Rc::clone(&store));
 
-    run.wait(flow.submit("tracker", "add tags to the CSV export"));
+    run.wait(flow.submit("tracker", "add tags to the CSV export", &[]));
     match flow.phase() {
         NewGoalPhase::Offering(found) => {
             assert_eq!(found.iter().map(|f| f.goal.id.clone()).collect::<Vec<_>>(), vec![csv.clone()])
@@ -483,14 +483,14 @@ fn a_new_goal_first_offers_the_goals_it_may_continue() {
     }
     assert!(home.wd(&["status", "--all"]).contains(&format!("{csv}\tdone")), "nothing started while offering");
 
-    run.wait(flow.continue_goal(&csv, "add tags to the CSV export"));
+    run.wait(flow.continue_goal(&csv, "add tags to the CSV export", &[]));
     match flow.phase() {
         NewGoalPhase::Started(continued) => assert!(continued.goal.id == csv && continued.tasks.len() == 2),
         other => panic!("phase = {other:?}, want the CSV goal continued"),
     }
 
     flow.reset();
-    run.wait(flow.submit("tracker", "A dark mode for the settings page"));
+    run.wait(flow.submit("tracker", "A dark mode for the settings page", &[]));
     let fresh = match flow.phase() {
         NewGoalPhase::Started(fresh) => fresh,
         other => panic!("phase = {other:?}, want a new goal started in one step"),
@@ -2081,6 +2081,87 @@ fn any_text_the_app_shows_can_be_copied() {
     let mut goal = work("ab12", "running");
     goal.title = "Release notes".into();
     assert_eq!(kit::copy::work(&goal), "Release notes (ab12)");
+}
+
+/// Files And Images Go With What The Person Sends
+#[test]
+fn files_and_images_go_with_what_the_person_sends() {
+    let home = Home::new();
+    let shot = home.dir.join("shot.PNG");
+    fs::write(&shot, [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n']).expect("an image");
+    let notes = home.dir.join("notes.txt");
+    fs::write(&notes, "x".repeat(2048)).expect("a file");
+    let image = PendingFile::at(&shot).expect("an image waits");
+    assert!(image.image && image.name == "shot.PNG" && image.size == 8);
+    let file = PendingFile::at(&notes).expect("a file waits");
+    assert!(!file.image && file.size_label() == "2 KB");
+    assert!(matches!(PendingFile::at(&home.dir), Err(AttachError::Folder(_))), "a folder is refused");
+    let mut waiting = vec![image.clone()];
+    kit::attach::add(&mut waiting, image.clone());
+    assert_eq!(waiting.len(), 1, "a file waits once");
+    assert_eq!((size_label(512), size_label(3_565_158)), ("512 B".to_string(), "3.4 MB".to_string()));
+
+    let paths = vec![image.path.clone(), file.path.clone()];
+    let send = Plan::send_files("g1", " look at these ", &paths).expect("a plan");
+    assert_eq!(
+        send.argv,
+        strings(&["send", "g1", "look at these", "--attach", &paths[0], "--attach", &paths[1]]),
+        "each file is passed as --attach"
+    );
+    assert_eq!(send.message(), ("look at these".to_string(), paths.clone()));
+    assert_eq!(
+        Plan::send_files("g1", "  ", &paths[..1]).map(|p| p.argv),
+        Ok(strings(&["send", "g1", "--attach", &paths[0]])),
+        "files alone can be sent"
+    );
+    assert_eq!(Plan::send_files("g1", "  ", &[]), Err(PlanError::Empty));
+    assert_eq!(
+        Plan::start_files("demo", "", &paths[..1]).map(|p| p.argv),
+        Ok(strings(&["goal", "start", "demo", "--detach", "--json", "--attach", &paths[0]]))
+    );
+    assert_eq!(
+        Plan::continue_goal("g1", "more").map(|p| p.attaching(&paths[..1]).argv),
+        Ok(strings(&["goal", "continue", "g1", "more", "--json", "--attach", &paths[0]]))
+    );
+    assert_eq!(Plan::continue_goal("g1", " "), Err(PlanError::Empty), "a goal is not continued with files alone");
+
+    let goal = home.goal("demo", "Ship the notes");
+    let run = Run::new();
+    let store = run.store(home.channel());
+    let said = run.wait(store.run(&Plan::send_files(&goal, "use these", &paths).expect("a plan"))).expect("ran");
+    assert_eq!(said.code, 0, "{}", said.complaint());
+    let g = run.wait(store.goal(&goal)).expect("the goal");
+    let decision = g.events.iter().find(|e| e.kind == "decision").expect("the decision");
+    assert_eq!(decision.body, "use these");
+    assert_eq!(
+        g.attached_to(decision).iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
+        vec!["shot.PNG", "notes.txt"],
+        "a file shows on the message it was sent with"
+    );
+    assert!(g.attachments[0].is_image() && !g.attachments[1].is_image());
+    assert!(
+        g.thread().iter().all(|s| s.event().kind != "attachment"),
+        "files a message carries do not show again on their own"
+    );
+
+    let event = |id: i64, work: &str, kind: &str, at: &str| json!({"id": id, "work": work, "kind": kind, "body": "", "at": at, "effective": null, "decision": null});
+    let file = |event: i64, work: &str, at: &str, name: &str| json!({"event": event, "work": work, "at": at, "name": name, "path": format!("/f/{name}"), "size": 3, "media_type": "text/plain"});
+    let (t1, t2) = ("2026-10-12T01:00:00Z", "2026-10-12T02:00:00Z");
+    let alone = goal_view(json!({
+        "goal": work_json("g", "running"), "tasks": [work_json("a", "running")],
+        "rollup": {"counts": {}, "done": 0, "total": 1}, "claims": [], "landings": [], "delivery": null,
+        "activity": {}, "reports": {}, "asking": null,
+        "events": [event(1, "g", "decision", t1), event(2, "g", "attachment", t1),
+            event(3, "a", "attachment", t2), event(4, "a", "attachment", t2)],
+        "attachments": [file(2, "g", t1, "with.txt"), file(3, "a", t2, "one.txt"), file(4, "a", t2, "two.txt")],
+    }));
+    let steps: Vec<ThreadStep> = alone.thread().into_iter().filter(|s| s.event().kind == "attachment").collect();
+    assert_eq!(steps.len(), 1, "files no message carries show on their own, once per moment");
+    assert_eq!(
+        alone.attached_alone(steps[0].event()).iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
+        vec!["one.txt", "two.txt"]
+    );
+    store.stop();
 }
 
 /// The Agents Panel Sits Beside The Page, Never Over It

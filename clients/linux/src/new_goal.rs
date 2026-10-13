@@ -37,22 +37,26 @@ impl NewGoal {
         *self.phase.borrow_mut() = phase;
     }
 
-    /// Looks for goals the request continues; with none, starts it at once.
-    pub async fn submit(&self, project: &str, text: &str) {
+    /// Looks for goals the request continues; with none, or with files and
+    /// no words to match on, starts it at once.
+    pub async fn submit(&self, project: &str, text: &str, files: &[String]) {
+        if text.trim().is_empty() && !files.is_empty() {
+            return self.run(Plan::start_files(project, text, files)).await;
+        }
         self.set(NewGoalPhase::Finding);
         match self.store.find(project, text).await {
-            Ok(found) if found.is_empty() => self.start_new(project, text).await,
+            Ok(found) if found.is_empty() => self.start_new(project, text, files).await,
             Ok(found) => self.set(NewGoalPhase::Offering(found)),
             Err(e) => self.set(NewGoalPhase::Failed(e.to_string())),
         }
     }
 
-    pub async fn start_new(&self, project: &str, text: &str) {
-        self.run(Plan::start(project, text)).await;
+    pub async fn start_new(&self, project: &str, text: &str, files: &[String]) {
+        self.run(Plan::start_files(project, text, files)).await;
     }
 
-    pub async fn continue_goal(&self, id: &str, text: &str) {
-        self.run(Plan::continue_goal(id, text)).await;
+    pub async fn continue_goal(&self, id: &str, text: &str, files: &[String]) {
+        self.run(Plan::continue_goal(id, text).map(|p| p.attaching(files))).await;
     }
 
     pub fn reset(&self) {

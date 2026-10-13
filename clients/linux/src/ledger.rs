@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
+use crate::attach::Attachment;
 use crate::conversation::{Activity, Question};
 use crate::tree::{Course, Finish, Link, NeedYou, Node, Progress, Reasoning, Superseded};
 
@@ -414,6 +415,8 @@ pub struct GoalDetail {
     pub proposed: bool,
     /// Why its latest planning broke it down so, when that planning said.
     pub reasoning: Option<Reasoning>,
+    /// Every file sent anywhere under the goal, oldest first.
+    pub attachments: Vec<Attachment>,
 }
 
 impl GoalDetail {

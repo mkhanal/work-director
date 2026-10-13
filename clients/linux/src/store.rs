@@ -382,10 +382,12 @@ impl Store {
     pub fn post(&self, plan: Plan, work: &str, then: Option<Plan>) -> Outgoing {
         let id = self.next_message.get();
         self.next_message.set(id + 1);
+        let (text, files) = plan.message();
         let message = Outgoing {
             id,
             work: work.to_string(),
-            text: plan.argv.last().cloned().unwrap_or_default(),
+            text,
+            files,
             at: Utc::now(),
             state: OutgoingState::Sending,
             plan,

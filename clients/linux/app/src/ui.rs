@@ -41,6 +41,15 @@ pub fn line(text: &str, classes: &[&str]) -> gtk::Label {
     label
 }
 
+/// A file's name on one line: as wide as it is, up to 28 characters, then cut in the middle.
+pub fn name_line(name: &str, classes: &[&str]) -> gtk::Label {
+    let label = line(name, classes);
+    label.set_ellipsize(pango::EllipsizeMode::Middle);
+    label.set_width_chars(name.chars().count().min(28) as i32);
+    label.set_max_width_chars(28);
+    label
+}
+
 /// A small capitalised label naming a section; never cut short.
 pub fn micro(text: &str, classes: &[&str]) -> gtk::Label {
     let label = gtk::Label::builder().label(text.to_uppercase()).xalign(0.0).build();
@@ -655,4 +664,40 @@ pub fn copy_menu(text: &str) -> gio::MenuModel {
     item.set_action_and_target_value(Some("win.copy-text"), Some(&text.to_variant()));
     menu.append_item(&item);
     menu.upcast()
+}
+
+/// Files sent with a message: an image as a thumbnail that opens in the
+/// person's default app, any other file as a chip that opens its folder.
+pub fn attachments(files: &[kit::Attachment]) -> gtk::Box {
+    let flow = hbox(SPACE_2);
+    flow.set_halign(gtk::Align::End);
+    flow.add_css_class("attachments");
+    for file in files {
+        let path = std::path::Path::new(&file.path);
+        let (child, opens, tip): (gtk::Widget, &std::path::Path, String) = if file.is_image() {
+            let picture = gtk::Picture::for_filename(path);
+            picture.set_content_fit(gtk::ContentFit::Cover);
+            picture.set_can_shrink(true);
+            picture.set_size_request(120, 90);
+            (picture.upcast(), path, format!("Open {}", file.name))
+        } else {
+            let chip = hbox(SPACE_2);
+            chip.append(&icon("text-x-generic-symbolic", &["text2"]));
+            chip.append(&name_line(&file.name, &["callout"]));
+            chip.append(&gtk::Label::builder().label(file.size_label()).css_classes(["meta", "text3"]).build());
+            (chip.upcast(), path.parent().unwrap_or(path), format!("Show {} in its folder", file.name))
+        };
+        let button = gtk::Button::builder().child(&child).tooltip_text(&tip).build();
+        button.add_css_class("attachment");
+        button.set_valign(gtk::Align::Start);
+        announce(&button, &tip);
+        let uri = gio::File::for_path(opens).uri();
+        button.connect_clicked(move |b| {
+            if let Err(e) = gio::AppInfo::launch_default_for_uri(&uri, gio::AppLaunchContext::NONE) {
+                let _ = b.activate_action("win.complain", Some(&format!("cannot open {uri}: {e}").to_variant()));
+            }
+        });
+        flow.append(&button);
+    }
+    flow
 }
