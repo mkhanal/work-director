@@ -441,6 +441,7 @@ struct QuestionCard: View {
     @State private var page = 0
     @State private var sending = false
     @State private var failure: String?
+    @State private var editing = false
 
     init(store: Store, workID: String, question: Question, title: String? = nil, asker: String? = nil,
          path: [PathPart] = [], at: String? = nil, change: PendingChange? = nil, answered: @escaping () -> Void) {
@@ -531,30 +532,37 @@ struct QuestionCard: View {
                 .padding(.top, 6)
                 .padding(.bottom, 8)
             if let change, i == 0 { ChangeBlock(change: change).padding(.bottom, 10) }
-            VStack(spacing: 0) {
-                ForEach(item.options, id: \.label) { option in
-                    optionRow(option, item: item, at: i, chosen: chosen(option.label, answer: answer, item: i))
-                }
-                if question.pending {
-                    HStack(spacing: 10) {
-                        Text(draft.typed[i].isEmpty ? "○" : "◉").font(TypeScale.calloutMedium).foregroundStyle(Palette.text)
-                        TextField(item.options.isEmpty ? "Your answer…" : "Something else…", text: $draft.typed[i], axis: .vertical)
-                            .textFieldStyle(.plain)
-                            .font(TypeScale.calloutMedium)
-                            .lineLimit(1...6)
-                            .onSubmit { advance() }
+            if !courseButtons {
+                VStack(spacing: 0) {
+                    ForEach(item.options, id: \.label) { option in
+                        optionRow(option, item: item, at: i, chosen: chosen(option.label, answer: answer, item: i))
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(draft.typed[i].isEmpty ? Color.clear : Palette.page, in: RoundedRectangle(cornerRadius: Radius.option))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.option).strokeBorder(draft.typed[i].isEmpty ? Color.clear : Palette.questionBorder))
-                } else if let answer, !item.options.contains(where: { answerParts(answer).contains(Choice($0.label).label) }) {
-                    Text(answer).font(TypeScale.callout).foregroundStyle(Palette.text).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10).padding(.vertical, 7)
+                    if question.pending {
+                        HStack(spacing: 10) {
+                            Text(draft.typed[i].isEmpty ? "○" : "◉").font(TypeScale.calloutMedium).foregroundStyle(Palette.text)
+                            TextField(item.options.isEmpty ? "Your answer…" : "Something else…", text: $draft.typed[i], axis: .vertical)
+                                .textFieldStyle(.plain)
+                                .font(TypeScale.calloutMedium)
+                                .lineLimit(1...6)
+                                .onSubmit { advance() }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(draft.typed[i].isEmpty ? Color.clear : Palette.page, in: RoundedRectangle(cornerRadius: Radius.option))
+                        .overlay(RoundedRectangle(cornerRadius: Radius.option).strokeBorder(draft.typed[i].isEmpty ? Color.clear : Palette.questionBorder))
+                    } else if let answer, !item.options.contains(where: { answerParts(answer).contains(Choice($0.label).label) }) {
+                        Text(answer).font(TypeScale.callout).foregroundStyle(Palette.text).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 10).padding(.vertical, 7)
+                    }
                 }
             }
         }
+    }
+
+    /// A pending course change is answered by its three buttons, not by picking.
+    private var courseButtons: Bool {
+        question.pending && change?.kind == .course && question.changeChoices != nil
     }
 
     private func optionRow(_ option: QuestionOption, item: QuestionItem, at i: Int, chosen: Bool) -> some View {
@@ -614,27 +622,46 @@ struct QuestionCard: View {
 
     private var footer: some View {
         VStack(alignment: .trailing, spacing: Space.s2) {
-            HStack(spacing: Space.s2) {
-                if many {
-                    Button("Back") { page -= 1 }.buttonStyle(.canvas).disabled(page == 0)
-                    Button("Next") { page += 1 }.buttonStyle(.canvas).disabled(page == question.items.count - 1)
+            if courseButtons, let choices = question.changeChoices {
+                HStack(spacing: Space.s2) {
+                    Spacer(minLength: Space.s2)
+                    Button(choices.keep) { Task { await send([try? Plan.answer(workID, question, answers: [choices.keep])]) } }
+                        .buttonStyle(.canvas)
+                    Button("Edit the change…") { editing = true }
+                        .buttonStyle(.canvas)
+                        .disabled(change?.proposed == nil)
+                    Button {
+                        Task { await send([try? Plan.answer(workID, question, answers: [choices.change])]) }
+                    } label: {
+                        if sending { ProgressView().controlSize(.small) } else { Text(choices.change + " · Recommended") }
+                    }
+                    .buttonStyle(.canvasPrimary)
+                    .keyboardShortcut(.defaultAction)
                 }
-                Spacer(minLength: Space.s2)
-                Button("Let the director decide") {
-                    Task { await send(try? Plan.answer(workID, question, answers: draft.directorDecides)) }
-                }
-                .buttonStyle(.canvas)
                 .disabled(sending)
-                .help("Answers with the director's recommendation, or leaves it to its judgement")
-                Button {
-                    Task { await send(plan) }
-                } label: {
-                    if sending { ProgressView().controlSize(.small) } else { Text(many && unanswered > 0 ? "Answer (\(unanswered) left open)" : "Answer") }
+            } else {
+                HStack(spacing: Space.s2) {
+                    if many {
+                        Button("Back") { page -= 1 }.buttonStyle(.canvas).disabled(page == 0)
+                        Button("Next") { page += 1 }.buttonStyle(.canvas).disabled(page == question.items.count - 1)
+                    }
+                    Spacer(minLength: Space.s2)
+                    Button("Let the director decide") {
+                        Task { await send(try? Plan.answer(workID, question, answers: draft.directorDecides)) }
+                    }
+                    .buttonStyle(.canvas)
+                    .disabled(sending)
+                    .help("Answers with the director's recommendation, or leaves it to its judgement")
+                    Button {
+                        Task { await send(plan) }
+                    } label: {
+                        if sending { ProgressView().controlSize(.small) } else { Text(many && unanswered > 0 ? "Answer (\(unanswered) left open)" : "Answer") }
+                    }
+                    .buttonStyle(.canvasPrimary)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(plan == nil || sending)
+                    .help(plan?.commandLine ?? "Pick an answer")
                 }
-                .buttonStyle(.canvasPrimary)
-                .keyboardShortcut(.defaultAction)
-                .disabled(plan == nil || sending)
-                .help(plan?.commandLine ?? "Pick an answer")
             }
             if let failure {
                 Label(failure, systemImage: "exclamationmark.triangle.fill")
@@ -644,23 +671,39 @@ struct QuestionCard: View {
             }
         }
         .padding(.top, 6)
+        .sheet(isPresented: $editing) {
+            if let proposed = change?.proposed {
+                EditChangeSheet(workID: workID, question: question, proposed: proposed) { plans in
+                    editing = false
+                    if let plans { Task { await send(plans) } }
+                }
+            }
+        }
     }
 
     private func send(_ plan: Plan?) async {
-        guard let plan else { return }
+        await send([plan])
+    }
+
+    /// Runs writes in order, stopping at the first refused; a nil write sends nothing.
+    private func send(_ plans: [Plan?]) async {
+        guard !plans.isEmpty, !plans.contains(where: { $0 == nil }) else { return }
         sending = true
         defer { sending = false }
-        do {
-            let result = try await store.run(plan)
-            if result.code == 0 {
-                failure = nil
-                answered()
-            } else {
-                failure = result.stderr.isEmpty ? result.stdout : result.stderr
+        failure = nil
+        for case let plan? in plans {
+            do {
+                let result = try await store.run(plan)
+                if result.code != 0 {
+                    failure = result.stderr.isEmpty ? result.stdout : result.stderr
+                    break
+                }
+            } catch {
+                failure = "\(error)"
+                break
             }
-        } catch {
-            failure = "\(error)"
         }
+        if failure == nil { answered() }
         await store.refresh()
     }
 }
@@ -672,10 +715,12 @@ struct ChangeBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let why = change.why, !why.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    CardLabel("Why change course", color: Palette.text2)
-                    Text(why).font(TypeScale.callout).lineSpacing(TypeScale.calloutLeading).foregroundStyle(Palette.text)
+            let found = change.found.flatMap { $0.isEmpty ? nil : $0 }
+            let why = change.why.flatMap { $0.isEmpty ? nil : $0 }
+            if found != nil || why != nil {
+                HStack(alignment: .top, spacing: Space.s5) {
+                    if let found { said("What was found", found) }
+                    if let why { said(change.kind == .course ? "Why change course" : "Why change the plan", why) }
                 }
             }
             if !change.table.isEmpty {
@@ -689,7 +734,23 @@ struct ChangeBlock: View {
                 .background(Palette.page, in: RoundedRectangle(cornerRadius: Radius.card))
                 .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.questionBorder))
             }
-            if let lines = change.lines, !lines.isEmpty {
+            if change.kind == .course, let fates = change.subGoals, !fates.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    CardLabel("Sub-goals after the change", color: Palette.text2)
+                    ForEach(Array(fates.enumerated()), id: \.offset) { _, fate in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Badge(fate.badge)
+                            Text(fate.title)
+                                .strikethrough(fate.status == .superseded)
+                                .foregroundStyle(fate.status == .superseded ? Palette.text2 : Palette.text)
+                            if fate.status == .superseded, let why = fate.why {
+                                Text(why).font(TypeScale.caption).foregroundStyle(Palette.text3)
+                            }
+                        }
+                        .font(TypeScale.callout)
+                    }
+                }
+            } else if let lines = change.lines, !lines.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     CardLabel(change.kind == .course ? "The plan after the change" : "What would change", color: Palette.text2)
                     ForEach(lines, id: \.self) { line in
@@ -704,6 +765,16 @@ struct ChangeBlock: View {
         }
     }
 
+    private func said(_ label: String, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            CardLabel(label, color: Palette.text2)
+            Text(text).font(TypeScale.callout).lineSpacing(TypeScale.calloutLeading).foregroundStyle(Palette.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
     private func row(_ label: String, _ now: String, _ proposed: String, header: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(label).foregroundStyle(Palette.text3).frame(width: 108, alignment: .leading)
@@ -715,6 +786,54 @@ struct ChangeBlock: View {
         .font(header ? TypeScale.meta : TypeScale.callout)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+    }
+}
+
+/// A course change as the person would make it instead: its proposed title,
+/// done-when and finish line to edit, applied after the change is.
+struct EditChangeSheet: View {
+    let workID: String
+    let question: Question
+    let proposed: GoalShape
+    let done: ([Plan]?) -> Void
+    @State private var title: String
+    @State private var doneWhen: String
+    @State private var finish: String
+
+    init(workID: String, question: Question, proposed: GoalShape, done: @escaping ([Plan]?) -> Void) {
+        self.workID = workID
+        self.question = question
+        self.proposed = proposed
+        self.done = done
+        _title = State(initialValue: proposed.title)
+        _doneWhen = State(initialValue: proposed.doneWhen ?? "")
+        _finish = State(initialValue: FinishMeaning.lines.first { $0.lowercased() == proposed.finish?.lowercased() } ?? "complete PR")
+    }
+
+    private var plans: [Plan]? {
+        try? Plan.editChange(workID, question, proposed: proposed, title: title, doneWhen: doneWhen, finish: finish)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s3) {
+            Text("Edit the change").font(TypeScale.headline)
+            TextField("The goal", text: $title)
+            TextField("Done when…", text: $doneWhen, axis: .vertical).lineLimit(2...4)
+            Picker("Finishes at", selection: $finish) {
+                ForEach(FinishMeaning.lines, id: \.self) { Text(FinishMeaning.of($0)?.title ?? $0).tag($0) }
+            }
+            if let plans {
+                Text(plans.map(\.commandLine).joined(separator: "\n")).font(TypeScale.codeTiny).foregroundStyle(Palette.text3).lineLimit(4)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { done(nil) }.keyboardShortcut(.cancelAction)
+                Button("Change course") { done(plans) }.keyboardShortcut(.defaultAction).disabled(plans == nil)
+            }
+        }
+        .textFieldStyle(.roundedBorder)
+        .padding(Space.s5)
+        .frame(width: 500)
     }
 }
 

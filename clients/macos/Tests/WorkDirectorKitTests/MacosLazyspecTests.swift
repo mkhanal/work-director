@@ -1210,4 +1210,64 @@ struct SeededTree {
         #expect(try await store.goal(under).chain.count > 1, "a sub-goal's page offers none")
         #expect(try await store.run(Plan.finish(under, "research")).code != 0)
     }
+
+    @Test("A Course Change Shows What Was Found And What Happens To Each Sub-Goal")
+    func courseChange() async throws {
+        let home = try Home()
+        try fakeRunner(home)
+        /// A goal waiting on a course change that adds one sub-goal and supersedes another.
+        func pivot() throws -> (goal: String, done: String, working: String, dropped: String) {
+            let goal = try home.goal("demo", "Why does sync drop events?")
+            let done = try home.sub(goal, "The cause is found and explained")
+            let working = try home.sub(goal, "We know which tenants lost events")
+            let dropped = try home.sub(goal, "Compare other sync vendors")
+            let change = #"{"actions":["GOAL \#(goal): A rejected batch is retried until delivered | done when: a 429 batch is retried","SUPERSEDE \#(dropped): no longer needed: the vendor is fine once retried"],"title":"Sync never drops events","done_when":"a 429 batch is retried","finish":"complete PR","found":"The vendor SDK drops a batch on 429."}"#
+            try home.sql("""
+            UPDATE work SET state='done' WHERE id='\(done)';
+            UPDATE work SET state='running' WHERE id='\(working)';
+            UPDATE work SET state='needs-input', finish_line='discovery', finish_source='goal', done_when='the cause is found', runner='fake', session='s-sup' WHERE id='\(goal)';
+            INSERT INTO event (work,kind,body,at,payload) VALUES ('\(goal)','question','Change course?
+              Now: Why does sync drop events? | done when: the cause is found | finish: discovery
+              Proposed: Sync never drops events | done when: a 429 batch is retried | finish: complete PR
+              Found: The vendor SDK drops a batch on 429.
+              Why: knowing is done and the fix is one retry policy
+            - Change course (recommended)
+            - Keep it a discovery','2026-10-13T11:40:00Z','\(change)');
+            """)
+            return (goal, done, working, dropped)
+        }
+        let store = await Store(channel: try home.channel())
+        let first = try pivot()
+        let ask = try #require(try await store.goal(first.goal).needsYou.first { $0.work == first.goal })
+        let change = try #require(ask.change)
+        #expect(change.found == "The vendor SDK drops a batch on 429.")
+        #expect(change.why == "knowing is done and the fix is one retry policy")
+        let fates = try #require(change.subGoals)
+        #expect(fates.map(\.title) == ["The cause is found and explained", "We know which tenants lost events",
+                                       "Compare other sync vendors", "A rejected batch is retried until delivered"])
+        #expect(fates.map(\.badge.text) == ["Kept · done", "Kept · working", "Superseded", "New"])
+        #expect(fates[2].why == "no longer needed: the vendor is fine once retried")
+        let choices = try #require(ask.question.changeChoices)
+        #expect(choices.change == "Change course" && choices.keep == "Keep it a discovery", "each button answers with its choice, labelled with it")
+        #expect(try Plan.answer(first.goal, ask.question, answers: [choices.keep]).argv == ["answer", first.goal, "Keep it a discovery"])
+
+        let proposed = try #require(change.proposed)
+        let untouched = try Plan.editChange(first.goal, ask.question, proposed: proposed,
+                                            title: "Sync never drops events", doneWhen: "a 429 batch is retried", finish: "complete PR")
+        #expect(untouched.map(\.argv) == [["answer", first.goal, "Change course"]], "nothing is written for what was left as proposed")
+        let edited = try Plan.editChange(first.goal, ask.question, proposed: proposed,
+                                         title: "Sync never loses events", doneWhen: "a 429 batch is retried", finish: "merged")
+        #expect(edited.map(\.argv) == [["answer", first.goal, "Change course"],
+                                       ["goal", "edit", first.goal, "--title", "Sync never loses events"],
+                                       ["goal", "finish", first.goal, "merged"]])
+        for plan in edited {
+            let r = try await store.run(plan)
+            #expect(r.code == 0, "\(plan.commandLine): \(r.stderr)")
+        }
+        let after = try await store.goal(first.goal)
+        #expect(after.goal.title == "Sync never loses events")
+        #expect(after.doneWhen == "a 429 batch is retried")
+        #expect(after.finish?.line == "merged")
+        #expect(after.needsYou.isEmpty)
+    }
 }
