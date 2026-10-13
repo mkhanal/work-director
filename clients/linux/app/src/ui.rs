@@ -423,6 +423,41 @@ pub fn button(text: &str, primary: bool) -> gtk::Button {
     button
 }
 
+/// A choice pressed as one button: its radio or check mark and its words
+/// together, announced by `name` with what it is, so assistive technology can
+/// tell choices apart and press one. A radio choice joins `group`, the first
+/// radio of its question, when one is given.
+pub fn choice(
+    words: &impl IsA<gtk::Widget>,
+    name: &str,
+    radio: bool,
+    group: Option<&gtk::ToggleButton>,
+) -> gtk::ToggleButton {
+    let role = if radio { gtk::AccessibleRole::Radio } else { gtk::AccessibleRole::Checkbox };
+    let button: gtk::ToggleButton = glib::Object::builder().property("accessible-role", role).build();
+    button.add_css_class("choice");
+    // The mark only shows the button's state; the button is what is pressed and announced.
+    let mark: gtk::CheckButton =
+        glib::Object::builder().property("accessible-role", gtk::AccessibleRole::Presentation).build();
+    mark.set_can_target(false);
+    mark.set_focusable(false);
+    mark.set_valign(gtk::Align::Start);
+    if radio {
+        // A lone check button draws as a box; one in a group draws as a radio.
+        mark.set_group(Some(&gtk::CheckButton::new()));
+    }
+    if let Some(first) = group {
+        button.set_group(Some(first));
+    }
+    let row = hbox(SPACE_2);
+    row.append(&mark);
+    row.append(words);
+    button.set_child(Some(&row));
+    button.update_property(&[gtk::accessible::Property::Label(name)]);
+    button.connect_toggled(move |b| mark.set_active(b.is_active()));
+    button
+}
+
 /// A small link inside a line of text.
 pub fn inline_link(text: &str) -> gtk::Button {
     let button = gtk::Button::with_label(text);

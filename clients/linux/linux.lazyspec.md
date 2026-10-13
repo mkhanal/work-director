@@ -68,6 +68,7 @@ hold only that product's work; with none, every product's.
 - Picking a single-choice option replaces the item's pick; typed words replace it too.
 - Multiple-choice picks join in the order offered, then any typed words.
 - A pick is sent as its label without a `(recommended)` mark.
+- Each option is announced to assistive technology by the title it shows, without a `(recommended)` mark.
 - Nothing can be sent until some item has an answer; an item left without one is sent as `(no answer)`.
 - Sending runs `wd answer <id>` with one answer per item, in the order asked.
 

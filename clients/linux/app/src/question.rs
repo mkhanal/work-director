@@ -61,7 +61,8 @@ pub fn pending(
     let decide = ui::button("Let the director decide", false);
     let failure = ui::text("", &["callout", "failure"]);
     failure.set_visible(false);
-    let remember = card_says.remember.as_deref().map(gtk::CheckButton::with_label);
+    let remember =
+        card_says.remember.as_deref().map(|said| ui::choice(&ui::line(said, &["callout"]), said, false, None));
 
     let answer_plan: Rc<dyn Fn() -> Option<Plan>> = {
         let (draft, work, q, remember) = (draft.clone(), work.to_string(), question.clone(), remember.clone());
@@ -99,6 +100,7 @@ pub fn pending(
         Some(check) => {
             check.add_css_class("callout");
             check.set_hexpand(true);
+            check.set_halign(gtk::Align::Start);
             let r = refresh.clone();
             check.connect_toggled(move |_| r());
             footer.append(check);
@@ -260,7 +262,7 @@ fn item_page(
         page.append(extra);
     }
 
-    let rows: Rc<RefCell<Vec<(gtk::Box, String)>>> = Rc::new(RefCell::new(Vec::new()));
+    let rows: Rc<RefCell<Vec<(gtk::ToggleButton, String)>>> = Rc::new(RefCell::new(Vec::new()));
     let mark_chosen = {
         let (rows, draft) = (rows.clone(), draft.clone());
         Rc::new(move || {
@@ -279,38 +281,36 @@ fn item_page(
         .has_frame(false)
         .build();
     other.add_css_class("callout");
-    let mut group: Option<gtk::CheckButton> = None;
+    other.update_property(&[gtk::accessible::Property::Label("Something else")]);
+    let mut group: Option<gtk::ToggleButton> = None;
     for option in &item.options {
-        let check = gtk::CheckButton::new();
-        if !item.multi {
-            if let Some(first) = &group {
-                check.set_group(Some(first));
-            } else {
-                group = Some(check.clone());
-            }
-        }
-        let (label, recommended) = shown(&option.label);
-        let row = ui::hbox(SPACE_2);
-        row.add_css_class("option");
-        row.append(&check);
-        let words = ui::vbox(2);
-        words.set_hexpand(true);
-        words.append(&ui::text(option.title.as_deref().unwrap_or(label), &["callout", "medium"]));
+        let recommended = shown(&option.label).1;
+        let words = ui::hbox(SPACE_2);
+        let said = ui::vbox(2);
+        said.set_hexpand(true);
+        said.append(&ui::text(option.shown(), &["callout", "medium"]));
         if !option.description.is_empty() {
-            words.append(&ui::text(&option.description, &["meta", "text3"]));
+            said.append(&ui::text(&option.description, &["meta", "text3"]));
         }
-        row.append(&words);
+        words.append(&said);
         if recommended {
-            row.append(&ui::badge("Recommended", Tone::Settled));
+            let badge = ui::badge("Recommended", Tone::Settled);
+            badge.set_valign(gtk::Align::Start);
+            words.append(&badge);
         }
-        let click = gtk::GestureClick::new();
-        let (c, multi) = (check.clone(), item.multi);
-        click.connect_released(move |_, _, _, _| c.set_active(!multi || !c.is_active()));
-        words.add_controller(click);
+        words.set_hexpand(true);
+        let row = ui::choice(&words, option.shown(), !item.multi, group.as_ref());
+        if !option.description.is_empty() {
+            row.update_property(&[gtk::accessible::Property::Description(&option.description)]);
+        }
+        row.add_css_class("option");
+        if !item.multi && group.is_none() {
+            group = Some(row.clone());
+        }
         rows.borrow_mut().push((row.clone(), option.label.clone()));
         let (draft, refresh, label, multi, other, mark) =
             (draft.clone(), refresh.clone(), option.label.clone(), item.multi, other.clone(), mark_chosen.clone());
-        check.connect_toggled(move |check| {
+        row.connect_toggled(move |check| {
             let picked = draft.borrow().is_picked(&label, i);
             if multi {
                 if check.is_active() != picked {

@@ -542,6 +542,18 @@ fn a_question_is_answered_in_place_one_answer_per_item() {
             {"label": "Yes (recommended)", "description": ""}, {"label": "No", "description": ""}]},
     ], "answers": null, "reply": null}))
     .expect("a question");
+    let announced: Vec<&str> = yes_no.items[0].options.iter().map(QuestionOption::shown).collect();
+    assert_eq!(announced, vec!["Yes", "No"], "each option is announced by what it shows");
+    let finish: NeedYou = serde_json::from_value(json!({"work": "f", "path": "P", "question": {"id": "q3", "items": [
+        {"header": "", "question": "Where does this goal finish?", "multi": false, "options": [
+            {"label": "research (recommended)", "description": ""}]}], "answers": null, "reply": null},
+        "change": {"kind": "finish", "choices": ["research (recommended)"]}}))
+    .expect("a finish-line question");
+    assert_eq!(
+        finish.shown_question().items[0].options[0].shown(),
+        "Research complete: a written comparison and a pick",
+        "a finish line is announced by its title, not its terse label"
+    );
     let mut draft = AnswerDraft::new(yes_no);
     draft.toggle("Yes (recommended)", 0);
     assert_eq!(draft.answers(), Some(strings(&["Yes"])), "the recommended mark is not sent");

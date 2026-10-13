@@ -135,11 +135,13 @@ fn proposed_card(
     let links = ui::hbox(2);
     links.set_valign(gtk::Align::Start);
     let edit = ui::inline_link("Edit");
+    named(&edit, "Edit", card, "");
     let (a, c) = (app.clone(), card.clone());
     edit.connect_clicked(move |_| ask_edit(&a, &c));
     links.append(&edit);
     if card.splits {
         let split = ui::inline_link("Split");
+        named(&split, "Split", card, "");
         let (a, id) = (app.clone(), card.id.clone());
         split.connect_clicked(move |_| a.run(Plan::split_sub_goal(&id)));
         links.append(&split);
@@ -148,6 +150,7 @@ fn proposed_card(
         [] => {}
         [other] => {
             let merge = ui::inline_link(&format!("Merge with {}", other.number));
+            named(&merge, "Merge", card, &format!(" with {}", other.number));
             let (a, plan) = (app.clone(), card.merge(other));
             merge.connect_clicked(move |_| a.run(plan.clone()));
             links.append(&merge);
@@ -168,10 +171,12 @@ fn proposed_card(
             popover.set_child(Some(&list));
             let merge = gtk::MenuButton::builder().label("Merge with…").popover(&popover).build();
             merge.add_css_class("inline-link");
+            named(&merge, "Merge", card, " with…");
             links.append(&merge);
         }
     }
     let drop = ui::inline_link("Drop");
+    named(&drop, "Drop", card, "");
     let (a, id, title) = (app.clone(), card.id.clone(), card.title.clone());
     drop.connect_clicked(move |_| {
         let id = id.clone();
@@ -211,6 +216,12 @@ fn proposed_card(
     });
     row.add_controller(target);
     row.upcast()
+}
+
+/// A card's action announced with the card it acts on: there is one per card.
+fn named(control: &impl IsA<gtk::Accessible>, action: &str, card: &ProposedCard, then: &str) {
+    let said = format!("{action} {} · {}{then}", card.number, card.title);
+    control.update_property(&[gtk::accessible::Property::Label(&said)]);
 }
 
 /// Asks a proposed sub-goal's new title and done-when; only what changed is sent.

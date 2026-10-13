@@ -264,4 +264,9 @@ menubutton.finish-pick > button {
 }
 menubutton.finish-pick.flat > button { font-size: 15px; padding: 0; border: none; background: none; }
 button.finish-line { padding: 6px 8px; border-radius: 6px; }
+button.choice, button.choice:checked, button.choice:hover {
+  background: none; box-shadow: none; border-color: transparent; min-height: 0; padding: 0; font-weight: normal; color: @wd_text;
+}
+.question button.choice.option { padding: 7px 10px; border-radius: 8px; border: 1px solid transparent; }
+.question button.choice.option.chosen { background-color: @wd_page; border-color: @wd_question_border; }
 .question .declined { background-color: @wd_page; border-color: @wd_question_border; }

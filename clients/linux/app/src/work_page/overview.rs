@@ -108,6 +108,7 @@ pub(super) fn finish_menu(app: &App, goal: &str, current: Option<FinishLine>, fr
         let pick = gtk::Button::builder().child(&row).build();
         pick.add_css_class("row-button");
         pick.add_css_class("finish-line");
+        pick.update_property(&[gtk::accessible::Property::Label(title), gtk::accessible::Property::Description(means)]);
         let (a, goal, p) = (app.clone(), goal.to_string(), popover.clone());
         pick.connect_clicked(move |_| {
             p.popdown();

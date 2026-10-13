@@ -34,6 +34,14 @@ pub struct QuestionOption {
     pub title: Option<String>,
 }
 
+impl QuestionOption {
+    /// What the option is shown and announced as: its title, else its label
+    /// without the recommended mark.
+    pub fn shown(&self) -> &str {
+        self.title.as_deref().unwrap_or_else(|| unmarked(&self.label))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
 pub struct QuestionItem {
     pub header: String,
