@@ -67,11 +67,17 @@ close_app
 check "approve records the approval" "SELECT count(*) FROM event WHERE work = '$proposal' AND kind = 'decision' AND body LIKE 'approved:%'" "1"
 
 open_app "$finish" conversation
-press AXRadioButton "Research complete" || press AXButton "Research complete" || true
-press AXCheckBox "this way from now on" || true
+press AXButton "Research complete"
+press AXCheckBox "this way from now on"
 press AXButton "Answer" && shot act-finish
 close_app
 check "the finish choice is stored" "SELECT finish_line FROM work WHERE id = '$finish'" "research"
 if grep -q '^finish: research' "$WD_HOME/projects/metariki-eqms.md"; then echo "PASS the finish choice became the product's setting"; else echo "FAIL the product's finish setting: $(grep '^finish' "$WD_HOME/projects/metariki-eqms.md" || echo none)"; fail=1; fi
+
+# A SwiftUI menu's items open outside the window's accessibility tree, and
+# this check never types into the screen a person may be using, so changing a
+# finish line and merging proposed sub-goals are checked on Linux only.
+echo "SKIP the finish line changes from the overview (menu, macOS)"
+echo "SKIP merging supersedes one proposed sub-goal (menu, macOS)"
 
 exit $fail
