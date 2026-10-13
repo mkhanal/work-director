@@ -193,7 +193,7 @@ public struct Plan: Hashable, Sendable, Identifiable {
         return text.isEmpty ? [] : [text]
     }
 
-    private static func required(_ text: String, for what: String) throws -> String {
+    static func required(_ text: String, for what: String) throws -> String {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw PlanError.reasonRequired(what) }
         return text

@@ -172,3 +172,7 @@ hold only that product's work; with none, every product's.
 - A sub-goal finishing is a line of its own; an agent's question the director answered reads as one turn.
 - The goal's plan opens it as a card of its sub-goals, each with its state.
 - A message from the goal's page goes to the whole goal, or to one open sub-goal chosen in the composer, as `wd send <id>`.
+
+## A Change Waiting For The Person Shows What Would Change
+- A breakdown waiting for approval shows each proposed sub-goal in order, numbered, with its done-when, what it starts after, and whether one agent takes it or it will be planned further.
+- Approving runs `wd goal approve <id>`; editing, splitting and dropping a sub-goal run `wd goal edit`, `wd goal split` and `wd goal drop <id> "<why>"`, a drop always with why.

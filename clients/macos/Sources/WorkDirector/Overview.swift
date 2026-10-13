@@ -20,6 +20,14 @@ struct GoalOverview: View {
     private var nested: Bool { goal.chain.count > 1 }
 
     var body: some View {
+        if let proposal = goal.proposal {
+            ProposalView(goal: goal, rows: proposal, run: run)
+        } else {
+            overview
+        }
+    }
+
+    private var overview: some View {
         VStack(alignment: .leading, spacing: Space.section) {
             cards
             ForEach(goal.needsYou) { ask in

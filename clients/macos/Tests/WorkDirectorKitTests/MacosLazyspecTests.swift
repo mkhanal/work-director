@@ -94,7 +94,7 @@ func executable(_ url: URL, _ script: String) throws {
 }
 
 /// A goal view's tree fields for a goal with no sub-goals yet.
-let treeless = #""chain":[],"tree":[],"paths":{},"done_when":null,"finish":null,"progress":{"done":0,"total":0,"superseded":0},"not_done_because":[],"needs_you":[],"course":null,"superseded":[]"#
+let treeless = #""chain":[],"tree":[],"paths":{},"done_when":null,"finish":null,"progress":{"done":0,"total":0,"superseded":0},"not_done_because":[],"needs_you":[],"course":null,"superseded":[],"proposed":false"#
 
 /// A board goal's summary fields for a goal with no sub-goals yet.
 let unplanned = #""progress":{"done":0,"total":0,"superseded":0},"needs_you":0,"finish":null,"finished":null"#
@@ -1029,7 +1029,7 @@ struct SeededTree {
          "rollup":{"counts":{},"done":1,"total":2},"events":[\(events)],"claims":[],"landings":[],"delivery":null,
          "activity":{},"reports":{},"waiting":[],
          "chain":[],"tree":[\(tree)],"paths":{"a":"A","b":"B","b1":"B › B1"},"done_when":null,"finish":null,
-         "progress":{"done":1,"total":2,"superseded":0},"not_done_because":[],"needs_you":[],"course":null,"superseded":[]}
+         "progress":{"done":1,"total":2,"superseded":0},"not_done_because":[],"needs_you":[],"course":null,"superseded":[],"proposed":false}
         """
         let goal = try JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
         #expect(goal.filters.map(\.label) == ["Everything", "You and the director", "A", "B"])
@@ -1043,5 +1043,42 @@ struct SeededTree {
         #expect(answer.answeredByDirector, "an agent's question and the director's answer read as one")
         #expect(goal.addressees.map(\.id) == ["g", "b", "b1"], "the whole goal, then each open sub-goal")
         #expect(try Plan.send("b1", text: "use forward-only").argv.prefix(2) == ["send", "b1"])
+    }
+
+    @Test("A Change Waiting For The Person Shows What Would Change")
+    func proposalShown() async throws {
+        let home = try Home()
+        let top = try home.goal("demo", "An inspector can get a full audit trail")
+        let keeps = try home.sub(top, "Every record change keeps who and why")
+        let export = try home.sub(top, "An admin can export the trail", "--after", keeps)
+        let locked = try home.sub(top, "The trail cannot be edited", "--after", keeps)
+        let checklist = try home.sub(top, "A checklist maps to the export", "--after", "\(export),\(locked)")
+        try home.sql("INSERT INTO event (work,kind,body,at) VALUES ('\(top)','note','proposed: 4 sub-goals','2026-10-13T10:00:00Z');")
+        let store = await Store(channel: try home.channel())
+        let goal = try await store.goal(top)
+        let rows = try #require(goal.proposal)
+        #expect(rows.map(\.number) == [1, 2, 3, 4])
+        #expect(rows.map(\.node.id) == [keeps, export, locked, checklist])
+        #expect(rows[0].chips == ["Starts first", "One agent"])
+        #expect(rows[3].chips == ["After 2 and 3", "One agent"])
+        #expect(rows[1].node.whyNotMoving == "proposed — needs approval")
+
+        let edit = try Plan.editGoal(export, doneWhen: "the export is a signed PDF and a CSV")
+        #expect(edit.argv == ["goal", "edit", export, "--done-when", "the export is a signed PDF and a CSV"])
+        #expect(throws: PlanError.self) { try Plan.editGoal(export) }
+        #expect(try await store.run(edit).code == 0)
+        #expect(try await store.run(Plan.splitGoal(keeps)).code == 0)
+        #expect(try await store.run(try Plan.drop(locked, why: "the export is read-only already")).code == 0)
+        let after = try await store.goal(top)
+        let changed = try #require(after.proposal)
+        #expect(changed.first { $0.id == export }?.node.doneWhen == "the export is a signed PDF and a CSV")
+        #expect(changed.last?.node.work.title == "Every record change keeps who and why", "a split sub-goal becomes a goal of its own")
+        #expect(changed.last?.chips == ["Will be planned further"])
+        #expect(changed.first { $0.id == export }?.chips == ["After \(changed.count)", "One agent"], "what waited on it waits on the goal it became")
+        #expect(!changed.contains { $0.id == locked }, "a dropped sub-goal leaves the proposal")
+        #expect(Plan.approve(top).argv == ["goal", "approve", top])
+
+        try home.sql("INSERT INTO event (work,kind,body,at) VALUES ('\(top)','decision','approved: 3 sub-goals','2026-10-13T10:05:00Z');")
+        #expect(try await store.goal(top).proposal == nil, "an approved breakdown is no longer a proposal")
     }
 }
