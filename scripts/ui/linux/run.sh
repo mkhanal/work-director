@@ -8,5 +8,5 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 out=$(mkdir -p "${1:-$root/ui-shots/linux}" && cd "${1:-$root/ui-shots/linux}" && pwd)
 docker build -q -t wd-ui-linux "$root/scripts/ui/linux" >/dev/null
-docker run --rm -e ONLY -v "$root":/repo:ro -v "$out":/shots -v wd-ui-cargo:/root/.cargo/registry \
+docker run --rm -e ONLY -e SEED_OLD_PLAN -v "$root":/repo:ro -v "$out":/shots -v wd-ui-cargo:/root/.cargo/registry \
   -v wd-ui-build:/build wd-ui-linux bash /repo/scripts/ui/linux/shoot.sh

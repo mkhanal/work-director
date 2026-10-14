@@ -124,6 +124,41 @@ if [ -n "${SEED_SESSIONS:-}" ]; then
   python3 "$(dirname "$0")/seed-session.py" "$sessions/seed-long.jsonl" --long
 fi
 
+# With SEED_OLD_PLAN=1, a goal of an older plan (screen: oldplan): tasks
+# grouped by heading rather than sub-goal rows, titled by their whole brief,
+# some finished, some stopped without a report, one working. Its questions
+# change what needs you, so the design screens are seeded without it.
+O=""
+if [ -n "${SEED_OLD_PLAN:-}" ]; then
+  O=$("$WD" goal add metariki-eqms "We filed a lot of issues today; resolve them all" --json | id)
+  state "$O" running 100
+  old() { # heading state brief
+    local t
+    local by=()
+    [ -z "$1" ] || by=(--heading "$1")
+    t=$("$WD" add metariki-eqms "placeholder" --goal "$O" ${by[@]+"${by[@]}"} --json | id)
+    # Older rows kept the whole brief as their title.
+    q "UPDATE work SET title = '$(printf %s "$3" | sed "s/'/''/g")', runner = 'claude', session = 'seed-$t' WHERE id = '$t'"
+    state "$t" "$2" 50
+    echo "$t"
+  }
+  old "Change Control template visibility (#490)" review "Fix the parent template so that choosing New Product shows its section, and add the married test that proves it. Work off main in your own worktree." >/dev/null
+  old "Change Control template visibility (#490)" review "Fix the Please specify if Others visibility rule (it is missing its prefix) in the shared template, with a test." >/dev/null
+  T1=$(old "Time answers in the org clock format (#501)" needs-input "Add a forms requirement and its married test saying a time answer shows, is entered and prints in the organisation's time format. Then convert time inputs to an org-format mask.")
+  event "$T1" sent "have you tested it end to end with all our tests, including browser tests?" 12
+  event "$T1" note "stopped without a report: No. Only part of the suite has run on this change, and none of it in a browser.
+The unit and API tiers pass; the browser tier needs the dev stack up.
+Shall I run all three?" 11
+  T2=$(old "Printed request content independent of who prints (#493)" running "Add the guard to the not-allowed banners so a printed request shows the same content whoever prints it, with a test.")
+  T3=$(old "Printed request content independent of who prints (#493)" needs-input "Add a forms requirement and its married test saying entity-link context prints the same for every role.")
+  event "$T3" note "stopped without a report: Ready and waiting for your release. I haven't pushed or opened a pull request." 25
+  q "INSERT INTO step (work, n, text, state) VALUES
+    ('$T2', 1, 'Find every not-allowed banner', 'done'),
+    ('$T2', 2, 'Add the guard to each', 'doing'),
+    ('$T2', 3, 'Run the print tests', 'todo')"
+  old "" review "Check the PDF export on main: does a form PDF print accented names and the euro sign correctly in a text answer, a comment and a fillable field? Add a requirement and its married test, and fix any case that still fails." >/dev/null
+fi
+
 # A course change waiting on the person (screen: pivot).
 D=$("$WD" goal add metariki-eqms "Why does sync drop events?" --json | id)
 q "UPDATE work SET done_when = 'The cause is found and explained, with proof', finish_line = 'discovery', finish_source = 'goal' WHERE id = '$D'"
@@ -175,4 +210,4 @@ q "UPDATE work SET finish_line = 'complete PR', finish_source = 'taste' WHERE id
 event "$P" pr "pull-request https://github.com/metariki/metariki-eqms/pull/512" 130
 state "$P" done 120
 
-echo "home=$WD_HOME/home issues=$W long=$L goal=$G subgoal=$S2 working=$S3 question=$S2c pivot=$D proposal=$A finish=$F"
+echo "home=$WD_HOME/home issues=$W long=$L oldplan=$O goal=$G subgoal=$S2 working=$S3 question=$S2c pivot=$D proposal=$A finish=$F"

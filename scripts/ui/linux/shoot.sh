@@ -14,7 +14,7 @@ install -m 755 /build/wd "$(dirname "$app")/wd"
 export WD_HOME=/data/home XDG_CONFIG_HOME=/data/config HOME=/data
 mkdir -p "$XDG_CONFIG_HOME/work-director"
 ids=$(/repo/scripts/ui/seed-goal-tree.sh /build/wd | tail -1)
-eval "$ids" # goal= subgoal= working= question= pivot= proposal= finish=
+eval "$ids" # goal= subgoal= working= question= pivot= proposal= finish= oldplan=
 
 Xvfb :99 -screen 0 1600x1100x24 >/tmp/xvfb.log 2>&1 &
 export DISPLAY=:99
@@ -31,7 +31,10 @@ screens=(
   "conversation $goal conversation"
   "record $goal record"
   "session $working conversation"
+  "oldplan ${oldplan:-} overview"
 )
+# A screen whose work was not seeded (oldplan without SEED_OLD_PLAN=1) is left out.
+mapfile -t screens < <(printf '%s\n' "${screens[@]}" | awk 'NF == 3')
 # ONLY=<screen|screen…> photographs just those.
 [ -z "${ONLY:-}" ] || mapfile -t screens < <(printf '%s\n' "${screens[@]}" | grep -E "^($ONLY) ")
 for scheme in light dark; do
