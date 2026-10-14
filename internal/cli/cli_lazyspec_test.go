@@ -5030,7 +5030,7 @@ func TestAGoalIsDeclaredDoneOnlyWhenEveryPartOfDoneHolds(t *testing.T) {
 		o.say(t, supervisor, "ACTIONS:", "DONE: every part is built and fits")
 		return superviseOnce(t, f, o.goal)
 	}
-	if s := done(); len(s.Refused) != 1 || !strings.Contains(s.Refused[0], o.a+" is running, not settled") {
+	if s := done(); len(s.Refused) != 1 || !strings.Contains(s.Refused[0], o.a+" is needs-input, not settled") {
 		t.Fatalf("DONE with %s open = %+v, want it refused naming it", o.a, s)
 	}
 	o.say(t, supervisor, "ACTIONS:", "MET "+o.b+": changes are grouped", "SUPERSEDE "+o.a+": folded into the collector")
@@ -5098,6 +5098,11 @@ func TestASubGoalClosesOnlyWhenItsDoneWhenIsJudgedMet(t *testing.T) {
 	}
 	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Its session stopped without a report, so it waits on the person until
+	// it reports.
+	if _, err := l.Transition(o.a, core.StateRunning); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := l.AddEvent(o.a, core.EventReport, "DONE\nSTATUS: DONE\nFILES: impacts.ts"); err != nil {

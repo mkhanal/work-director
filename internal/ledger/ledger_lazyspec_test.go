@@ -811,6 +811,25 @@ func TestLedger(t *testing.T) {
 		}
 	})
 
+	t.Run("A Task Added With Its Brief As Its Title Keeps The Brief As Its Detail", func(t *testing.T) {
+		l := newTestLedger(t)
+		goal := add(t, l, "p", "Goal", AddOptions{Kind: core.WorkGoal})
+		brief := "Check the invoice export on the main branch: does a PDF with accented names print them whole? Add a test for it and fix what still fails."
+		long := add(t, l, "p", brief, AddOptions{Parent: &goal.ID})
+		if long.Title != "Check the invoice export on the main branch: does a PDF with accented names…" || long.Detail != brief {
+			t.Fatalf("title %q, detail %q; want the first sentence clipped and the whole brief as detail", long.Title, long.Detail)
+		}
+		lines := add(t, l, "p", "Fix the footer\nIt overlaps the totals.", AddOptions{Parent: &goal.ID})
+		if lines.Title != "Fix the footer" || lines.Detail != "Fix the footer\nIt overlaps the totals." {
+			t.Fatalf("title %q, detail %q; want the first line and the whole text", lines.Title, lines.Detail)
+		}
+		given := add(t, l, "p", brief, AddOptions{Parent: &goal.ID, Detail: "its own detail"})
+		short := add(t, l, "p", "Fix the footer", AddOptions{Parent: &goal.ID})
+		if given.Title != brief || given.Detail != "its own detail" || short.Title != "Fix the footer" || short.Detail != "" {
+			t.Fatalf("given = %q/%q, short = %q/%q; want both stored as given", given.Title, given.Detail, short.Title, short.Detail)
+		}
+	})
+
 	t.Run("A Sub-Goal's State Is Rolled Up From Its Children", func(t *testing.T) {
 		l := newTestLedger(t)
 		top := add(t, l, "p", "Top", AddOptions{Kind: core.WorkGoal})

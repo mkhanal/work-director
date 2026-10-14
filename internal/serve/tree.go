@@ -145,9 +145,9 @@ func (t tree) paths() map[string]string {
 	var walk func(parent, prefix string)
 	walk = func(parent, prefix string) {
 		for _, w := range t.kids[parent] {
-			p := w.Title
+			p := titled(w).Title
 			if prefix != "" {
-				p = prefix + pathSep + w.Title
+				p = prefix + pathSep + p
 			}
 			out[w.ID] = p
 			walk(w.ID, p)
@@ -223,9 +223,25 @@ func (s *Server) nodes(t tree, parent string) ([]node, error) {
 	return out, nil
 }
 
+// titled is a task as its row reads: a title that is a whole brief reads as
+// its first sentence, with the whole of it kept as its detail.
+func titled(w core.Work) core.Work {
+	short := core.ShortTitle(w.Title)
+	if w.Kind != core.WorkTask || short == w.Title {
+		return w
+	}
+	if w.Detail == "" {
+		w.Detail = w.Title
+	} else {
+		w.Detail = w.Title + "\n\n" + w.Detail
+	}
+	w.Title = short
+	return w
+}
+
 // node builds one work's node with everything under it.
 func (s *Server) node(t tree, w core.Work) (node, error) {
-	n := node{Work: w, DoneWhen: w.DoneWhen, WaitingOn: []string{}, Children: []node{}}
+	n := node{Work: titled(w), DoneWhen: w.DoneWhen, WaitingOn: []string{}, Children: []node{}}
 	after, err := s.ledger.After(w.ID)
 	if err != nil {
 		return n, err
@@ -239,7 +255,7 @@ func (s *Server) node(t tree, w core.Work) (node, error) {
 			}
 		}
 		if !core.Settled(o.State) {
-			n.WaitingOn = append(n.WaitingOn, o.Title)
+			n.WaitingOn = append(n.WaitingOn, titled(o).Title)
 		}
 	}
 	n.WhyNotMoving = t.whyNotMoving(w, n.WaitingOn)
@@ -316,10 +332,10 @@ func (t tree) whyNotMoving(w core.Work, waitingOn []string) *string {
 	return &why
 }
 
-// stopped is what running work last said when its session stopped without a
-// report, or nil.
+// stopped is what running work, or work waiting on the person since, last
+// said when its session stopped without a report, or nil.
 func (t tree) stopped(w core.Work) *stop {
-	if w.State != core.StateRunning {
+	if w.State != core.StateRunning && w.State != core.StateNeedsInput {
 		return nil
 	}
 	var own []core.Event

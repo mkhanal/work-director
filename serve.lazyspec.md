@@ -96,6 +96,16 @@ JSON message per line to stdout:
 - Each node carries its work, done-when, what it waits on and why it is not moving, its owner or how many sub-goals it was planned into, its progress, its current step and steps, its judgement and how many things under it need the person.
 - Tasks of an older plan that share a heading are served as one grouped node with no done-when.
 
+## A Sub-Goal Whose Work Is All Finished Reads As To Review
+- A grouped node of an older plan's tasks takes its state from its tasks by the rule a sub-goal's state rolls up by: needs-input if one needs the person, else blocked if one is blocked, else running only while one is briefed or running, else done once all are settled with one done.
+- Once every open task is in review or waits to be confirmed it reads review, or soft-done when none is in review.
+- A grouped node counts in `needs_you` what its tasks wait on the person for.
+
+## A Task Titled By Its Whole Brief Reads By Its First Sentence
+- A task node whose title runs past 80 characters or one line serves its first sentence as its title, clipped at a word to 80 characters with an ellipsis.
+- Its whole title is served as its detail, ahead of any detail it had.
+- `paths` and what a node waits on name it by that short title.
+
 ## A Goal Serves What Done Means And Why It Is Not Done Yet
 - `done_when`, `finish` with its source, and `progress` with superseded counted apart; a nested goal's `finish` is its top goal's.
 - `not_done_because` names, in order, the open sub-goals, a done-when not yet judged met, and a finish line not reached; empty once done.
@@ -141,7 +151,7 @@ JSON message per line to stdout:
 - A finish line set reads in the record as `Finishes at a complete pull request, as your taste says`; a report as `Reported finished`, `Reported stuck` or `Asked for your input` with what it said.
 
 ## A Goal Serves Why Work Stopped Or Is Blocked
-- Each tree node serves `stopped`, `{said, at}`, while its work is running and its latest session stopped without a report: the first line it last said and when that was noted. Otherwise `stopped` is null; a later report, message, question or answer clears it.
+- Each tree node serves `stopped`, `{said, at}`, while its work is running or needs input and its latest session stopped without a report: what it last said and when that was noted. Otherwise `stopped` is null; a later report, message, question or answer clears it.
 - Each node serves `blocked_because` while its work is blocked: what its latest report said when that report is BLOCKED, else the text of its latest open concern, else null. Work that is not blocked serves null.
 
 ## A Running Session's Question Puts Its Work In Needs You
@@ -154,9 +164,10 @@ JSON message per line to stdout:
 - `STATUS: BLOCKED` moves it to blocked, and `STATUS: NEEDS-INPUT` to needs-input.
 - A report already filed at that point of the conversation is not filed again.
 
-## A Running Session That Stops Without A Report Is Noted
-- While serving, a running work item whose session is not running and ends on neither a question nor a report has a `note` filed, `stopped without a report: ` and the first line it last said; its state stays.
-- It is noted once at that point of the conversation.
+## Work Reads As Working Only While An Agent Is Working
+- While serving, a running work item whose session is not running and ends on neither a question nor a report has a `note` filed, `stopped without a report: ` and what it last said, and moves to needs-input.
+- It is noted once at that point of the conversation; running work whose latest exchange is that note already moves to needs-input without a second note.
+- Its goal lists it in `needs_you`, asking what it last said, offered Yes and No when that ends on a yes-or-no question.
 
 ## A Running Goal Is Supervised While Serving
 - While serving, each running top goal (a goal with no goal above it) is supervised every few seconds, as `wd goal supervise` does.

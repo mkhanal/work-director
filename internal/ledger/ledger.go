@@ -435,6 +435,11 @@ func (l *Ledger) Add(project, title string, opts AddOptions) (core.Work, error) 
 	if opts.GoalType != nil && !core.IsGoal(kind) {
 		return core.Work{}, fmt.Errorf("a goal type applies to a goal, not %s", kind)
 	}
+	// A task given its whole brief as a title keeps the brief as its detail
+	// and reads by its first sentence.
+	if short := core.ShortTitle(title); kind == core.WorkTask && opts.Detail == "" && short != title {
+		title, opts.Detail = short, title
+	}
 	id, err := newId()
 	if err != nil {
 		return core.Work{}, err

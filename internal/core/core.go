@@ -679,9 +679,10 @@ func Proposed(goal string, events []Event) bool {
 
 // RollupState is a nested goal's state from its children's: needs-input if
 // any child needs input; else blocked if any is blocked; else running if any
-// is briefed, running, review or soft-done; else done if every child is
-// settled and at least one is done; else superseded if every child is
-// superseded; else queued. No children: queued.
+// is briefed or running; else done if every child is settled and at least
+// one is done; else superseded if every child is superseded; else review if
+// every open child is finished and one waits on review, soft-done if they all
+// wait to be confirmed; else queued. No children: queued.
 func RollupState(children []State) State {
 	has := func(states ...State) bool {
 		return slices.ContainsFunc(children, func(s State) bool { return slices.Contains(states, s) })
@@ -689,20 +690,49 @@ func RollupState(children []State) State {
 	all := func(f func(State) bool) bool {
 		return len(children) > 0 && !slices.ContainsFunc(children, func(s State) bool { return !f(s) })
 	}
+	finished := func(s State) bool { return Settled(s) || s == StateReview || s == StateSoftDone }
 	switch {
 	case has(StateNeedsInput):
 		return StateNeedsInput
 	case has(StateBlocked):
 		return StateBlocked
-	case has(StateBriefed, StateRunning, StateReview, StateSoftDone):
+	case has(StateBriefed, StateRunning):
 		return StateRunning
 	case all(Settled) && has(StateDone):
 		return StateDone
 	case all(func(s State) bool { return s == StateSuperseded }):
 		return StateSuperseded
+	case all(finished) && has(StateReview):
+		return StateReview
+	case all(finished) && has(StateSoftDone):
+		return StateSoftDone
 	default:
 		return StateQueued
 	}
+}
+
+// shortTitle is how long a title reads before the rest of it belongs in the
+// work's detail.
+const shortTitle = 80
+
+// ShortTitle is text as a row's title: its first sentence, clipped at a word
+// to shortTitle runes with an ellipsis. Text already that short is itself.
+func ShortTitle(text string) string {
+	text = strings.TrimSpace(text)
+	first, _, _ := strings.Cut(text, "\n")
+	if first == text && len([]rune(text)) <= shortTitle {
+		return text
+	}
+	for _, end := range []string{". ", "? ", "! "} {
+		if i := strings.Index(first, end); i >= 0 {
+			first = first[:i+1]
+		}
+	}
+	first = strings.TrimSpace(first)
+	if len([]rune(first)) <= shortTitle {
+		return first
+	}
+	return Clipped(first, shortTitle-1) + "…"
 }
 
 func Reopenable(s State) bool {

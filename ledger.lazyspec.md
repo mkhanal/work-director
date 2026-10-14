@@ -102,6 +102,10 @@ two or more feedback entries share the key.
 - An item with no roadmap is refused.
 - `Tasks(goal)` returns every task under the goal at any depth, oldest first; `Children(id)` returns its direct children.
 
+## A Task Added With Its Brief As Its Title Keeps The Brief As Its Detail
+- `Add` of a task with no detail whose title runs past 80 characters or one line stores its first sentence, clipped at a word to 80 characters with an ellipsis, as its title and the whole text as its detail.
+- A task given a detail, or a short title, is stored as given.
+
 ## A Roadmap Item Becomes A Goal Without Changing Its Id
 - `Promote` changes an item's kind to goal on the same row and records an event.
 - Events, decisions and sessions filed on the item stay on the goal.

@@ -599,10 +599,15 @@ func Supervisor(l *ledger.Ledger, goal core.Work, p *project.Project) (runner.Ha
 // reporting.
 const stoppedPrefix = "stopped without a report: "
 
+// stoppedClip is how much of what a stopped session last said its note keeps.
+const stoppedClip = 4000
+
 // Stopped is the note filed on work whose session stopped without a question
-// or a report, so the stop is a fact on the record and its goal's supervisor
-// looks. It files once at a point of the transcript and reports whether it
-// filed.
+// or a report, with what it last said, so the stop is a fact on the record and
+// its goal's supervisor looks. Nothing works on it any more, so it waits on
+// the person: it moves to needs-input, and so does running work whose latest
+// exchange is such a note already. It files once at a point of the transcript
+// and reports whether it filed.
 func Stopped(l *ledger.Ledger, w core.Work, h runner.Handle, texts []string) (bool, error) {
 	if w.State != core.StateRunning || len(texts) == 0 {
 		return false, nil
@@ -611,8 +616,52 @@ func Stopped(l *ledger.Ledger, w core.Work, h runner.Handle, texts []string) (bo
 	if askRe.MatchString(last) || statusRe.MatchString(last) {
 		return false, nil
 	}
-	line, _, _ := strings.Cut(strings.TrimSpace(last), "\n")
-	return l.File(w.ID, core.EventNote, stoppedPrefix+line, core.TranscriptMark{Session: h.Session, Entries: len(texts)})
+	filed, err := l.File(w.ID, core.EventNote, stoppedPrefix+clip(last, stoppedClip), core.TranscriptMark{Session: h.Session, Entries: len(texts)})
+	if err != nil {
+		return false, err
+	}
+	if !filed {
+		events, err := l.Events(w.ID, nil)
+		if err != nil {
+			return false, err
+		}
+		if _, _, ok := StoppedNote(events); !ok {
+			return false, nil
+		}
+	}
+	if _, err := l.Transition(w.ID, core.StateNeedsInput); err != nil {
+		// Another pass reading the same stop may have moved it first.
+		if now, gerr := l.Get(w.ID); gerr != nil || now.State == core.StateRunning {
+			return false, err
+		}
+	}
+	return filed, nil
+}
+
+// StoppedQuestion is what work that stopped without a report waits on the
+// person for: what it last said, offered Yes and No when it ends asking one.
+func StoppedQuestion(e core.Event) runner.Question {
+	said := strings.TrimSpace(strings.TrimPrefix(e.Body, stoppedPrefix))
+	it := runner.QuestionItem{Question: said, Options: []runner.Option{}}
+	lines := strings.Split(said, "\n")
+	ask := runner.QuestionItem{Question: lastSentence(lines[len(lines)-1]), Options: []runner.Option{}}
+	if strings.HasSuffix(ask.Question, "?") {
+		offerYesNo(&ask)
+		it.Options = ask.Options
+	}
+	return runner.Question{ID: fmt.Sprintf("event-%d", e.ID), Items: []runner.QuestionItem{it}}
+}
+
+// lastSentence is the last sentence of a line.
+func lastSentence(line string) string {
+	line = strings.TrimSpace(line)
+	cut := 0
+	for _, end := range []string{". ", "? ", "! "} {
+		if i := strings.LastIndex(line, end); i >= 0 && i+2 > cut {
+			cut = i + 2
+		}
+	}
+	return line[cut:]
 }
 
 // StoppedSaying is what work last said when its latest event is the note that

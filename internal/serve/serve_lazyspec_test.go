@@ -50,6 +50,8 @@ func TestServe(t *testing.T) {
 	t.Run("A Work Item Serves Its Session's Conversation", aWorkItemServesItsSessionsConversation)
 	t.Run("A Goal Serves What Each Of Its Tasks Is Doing", aGoalServesWhatEachOfItsTasksIsDoing)
 	t.Run("A Goal Serves Its Sub-Goals As A Tree", aGoalServesItsSubGoalsAsATree)
+	t.Run("A Sub-Goal Whose Work Is All Finished Reads As To Review", aSubGoalWhoseWorkIsAllFinishedReadsAsToReview)
+	t.Run("A Task Titled By Its Whole Brief Reads By Its First Sentence", aTaskTitledByItsWholeBriefReadsByItsFirstSentence)
 	t.Run("A Goal Serves What Done Means And Why It Is Not Done Yet", aGoalServesWhatDoneMeansAndWhyItIsNotDoneYet)
 	t.Run("A Goal Serves Everything Below It That Needs The Person", aGoalServesEverythingBelowItThatNeedsThePerson)
 	t.Run("A Goal Serves Its Course", aGoalServesItsCourse)
@@ -62,7 +64,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Goal Serves Why Work Stopped Or Is Blocked", aGoalServesWhyWorkStoppedOrIsBlocked)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("A Running Session's Report Moves Its Work On", aRunningSessionsReportMovesItsWorkOn)
-	t.Run("A Running Session That Stops Without A Report Is Noted", aRunningSessionThatStopsWithoutAReportIsNoted)
+	t.Run("Work Reads As Working Only While An Agent Is Working", workReadsAsWorkingOnlyWhileAnAgentIsWorking)
 	t.Run("A Running Goal Is Supervised While Serving", aRunningGoalIsSupervisedWhileServing)
 	t.Run("Work Items Serve Over HTTP", workItemsServeOverHTTP)
 	t.Run("A Work Item Serves The Next Gate It Waits On", aWorkItemServesTheNextGateItWaitsOn)
@@ -1629,8 +1631,8 @@ func aRunningSessionsQuestionPutsItsWorkInNeedsYou(t *testing.T) {
 	if w, _ := s.ledger.Get(ask.ID); w.State != core.StateRunning {
 		t.Fatalf("a filed question was escalated again: %s", w.State)
 	}
-	if w, _ := s.ledger.Get(quiet.ID); w.State != core.StateRunning {
-		t.Fatalf("work asking nothing moved to %s", w.State)
+	if qs, err := s.ledger.Events(quiet.ID, kindOf(core.EventQuestion)); err != nil || len(qs) != 0 {
+		t.Fatalf("work asking nothing had questions filed: %+v (%v)", qs, err)
 	}
 	if len(r.sent) != 0 {
 		t.Fatalf("the watcher sent %q", r.sent)
@@ -1746,44 +1748,196 @@ func aRunningSessionsReportMovesItsWorkOn(t *testing.T) {
 	}
 }
 
-func aRunningSessionThatStopsWithoutAReportIsNoted(t *testing.T) {
+func aSubGoalWhoseWorkIsAllFinishedReadsAsToReview(t *testing.T) {
 	s := newTestServer(t)
+	l := s.ledger
+	g, err := l.Add("p", "Fix today's issues", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := func(parent, heading string, states ...core.State) string {
+		t.Helper()
+		o := ledger.AddOptions{Parent: &parent}
+		if heading != "" {
+			o.Heading = &heading
+		}
+		w, err := l.Add("p", "Task", o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		walk(t, l, w.ID, states...)
+		return w.ID
+	}
+	review := []core.State{core.StateRunning, core.StateReview}
+	task(g.ID, "Visibility (#490)", review...)
+	task(g.ID, "Visibility (#490)", review...)
+	task(g.ID, "Time format (#501)", review...)
+	stopped := task(g.ID, "Time format (#501)", core.StateRunning, core.StateNeedsInput)
+	event(t, l, stopped, core.EventNote, "stopped without a report: Shall I run all three?")
+	task(g.ID, "Printing (#493)", core.StateRunning)
+	task(g.ID, "Printing (#493)", review...)
+	confirming := task(g.ID, "Signatures (#492)", review...)
+	event(t, l, confirming, core.EventReport, "DONE\nSTATUS: DONE")
+	event(t, l, confirming, core.EventVerify, "pass\ngo test → 0")
+	if _, err := l.SoftDone(confirming, false); err != nil {
+		t.Fatal(err)
+	}
+	task(g.ID, "Signatures (#492)", core.StateDone)
+	sub, err := l.Add("p", "Stamps are never rewritten", ledger.AddOptions{Kind: core.WorkGoal, Parent: &g.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task(sub.ID, "", review...)
+	task(sub.ID, "", core.StateDone)
+
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	var view struct {
+		Tree []struct {
+			Work     core.Work `json:"work"`
+			Group    bool      `json:"group"`
+			NeedsYou int       `json:"needs_you"`
+		} `json:"tree"`
+	}
+	getJSON(t, api.URL+"/api/goal/"+g.ID, http.StatusOK, &view)
+	want := map[string]core.State{
+		"Visibility (#490)": core.StateReview, "Time format (#501)": core.StateNeedsInput, "Printing (#493)": core.StateRunning,
+		"Signatures (#492)": core.StateSoftDone, "Stamps are never rewritten": core.StateReview,
+	}
+	if len(view.Tree) != len(want) {
+		t.Fatalf("tree = %+v, want %d nodes", view.Tree, len(want))
+	}
+	for _, n := range view.Tree {
+		if n.Work.State != want[n.Work.Title] {
+			t.Errorf("%s reads %s, want %s", n.Work.Title, n.Work.State, want[n.Work.Title])
+		}
+		wantYou := 0
+		if n.Work.Title == "Time format (#501)" {
+			wantYou = 1
+		}
+		if n.NeedsYou != wantYou {
+			t.Errorf("%s needs_you = %d, want %d", n.Work.Title, n.NeedsYou, wantYou)
+		}
+	}
+}
+
+func aTaskTitledByItsWholeBriefReadsByItsFirstSentence(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	g, err := l.Add("p", "Release notes", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	brief := "Check the invoice export on the main branch: does a PDF with accented names print them whole? Add a test for it."
+	short := "Check the invoice export on the main branch: does a PDF with accented names…"
+	// A row written before titles were kept short.
+	old, err := l.Add("p", "placeholder", ledger.AddOptions{Parent: &g.ID, Detail: "Work off main."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetTitle(old.ID, brief); err != nil {
+		t.Fatal(err)
+	}
+	after, err := l.Add("p", "Publish the guide", ledger.AddOptions{Parent: &g.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetAfter(after.ID, []string{old.ID}); err != nil {
+		t.Fatal(err)
+	}
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	var view struct {
+		Tree []struct {
+			Work      core.Work `json:"work"`
+			WaitingOn []string  `json:"waiting_on"`
+		} `json:"tree"`
+		Paths map[string]string `json:"paths"`
+	}
+	getJSON(t, api.URL+"/api/goal/"+g.ID, http.StatusOK, &view)
+	if len(view.Tree) != 2 {
+		t.Fatalf("tree = %+v, want two nodes", view.Tree)
+	}
+	n := view.Tree[0].Work
+	if n.Title != short || n.Detail != brief+"\n\nWork off main." {
+		t.Fatalf("node title %q, detail %q; want its first sentence and the whole brief ahead of its detail", n.Title, n.Detail)
+	}
+	if view.Paths[old.ID] != short || !slices.Equal(view.Tree[1].WaitingOn, []string{short}) {
+		t.Fatalf("paths = %v, waiting_on = %v; want the short title", view.Paths, view.Tree[1].WaitingOn)
+	}
+}
+
+func workReadsAsWorkingOnlyWhileAnAgentIsWorking(t *testing.T) {
+	s := newTestServer(t)
+	said := "Wiring it in belongs to the collector task.\nShall I wire it in too?"
 	r := &sessionRunner{steps: map[string][]runner.Entry{
-		"quiet": {{Kind: runner.EntryText, Text: "working"}, {Kind: runner.EntryText, Text: "Wiring it in belongs to the collector task.\nSay so if I should."}},
+		"quiet": {{Kind: runner.EntryText, Text: "working"}, {Kind: runner.EntryText, Text: said}},
+		"noted": {{Kind: runner.EntryText, Text: "Ready to land. Waiting for your go."}},
 	}}
 	withSessions(s, r)
-	quiet := inSession(t, s, "Quiet", "quiet", nil)
+	goal, err := s.ledger.Add("p", "Collect metrics", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiet := inSession(t, s, "Quiet", "quiet", &goal.ID)
+	// Noted by an earlier pass that left the work running.
+	noted := inSession(t, s, "Noted", "noted", &goal.ID)
+	if _, err := s.ledger.File(noted.ID, core.EventNote, "stopped without a report: Ready to land. Waiting for your go.", core.TranscriptMark{Session: "noted", Entries: 1}); err != nil {
+		t.Fatal(err)
+	}
 	stop := make(chan struct{})
 	ended := make(chan error, 1)
 	go func() { ended <- s.watchSessions(stop) }()
 	deadline := time.Now().Add(10 * time.Second)
-	for {
-		notes, err := s.ledger.Events(quiet.ID, kindOf(core.EventNote))
-		if err != nil {
-			t.Fatal(err)
+	for _, id := range []string{quiet.ID, noted.ID} {
+		for {
+			w, err := s.ledger.Get(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if w.State == core.StateNeedsInput {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s is %s, want needs-input once its session stopped without a report", w.Title, w.State)
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
-		if len(notes) > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("no note that the session stopped without a report")
-		}
-		time.Sleep(100 * time.Millisecond)
 	}
 	time.Sleep(sessionWatch + time.Second)
 	close(stop)
 	if err := <-ended; err != nil {
 		t.Fatal(err)
 	}
-	notes, err := s.ledger.Events(quiet.ID, kindOf(core.EventNote))
-	if err != nil {
-		t.Fatal(err)
+	for id, want := range map[string]string{quiet.ID: said, noted.ID: "Ready to land. Waiting for your go."} {
+		notes, err := s.ledger.Events(id, kindOf(core.EventNote))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(notes) != 1 || notes[0].Body != "stopped without a report: "+want {
+			t.Fatalf("notes = %+v, want one note with what it last said", notes)
+		}
 	}
-	if len(notes) != 1 || notes[0].Body != "stopped without a report: Wiring it in belongs to the collector task." {
-		t.Fatalf("notes = %+v, want one note with the first line it said", notes)
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	var view struct {
+		NeedsYou []needYou `json:"needs_you"`
 	}
-	if w, _ := s.ledger.Get(quiet.ID); w.State != core.StateRunning {
-		t.Fatalf("a stop without a report moved the work to %s", w.State)
+	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &view)
+	asked := map[string]runner.QuestionItem{}
+	for _, n := range view.NeedsYou {
+		if len(n.Question.Items) == 1 {
+			asked[n.Work] = n.Question.Items[0]
+		}
+	}
+	if len(view.NeedsYou) != 2 || len(asked) != 2 {
+		t.Fatalf("needs_you = %+v, want both stopped tasks with one question each", view.NeedsYou)
+	}
+	if q := asked[quiet.ID]; q.Question != said || len(q.Options) != 2 || q.Options[0].Label != "Yes" || q.Options[1].Label != "No" {
+		t.Fatalf("quiet asks %+v, want what it last said offered Yes and No", q)
+	}
+	if q := asked[noted.ID]; q.Question != "Ready to land. Waiting for your go." || len(q.Options) != 0 {
+		t.Fatalf("noted asks %+v, want what it last said with no choices", q)
 	}
 }
 
@@ -2870,6 +3024,8 @@ func aGoalServesWhyWorkStoppedOrIsBlocked(t *testing.T) {
 	}
 	stopped := sub("Tag every release", core.StateRunning)
 	event(t, l, stopped, core.EventNote, "stopped without a report: I ran out of room before tagging v2")
+	waiting := sub("Tag the hotfix", core.StateRunning, core.StateNeedsInput)
+	event(t, l, waiting, core.EventNote, "stopped without a report: Tagged it.\nShall I push the tag?")
 	cleared := sub("Group the change list", core.StateRunning)
 	event(t, l, cleared, core.EventNote, "stopped without a report: halfway through")
 	event(t, l, cleared, core.EventSent, "carry on")
@@ -2912,14 +3068,18 @@ func aGoalServesWhyWorkStoppedOrIsBlocked(t *testing.T) {
 	}
 	noteAt := evs[len(evs)-1].At
 	wantBlocked := map[string]string{reported: "the flag list lives in another repository", noted: "no access to staging", concerned: "the docs site is down"}
-	if len(view.Tree) != 7 {
-		t.Fatalf("tree has %d nodes, want 7", len(view.Tree))
+	if len(view.Tree) != 8 {
+		t.Fatalf("tree has %d nodes, want 8", len(view.Tree))
 	}
 	for _, n := range view.Tree {
 		id := n.Work.ID
 		if id == stopped {
 			if n.Stopped == nil || n.Stopped.Said != "I ran out of room before tagging v2" || n.Stopped.At != noteAt {
 				t.Errorf("stopped of %s = %+v, want what it last said at %s", n.Work.Title, n.Stopped, noteAt)
+			}
+		} else if id == waiting {
+			if n.Stopped == nil || n.Stopped.Said != "Tagged it.\nShall I push the tag?" {
+				t.Errorf("stopped of %s = %+v, want all it last said while it waits on the person", n.Work.Title, n.Stopped)
 			}
 		} else if n.Stopped != nil {
 			t.Errorf("stopped of %s = %+v, want null", n.Work.Title, n.Stopped)
