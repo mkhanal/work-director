@@ -71,9 +71,9 @@ ui_watch() { # starts watching the frontmost app until ui_unwatch
   sessions=$(ui_sessions)
   seeded=$(sqlite3 "$WD_HOME/ledger.db" "SELECT coalesce(max(id), 0) FROM event")
   : >"$work/watching"
-  # However the check ends, the watcher stops, the app with it, and its
-  # settings go.
-  trap 'rm -f "$work/watching"; kill "${pid:-}" 2>/dev/null || true; ui_forget' EXIT
+  # However the check ends, the watcher stops, the app with it, its
+  # settings go, and so does the check's folder.
+  trap 'rm -f "$work/watching"; kill "${pid:-}" 2>/dev/null || true; wait "${pid:-}" 2>/dev/null || true; ui_forget; rm -rf "$work"' EXIT
   "$work/frontmost" 86400 "$app" -until "$work/watching" >"$work/frontmost.log" 2>&1 &
   watcher=$!
   until grep -q READY "$work/frontmost.log"; do sleep 0.05; done

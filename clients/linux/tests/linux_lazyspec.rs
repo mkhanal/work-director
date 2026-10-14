@@ -24,7 +24,7 @@ fn built_wd() -> &'static Path {
     static BUILT: OnceLock<PathBuf> = OnceLock::new();
     BUILT.get_or_init(|| {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let out = std::env::temp_dir().join(format!("wd-linux-tests-{}", std::process::id())).join("wd");
+        let out = test_run().join("wd");
         let status = Command::new("go")
             .args(["build", "-o"])
             .arg(&out)
@@ -37,14 +37,30 @@ fn built_wd() -> &'static Path {
     })
 }
 
+/// Everything one test run writes, in one folder named for its process. A run
+/// cannot clean up after itself when it is killed, so each run first removes
+/// the folders of runs whose process has gone.
+fn test_run() -> &'static Path {
+    static RUN: OnceLock<PathBuf> = OnceLock::new();
+    RUN.get_or_init(|| {
+        let temp = std::env::temp_dir();
+        let prefix = "wd-linux-tests-";
+        for entry in fs::read_dir(&temp).expect("read the temp dir") {
+            let name = entry.expect("a temp dir entry").file_name();
+            let Some(pid) = name.to_str().and_then(|n| n.strip_prefix(prefix)).and_then(|p| p.parse::<u32>().ok()) else {
+                continue;
+            };
+            if !Path::new(&format!("/proc/{pid}")).exists() {
+                fs::remove_dir_all(temp.join(&name)).expect("remove a finished test run's folder");
+            }
+        }
+        temp.join(format!("{prefix}{}", std::process::id()))
+    })
+}
+
 fn temp_dir() -> PathBuf {
     static N: AtomicU64 = AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    let dir = std::env::temp_dir().join(format!(
-        "wd-linux-{}-{}-{nanos}",
-        std::process::id(),
-        N.fetch_add(1, Ordering::SeqCst)
-    ));
+    let dir = test_run().join(N.fetch_add(1, Ordering::SeqCst).to_string());
     fs::create_dir_all(&dir).expect("temp dir");
     dir
 }

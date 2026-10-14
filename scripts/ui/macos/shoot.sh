@@ -15,6 +15,8 @@ if ioreg -n Root -d1 -a | grep -A1 CGSSessionScreenIsLocked | grep -q '<true/>';
 fi
 out=$(mkdir -p "${1:-$root/ui-shots/macos}" && cd "${1:-$root/ui-shots/macos}" && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/wd-ui-macos.XXXXXX")
+# The check's folder holds builds and a ledger; it goes when the check ends.
+trap 'rm -rf "$work"' EXIT
 (cd "$root" && go build -o "$work/wd" ./cmd/wd)
 (cd "$root/clients/macos" && swift build -c release -q)
 app=$root/clients/macos/.build/release/WorkDirector

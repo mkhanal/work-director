@@ -2,15 +2,31 @@ import Foundation
 import Testing
 @testable import WorkDirectorKit
 
+/// Everything one test run writes, in one folder named for its process. A run
+/// cannot clean up after itself when it is killed, so each run first removes
+/// the folders of runs whose process has gone.
+let testRun: URL = {
+    let temp = FileManager.default.temporaryDirectory
+    let prefix = "wd-macos-tests-"
+    do {
+        for name in try FileManager.default.contentsOfDirectory(atPath: temp.path) {
+            guard name.hasPrefix(prefix), let pid = Int32(name.dropFirst(prefix.count)),
+                  kill(pid, 0) != 0, errno == ESRCH else { continue }
+            try FileManager.default.removeItem(at: temp.appendingPathComponent(name))
+        }
+    } catch {
+        fatalError("removing the folders of finished test runs: \(error)")
+    }
+    return temp.appendingPathComponent(prefix + "\(ProcessInfo.processInfo.processIdentifier)")
+}()
+
 /// A wd built from this checkout, so the app's tests read the wire the Go side
 /// writes today.
 let builtWD: URL = {
     let repo = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent()
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    let out = FileManager.default.temporaryDirectory
-        .appendingPathComponent("wd-macos-tests-\(ProcessInfo.processInfo.processIdentifier)")
-        .appendingPathComponent("wd")
+    let out = testRun.appendingPathComponent("wd")
     let go = Process()
     go.executableURL = URL(fileURLWithPath: "/usr/bin/env")
     go.arguments = ["go", "build", "-o", out.path, "./cmd/wd"]
@@ -27,7 +43,7 @@ struct Home {
     let environment: [String: String]
 
     init() throws {
-        dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        dir = testRun.appendingPathComponent(UUID().uuidString)
         let project = dir.appendingPathComponent("demo-repo")
         try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
         var env = ProcessInfo.processInfo.environment
@@ -108,7 +124,7 @@ func workJSON(state: String) -> String {
 }
 
 func tempDir() -> URL {
-    FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    testRun.appendingPathComponent(UUID().uuidString)
 }
 
 /// A runner that matches requests to goals and plans goals the way a model
