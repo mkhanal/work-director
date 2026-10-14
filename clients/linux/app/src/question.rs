@@ -339,31 +339,3 @@ fn item_page(
     });
     page
 }
-
-/// A question already answered, or asked of a session and answered there:
-/// its items with what was chosen, and any reply instead.
-pub fn answered(question: &Question) -> gtk::Widget {
-    let card = ui::wd_card(SPACE_2);
-    card.append(&ui::label("Asked"));
-    for (i, item) in question.items.iter().enumerate() {
-        let answer = question.answers.as_ref().and_then(|a| a.get(i));
-        let parts: Vec<&str> = answer.map(|a| a.split(", ").collect()).unwrap_or_default();
-        let column = ui::vbox(SPACE_1);
-        column.append(&ui::said(&item.question, &["callout", "medium"]));
-        for option in &item.options {
-            let chosen = parts.contains(&option.label.as_str());
-            let row = ui::hbox(SPACE_2);
-            row.append(&ui::line(if chosen { "◉" } else { "○" }, &[if chosen { "accent-text" } else { "text3" }]));
-            row.append(&ui::text(shown(&option.label).0, &["callout", if chosen { "medium" } else { "text2" }]));
-            column.append(&row);
-        }
-        if let Some(answer) = answer.filter(|a| !item.options.iter().any(|o| a.split(", ").any(|p| p == o.label))) {
-            column.append(&ui::said(answer, &["callout"]));
-        }
-        card.append(&column);
-    }
-    if let Some(reply) = &question.reply {
-        card.append(&ui::said(reply, &["callout", "text2"]));
-    }
-    card.upcast()
-}

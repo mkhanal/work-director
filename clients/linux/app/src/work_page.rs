@@ -492,8 +492,8 @@ impl WorkPage {
     }
 
     fn scroll_to(&self, turn: &str) {
-        let Some(widget) = self.turns.find(turn) else { return };
-        if let Some(point) = widget.compute_point(&self.column, &gtk::graphene::Point::new(0.0, 0.0)) {
+        let Some((widget, y)) = self.turns.find(turn) else { return };
+        if let Some(point) = widget.compute_point(&self.column, &gtk::graphene::Point::new(0.0, y)) {
             self.scroller.vadjustment().set_value(f64::from(point.y()) - f64::from(SPACE_4));
         }
     }

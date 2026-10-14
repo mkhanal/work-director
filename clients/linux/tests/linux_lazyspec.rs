@@ -2450,3 +2450,79 @@ fn a_table_in_a_reply_reads_as_a_table() {
         "quoted words\n\n• top\n\n  • nested"
     );
 }
+
+/// Copying Across The Conversation Keeps Every Line It Spans
+#[test]
+fn copying_across_the_conversation_keeps_every_line_it_spans() {
+    use kit::transcript::{self, Act, Doc};
+    let step = |kind: StepKind, text: &str| Step {
+        kind,
+        at: Some("12:10".into()),
+        text: Some(text.into()),
+        tool: None,
+        question: None,
+    };
+    let call = |id: &str, summary: &str, result: &str| ToolCall {
+        id: id.into(),
+        name: "Bash".into(),
+        summary: summary.into(),
+        input: summary.into(),
+        result: Some(result.into()),
+        failed: false,
+    };
+    let reply = "The template reads **well**:\n\n| Check | Run? | Result |\n|---|:-:|---|\n| `go test` | yes | passed |\n| Link check | no | skipped |\n\nNext I write the note.";
+
+    let mut run = Doc::default();
+    run.append(transcript::told("Told", Some("12:09"), "Run the notes tests"));
+    let head = transcript::agent_head("Customer note", WorkState::Running, Some("12:10"));
+    run.append(transcript::turn(
+        Some(head),
+        transcript::step(&step(StepKind::Thinking, "Check the tests first."), false),
+    ));
+    run.append(transcript::turn(
+        None,
+        transcript::tools(&[
+            call("t1", "cd release-notes && ls templates/", "customer.md"),
+            call("t2", "go test ./notes/...", "ok"),
+        ]),
+    ));
+    run.append(transcript::turn(None, transcript::step(&step(StepKind::Text, reply), false)));
+    let shown = run.shown();
+    let closed = |f: usize| run.folds[f];
+
+    let all = run.copied(0, run.len(), &closed);
+    assert_eq!(
+        all,
+        "Told · 12:09\nRun the notes tests\n\nCustomer note · 12:10\nThinking\nBash cd release-notes && ls templates/\nBash go test ./notes/...\n\nThe template reads well:\n\nCheck\tRun?\tResult\ngo test\tyes\tpassed\nLink check\tno\tskipped\n\nNext I write the note.",
+        "one selection spans the person's message, the header, every step line and the reply with its table"
+    );
+    assert!(shown.contains('▸') && !all.contains('▸'), "a chevron shows but is not copied");
+
+    let from = shown.find("go test ./notes").map(|b| shown[..b].chars().count()).expect("the step line");
+    let to = shown.find("The template").map(|b| shown[..b].chars().count() + "The template".len()).expect("the reply");
+    assert_eq!(
+        run.copied(from, to, &closed),
+        "go test ./notes/...\n\nThe template",
+        "a drag copies just what it spans"
+    );
+
+    let bash = shown.find("Bash cd").map(|b| shown[..b].chars().count()).expect("the first tool line");
+    let Some(Act::Toggle(fold)) = run.act_at(bash) else { panic!("clicking a step's line opens it") };
+    let opened = |f: usize| f == fold || run.folds[f];
+    assert!(
+        run.copied(0, run.len(), &opened).contains(
+            "Bash cd release-notes && ls templates/\ncd release-notes && ls templates/\ncustomer.md\nBash go test"
+        ),
+        "an opened step copies with what it holds: {:?}",
+        run.copied(0, run.len(), &opened)
+    );
+    let thinking = shown.find("Thinking").map(|b| shown[..b].chars().count()).expect("the thinking line");
+    let Some(Act::Toggle(thought)) = run.act_at(thinking) else { panic!("a thinking line opens") };
+    assert!(run.copied(0, run.len(), &|f| f == thought).contains("Thinking\nCheck the tests first."));
+
+    let before = run.len();
+    let earlier = run.copied(0, before, &closed);
+    run.append(transcript::turn(None, transcript::step(&step(StepKind::Text, "One more line."), false)));
+    assert_eq!(run.copied(0, before, &|f| run.folds[f]), earlier, "what was shown keeps its place when more arrives");
+    assert!(run.shown().starts_with(&shown));
+}

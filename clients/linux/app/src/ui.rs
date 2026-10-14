@@ -4,7 +4,7 @@
 use adw::prelude::*;
 use gtk::{gdk, gio, glib, pango};
 
-use kit::markdown::{self, Block};
+use kit::markdown;
 use kit::{Mark, Tone, WorkState};
 
 /// Space tokens, in pixels.
@@ -163,30 +163,6 @@ pub fn speaker(name: &str) -> gtk::Widget {
     line(name, &["speaker"]).upcast()
 }
 
-/// Your words: a right-aligned bubble in the accent colour, its meta line above
-/// it; long text folds after 8 lines.
-pub fn you_bubble(body: &str, label: &str, at: Option<&str>, status: Option<&gtk::Widget>) -> gtk::Box {
-    let column = vbox(SPACE_2);
-    column.set_halign(gtk::Align::End);
-    column.set_margin_start(SPACE_7 * 2);
-    let meta = hbox(SPACE_1);
-    meta.set_halign(gtk::Align::End);
-    meta.add_css_class("meta");
-    meta.append(&line(label, &["speaker"]));
-    if let Some(at) = at {
-        meta.append(&line(&format!("· {}", kit::time::when(at)), &["text3"]));
-    }
-    if let Some(status) = status {
-        meta.append(status);
-    }
-    column.append(&meta);
-    let bubble = vbox(SPACE_2);
-    bubble.add_css_class("bubble-you");
-    bubble.append(&folded(body, 8, &["body"]));
-    column.append(&bubble);
-    column
-}
-
 /// Text that folds after `lines` lines, with Show all to read the rest.
 pub fn folded(body: &str, lines: i32, classes: &[&str]) -> gtk::Box {
     let column = vbox(SPACE_1);
@@ -216,90 +192,6 @@ pub fn card(class: &str) -> gtk::Box {
     card
 }
 
-/// A look, a state change or a stop: centred meta text between two hairlines.
-pub fn event_line(text: &str, classes: &[&str]) -> gtk::Box {
-    let row = hbox(SPACE_3);
-    row.add_css_class("event-line");
-    let left = gtk::Separator::new(gtk::Orientation::Horizontal);
-    left.set_hexpand(true);
-    left.set_valign(gtk::Align::Center);
-    let right = gtk::Separator::new(gtk::Orientation::Horizontal);
-    right.set_hexpand(true);
-    right.set_valign(gtk::Align::Center);
-    let label = line(text, &["meta", "text3"]);
-    label.set_xalign(0.5);
-    label.set_max_width_chars(80);
-    for class in classes {
-        label.add_css_class(class);
-    }
-    row.append(&left);
-    row.append(&label);
-    row.append(&right);
-    row
-}
-
-/// The line that starts each day of a conversation.
-pub fn day_line(day: &str) -> gtk::Box {
-    event_line(day, &["strong"])
-}
-
-/// Monospace text in a sunken block that scrolls sideways rather than wrapping.
-pub fn code_block(code: &str) -> gtk::Widget {
-    let label = gtk::Label::builder().label(code).xalign(0.0).selectable(true).build();
-    label.add_css_class("code");
-    let scroller = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Automatic)
-        .vscrollbar_policy(gtk::PolicyType::Never)
-        .child(&label)
-        .build();
-    scroller.add_css_class("sunken");
-    scroller.upcast()
-}
-
-/// Markdown as blocks of labels: paragraphs, headings, bullets, code,
-/// tables, quotes and rules.
-pub fn markdown(source: &str) -> gtk::Box {
-    blocks(markdown::parse(source))
-}
-
-fn blocks(parsed: Vec<Block>) -> gtk::Box {
-    let column = vbox(SPACE_3);
-    for block in parsed {
-        let widget: gtk::Widget = match block {
-            Block::Heading(_, title) => {
-                let label = marked(&markdown::inline(&title), &["title"]);
-                label.set_margin_top(SPACE_2);
-                label.upcast()
-            }
-            Block::Bullet { text, number, depth } => {
-                let row = hbox(SPACE_2);
-                row.set_margin_start(depth as i32 * SPACE_4);
-                let marker = gtk::Label::new(Some(number.as_deref().unwrap_or(if depth == 0 { "•" } else { "◦" })));
-                marker.add_css_class("text2");
-                marker.set_valign(gtk::Align::Start);
-                marker.set_xalign(1.0);
-                marker.set_size_request(12, -1);
-                let body = marked(&markdown::inline(&text), &["body"]);
-                body.set_hexpand(true);
-                row.append(&marker);
-                row.append(&body);
-                row.upcast()
-            }
-            Block::Code(code) => code_block(&code),
-            Block::Paragraph(paragraph) => marked(&markdown::inline(&paragraph), &["body"]).upcast(),
-            Block::Table(table) => self::table(&table).upcast(),
-            Block::Quote(inner) => {
-                let quote = blocks(inner);
-                quote.add_css_class("md-quote");
-                quote.upcast()
-            }
-            Block::Rule => hairline().upcast(),
-        };
-        column.append(&widget);
-    }
-    column
-}
-
 /// A markdown table as a grid: the header semibold, a hairline under each
 /// row, each cell aligned as its column and wrapping within it.
 pub fn table(table: &markdown::Table) -> gtk::Widget {
@@ -327,6 +219,9 @@ pub fn table(table: &markdown::Table) -> gtk::Widget {
                 .max_width_chars(48)
                 .hexpand(true)
                 .build();
+            // A text view gives what it holds its least width; this keeps a
+            // cell as wide as its words, wrapping only past 40 characters.
+            label.set_width_chars(kit::copy::words(cell).chars().count().min(40) as i32);
             label.add_css_class("md-cell");
             if r == 0 {
                 label.add_css_class("md-head");
@@ -337,12 +232,6 @@ pub fn table(table: &markdown::Table) -> gtk::Widget {
         }
     }
     grid.upcast()
-}
-
-fn marked(markup: &str, classes: &[&str]) -> gtk::Label {
-    let label = said("", classes);
-    label.set_markup(markup);
-    label
 }
 
 /// Text for Pango markup.
@@ -396,55 +285,57 @@ pub fn mark(mark: Mark, size: i32, name: &str) -> gtk::DrawingArea {
     area.add_css_class(mark.css_class());
     area.update_property(&[gtk::accessible::Property::Label(name)]);
     area.set_tooltip_text(Some(name));
-    area.set_draw_func(move |area, cr, w, h| {
-        let c = area.color();
-        let (r, g, b) = (f64::from(c.red()), f64::from(c.green()), f64::from(c.blue()));
-        let unit = f64::from(w.min(h)) / 20.0;
-        let (cx, cy) = (f64::from(w) / 2.0, f64::from(h) / 2.0);
-        cr.set_source_rgb(r, g, b);
-        cr.set_line_width(2.0 * unit);
-        let ring = |cr: &gtk::cairo::Context| {
-            cr.new_path();
-            cr.arc(cx, cy, 8.0 * unit, 0.0, std::f64::consts::TAU);
-            let _ = cr.stroke();
-        };
-        // A failed stroke or fill leaves the icon blank; there is nothing else to draw instead.
-        match mark {
-            Mark::Done => {
-                cr.arc(cx, cy, 9.0 * unit, 0.0, std::f64::consts::TAU);
-                let _ = cr.fill();
-                cr.set_source_rgb(1.0, 1.0, 1.0);
-                cr.move_to(cx - 4.0 * unit, cy + 0.5 * unit);
-                cr.line_to(cx - 1.4 * unit, cy + 3.0 * unit);
-                cr.line_to(cx + 4.0 * unit, cy - 2.5 * unit);
-                let _ = cr.stroke();
-            }
-            Mark::NeedsYou => {
-                ring(cr);
-                cr.arc(cx, cy, 3.0 * unit, 0.0, std::f64::consts::TAU);
-                let _ = cr.fill();
-            }
-            Mark::Working => {
-                ring(cr);
-                cr.move_to(cx, cy);
-                cr.line_to(cx, cy - 8.0 * unit);
-                cr.arc(cx, cy, 8.0 * unit, -std::f64::consts::FRAC_PI_2, 0.0);
-                cr.close_path();
-                let _ = cr.fill();
-            }
-            Mark::Waiting => {
-                cr.set_dash(&[3.0 * unit, 3.0 * unit], 0.0);
-                ring(cr);
-            }
-            Mark::Superseded | Mark::Blocked => {
-                ring(cr);
-                cr.move_to(cx - 5.0 * unit, cy);
-                cr.line_to(cx + 5.0 * unit, cy);
-                let _ = cr.stroke();
-            }
-        }
-    });
+    area.set_draw_func(move |area, cr, w, h| draw_mark(cr, mark, f64::from(w), f64::from(h), &area.color()));
     area
+}
+
+/// Draws a state's mark, `w` by `h`, in colour `c`.
+pub fn draw_mark(cr: &gtk::cairo::Context, mark: Mark, w: f64, h: f64, c: &gdk::RGBA) {
+    let (r, g, b) = (f64::from(c.red()), f64::from(c.green()), f64::from(c.blue()));
+    let unit = w.min(h) / 20.0;
+    let (cx, cy) = (w / 2.0, h / 2.0);
+    cr.set_source_rgb(r, g, b);
+    cr.set_line_width(2.0 * unit);
+    let ring = |cr: &gtk::cairo::Context| {
+        cr.new_path();
+        cr.arc(cx, cy, 8.0 * unit, 0.0, std::f64::consts::TAU);
+        let _ = cr.stroke();
+    };
+    // A failed stroke or fill leaves the icon blank; there is nothing else to draw instead.
+    match mark {
+        Mark::Done => {
+            cr.arc(cx, cy, 9.0 * unit, 0.0, std::f64::consts::TAU);
+            let _ = cr.fill();
+            cr.set_source_rgb(1.0, 1.0, 1.0);
+            cr.move_to(cx - 4.0 * unit, cy + 0.5 * unit);
+            cr.line_to(cx - 1.4 * unit, cy + 3.0 * unit);
+            cr.line_to(cx + 4.0 * unit, cy - 2.5 * unit);
+            let _ = cr.stroke();
+        }
+        Mark::NeedsYou => {
+            ring(cr);
+            cr.arc(cx, cy, 3.0 * unit, 0.0, std::f64::consts::TAU);
+            let _ = cr.fill();
+        }
+        Mark::Working => {
+            ring(cr);
+            cr.move_to(cx, cy);
+            cr.line_to(cx, cy - 8.0 * unit);
+            cr.arc(cx, cy, 8.0 * unit, -std::f64::consts::FRAC_PI_2, 0.0);
+            cr.close_path();
+            let _ = cr.fill();
+        }
+        Mark::Waiting => {
+            cr.set_dash(&[3.0 * unit, 3.0 * unit], 0.0);
+            ring(cr);
+        }
+        Mark::Superseded | Mark::Blocked => {
+            ring(cr);
+            cr.move_to(cx - 5.0 * unit, cy);
+            cr.line_to(cx + 5.0 * unit, cy);
+            let _ = cr.stroke();
+        }
+    }
 }
 
 /// A state's drawn icon, named by its label.

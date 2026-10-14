@@ -6,7 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential pkg-config curl ca-certificates git jq sqlite3 python3 \
     libgtk-4-dev libadwaita-1-dev librsvg2-common \
-    xvfb xauth x11-utils xdotool imagemagick \
+    xvfb xauth x11-utils xdotool xclip imagemagick \
     dbus dbus-x11 at-spi2-core python3-gi gir1.2-atspi-2.0 \
     fonts-cantarell fonts-dejavu-core adwaita-icon-theme \
     && rm -rf /var/lib/apt/lists/*

@@ -10,6 +10,7 @@ mod question;
 mod settings;
 mod side_panel;
 mod sidebar;
+mod surface;
 mod turns;
 mod ui;
 mod window;

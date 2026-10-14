@@ -36,20 +36,9 @@ pub fn table_rows(table: &markdown::Table) -> String {
         .join("\n")
 }
 
-/// Inline markdown's words: its markup rendered, then the tags dropped.
+/// Inline markdown's words, without the marks that style them.
 pub fn words(text: &str) -> String {
-    let markup = markdown::inline(text);
-    let mut out = String::with_capacity(markup.len());
-    let mut in_tag = false;
-    for c in markup.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' if in_tag => in_tag = false,
-            _ if !in_tag => out.push(c),
-            _ => {}
-        }
-    }
-    out.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&")
+    markdown::runs(text).into_iter().map(|run| run.text).collect()
 }
 
 /// Work as one line: its title and its id.

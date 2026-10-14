@@ -1,7 +1,9 @@
 //! A conversation's turns, kept in place across reads. Each turn has a key
 //! that changes when what it shows changes; a read rebuilds only from the
-//! first turn whose key differs, so what a reader opened or scrolled past
-//! stays as it was, and new content is appended at the end.
+//! first turn whose key differs, so what a reader opened, selected or
+//! scrolled past stays as it was, and new content is appended at the end.
+//! Turns of text run together into one surface, selectable as one; a turn
+//! that is a widget, an interactive card, sits between surfaces.
 
 use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
@@ -11,13 +13,19 @@ use std::hash::{Hash, Hasher};
 use adw::prelude::*;
 use gtk::gio;
 
+use crate::surface::{Rich, Surface};
 use crate::ui;
 
 pub struct Turn {
     key: String,
     /// What the turn says, as the markdown it was written in, for its menu's Copy.
     copy: Option<String>,
-    build: Box<dyn FnOnce() -> gtk::Widget>,
+    build: Build,
+}
+
+enum Build {
+    Widget(Box<dyn FnOnce() -> gtk::Widget>),
+    Text(Box<dyn FnOnce() -> Rich>),
 }
 
 /// What a turn is named and shows, before it is built.
@@ -29,8 +37,14 @@ impl Key {
         Key(self.0, Some(said.to_string()))
     }
 
+    /// A turn that is a widget of its own: an interactive card.
     pub fn with(self, build: impl FnOnce() -> gtk::Widget + 'static) -> Turn {
-        Turn { key: self.0, copy: self.1, build: Box::new(build) }
+        Turn { key: self.0, copy: self.1, build: Build::Widget(Box::new(build)) }
+    }
+
+    /// A turn of text, written into the surface it runs on in.
+    pub fn text(self, build: impl FnOnce() -> Rich + 'static) -> Turn {
+        Turn { key: self.0, copy: self.1, build: Build::Text(Box::new(build)) }
     }
 }
 
@@ -43,9 +57,12 @@ impl Turn {
         Key(format!("{id}:{:x}", hasher.finish()), None)
     }
 
-    /// The turn's widget, for a turn shown inside another.
-    pub fn build(self) -> gtk::Widget {
-        (self.build)()
+    /// The turn's text, for a turn shown inside another; none for a widget.
+    pub fn rich(self) -> Option<Rich> {
+        match self.build {
+            Build::Text(build) => Some(build()),
+            Build::Widget(_) => None,
+        }
     }
 
     fn id(&self) -> &str {
@@ -53,9 +70,15 @@ impl Turn {
     }
 }
 
+/// Where a shown turn is: a widget of its own, or the n-th turn of a surface.
+enum Placed {
+    Widget(gtk::Widget),
+    Text(Surface, usize),
+}
+
 pub struct Turns {
     pub widget: gtk::Box,
-    shown: RefCell<Vec<(String, gtk::Widget)>>,
+    shown: RefCell<Vec<(String, Placed)>>,
 }
 
 impl Turns {
@@ -66,27 +89,68 @@ impl Turns {
     pub fn update(&self, turns: Vec<Turn>) {
         let mut shown = self.shown.borrow_mut();
         let keep = shown.iter().zip(&turns).take_while(|((key, _), turn)| *key == turn.key).count();
-        for (_, widget) in shown.drain(keep..) {
-            self.widget.remove(&widget);
+        let mut cut: Vec<Surface> = Vec::new();
+        for (_, placed) in shown.drain(keep..) {
+            match placed {
+                Placed::Widget(widget) => self.widget.remove(&widget),
+                Placed::Text(surface, n) => {
+                    if cut.contains(&surface) {
+                        continue;
+                    }
+                    if n == 0 {
+                        self.widget.remove(&surface);
+                    } else {
+                        surface.truncate(n);
+                    }
+                    cut.push(surface);
+                }
+            }
         }
+        let mut written: Vec<Surface> = Vec::new();
         for turn in turns.into_iter().skip(keep) {
             let id = turn.id().to_string();
             let key = turn.key.clone();
-            let widget = (turn.build)();
-            widget.set_widget_name(&id);
-            let menus = turn.copy.map(|said| copy_menus(&widget, said));
-            ui::copyable(&widget, menus.as_ref().map(|m| &m.1));
-            if let Some((menu, _)) = &menus {
-                ui::context_menu(&widget, menu);
+            match turn.build {
+                Build::Widget(build) => {
+                    let widget = build();
+                    widget.set_widget_name(&id);
+                    let menus = turn.copy.map(|said| copy_menus(&widget, said));
+                    ui::copyable(&widget, menus.as_ref().map(|m| &m.1));
+                    if let Some((menu, _)) = &menus {
+                        ui::context_menu(&widget, menu);
+                    }
+                    self.widget.append(&widget);
+                    shown.push((key, Placed::Widget(widget)));
+                }
+                Build::Text(build) => {
+                    let last = self.widget.last_child().and_downcast::<Surface>();
+                    let surface = last.unwrap_or_else(|| {
+                        let surface = Surface::new();
+                        self.widget.append(&surface);
+                        surface
+                    });
+                    let n = surface.len();
+                    surface.append(&id, build(), turn.copy);
+                    if !written.contains(&surface) {
+                        written.push(surface.clone());
+                    }
+                    shown.push((key, Placed::Text(surface, n)));
+                }
             }
-            self.widget.append(&widget);
-            shown.push((key, widget));
+        }
+        for surface in cut.iter().chain(&written) {
+            surface.settle();
         }
     }
 
-    /// The widget showing the turn named `id`.
-    pub fn find(&self, id: &str) -> Option<gtk::Widget> {
-        self.shown.borrow().iter().find(|(key, _)| key.split(':').next() == Some(id)).map(|(_, w)| w.clone())
+    /// The widget showing the turn named `id`, and how far down it the turn starts.
+    pub fn find(&self, id: &str) -> Option<(gtk::Widget, f32)> {
+        self.shown.borrow().iter().find(|(key, _)| key.split(':').next() == Some(id)).and_then(|(_, placed)| {
+            match placed {
+                Placed::Widget(w) => Some((w.clone(), 0.0)),
+                Placed::Text(surface, _) => surface.locate(id).map(|y| (surface.clone().upcast(), y)),
+            }
+        })
     }
 }
 

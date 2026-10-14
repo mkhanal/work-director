@@ -84,5 +84,32 @@ import -window "$win" /shots/act-finish-menu.png
 close
 check "the finish line changes from the overview" "SELECT finish_line FROM work WHERE id = '$goal'" "merged"
 
+# The conversation copies as one. GTK's Text interface reads a text view's
+# selection but cannot set one, so the selection is dragged: from the second
+# Bash step's line to the end of the reply, where the seeded session lies in
+# a 1280 by 900 window scrolled to its newest. The Text interface reads it
+# back; Ctrl+C copies the step line, the table as tab-separated rows and the
+# words after; Ctrl+A then Ctrl+C copies the whole run, brief to reply.
+has() { # name, file, text
+  if grep -qF -- "$3" "$2"; then echo "PASS $1"; else echo "FAIL $1: $(head -c 400 "$2")"; fail=1; fi
+}
+open "$working" conversation
+xdotool mousemove 376 370 mousedown 1 mousemove 500 500 mousemove 700 684 mouseup 1
+sleep 1
+act "a=find('text', 'Conversation'); r=Atspi.Text.get_selection(a, 0); open('/shots/selection.txt', 'w').write(Atspi.Text.get_text(a, r.start_offset, r.end_offset))"
+xdotool key ctrl+c; sleep 1
+xclip -o -selection clipboard >/shots/copied.txt 2>/dev/null || true
+import -window "$win" /shots/act-selection.png
+has "a selection dragged across a step and the reply reads back from the step" /shots/selection.txt "Bash go test ./notes/..."
+has "the copy starts at the step's line" /shots/copied.txt "Bash go test ./notes/..."
+has "the copy keeps the table as tab-separated rows" /shots/copied.txt "$(printf 'Check\tRun?\tResult')"
+has "the copy keeps the words after the table" /shots/copied.txt "Next I generate the note for v1.0.0 as a sample."
+if grep -qF "▸" /shots/copied.txt; then echo "FAIL a chevron was copied"; fail=1; else echo "PASS chevrons are not copied"; fi
+xdotool key ctrl+a ctrl+c; sleep 1
+xclip -o -selection clipboard >/shots/copied-all.txt 2>/dev/null || true
+has "Ctrl+A copies from the brief" /shots/copied-all.txt "Write the customer release note template, in plain language."
+has "Ctrl+A copies to the reply's end" /shots/copied-all.txt "Next I generate the note for v1.0.0 as a sample."
+close
+
 cp "$db" /shots/ledger.db; cp /tmp/app.log /shots/app.log
 exit $fail

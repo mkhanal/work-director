@@ -7,7 +7,11 @@ pub enum Block {
     Heading(usize, String),
     /// A list item: its number when the list is ordered, and how many lists
     /// it sits inside.
-    Bullet { text: String, number: Option<String>, depth: usize },
+    Bullet {
+        text: String,
+        number: Option<String>,
+        depth: usize,
+    },
     Code(String),
     Paragraph(String),
     Table(Table),
@@ -214,17 +218,66 @@ pub fn escape(text: &str) -> String {
 /// Inline markdown as Pango markup: `code`, **bold**, *italic*, _italic_ and
 /// [links](url). Every tag opened is closed, so the markup always parses.
 pub fn inline(text: &str) -> String {
-    let chars: Vec<char> = text.chars().collect();
     let mut out = String::new();
+    for run in runs(text) {
+        let mut open = String::new();
+        let mut close = String::new();
+        if let Some(url) = &run.link {
+            open.push_str(&format!("<a href=\"{}\">", escape(url)));
+            close.insert_str(0, "</a>");
+        }
+        if run.code {
+            open.push_str("<span font_family=\"monospace\" background=\"#8080801f\">");
+            close.insert_str(0, "</span>");
+        }
+        if run.bold {
+            open.push_str("<b>");
+            close.insert_str(0, "</b>");
+        }
+        if run.italic {
+            open.push_str("<i>");
+            close.insert_str(0, "</i>");
+        }
+        out.push_str(&open);
+        out.push_str(&escape(&run.text));
+        out.push_str(&close);
+    }
+    out
+}
+
+/// A stretch of inline markdown's words styled one way.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct Run {
+    pub text: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub code: bool,
+    pub link: Option<String>,
+}
+
+/// Inline markdown as its words, in runs styled one way each: `code`,
+/// **bold**, *italic*, _italic_ and [links](url), the marks dropped.
+pub fn runs(text: &str) -> Vec<Run> {
+    let mut out: Vec<Run> = Vec::new();
+    styled(text, &Run::default(), &mut out);
+    out
+}
+
+fn styled(text: &str, style: &Run, out: &mut Vec<Run>) {
+    let push = |out: &mut Vec<Run>, run: Run| match out.last_mut() {
+        Some(last) if Run { text: String::new(), ..last.clone() } == Run { text: String::new(), ..run.clone() } => {
+            last.text.push_str(&run.text)
+        }
+        _ => out.push(run),
+    };
+    let chars: Vec<char> = text.chars().collect();
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
         if c == '`' {
             if let Some(end) = find(&chars, i + 1, &['`']) {
                 let inner: String = chars[i + 1..end].iter().collect();
-                out.push_str("<span font_family=\"monospace\" background=\"#8080801f\">");
-                out.push_str(&escape(&inner));
-                out.push_str("</span>");
+                push(out, Run { text: inner, code: true, ..style.clone() });
                 i = end + 1;
                 continue;
             }
@@ -233,7 +286,7 @@ pub fn inline(text: &str) -> String {
             if let Some(end) = find(&chars, i + 2, &['*', '*']) {
                 if end > i + 2 {
                     let inner: String = chars[i + 2..end].iter().collect();
-                    out.push_str(&format!("<b>{}</b>", inline(&inner)));
+                    styled(&inner, &Run { bold: true, ..style.clone() }, out);
                     i = end + 2;
                     continue;
                 }
@@ -245,7 +298,7 @@ pub fn inline(text: &str) -> String {
                     && (c == '*' || chars.get(end + 1).is_none_or(|n| !n.is_alphanumeric()));
                 if end > i + 1 && closes {
                     let inner: String = chars[i + 1..end].iter().collect();
-                    out.push_str(&format!("<i>{}</i>", inline(&inner)));
+                    styled(&inner, &Run { italic: true, ..style.clone() }, out);
                     i = end + 1;
                     continue;
                 }
@@ -256,16 +309,15 @@ pub fn inline(text: &str) -> String {
                 if let Some(end) = find(&chars, close + 2, &[')']) {
                     let label: String = chars[i + 1..close].iter().collect();
                     let url: String = chars[close + 2..end].iter().collect();
-                    out.push_str(&format!("<a href=\"{}\">{}</a>", escape(&url), escape(&label)));
+                    push(out, Run { text: label, link: Some(url), ..style.clone() });
                     i = end + 1;
                     continue;
                 }
             }
         }
-        out.push_str(&escape(&c.to_string()));
+        push(out, Run { text: c.to_string(), ..style.clone() });
         i += 1;
     }
-    out
 }
 
 /// An emphasis marker opens one when a word follows it and, for `_`, when it

@@ -211,6 +211,30 @@ progressbar.wd-progress progress { min-height: 4px; border-radius: 2px; backgrou
 .sunken > viewport > label, .sunken label { padding: 12px; }
 .director-line { padding: 6px 0; font-size: 13px; }
 
+/* The conversation's text surface. It reads every colour it tags or draws
+   from these swatches, so the tokens stay defined only here and in dark.css. */
+textview.surface, textview.surface > text { background-color: transparent; font-size: 14px; color: @wd_text; }
+textview.surface > text > selection { background-color: alpha(@wd_accent, 0.25); }
+.ink-text { color: @wd_text; }
+.ink-link { color: @wd_link; }
+.swatch-hairline { color: @wd_hairline; }
+.swatch-page { color: @wd_page; }
+.swatch-tag { color: @wd_tag_fill; }
+.swatch-bubble { color: @wd_bubble_fill; }
+.swatch-bubble-border { color: @wd_bubble_border; }
+.swatch-answered { color: @wd_answered_fill; }
+.swatch-answered-border { color: @wd_answered_border; }
+.swatch-proposed { color: @wd_proposed_fill; }
+.swatch-sunken { color: alpha(@wd_text, 0.06); }
+.swatch-chip { color: alpha(@wd_text, 0.04); }
+.swatch-code { color: alpha(@wd_text, 0.08); }
+.swatch-badge-attention { color: @wd_attention_bg; }
+.swatch-badge-settled { color: @wd_settled_bg; }
+.swatch-badge-live { color: @wd_live_bg; }
+.swatch-badge-waiting { color: @wd_waiting_bg; }
+.swatch-badge-decision { color: @wd_decision_bg; }
+.md-table.selected { background-color: alpha(@wd_accent, 0.25); }
+
 /* Markdown tables, quotes */
 .md-table { border: 1px solid @wd_hairline; border-radius: 8px; }
 .md-cell { font-size: 13px; padding: 6px 12px; border-bottom: 1px solid @wd_separator; }

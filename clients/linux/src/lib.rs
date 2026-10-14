@@ -24,6 +24,7 @@ pub mod send_key;
 pub mod store;
 pub mod thread;
 pub mod time;
+pub mod transcript;
 pub mod tree;
 pub mod words;
 pub mod working;

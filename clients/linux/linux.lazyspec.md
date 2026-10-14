@@ -259,3 +259,9 @@ hold only that product's work; with none, every product's.
 - A cell's inline markdown is styled as anywhere else, and `\|` is a pipe inside a cell; a row short of cells is padded, one with too many is cut.
 - Copied, a table reads as its rows, its cells separated by tabs.
 - A blockquote, a horizontal rule and a bullet nested under another show as such.
+
+## Copying Across The Conversation Keeps Every Line It Spans
+- Between its interactive cards — a question with choices, a plan to approve — a conversation is one stretch of selectable text: who spoke and when, each step's line, replies with their tables, and what the person said. A drag or Ctrl+A selects across all of it; Ctrl+C copies it.
+- Copied text reads as shown: words without their markdown marks, a table's cells separated by tabs, a folded step as its one line and an opened one with what it holds. Chevrons, icons and controls are not copied.
+- Clicking a step's line opens or folds it; folded or open, its text can be selected.
+- A refresh redraws only from the first turn that changed: what was shown before it keeps its place and its selection, and the reader stays where they scrolled.

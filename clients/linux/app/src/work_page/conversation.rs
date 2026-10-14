@@ -1,21 +1,27 @@
 //! A goal read as one conversation, and a session as it happens: each turn
 //! tagged with the sub-goal it came from, narrowed by who spoke or by sub-goal.
+//! Every turn but an interactive card is text, so the conversation between
+//! cards selects and copies as one.
 
 use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
 
+use kit::markdown::Align;
+use kit::transcript::{self, Act, Doc, Icon, Ink, Look, Size, Style, Weight, BODY, HEAD_GAP, TURN_GAP};
 use kit::{
-    Attachment, Event, Feed, FilterChip, GoalDetail, Mark, Outgoing, OutgoingState, Phase, Report, SessionStatus, Step,
-    StepKind, ThreadFilter, ThreadItem, ThreadRow, ThreadStep, ToolCall, Work, WorkState, WorkUnderWay, WorkingRow,
+    Attachment, Event, Feed, FilterChip, GoalDetail, Mark, Outgoing, OutgoingState, Phase, Question, Report,
+    SessionStatus, Step, StepKind, ThreadFilter, ThreadItem, ThreadRow, ThreadStep, Tone, ToolCall, Work, WorkState,
+    WorkUnderWay, WorkingRow,
 };
 
 use super::{Loaded, WorkPage, MERGE_SECONDS};
 use crate::agents::phase_mark;
 use crate::app::{App, Place};
 use crate::question;
+use crate::surface::Rich;
 use crate::turns::Turn;
-use crate::ui::{self, SPACE_1, SPACE_2, SPACE_3};
+use crate::ui;
 use crate::working;
 
 impl WorkPage {
@@ -36,7 +42,7 @@ impl WorkPage {
                 turns.push(
                     Turn::key("asked", &detail)
                         .copying(&detail)
-                        .with(move || ui::you_bubble(&detail, "You asked", Some(at.as_str()), None).upcast()),
+                        .text(move || Rich::new(transcript::told("You asked", Some(at.as_str()), &detail))),
                 );
             }
             let plan: Vec<(String, String, WorkState, Option<String>)> = g
@@ -45,7 +51,7 @@ impl WorkPage {
                 .map(|n| (n.work.id.clone(), n.work.title.clone(), n.work.state, n.opens().map(str::to_string)))
                 .collect();
             let (weak, app) = (self.me.clone(), self.app.clone());
-            turns.push(Turn::key("plan", &plan).with(move || plan_block(&plan, &app, weak)));
+            turns.push(Turn::key("plan", &plan).text(move || plan_block(&plan, &app, weak)));
         }
 
         let mut day = String::new();
@@ -57,7 +63,10 @@ impl WorkPage {
             let today = kit::time::day(&at);
             if today != day {
                 let label = today.clone();
-                turns.push(Turn::key(format!("day-{}", item.id()), &label).with(move || ui::day_line(&label).upcast()));
+                turns.push(
+                    Turn::key(format!("day-{}", item.id()), &label)
+                        .text(move || Rich::new(transcript::event_line(&label, Ink::Text3, true))),
+                );
                 day = today;
             }
             match item {
@@ -71,7 +80,7 @@ impl WorkPage {
                     let inner: Vec<Turn> =
                         run.iter().filter_map(|s| self.step_turn(g, s.clone(), &mut yours)).collect();
                     let count = run.len();
-                    turns.push(Turn::key(&id, &run).with(move || updates_row(count, &at, inner)));
+                    turns.push(Turn::key(&id, &run).text(move || updates_row(count, &at, inner)));
                 }
             }
         }
@@ -89,7 +98,7 @@ impl WorkPage {
             turns.push(
                 Turn::key(format!("out{}", m.id), &m.state)
                     .copying(&m.text)
-                    .with(move || outgoing_bubble(&app, &m, "sent")),
+                    .text(move || outgoing_bubble(&app, &m, "sent")),
             );
         }
 
@@ -118,7 +127,7 @@ impl WorkPage {
                 yours.push((format!("Attached {names}"), id.clone()));
                 Turn::key(&id, &(&e, &files))
                     .copying(&files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>().join("\n"))
-                    .with(move || yours_with_files("", "You attached", Some(e.at.as_str()), None, &files))
+                    .text(move || yours_with_files("", "You attached", Some(e.at.as_str()), &files))
             }
             ThreadStep::Event(e) if g.is_yours(&e) => {
                 let said = e.decision.as_ref().map(|d| d.answer.clone()).unwrap_or_else(|| e.body.clone());
@@ -127,11 +136,11 @@ impl WorkPage {
                 let label = if e.kind == "answer" { "You answered" } else { "You" };
                 Turn::key(&id, &(&e, &files))
                     .copying(&said)
-                    .with(move || yours_with_files(&said, label, Some(e.at.as_str()), None, &files))
+                    .text(move || yours_with_files(&said, label, Some(e.at.as_str()), &files))
             }
             ThreadStep::Event(e) if g.finished_line(&e).is_some() => {
                 let text = format!("{} · {}", g.finished_line(&e).unwrap_or_default(), kit::time::when(&e.at));
-                Turn::key(&id, &text).with(move || ui::event_line(&text, &[]).upcast())
+                Turn::key(&id, &text).text(move || Rich::new(transcript::event_line(&text, Ink::Text3, false)))
             }
             ThreadStep::Event(e) => {
                 let task = self.named(g, &e.work);
@@ -139,7 +148,7 @@ impl WorkPage {
                 let weak = self.me.clone();
                 Turn::key(&id, &(&e, &report))
                     .copying(&e.answer_text())
-                    .with(move || event_turn(&e, report.as_ref(), task, weak))
+                    .text(move || event_turn(&e, report.as_ref(), task, weak))
             }
             ThreadStep::Exchange(q, answer) => {
                 // An open question is answered in its needs-you card, shown once.
@@ -168,26 +177,26 @@ impl WorkPage {
                     answer.as_ref().map(|a| g.attached_to(a).into_iter().cloned().collect()).unwrap_or_default();
                 Turn::key(&id, &(&q, &answer, &decided, &files))
                     .copying(&said)
-                    .with(move || exchange_turn(&q, answer.as_ref(), &decided, &files, &asker, target, weak))
+                    .text(move || exchange_turn(&q, answer.as_ref(), &decided, &files, &asker, target, weak))
             }
             ThreadStep::Look(e) => {
                 let text = format!("Supervisor looking · {} · {}", e.body, kit::time::when(&e.at));
-                Turn::key(&id, &text).with(move || ui::event_line(&text, &[]).upcast())
+                Turn::key(&id, &text).text(move || Rich::new(transcript::event_line(&text, Ink::Text3, false)))
             }
             ThreadStep::Supervisor(e, reply) => {
                 let tasks = self.told(g, &reply);
                 let (weak, goal) = (self.me.clone(), g.goal.id.clone());
                 Turn::key(&id, &(&e, &reply, &tasks))
                     .copying(&e.body)
-                    .with(move || supervisor_turn(&e, &reply, &tasks, &goal, weak))
+                    .text(move || supervisor_turn(&e, &reply, &tasks, &goal, weak))
             }
             ThreadStep::Declined(e, declined) => Turn::key(&id, &(&e, &declined))
                 .copying(&format!("{}\n\n{}", declined.question, declined.why))
-                .with(move || declined_turn(&e, &declined)),
+                .text(move || declined_turn(&e, &declined)),
             ThreadStep::Stopped(e, said) => {
                 let task = self.named(g, &e.work);
                 let weak = self.me.clone();
-                Turn::key(&id, &(&e, &said)).copying(&said).with(move || stopped_turn(&e, &said, task, weak))
+                Turn::key(&id, &(&e, &said)).copying(&said).text(move || stopped_turn(&e, &said, task, weak))
             }
         })
     }
@@ -296,20 +305,19 @@ impl WorkPage {
                 ThreadRow::Step { index, step } => match step.kind {
                     StepKind::Prompt => {
                         let text = step.text().to_string();
+                        let at = step.at.clone();
                         if director.iter().any(|d| text.contains(d.as_str())) {
-                            let at = step.at.clone();
                             turns.push(
                                 Turn::key(&id, &step)
                                     .copying(&text)
-                                    .with(move || director_answer(&text, at.as_deref(), None)),
+                                    .text(move || director_answer(&text, at.as_deref(), None)),
                             );
                         } else {
                             let label = if index == 0 { "Brief" } else { "Told" };
-                            let at = step.at.clone();
                             turns.push(
                                 Turn::key(&id, &step)
                                     .copying(&text)
-                                    .with(move || ui::you_bubble(&text, label, at.as_deref(), None).upcast()),
+                                    .text(move || Rich::new(transcript::told(label, at.as_deref(), &text))),
                             );
                         }
                     }
@@ -326,16 +334,14 @@ impl WorkPage {
                                 question::pending(&app, &work_id, &q, card, answered, heard)
                             }));
                         } else {
-                            turns.push(Turn::key(&id, &q).with(move || question::answered(&q)));
+                            turns.push(Turn::key(&id, &q).text(move || answered_question(&q)));
                         }
                     }
                     _ => {
                         let open = index == last && running;
-                        turns.push(
-                            Turn::key(&id, &(&step, open, &head))
-                                .copying(&step_said(&step))
-                                .with(move || agent_turn(head, agent_body(&step, open))),
-                        );
+                        turns.push(Turn::key(&id, &(&step, open, &head)).copying(&step_said(&step)).text(move || {
+                            Rich::new(transcript::turn(agent_head(head), transcript::step(&step, open)))
+                        }));
                     }
                 },
                 ThreadRow::Tools { calls, .. } => {
@@ -343,7 +349,7 @@ impl WorkPage {
                     turns.push(
                         Turn::key(&id, &(&calls, working, &head))
                             .copying(&calls.iter().map(tool_said).collect::<Vec<_>>().join("\n\n"))
-                            .with(move || agent_turn(head, tool_group(&calls))),
+                            .text(move || Rich::new(transcript::turn(agent_head(head), transcript::tools(&calls)))),
                     );
                 }
             }
@@ -365,7 +371,7 @@ impl WorkPage {
                 turns.push(
                     Turn::key(format!("out{}", m.id), &(&m.state, waiting))
                         .copying(&m.text)
-                        .with(move || outgoing_bubble(&app, &m, waiting)),
+                        .text(move || outgoing_bubble(&app, &m, waiting)),
                 );
             }
         }
@@ -439,26 +445,49 @@ pub(super) fn director_answers(loaded: &Loaded, id: &str) -> Vec<String> {
     events.iter().filter(|e| e.work == id && e.answered_by_director()).map(|e| e.body.clone()).collect()
 }
 
-/// Your words as a bubble, with the files you sent under it; files alone
-/// show under the meta line.
-pub(super) fn yours_with_files(
-    said: &str,
-    label: &str,
-    at: Option<&str>,
-    status: Option<&gtk::Widget>,
-    files: &[Attachment],
-) -> gtk::Widget {
-    let column = ui::you_bubble(said, label, at, status);
-    if said.trim().is_empty() {
-        // The bubble is the last child; with nothing said there is none to show.
-        if let Some(bubble) = column.last_child() {
-            column.remove(&bubble);
+/// An agent's head, for a turn that does not continue the one before.
+fn agent_head(head: Option<(String, WorkState, Option<String>)>) -> Option<Doc> {
+    head.map(|(title, state, at)| transcript::agent_head(&title, state, at.as_deref()))
+}
+
+/// A turn's head and body as one: the head's actions and widgets first.
+fn turn(head: Option<Rich>, body: Rich) -> Rich {
+    let (head_doc, mut acts, mut embeds) = match head {
+        Some(h) => (Some(h.doc), h.acts, h.embeds),
+        None => (None, Vec::new(), Vec::new()),
+    };
+    acts.extend(body.acts);
+    embeds.extend(body.embeds);
+    Rich { doc: transcript::turn(head_doc, body.doc), acts, embeds }
+}
+
+/// The sub-goal a turn came from, as a tag that opens its conversation.
+fn task_tag(rich: &mut Rich, task: &Option<(String, String, WorkState)>, page: &Weak<WorkPage>) -> bool {
+    let Some((id, path, _)) = task.as_ref() else { return false };
+    let (page, id) = (page.clone(), id.clone());
+    let act = rich.act(move || {
+        if let Some(page) = page.upgrade() {
+            page.focus_task(&id);
         }
-    }
+    });
+    rich.doc.pill(Look::Tag, path, tag_style().act(act));
+    true
+}
+
+fn tag_style() -> Style {
+    Style::of(Size::Small).weight(Weight::Medium).ink(Ink::Step)
+}
+
+/// Your words as a bubble, with the files you sent under it.
+pub(super) fn yours_with_files(said: &str, label: &str, at: Option<&str>, files: &[Attachment]) -> Rich {
+    let mut rich = Rich::new(transcript::told(label, at, said));
     if !files.is_empty() {
-        column.append(&ui::attachments(files));
+        rich.doc.para(HEAD_GAP, false).align(Align::End);
+        let names = files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>().join(", ");
+        let files = files.to_vec();
+        rich.embed(&names, move || ui::attachments(&files).upcast());
     }
-    column.upcast()
+    rich
 }
 
 /// The director's plan: each sub-goal with where it stands, a way into it.
@@ -466,45 +495,34 @@ pub(super) fn plan_block(
     plan: &[(String, String, WorkState, Option<String>)],
     app: &App,
     page: Weak<WorkPage>,
-) -> gtk::Widget {
+) -> Rich {
+    let mut rich = Rich::new(transcript::head(Some(Icon::Mark(Mark::Done)), "Director", None, None));
+    let mut body = Rich::default();
     if plan.is_empty() {
-        return ui::text("Not planned yet.", &["callout", "text3"]).upcast();
-    }
-    let card = ui::wd_card(6);
-    for (id, title, state, opens) in plan {
-        let row = ui::hbox(SPACE_2);
-        row.append(&ui::state_badge(*state));
-        row.append(&ui::text(title, &["callout"]));
-        let button = gtk::Button::builder().child(&row).build();
-        button.add_css_class("row-button");
-        let (app, page, id, opens) = (app.clone(), page.clone(), id.clone(), opens.clone());
-        button.connect_clicked(move |_| match &opens {
-            Some(goal) => app.open(Place::Work(goal.clone())),
-            None => {
-                if let Some(page) = page.upgrade() {
-                    page.focus_task(&id);
+        body.doc.text("Not planned yet.", Style::CALLOUT.ink(Ink::Text3));
+    } else {
+        body.doc.open_frame(Look::Plan);
+        for (i, (id, title, state, opens)) in plan.iter().enumerate() {
+            let (app, page, id, opens) = (app.clone(), page.clone(), id.clone(), opens.clone());
+            let act = body.act(move || match &opens {
+                Some(goal) => app.open(Place::Work(goal.clone())),
+                None => {
+                    if let Some(page) = page.upgrade() {
+                        page.focus_task(&id);
+                    }
                 }
-            }
-        });
-        card.append(&button);
-    }
-    let turn = ui::turn(Some(&ui::mark(Mark::Done, 24, "Director").upcast()), Some(&ui::speaker("Director")), &card);
-    turn.upcast()
-}
-
-/// The sub-goal a turn came from, as a tag that opens its conversation; none for the goal.
-pub(super) fn task_link(task: &Option<(String, String, WorkState)>, page: &Weak<WorkPage>) -> Option<gtk::Widget> {
-    let (id, path, _) = task.as_ref()?;
-    let link = gtk::Button::builder().child(&ui::sgtag(path)).tooltip_text("Show this sub-goal's conversation").build();
-    link.add_css_class("row-button");
-    link.set_valign(gtk::Align::Center);
-    let (page, id) = (page.clone(), id.clone());
-    link.connect_clicked(move |_| {
-        if let Some(page) = page.upgrade() {
-            page.focus_task(&id);
+            });
+            body.doc.para(if i == 0 { 0 } else { 6 }, false);
+            let (badge, tone) = state.badge();
+            let badge_style = Style::of(Size::Small).weight(Weight::Semibold).ink(Ink::Badge(tone));
+            body.doc.pill(Look::Badge(tone), badge, badge_style.act(act.clone()));
+            body.doc.ornament("  ", Style::CALLOUT);
+            body.doc.push(transcript::Content::Text(title.clone()), Style::CALLOUT.act(act));
         }
-    });
-    Some(link.upcast())
+        body.doc.close_frame();
+    }
+    let head = std::mem::take(&mut rich);
+    turn(Some(head), body)
 }
 
 /// One thing that happened on a goal or a task, as its kind reads.
@@ -513,48 +531,51 @@ pub(super) fn event_turn(
     report: Option<&Report>,
     task: Option<(String, String, WorkState)>,
     page: Weak<WorkPage>,
-) -> gtk::Widget {
+) -> Rich {
     let on = task.as_ref().map(|t| t.1.clone());
     match e.kind.as_str() {
         "report" => {
-            let card = ui::card("raised");
-            let head = ui::hbox(SPACE_2);
-            head.append(&ui::line("Report", &["callout", "strong"]));
-            if let Some(link) = task_link(&task, &page) {
-                head.append(&link);
-            }
+            let mut rich = Rich::default();
+            rich.doc.indent(BODY);
+            rich.doc.open_frame(Look::Card);
+            rich.doc.para(TURN_GAP, true);
+            rich.doc.push(transcript::Content::Text("Report".into()), Style::CALLOUT.weight(Weight::Semibold));
+            rich.doc.ornament(" ", Style::CALLOUT);
+            task_tag(&mut rich, &task, &page);
             let verdict = report.map(|r| r.verdict.clone()).filter(|v| !v.is_empty()).or_else(|| verdict(&e.body));
             if let Some(verdict) = verdict {
-                head.append(&verdict_pill(&verdict));
+                let tone = verdict_tone(&verdict);
+                rich.doc.ornament(" ", Style::CALLOUT);
+                rich.doc.pill(
+                    Look::Badge(tone),
+                    &verdict,
+                    Style::of(Size::Small).weight(Weight::Semibold).ink(Ink::Badge(tone)),
+                );
             }
-            let at = ui::line(&kit::time::when(&e.at), &["meta", "text3"]);
-            at.set_hexpand(true);
-            at.set_xalign(1.0);
-            head.append(&at);
-            card.append(&head);
-            match report {
-                Some(r) => card.append(&report_view(r)),
-                None => card.append(&folded_markdown(&e.body, 12)),
+            transcript::meta_tail(&mut rich.doc, Some(e.at.as_str()), None);
+            let mut body = match report {
+                Some(r) => report_view(r),
+                None => Rich::new(transcript::markdown_folded(&e.body, 12)),
+            };
+            if let Some(first) = body.doc.paras.first_mut() {
+                first.above += 12;
             }
-            card.upcast()
+            rich.append(body);
+            rich.doc.close_frame();
+            rich
         }
         "sent" => {
-            let speaker = match task_link(&task, &page) {
-                Some(link) => {
-                    let row = ui::hbox(SPACE_1);
-                    row.append(&ui::line("Sent to", &["speaker"]));
-                    row.append(&link);
-                    row.upcast()
-                }
-                None => ui::speaker("Sent"),
-            };
-            let meta = ui::meta(&speaker, Some(e.at.as_str()), None);
-            ui::turn(
-                Some(&ui::avatar("mail-send-symbolic", &["text2"])),
-                Some(&meta),
-                &ui::folded(&e.body, 4, &["body"]),
-            )
-            .upcast()
+            let mut head = Rich::new(transcript::head(
+                Some(Icon::Named("mail-send-symbolic", Ink::Text2)),
+                if task.is_some() { "Sent to " } else { "Sent" },
+                None,
+                None,
+            ));
+            task_tag(&mut head, &task, &page);
+            transcript::meta_tail(&mut head.doc, Some(e.at.as_str()), None);
+            let mut body = Doc::new();
+            transcript::folded(&mut body, &e.body, 4, Style::BODY);
+            turn(Some(head), Rich::new(body))
         }
         "decision" | "answer" => director_answer(&e.answer_text(), Some(e.at.as_str()), on.as_deref()),
         "verify" => {
@@ -565,23 +586,24 @@ pub(super) fn event_turn(
                 on.map(|t| format!(" · {t}")).unwrap_or_default(),
                 kit::time::when(&e.at)
             );
-            let classes: &[&str] = if passed { &[] } else { &["failure"] };
-            ui::event_line(&text, classes).upcast()
+            Rich::new(transcript::event_line(&text, if passed { Ink::Text3 } else { Ink::Failure }, false))
         }
-        "pr" => ui::event_line(&format!("Delivered · {} · {}", e.body, kit::time::when(&e.at)), &[]).upcast(),
+        "pr" => Rich::new(transcript::event_line(
+            &format!("Delivered · {} · {}", e.body, kit::time::when(&e.at)),
+            Ink::Text3,
+            false,
+        )),
         "state" => {
             let who = on.unwrap_or_else(|| "The goal".to_string());
             let failed = matches!(e.body.as_str(), "blocked" | "abandoned");
-            let classes: &[&str] = if failed { &["failure"] } else { &[] };
-            ui::event_line(
-                &format!("{who}: {} · {}", kit::words::event_body("state", &e.body), kit::time::when(&e.at)),
-                classes,
-            )
-            .upcast()
+            let text = format!("{who}: {} · {}", kit::words::event_body("state", &e.body), kit::time::when(&e.at));
+            Rich::new(transcript::event_line(&text, if failed { Ink::Failure } else { Ink::Text3 }, false))
         }
         _ => {
-            let meta = ui::meta(&ui::speaker(&kit::words::event(&e.kind)), Some(e.at.as_str()), on.as_deref());
-            ui::turn(None, Some(&meta), &ui::folded(&e.body, 6, &["body"])).upcast()
+            let head = transcript::head(None, &kit::words::event(&e.kind), Some(e.at.as_str()), on.as_deref());
+            let mut body = Doc::new();
+            transcript::folded(&mut body, &e.body, 6, Style::BODY);
+            Rich::new(transcript::turn(Some(head), body))
         }
     }
 }
@@ -591,46 +613,43 @@ pub(super) fn verdict(body: &str) -> Option<String> {
     body.lines().find_map(|l| l.trim().strip_prefix("STATUS:")).map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
 
-/// Markdown that folds after `lines` lines, with Show all to read the rest.
-pub(super) fn folded_markdown(body: &str, lines: usize) -> gtk::Widget {
-    let total = body.lines().count();
-    if total <= lines {
-        return ui::markdown(body).upcast();
+/// A verdict's tone: done settled, blocked and needs-input for the person.
+fn verdict_tone(verdict: &str) -> Tone {
+    match verdict.to_lowercase().as_str() {
+        "done" => Tone::Settled,
+        "blocked" | "needs-input" => Tone::Attention,
+        _ => Tone::Waiting,
     }
-    let column = ui::vbox(SPACE_2);
-    let short: String = body.lines().take(lines).collect::<Vec<_>>().join("\n");
-    let shown = gtk::Stack::builder().vhomogeneous(false).build();
-    shown.add_named(&ui::markdown(&short), Some("short"));
-    shown.add_named(&ui::markdown(body), Some("all"));
-    shown.set_visible_child_name("short");
-    let more = ui::link("Show all");
-    let s = shown.clone();
-    more.connect_clicked(move |b| {
-        let all = s.visible_child_name().as_deref() == Some("all");
-        s.set_visible_child_name(if all { "short" } else { "all" });
-        b.set_label(if all { "Show all" } else { "Show less" });
-    });
-    column.append(&shown);
-    column.append(&more);
-    column.upcast()
 }
 
 /// The director answering in your place, settled: what it answered, and that it was the director.
-pub(super) fn director_answer(text: &str, at: Option<&str>, on: Option<&str>) -> gtk::Widget {
-    let card = ui::card("settled");
+pub(super) fn director_answer(text: &str, at: Option<&str>, on: Option<&str>) -> Rich {
+    let mut doc = Doc::new();
+    doc.indent(BODY);
+    doc.open_frame(Look::Settled);
+    doc.para(TURN_GAP, true).avatar(Icon::Named("emblem-ok-symbolic", Ink::Settled));
+    doc.push(transcript::Content::Text("Director answered".into()), Style::SPEAKER);
     let detail = on.map(|t| format!("on {t}"));
-    card.append(&ui::meta(&ui::speaker("Director answered"), at, detail.as_deref()));
-    card.append(&ui::said(text, &["body"]));
-    ui::turn(Some(&ui::avatar("emblem-ok-symbolic", &["settled-text"])), None, &card).upcast()
+    transcript::meta_tail(&mut doc, at, detail.as_deref());
+    doc.para(4, false);
+    doc.text(text, Style::BODY);
+    doc.close_frame();
+    Rich::new(doc)
 }
 
 /// The director leaving a part of a question to the person, and why.
-fn declined_turn(e: &Event, declined: &kit::DirectorChoice) -> gtk::Widget {
-    let card = ui::vbox(SPACE_1);
-    card.append(&ui::meta(&ui::speaker("Director"), Some(e.at.as_str()), Some("left it to you")));
-    card.append(&ui::said(&declined.question, &["callout", "medium"]));
-    card.append(&ui::said(&kit::sentence(&declined.why), &["callout", "text2"]));
-    ui::turn(Some(&ui::avatar("dialog-question-symbolic", &["attention-text"])), None, &card).upcast()
+fn declined_turn(e: &Event, declined: &kit::DirectorChoice) -> Rich {
+    let head = transcript::head(
+        Some(Icon::Named("dialog-question-symbolic", Ink::Attention)),
+        "Director",
+        Some(e.at.as_str()),
+        Some("left it to you"),
+    );
+    let mut body = Doc::new();
+    body.text(&declined.question, Style::CALLOUT.weight(Weight::Medium));
+    body.para(4, false);
+    body.text(&kit::sentence(&declined.why), Style::CALLOUT.ink(Ink::Text2));
+    Rich::new(transcript::turn(Some(head), body))
 }
 
 /// A question and its answer in one card: the director's answer set apart
@@ -643,61 +662,70 @@ pub(super) fn exchange_turn(
     asker: &str,
     task: Option<String>,
     page: Weak<WorkPage>,
-) -> gtk::Widget {
-    let card = ui::wd_card(SPACE_1);
+) -> Rich {
+    let mut head = Rich::new(transcript::head(
+        Some(Icon::Mark(Mark::NeedsYou)),
+        if task.is_some() { "agent " } else { asker },
+        None,
+        None,
+    ));
+    if let Some(id) = task.clone() {
+        let named = Some((id, asker.to_string(), WorkState::Running));
+        task_tag(&mut head, &named, &page);
+    }
+    transcript::meta_tail(&mut head.doc, Some(q.at.as_str()), None);
+
+    let mut body = Rich::default();
+    body.doc.open_frame(Look::Card);
     let asked = match (answer, &task) {
         (Some(a), _) if a.answered_by_director() => "Asked the director".to_string(),
         (_, Some(_)) => format!("{asker} asks you"),
         (_, None) => "Asked you".to_string(),
     };
-    card.append(&ui::label(&asked));
+    body.doc.text(&asked, Style::LABEL);
     for item in q.asked_items() {
-        card.append(&ui::said(&item.question, &["callout"]));
+        body.doc.para(4, false);
+        body.doc.text(&item.question, Style::CALLOUT);
         for choice in &item.choices {
-            card.append(&ui::text(&format!("○ {}", kit::unmarked(choice)), &["callout", "text2"]));
+            body.doc.para(2, false);
+            body.doc.ornament("○ ", Style::CALLOUT.ink(Ink::Text2));
+            body.doc.text(kit::unmarked(choice), Style::CALLOUT.ink(Ink::Text2));
         }
     }
     match answer {
         Some(a) if a.answered_by_director() => {
-            let answered = ui::hbox(SPACE_1);
-            answered.add_css_class("wd-card");
-            answered.add_css_class("answered");
-            answered.set_margin_top(SPACE_2);
-            let head = ui::label("Director answered");
-            head.add_css_class("settled-text");
-            head.set_valign(gtk::Align::Start);
-            answered.append(&head);
-            let said = ui::said(&format!("· {}", a.answer_text()), &["callout"]);
-            said.set_hexpand(true);
-            answered.append(&said);
-            card.append(&answered);
+            body.doc.open_frame(Look::Settled);
+            body.doc.para(8, false);
+            body.doc.push(
+                transcript::Content::Text("Director answered".into()),
+                Style::META.weight(Weight::Medium).ink(Ink::Settled),
+            );
+            body.doc.text(&format!(" · {}", a.answer_text()), Style::CALLOUT);
+            body.doc.close_frame();
             for part in decided.iter().filter(|d| !d.why.is_empty()) {
                 let why = if decided.len() > 1 {
                     format!("{} · {}: {}", part.question, part.answer.as_deref().unwrap_or(""), part.why)
                 } else {
                     format!("Why: {}", part.why)
                 };
-                card.append(&ui::said(&kit::sentence(&why), &["meta", "text2"]));
+                body.doc.para(6, false);
+                body.doc.text(&kit::sentence(&why), Style::META.ink(Ink::Text2));
             }
         }
-        Some(a) => card.append(&yours_with_files(&a.answer_text(), "You answered", Some(a.at.as_str()), None, files)),
-        None => card.append(&ui::line("Not answered yet", &["meta", "text3"])),
-    }
-    let who = ui::hbox(6);
-    who.append(&ui::speaker(if task.is_some() { "agent" } else { asker }));
-    if let Some(id) = task {
-        let tag = gtk::Button::builder().child(&ui::sgtag(asker)).build();
-        tag.add_css_class("row-button");
-        tag.connect_clicked(move |_| {
-            if let Some(page) = page.upgrade() {
-                page.focus_task(&id);
+        Some(a) => {
+            let mut yours = yours_with_files(&a.answer_text(), "You answered", Some(a.at.as_str()), files);
+            if let Some(first) = yours.doc.paras.first_mut() {
+                first.above = 8;
             }
-        });
-        who.append(&tag);
+            body.append(yours);
+        }
+        None => {
+            body.doc.para(6, false);
+            body.doc.text("Not answered yet", Style::META.ink(Ink::Text3));
+        }
     }
-    who.append(&ui::line(&format!("· {}", kit::time::when(&q.at)), &["speaker"]));
-    let mark = ui::mark(Mark::NeedsYou, 24, "asked");
-    ui::turn(Some(&mark.upcast()), Some(&who.upcast()), &card).upcast()
+    body.doc.close_frame();
+    turn(Some(head), body)
 }
 
 /// A supervisor's reply: what it said, then each agent it told, started or
@@ -708,18 +736,19 @@ pub(super) fn supervisor_turn(
     tasks: &[(Option<Work>, Phase, Option<String>)],
     goal: &str,
     page: Weak<WorkPage>,
-) -> gtk::Widget {
-    let body = supervisor_body(reply, tasks, page.clone());
-    let speaker = ui::link("Supervisor");
-    speaker.add_css_class("speaker");
-    let goal = goal.to_string();
-    speaker.connect_clicked(move |_| {
-        if let Some(page) = page.upgrade() {
+) -> Rich {
+    let mut head = Rich::default();
+    let (weak, goal) = (page.clone(), goal.to_string());
+    let act = head.act(move || {
+        if let Some(page) = weak.upgrade() {
             page.focus_task(&goal);
         }
     });
-    let meta = ui::meta(&speaker.upcast(), Some(e.at.as_str()), None);
-    ui::turn(Some(&ui::avatar("security-high-symbolic", &["text2"])), Some(&meta), &body).upcast()
+    head.doc.para(0, true).avatar(Icon::Named("security-high-symbolic", Ink::Text2));
+    head.doc.paras[0].indent = BODY;
+    head.doc.push(transcript::Content::Text("Supervisor".into()), Style::SPEAKER.ink(Ink::Link).act(act));
+    transcript::meta_tail(&mut head.doc, Some(e.at.as_str()), None);
+    turn(Some(head), supervisor_body(reply, tasks, page))
 }
 
 /// What a supervisor said, the agents it told, started or filed, and what was refused.
@@ -727,70 +756,67 @@ pub(super) fn supervisor_body(
     reply: &kit::SupervisorReply,
     tasks: &[(Option<Work>, Phase, Option<String>)],
     page: Weak<WorkPage>,
-) -> gtk::Box {
-    let body = ui::vbox(SPACE_3);
-    if !reply.said.is_empty() {
-        body.append(&ui::markdown(&reply.said));
-    }
-    let chips = ui::vbox(SPACE_2);
-    for (action, (task, phase, now)) in reply.actions.iter().zip(tasks) {
+) -> Rich {
+    let mut body = Rich::new(transcript::markdown(&reply.said));
+    for (i, (action, (task, phase, now))) in reply.actions.iter().zip(tasks).enumerate() {
+        let gap = if i == 0 && reply.said.is_empty() {
+            0
+        } else if i == 0 {
+            12
+        } else {
+            8
+        };
         match task {
-            Some(task) => chips.append(&agent_chip(task, *phase, &action.line, now.as_deref(), page.clone())),
+            Some(task) => {
+                let mut chip = agent_chip(task, *phase, &action.line, now.as_deref(), page.clone());
+                if let Some(first) = chip.doc.paras.first_mut() {
+                    first.above += gap;
+                }
+                body.append(chip);
+            }
             None => {
-                let row = ui::hbox(SPACE_2);
-                row.append(&ui::icon("object-select-symbolic", &["text2"]));
-                row.append(&ui::text(&action.line, &["callout", "text2"]));
-                chips.append(&row);
+                body.doc.para(gap, false);
+                body.doc.icon(Icon::Named("object-select-symbolic", Ink::Text2));
+                body.doc.ornament(" ", Style::CALLOUT);
+                body.doc.text(&action.line, Style::CALLOUT.ink(Ink::Text2));
             }
         }
     }
-    if chips.first_child().is_some() {
-        body.append(&chips);
-    }
     for line in &reply.refused {
-        let row = ui::hbox(SPACE_2);
-        row.append(&ui::icon("window-close-symbolic", &["failure"]));
-        row.append(&ui::said(line, &["callout", "failure"]));
-        body.append(&row);
+        body.doc.para(8, false);
+        body.doc.icon(Icon::Named("window-close-symbolic", Ink::Failure));
+        body.doc.ornament(" ", Style::CALLOUT);
+        body.doc.text(line, Style::CALLOUT.ink(Ink::Failure));
     }
     body
 }
 
 /// An agent inside the conversation: where its session is, what it is
-/// doing, and what it was told.
-pub(super) fn agent_chip(
-    task: &Work,
-    phase: Phase,
-    told: &str,
-    now: Option<&str>,
-    page: Weak<WorkPage>,
-) -> gtk::Widget {
-    let row = ui::hbox(SPACE_2);
-    let mark = phase_mark(phase);
-    mark.set_valign(gtk::Align::Start);
-    mark.set_margin_top(SPACE_1);
-    row.append(&mark);
-    let column = ui::vbox(2);
-    column.set_hexpand(true);
-    let top = ui::hbox(SPACE_2);
-    top.append(&ui::line(&task.title, &["callout", "strong"]));
-    top.append(&ui::state_icon(task.state));
-    column.append(&top);
-    column.append(&ui::line(told, &["meta", "text2"]));
-    if let Some(now) = now.filter(|n| !n.is_empty()) {
-        column.append(&ui::line(now, &["meta", "text3"]));
-    }
-    row.append(&column);
-    row.append(&ui::icon("go-next-symbolic", &["text3"]));
-    let button = gtk::Button::builder().child(&row).tooltip_text("Show this agent's conversation").build();
-    button.add_css_class("agent-chip");
+/// doing, and what it was told; a click shows its conversation.
+pub(super) fn agent_chip(task: &Work, phase: Phase, told: &str, now: Option<&str>, page: Weak<WorkPage>) -> Rich {
+    let mut chip = Rich::default();
     let id = task.id.clone();
-    button.connect_clicked(move |_| {
+    let act = chip.act(move || {
         if let Some(page) = page.upgrade() {
             page.focus_task(&id);
         }
     });
-    button.upcast()
+    chip.doc.open_frame(Look::Chip);
+    chip.doc.para(0, false);
+    chip.embed("", move || phase_mark(phase));
+    chip.doc.ornament("  ", Style::CALLOUT);
+    chip.doc
+        .push(transcript::Content::Text(task.title.clone()), Style::CALLOUT.weight(Weight::Semibold).act(act.clone()));
+    chip.doc.ornament(" ", Style::CALLOUT);
+    chip.doc.icon(Icon::State(task.state));
+    chip.doc.para(2, false);
+    chip.doc.text(told, Style::META.ink(Ink::Text2).act(act.clone()));
+    if let Some(now) = now.filter(|n| !n.is_empty()) {
+        chip.doc.para(2, false);
+        chip.doc.text(now, Style::META.ink(Ink::Text3).act(act));
+    }
+    chip.doc.close_frame();
+    chip
 }
 
 /// A task that stopped without a report, and what it last said.
@@ -799,39 +825,49 @@ pub(super) fn stopped_turn(
     said: &str,
     task: Option<(String, String, WorkState)>,
     page: Weak<WorkPage>,
-) -> gtk::Widget {
-    let avatar = task.as_ref().map(|t| ui::state_icon(t.2).upcast::<gtk::Widget>());
-    let speaker = task_link(&task, &page).unwrap_or_else(|| ui::speaker("A task"));
-    let meta = ui::meta(&speaker, Some(e.at.as_str()), Some("stopped without a report"));
-    ui::turn(avatar.as_ref(), Some(&meta), &ui::folded(said, 3, &["body", "text2"])).upcast()
+) -> Rich {
+    let avatar = task.as_ref().map(|t| Icon::State(t.2));
+    let mut head = Rich::new(transcript::head(avatar, if task.is_some() { "" } else { "A task" }, None, None));
+    task_tag(&mut head, &task, &page);
+    transcript::meta_tail(&mut head.doc, Some(e.at.as_str()), Some("stopped without a report"));
+    let mut body = Doc::new();
+    transcript::folded(&mut body, said, 3, Style::BODY.ink(Ink::Text2));
+    turn(Some(head), Rich::new(body))
 }
 
-/// An agent's turn: its mark and name once, then what it said and did.
-pub(super) fn agent_turn(head: Option<(String, WorkState, Option<String>)>, body: gtk::Widget) -> gtk::Widget {
-    match head {
-        Some((title, state, at)) => {
-            let meta = ui::meta(&ui::speaker(&title), at.as_deref(), None);
-            ui::turn(Some(&ui::state_icon(state).upcast()), Some(&meta), &body).upcast()
+/// A question the session asked and how it was answered.
+fn answered_question(question: &Question) -> Rich {
+    let mut doc = Doc::new();
+    doc.indent(BODY);
+    doc.open_frame(Look::Card);
+    doc.para(TURN_GAP, true);
+    doc.text("Asked", Style::LABEL);
+    for (i, item) in question.items.iter().enumerate() {
+        let answer = question.answers.as_ref().and_then(|a| a.get(i));
+        let parts: Vec<&str> = answer.map(|a| a.split(", ").collect()).unwrap_or_default();
+        doc.para(8, false);
+        doc.text(&item.question, Style::CALLOUT.weight(Weight::Medium));
+        for option in &item.options {
+            let chosen = parts.contains(&option.label.as_str());
+            doc.para(2, false);
+            doc.ornament(
+                if chosen { "◉ " } else { "○ " },
+                Style::CALLOUT.ink(if chosen { Ink::Accent } else { Ink::Text3 }),
+            );
+            let style = if chosen { Style::CALLOUT.weight(Weight::Medium) } else { Style::CALLOUT.ink(Ink::Text2) };
+            doc.text(kit::unmarked(&option.label), style);
         }
-        None => ui::turn(None, None, &body).upcast(),
-    }
-}
-
-pub(super) fn agent_body(step: &Step, open: bool) -> gtk::Widget {
-    match step.kind {
-        StepKind::Thinking => {
-            let expander = gtk::Expander::new(None);
-            expander.set_label_widget(Some(&ui::line("Thinking", &["callout", "text3"])));
-            expander.set_child(Some(&ui::said(step.text(), &["callout", "text2"])));
-            expander.set_expanded(open);
-            expander.upcast()
+        if let Some(answer) = answer.filter(|a| !item.options.iter().any(|o| a.split(", ").any(|p| p == o.label))) {
+            doc.para(4, false);
+            doc.text(answer, Style::CALLOUT);
         }
-        StepKind::Tool => match &step.tool {
-            Some(call) => tool_row(call),
-            None => ui::line("a tool call", &["callout", "text2"]).upcast(),
-        },
-        _ => ui::markdown(step.text()).upcast(),
     }
+    if let Some(reply) = &question.reply {
+        doc.para(8, false);
+        doc.text(reply, Style::CALLOUT.ink(Ink::Text2));
+    }
+    doc.close_frame();
+    Rich::new(doc)
 }
 
 /// What a step said, as its turn copies it.
@@ -851,156 +887,100 @@ fn tool_said(call: &ToolCall) -> String {
     parts.join("\n\n")
 }
 
-/// One tool call in a line; its input and result on disclosure.
-pub(super) fn tool_row(call: &ToolCall) -> gtk::Widget {
-    let head = ui::hbox(SPACE_2);
-    head.append(&ui::line(&call.name, &["callout", "strong", "text2"]));
-    let summary = ui::line(&call.summary, &["callout", "text2"]);
-    summary.set_hexpand(true);
-    head.append(&summary);
-    if call.failed {
-        head.append(&ui::icon("dialog-error-symbolic", &["failure"]));
-    } else if call.result.is_none() {
-        let spinner = gtk::Spinner::new();
-        spinner.start();
-        head.append(&spinner);
-    }
-    let detail = ui::vbox(SPACE_2);
-    if !call.input.is_empty() {
-        detail.append(&ui::code_block(&call.input));
-    }
-    if let Some(result) = &call.result {
-        detail.append(&ui::code_block(result));
-    }
-    let expander = gtk::Expander::new(None);
-    expander.set_label_widget(Some(&head));
-    expander.set_child(Some(&detail));
-    expander.upcast()
-}
-
-/// A run of tool calls: one line each, a run of more than three folded into
-/// "N tool calls".
-pub(super) fn tool_group(calls: &[ToolCall]) -> gtk::Widget {
-    let column = ui::vbox(SPACE_1);
-    for call in calls {
-        column.append(&tool_row(call));
-    }
-    if calls.len() <= 3 {
-        return column.upcast();
-    }
-    let expander = gtk::Expander::new(None);
-    expander.set_label_widget(Some(&ui::line(&format!("{} tool calls", calls.len()), &["callout", "text2"])));
-    expander.set_child(Some(&column));
-    expander.upcast()
-}
-
 /// A message on its way: your bubble with where it is, and when wd refused
 /// it, why, with Retry and Discard.
-pub(super) fn outgoing_bubble(app: &App, m: &Outgoing, waiting: &str) -> gtk::Widget {
+pub(super) fn outgoing_bubble(app: &App, m: &Outgoing, waiting: &str) -> Rich {
     let status = match &m.state {
-        OutgoingState::Sending => "· Sending…".to_string(),
-        OutgoingState::Sent => format!("· {waiting}"),
-        OutgoingState::Failed { .. } => "· not sent".to_string(),
+        OutgoingState::Sending => "Sending…".to_string(),
+        OutgoingState::Sent => waiting.to_string(),
+        OutgoingState::Failed { .. } => "not sent".to_string(),
     };
-    let status: gtk::Widget = ui::line(&status, &["text3"]).upcast();
-    let column = ui::you_bubble(&m.text, "You", None, Some(&status));
-    if m.text.trim().is_empty() {
-        if let Some(bubble) = column.last_child() {
-            column.remove(&bubble);
-        }
+    let mut rich = Rich::new(transcript::told("You", None, &m.text));
+    if let Some(meta) = rich.doc.paras.first_mut() {
+        meta.spans.push(transcript::Span {
+            content: transcript::Content::Text(format!(" · {status}")),
+            style: Style::META.ink(Ink::Text3),
+        });
     }
     if !m.files.is_empty() {
-        let names = ui::hbox(SPACE_1);
-        names.set_halign(gtk::Align::End);
-        for path in &m.files {
+        rich.doc.para(HEAD_GAP, false).align(Align::End);
+        for (i, path) in m.files.iter().enumerate() {
             let name =
                 std::path::Path::new(path).file_name().map_or(path.clone(), |n| n.to_string_lossy().into_owned());
-            names.append(&ui::tag(&name, &["meta", "text2"]));
+            if i > 0 {
+                rich.doc.ornament(" ", Style::META);
+            }
+            rich.doc.pill(Look::Tag, &name, Style::META.ink(Ink::Text2));
         }
-        column.append(&names);
     }
     if let OutgoingState::Failed { why, .. } = &m.state {
-        let row = ui::hbox(SPACE_2);
-        row.set_halign(gtk::Align::End);
-        let why = ui::said(why, &["meta", "failure"]);
-        why.set_max_width_chars(60);
-        row.append(&why);
-        let retry = ui::link("Retry");
-        retry.add_css_class("failure");
-        let discard = ui::link("Discard");
-        discard.add_css_class("failure");
         let (a, id) = (app.clone(), m.id);
-        retry.connect_clicked(move |_| a.store.retry(id));
+        let retry = rich.act(move || a.store.retry(id));
         let a = app.clone();
-        discard.connect_clicked(move |_| a.store.discard(id));
-        row.append(&retry);
-        row.append(&discard);
-        column.append(&row);
+        let discard = rich.act(move || a.store.discard(id));
+        rich.doc.para(HEAD_GAP, false).align(Align::End);
+        rich.doc.text(why, Style::META.ink(Ink::Failure));
+        rich.doc.ornament("   ", Style::META);
+        rich.doc.ornament("Retry", Style::META.ink(Ink::Failure).weight(Weight::Medium).act(retry));
+        rich.doc.ornament("   ", Style::META);
+        rich.doc.ornament("Discard", Style::META.ink(Ink::Failure).weight(Weight::Medium).act(discard));
     }
-    column.upcast()
+    rich
 }
 
-/// A report in parts: what it said with its verdict, then its files as path
-/// chips with any note, then each named section; the first two show and the
-/// rest open with "Show N more".
-pub(super) fn report_view(r: &Report) -> gtk::Widget {
-    let column = ui::vbox(SPACE_3);
+/// A report in parts: what it said, then its files as tags with any note,
+/// then each named section; the first two show and the rest open with
+/// "Show N more".
+pub(super) fn report_view(r: &Report) -> Rich {
+    let mut doc = Doc::new();
+    let mut gap = 0;
     if !r.said.is_empty() {
-        column.append(&ui::said(&r.said, &["body"]));
+        doc.para(0, false);
+        doc.text(&r.said, Style::BODY);
+        gap = 12;
     }
     if !r.files.is_empty() || !r.file_note.is_empty() {
-        let value = ui::vbox(SPACE_1);
-        let chips = gtk::FlowBox::builder()
-            .selection_mode(gtk::SelectionMode::None)
-            .column_spacing(SPACE_1 as u32)
-            .row_spacing(SPACE_1 as u32)
-            .max_children_per_line(12)
-            .build();
-        for file in &r.files {
-            chips.insert(&ui::tag(file, &["code"]), -1);
+        doc.para(gap, true);
+        doc.text("Files", Style::META.ink(Ink::Text2));
+        if !r.files.is_empty() {
+            doc.para(4, false);
+            for (i, file) in r.files.iter().enumerate() {
+                if i > 0 {
+                    doc.ornament("  ", Style::META);
+                }
+                doc.pill(Look::Tag, file, Style::of(Size::Code).ink(Ink::Step));
+            }
         }
-        value.append(&chips);
         if !r.file_note.is_empty() {
-            value.append(&ui::said(&r.file_note, &["callout", "text2"]));
+            doc.para(4, false);
+            doc.text(&r.file_note, Style::CALLOUT.ink(Ink::Text2));
         }
-        column.append(&field("Files", &value));
+        gap = 12;
     }
-    let rest = ui::vbox(SPACE_3);
+    let mut fold = None;
     for (i, section) in r.sections.iter().enumerate() {
-        let shown = field(&title_case(&section.name), &ui::markdown(&section.text));
-        if i < 2 {
-            column.append(&shown);
-        } else {
-            rest.append(&shown);
+        if i == 2 {
+            fold = Some(doc.open_fold(false));
         }
+        doc.para(gap, true);
+        doc.text(&title_case(&section.name), Style::META.ink(Ink::Text2));
+        let mut text = transcript::markdown(&section.text);
+        if let Some(first) = text.paras.first_mut() {
+            first.above += 4;
+            first.starts = false;
+        }
+        doc.append(text);
+        gap = 12;
     }
-    let more = r.sections.len().saturating_sub(2);
-    if more > 0 {
-        let revealer = gtk::Revealer::builder().child(&rest).reveal_child(false).build();
-        let open = ui::link(&format!("Show {more} more"));
-        let r = revealer.clone();
-        open.connect_clicked(move |b| {
-            let now = !r.reveals_child();
-            r.set_reveal_child(now);
-            let label = if now { "Show less".to_string() } else { format!("Show {more} more") };
-            b.set_label(&label);
-        });
-        column.append(&revealer);
-        column.append(&open);
+    if let Some(fold) = fold {
+        doc.close_fold();
+        let more = r.sections.len() - 2;
+        doc.para(8, false);
+        let link = Style::META.ink(Ink::Link).act(Act::Toggle(fold));
+        doc.ornament(&format!("Show {more} more"), link.clone().show(transcript::Show::Closed(fold)));
+        doc.ornament("Show less", link.show(transcript::Show::Open(fold)));
     }
-    column.upcast()
-}
-
-/// A labelled field: the name in a 64 px column, the value beside it.
-pub(super) fn field(name: &str, value: &impl IsA<gtk::Widget>) -> gtk::Box {
-    let row = ui::hbox(SPACE_3);
-    let label = ui::line(name, &["meta", "text2"]);
-    label.set_size_request(64, -1);
-    label.set_valign(gtk::Align::Start);
-    row.append(&label);
-    value.set_hexpand(true);
-    row.append(value);
-    row
+    Rich::new(doc)
 }
 
 /// VERIFY as Verify.
@@ -1010,26 +990,22 @@ pub(super) fn title_case(name: &str) -> String {
     chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
-/// A verdict as a pill: done green, blocked red, needs-input orange.
-pub(super) fn verdict_pill(verdict: &str) -> gtk::Label {
-    let class = match verdict.to_lowercase().as_str() {
-        "done" => "settled-text",
-        "blocked" => "failure",
-        "needs-input" => "attention-text",
-        _ => "text2",
-    };
-    ui::tag(verdict, &["meta", class])
-}
-
 /// A run of updates folded into one line that opens.
-pub(super) fn updates_row(count: usize, at: &str, inner: Vec<Turn>) -> gtk::Widget {
-    let column = ui::vbox(SPACE_3);
+pub(super) fn updates_row(count: usize, at: &str, inner: Vec<Turn>) -> Rich {
+    let mut rich = Rich::default();
+    let fold = rich.doc.folds.len();
+    rich.doc.para(TURN_GAP, true);
+    let act = Act::Toggle(fold);
+    let style = Style::META.ink(Ink::Text3).act(act);
+    rich.doc.ornament("▸ ", style.clone().show(transcript::Show::Closed(fold)));
+    rich.doc.ornament("▾ ", style.clone().show(transcript::Show::Open(fold)));
+    rich.doc.text(&format!("{count} updates · {}", kit::time::when(at)), style);
+    rich.doc.open_fold(false);
     for turn in inner {
-        column.append(&turn.build());
+        if let Some(inner) = turn.rich() {
+            rich.append(inner);
+        }
     }
-    let expander = gtk::Expander::new(None);
-    expander
-        .set_label_widget(Some(&ui::line(&format!("{count} updates · {}", kit::time::when(at)), &["meta", "text3"])));
-    expander.set_child(Some(&column));
-    expander.upcast()
+    rich.doc.close_fold();
+    rich
 }
