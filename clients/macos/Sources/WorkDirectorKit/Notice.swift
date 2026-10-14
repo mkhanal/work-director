@@ -86,7 +86,9 @@ public struct Notice: Sendable, Hashable {
 
             if let detail, let known = earlier.knownQuestions(w.id) {
                 let fresh = detail.needsYou.filter { !known.contains($0.question.id) && $0.question.pending }
-                let asked = fresh.filter { $0.change == nil }
+                // A stop waiting on the person is told as a stop, not again as a question.
+                let stopped = Set(detail.nodes.filter { $0.stopped != nil }.map(\.work.id))
+                let asked = fresh.filter { $0.change == nil && !stopped.contains($0.work) }
                 let items = asked.flatMap(\.question.items)
                 if let first = items.first {
                     var lines = [w.title, first.head]

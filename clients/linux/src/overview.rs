@@ -72,6 +72,11 @@ impl Node {
             return parts.join(" · ");
         }
         let mut parts: Vec<String> = Vec::new();
+        if let Some(stop) = &self.stopped {
+            parts.extend(self.owner.iter().map(|o| o.runner.clone()));
+            parts.push(format!("Stopped without finishing: {}", stop.first_line()));
+            return parts.join(" · ");
+        }
         match state.mark() {
             Mark::Done => {
                 if let Some(d) = &self.done_when {
@@ -84,9 +89,7 @@ impl Node {
             }
             Mark::Working => {
                 parts.extend(self.owner.iter().map(|o| o.runner.clone()));
-                if let Some(stop) = &self.stopped {
-                    parts.push(format!("Stopped without finishing: {}", stop.first_line()));
-                } else if let Some(doing) = &self.doing {
+                if let Some(doing) = &self.doing {
                     parts.push(crate::words::now(doing));
                 }
             }
@@ -116,7 +119,7 @@ impl Node {
         }
         let (label, tone) = self.work.state.badge();
         let (done, total) = self.steps_done();
-        if self.work.state.mark() == Mark::Working && total > 0 {
+        if self.work.state == WorkState::Running && total > 0 {
             return (format!("{label} · {done} of {total}"), tone);
         }
         (label.to_string(), tone)

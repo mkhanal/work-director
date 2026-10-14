@@ -119,6 +119,11 @@ hold only that product's work; with none, every product's.
 - A sub-goal is added with its outcome and what makes it done.
 - What holds the goal back from done is listed, and a sub-goal's page lists what the director did under it.
 
+## A Sub-Goal Reads As Working Only While An Agent Works On It
+- A sub-goal's badge says the state `wd` serves it, a group of an older plan's tasks included: Working, To review, Needs you or Blocked among them; its steps are counted on it only while it is working.
+- The moving mark shows on a row only while a session in it or under it runs.
+- A sub-goal waiting on the person since its agent stopped reads Needs you, says Stopped without finishing with the first line it last said, and offers Tell it to carry on.
+
 ## The Conversation Tags Each Turn With Its Sub-Goal And Filters By It
 - Every turn on work under the goal is tagged with that work's path through the tree.
 - It narrows to everything, to the person and the director, or to one sub-goal and everything under it, each choice with how many turns it keeps.
@@ -209,6 +214,7 @@ hold only that product's work; with none, every product's.
 - Its title says what happened: Question for you, Approve the plan, Change of course proposed, Choose where it finishes, Plan change to approve, Blocked, Stopped without finishing, Finished or Ready for review.
 - Its body names the goal, then what about it: a question's first line and how many more came with it, how many sub-goals a plan has, the course's proposed title, what under it is blocked and why when `wd` says, what under it stopped and the first line it last said, or where it finished.
 - A stop is told once for each work and moment it stopped.
+- Work waiting on the person since its agent stopped is told as Stopped without finishing, not again as a question.
 - Ready for review is told when work reaches Ready to Push, In Review or Ready to Close.
 - Nothing is told from the first read, twice, or about work the person wrote to from the app in the last few seconds.
 - Clicking it opens its goal.

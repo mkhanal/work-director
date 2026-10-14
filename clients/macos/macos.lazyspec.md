@@ -155,6 +155,7 @@ hold only that product's work; with none, every product's.
 - Its title says what happened: Question for you, Approve the plan, Change of course proposed, Choose where it finishes, Plan change to approve, Blocked, Stopped without finishing, Finished or Ready for review.
 - Its body names the goal, then what about it: a question's first line and how many more came with it, how many sub-goals a plan has, the course's proposed title, what under it is blocked and why when `wd` says, what under it stopped without finishing and the first line it last said, or where it finished.
 - Stopped without finishing is told once each time work's agent stops without reporting.
+- Work waiting on the person since its agent stopped is told as Stopped without finishing, not again as a question.
 - Ready for review is told when work reaches Ready to Push, In Review or Ready to Close.
 - Nothing is told from the first read, twice, or about work the person wrote to from the app in the last few seconds.
 - Clicking it opens its goal; with notifications turned off in Settings, none is shown.
@@ -189,6 +190,11 @@ hold only that product's work; with none, every product's.
 - Adding a sub-goal runs `wd goal add <id> "<outcome>" --done-when "<done when>"`; both are required.
 - What holds the goal from done is listed as served.
 - A sub-goal's page lists what the director did there, from its record.
+
+## A Sub-Goal Reads As Working Only While An Agent Works On It
+- A sub-goal's badge says the state `wd` serves it, a group of an older plan's tasks included: Working, To review, Needs you or Blocked among them; its steps are counted on it only while it is working.
+- The moving mark shows on a row only while a session in it or under it runs.
+- A sub-goal waiting on the person since its agent stopped reads Needs you, says Stopped without finishing with the first line it last said, and offers Tell it to carry on.
 
 ## The Record Lists What Was Decided And Done, Filtered By Kind And Sub-Goal
 - The record opens with five counts: decisions and how many were yours, direction checks and corrections, questions and how many the director answered, housekeeping tasks the director ran, and reports checked.

@@ -192,7 +192,11 @@ impl Notice {
                     .iter()
                     .filter(|n| !known.contains(&n.question.id) && n.question.pending())
                     .collect();
-                let asked: Vec<_> = fresh.iter().filter(|n| n.change.is_none()).collect();
+                // A stop waiting on the person is told as a stop, not again as a question.
+                let stopped: HashSet<&str> =
+                    nodes(&detail.tree).into_iter().filter(|n| n.stopped.is_some()).map(|n| n.work.id.as_str()).collect();
+                let asked: Vec<_> =
+                    fresh.iter().filter(|n| n.change.is_none() && !stopped.contains(n.work.as_str())).collect();
                 let items: Vec<_> = asked.iter().flat_map(|n| &n.question.items).collect();
                 if let Some(first) = items.first() {
                     let mut lines = vec![w.title.clone(), first.question.lines().next().unwrap_or("").to_string()];

@@ -879,6 +879,10 @@ struct SeededTree {
         #expect(Notice.between(try readme(nil), first).map(\.keys) == [["stopped:x:t1"]])
         #expect(Notice.between(first, again).map(\.body) == ["Ship the export — Write the README\nhalfway"], "a later stop is told again")
         #expect(Notice.between(first, try readme(nil)).isEmpty, "carrying on is not news")
+        let waits = try sighting([row(export, "needs-you", needsYou: 1)], [],
+                                 ["g": detail(export, tree: [node(work("x", "Write the README", "needs-input", kind: "task"), stopped: ["said": "Shall I add examples?", "at": "t3"])],
+                                              asks: [ask("event-9", on: "x", "Shall I add examples?")])])
+        #expect(Notice.between(try readme(nil), waits).map(\.title) == ["Stopped without finishing"], "a stop waiting on the person is not told again as a question")
         #expect(Notice.between(before, after, told: Set(told.flatMap(\.keys))).isEmpty, "nothing is told twice")
         #expect(!Notice.between(before, after, quiet: ["g", "q3"]).contains { $0.work == "g" || $0.body.contains("Sync never") },
                 "what the person just did is not told back to them")
@@ -1159,6 +1163,48 @@ struct SeededTree {
         #expect(here.entries.contains { $0.kind == "chore" && $0.by == "director" }, "a nested page's record holds what the director did there")
         #expect(here.entries.first { $0.kind == "chore" }?.sentence == "Housekeeping: refreshed dependencies")
         #expect(try await store.record(t.top).entries.first { $0.kind == "course" }?.text == "The tag format suits the rest", "ledger text in a sentence's place starts with a capital")
+    }
+
+    @Test("A Sub-Goal Reads As Working Only While An Agent Works On It")
+    func subGoalWorkingOnlyWhileAnAgentWorks() throws {
+        func work(_ id: String, _ state: String, kind: String = "task") -> String {
+            workJSON(state: state)
+                .replacingOccurrences(of: #""id":"w1""#, with: #""id":"\#(id)""#)
+                .replacingOccurrences(of: #""title":"T""#, with: #""title":"\#(id)""#)
+                .replacingOccurrences(of: #""kind":"task""#, with: #""kind":"\#(kind)""#)
+        }
+        func node(_ w: String, group: Bool = false, steps: Bool = false, needsYou: Int = 0, stopped: String = "null", children: [String] = []) -> String {
+            let planned = steps ? #"[{"n":1,"text":"Write it","state":"done"},{"n":2,"text":"Test it","state":"done"}]"# : "[]"
+            return #"{"work":\#(w),"group":\#(group),"done_when":null,"after":[],"waiting_on":[],"why_not_moving":null,"owner":null,"planned_into":null,"progress":null,"doing":null,"steps":\#(planned),"judged":null,"needs_you":\#(needsYou),"stopped":\#(stopped),"blocked_because":null,"children":[\#(children.joined(separator: ","))]}"#
+        }
+        let stop = #"{"said":"Only part of the suite has run.\nShall I run all three?","at":"t1"}"#
+        let tree = [
+            node(work("finished", "review", kind: "goal"), group: true, children: [node(work("a", "review", kind: "task"), steps: true), node(work("b", "review"))]),
+            node(work("asked", "needs-input", kind: "goal"), group: true, needsYou: 1, children: [node(work("c", "needs-input"), needsYou: 1, stopped: stop)]),
+            node(work("busy", "running"), steps: true),
+            node(work("idle", "running")),
+        ].joined(separator: ",")
+        let json = """
+        {"goal":\(work("g", "running", kind: "goal")),"tasks":[],"rollup":{"counts":{},"done":0,"total":0},"events":[],"claims":[],"landings":[],
+         "delivery":null,"activity":{"busy":{"status":"running"},"idle":{"status":"idle"},"c":{"status":"idle"},"a":{"status":"stopped"}},
+         "reports":{},"waiting":[],"chain":[],"tree":[\(tree)],"paths":{},"done_when":null,"finish":null,
+         "progress":{"done":0,"total":0,"superseded":0},"not_done_because":[],"needs_you":[],"course":null,"superseded":[],"proposed":false}
+        """
+        let goal = try JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
+        let rows = Dictionary(uniqueKeysWithValues: goal.nodes.map { ($0.id, $0) })
+        let finished = try #require(rows["finished"]), a = try #require(rows["a"]), asked = try #require(rows["asked"])
+        let c = try #require(rows["c"]), busy = try #require(rows["busy"])
+        #expect(finished.badge == GoalBadge("To review", .live), "a group whose tasks all wait on review reads To review")
+        #expect(a.badge == GoalBadge("To review", .live), "steps are counted only while it is working")
+        #expect(busy.badge == GoalBadge("Working · 2 of 2", .live))
+        #expect(asked.badge == GoalBadge("Needs you", .attention) && asked.mark == .needsYou)
+        #expect(c.badge == GoalBadge("Needs you", .attention) && c.mark == .needsYou)
+        #expect(c.meta() == "Stopped without finishing: Only part of the suite has run.")
+        #expect(c.stopped != nil, "it offers Tell it to carry on")
+        #expect(Plan.carryOn("c").argv == ["send", "c", "Carry on where you left off."])
+        #expect(goal.isWorking("busy"), "a session that runs shows the moving mark")
+        #expect(!goal.isWorking("idle") && !goal.isWorking("c") && !goal.isWorking("finished") && !goal.isWorking("asked"),
+                "no session runs there, so no moving mark")
     }
 
     @Test("The Record Lists What Was Decided And Done, Filtered By Kind And Sub-Goal")

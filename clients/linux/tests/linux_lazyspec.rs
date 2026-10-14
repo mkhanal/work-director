@@ -1923,6 +1923,25 @@ fn a_notification_says_what_happened_and_where() {
         ]
     );
     assert!(Notice::between(Some(&after), &after, &none, &none).is_empty(), "staying put is not news");
+    let waits = {
+        let mut x = node(work("x", "Write the README", "needs-input", "task", "u2"), vec![]);
+        x["stopped"] = json!({"said": "Shall I add examples?", "at": "2026-10-13T11:00:00Z"});
+        sighting(
+            vec![row(goal("g", "Ship the export", "needs-input"), "needs-you", 1, 0, None, false)],
+            vec![],
+            vec![("g", detail(goal("g", "Ship the export", "needs-input"), vec![x], vec![ask("event-9", "x", "Shall I add examples?", Value::Null)]))],
+        )
+    };
+    let was = sighting(
+        vec![row(goal("g", "Ship the export", "running"), "in-flight", 0, 0, None, false)],
+        vec![],
+        vec![("g", detail(goal("g", "Ship the export", "running"), vec![], vec![]))],
+    );
+    assert_eq!(
+        Notice::between(Some(&was), &waits, &none, &none).iter().map(|n| n.title.as_str()).collect::<Vec<_>>(),
+        vec!["Stopped without finishing"],
+        "a stop waiting on the person is not told again as a question"
+    );
     let keys: HashSet<String> = told.iter().flat_map(|n| n.keys.iter().cloned()).collect();
     assert!(Notice::between(Some(&before), &after, &keys, &none).is_empty(), "nothing is told twice");
     let quiet: HashSet<String> = HashSet::from(["g".to_string(), "q3".to_string()]);
@@ -1953,6 +1972,50 @@ fn a_notification_says_what_happened_and_where() {
         HashSet::from(["g", "p", "r", "c"].map(String::from)),
         "a goal whose row changed is read again; one at rest with nothing asked is not read"
     );
+}
+
+/// A Sub-Goal Reads As Working Only While An Agent Works On It
+#[test]
+fn a_sub_goal_reads_as_working_only_while_an_agent_works_on_it() {
+    let step = |n: i64| json!({"n": n, "text": format!("step {n}"), "state": "done"});
+    let stop = json!({"said": "Only part of the suite has run.\nShall I run all three?", "at": "2026-10-13T22:26:51Z"});
+    let goal = goal_view(json!({
+        "goal": work_json("g", "running"), "tasks": [], "rollup": {"counts": {}, "done": 0, "total": 4},
+        "events": [], "claims": [], "landings": [], "delivery": null, "reports": {}, "asking": null,
+        "activity": {"busy": {"status": "running"}, "idle": {"status": "idle"}, "c": {"status": "idle"}, "a": {"status": "stopped"}},
+        "tree": [
+            node_json("finished", "goal", "review", json!({"group": true, "children": [
+                node_json("a", "task", "review", json!({"steps": [step(1), step(2)]})),
+                node_json("b", "task", "review", json!({}))]})),
+            node_json("asked", "goal", "needs-input", json!({"group": true, "needs_you": 1, "children": [
+                node_json("c", "task", "needs-input", json!({"needs_you": 1, "stopped": stop}))]})),
+            node_json("busy", "task", "running", json!({"steps": [step(1), step(2)]})),
+            node_json("idle", "task", "running", json!({})),
+        ],
+    }));
+    let rows = goal.sub_goal_rows();
+    let row = |id: &str| rows.iter().find(|r| r.id == id).expect("a row").clone();
+    assert_eq!(row("finished").badge.0, "To review", "a group whose tasks all wait on review reads To review");
+    assert_eq!(row("busy").badge.0, "Working · 2 of 2");
+    assert_eq!(row("asked").badge.0, "1 needs you");
+    assert!(row("busy").working, "a session that runs shows the moving mark");
+    for id in ["finished", "asked", "idle"] {
+        assert!(!row(id).working, "no session runs under {id}, so no moving mark");
+    }
+    let a = node_json("a", "task", "review", json!({"steps": [step(1), step(2)]}));
+    let a: Node = serde_json::from_value(a).expect("a node");
+    assert_eq!(a.row().badge.0, "To review", "steps are counted only while it is working");
+    let c: Node = serde_json::from_value(node_json("c", "task", "needs-input", json!({"needs_you": 1, "stopped": stop})))
+        .expect("a node");
+    let c = c.row();
+    assert_eq!((c.badge.0.as_str(), c.mark), ("Needs you", Mark::NeedsYou));
+    assert_eq!(c.meta, "Stopped without finishing: Only part of the suite has run.");
+    assert_eq!(
+        c.carry_on.map(|p| p.argv),
+        Some(strings(&["send", "c", "Carry on where you left off."])),
+        "it offers Tell it to carry on"
+    );
+    assert!(!goal.under_way("c"));
 }
 
 /// A Product Is Added From A Folder

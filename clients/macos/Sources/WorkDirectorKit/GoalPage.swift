@@ -31,7 +31,7 @@ extension TreeNode {
     public var badge: GoalBadge {
         if needsYou > 0 && work.state != .needsInput { return GoalBadge("\(needsYou) needs you", .attention) }
         let planned = steps.filter { $0.state != .dropped }
-        if work.state.mark == .working && !planned.isEmpty {
+        if work.state == .running && !planned.isEmpty {
             return GoalBadge("Working · \(planned.filter { $0.state == .done }.count) of \(planned.count)", .live)
         }
         return work.state.badge

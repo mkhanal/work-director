@@ -69,7 +69,8 @@ public struct TreeNode: Codable, Sendable, Hashable, Identifiable {
     public let steps: [PlanStep]
     public let judged: Judgement?
     public let needsYou: Int
-    /// Set while its work runs and its agent stopped without reporting.
+    /// Set while its work runs, or waits on the person, since its agent
+    /// stopped without reporting.
     public let stopped: Stopped?
     /// Why blocked work is blocked, when wd knows.
     public let blockedBecause: String?
