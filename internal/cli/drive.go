@@ -722,12 +722,14 @@ func (c *Cli) sendAnswer(p *project.Project) func(work, question, answer string)
 		if _, err := detectedRunner(h.Runner); err != nil {
 			return err
 		}
-		// Queued and delivered as any message is, so a session that started
-		// working meanwhile reads it when it is free rather than losing it.
-		if _, err := c.tellVia(w, h, answer); err != nil {
+		// Queued and delivered as any answer is, so a session that started
+		// working meanwhile reads it when it is free rather than losing it,
+		// and a goal's supervisor is given it by a look.
+		answered, err := c.Ledger.Answer(w.ID, core.Decision{Question: question, Answer: answer, Source: core.AnsweredByDirector})
+		if err != nil {
 			return err
 		}
-		_, err = c.Ledger.Answer(w.ID, core.Decision{Question: question, Answer: answer, Source: core.AnsweredByDirector})
+		_, err = c.deliverAnswer(w, answered, h, true, answer)
 		return err
 	}
 }

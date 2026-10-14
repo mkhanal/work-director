@@ -4750,7 +4750,7 @@ func TestAMessageSentWhileTheDirectorIsBusyIsDeliveredWhenItIsFree(t *testing.T)
 	if !strings.Contains(o.lastBrief(t), first) {
 		t.Fatalf("the brief lacks the first message:\n%s", o.lastBrief(t))
 	}
-	if out := f.runOK(t, "send", o.goal, second); !strings.Contains(out, "as soon as it is free") {
+	if out := f.runOK(t, "send", o.goal, second); !strings.Contains(out, "the director is finishing the last one") || strings.Contains(out, "supervisor") {
 		t.Fatalf("send to a working director = %q, want it said to wait", out)
 	}
 	if got := waitingFor(t, f, o.goal); !slices.Equal(got, []string{second}) {
@@ -4828,6 +4828,119 @@ func TestEveryMessageFromThePersonGetsAReply(t *testing.T) {
 	}
 	if brief := o.lastBrief(t); !strings.Contains(unreadIn(t, brief), "engineers") {
 		t.Fatalf("the brief lacks the answer given while the director worked:\n%s", brief)
+	}
+}
+
+func TestWhatHappensUnderAGoalWhileItsDirectorWorksReachesItAtTheNextLook(t *testing.T) {
+	f := newCLIFixture(t)
+	o := lookingSupervisor(t, f)
+	f.runOK(t, "send", o.goal, "Start with the detector")
+	// The detector's agent reports while the director works on that message.
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.AddEvent(o.a, core.EventReport, "DONE\nSTATUS: DONE\nFILES: detect.ts"); err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range []core.State{core.StateRunning, core.StateReview} {
+		if w, err := l.Get(o.a); err != nil {
+			t.Fatal(err)
+		} else if w.State == st {
+			continue
+		}
+		if _, err := l.Transition(o.a, st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.Close()
+	o.say(t, supervisor, "Starting with the detector.", "ACTIONS:", "WAIT")
+	o.busy(t, supervisor, false)
+	if s := superviseOnce(t, f, o.goal); !s.Applied {
+		t.Fatalf("supervise once the director is free = %+v, want its reply carried out", s)
+	}
+	if s := superviseOnce(t, f, o.goal); !s.Looked {
+		t.Fatalf("supervise after a report filed while the director worked = %+v, want a look", s)
+	}
+	if brief := o.lastBrief(t); !strings.Contains(brief, "detect.ts") {
+		t.Fatalf("the next brief lacks the report filed while the director worked:\n%s", brief)
+	}
+
+	// What its own reply files does not have it look again.
+	o.say(t, supervisor, "The collector is not needed.", "ACTIONS:", "SUPERSEDE "+o.b+": the detector covers it")
+	o.busy(t, supervisor, false)
+	if s := superviseOnce(t, f, o.goal); !s.Applied || len(s.Actions) != 1 {
+		t.Fatalf("supervise after a SUPERSEDE = %+v, want it carried out", s)
+	}
+	if got := stateOf(t, f, o.b); got != core.StateSuperseded {
+		t.Fatalf("%s = %s, want superseded by the reply", o.b, got)
+	}
+	if s := superviseOnce(t, f, o.goal); s.Looked {
+		t.Fatalf("supervise with only the reply's own changes = %+v, want no look", s)
+	}
+}
+
+// personWrites files text as the person's decision on goal, waiting for its
+// supervisor, as wd send from another process does before it supervises.
+func personWrites(t *testing.T, f *cliFixture, goal, text string) {
+	t.Helper()
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	e, err := l.AddEvent(goal, core.EventDecision, text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.QueueForSupervisor(goal, e.ID, text); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOnlyOneProcessAtATimeSendsToAGoalsDirector(t *testing.T) {
+	f := newCLIFixture(t)
+	o := lookingSupervisor(t, f)
+	o.touch(t, "send-slow", true)
+	first, second := "Cover the API too", "List breaking changes first"
+	personWrites(t, f, o.goal, first)
+	slow := exec.Command(f.goBin, "goal", "supervise", o.goal)
+	slow.Env, slow.Dir = f.env(t, f.bin), f.dir
+	var slowOut []byte
+	var slowErr error
+	done := make(chan struct{})
+	go func() {
+		slowOut, slowErr = slow.CombinedOutput()
+		close(done)
+	}()
+	sending := filepath.Join(o.state, "sending-"+supervisor)
+	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(sending); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the first pass never began sending its brief")
+		}
+	}
+	// Another process is told something while the first is still sending.
+	personWrites(t, f, o.goal, second)
+	superviseAtOnce(t, f, o.goal, 3)
+	<-done
+	if slowErr != nil {
+		t.Fatalf("the sending pass failed: %v\n%s", slowErr, slowOut)
+	}
+	if sent := readFile(t, filepath.Join(o.state, "sent-"+supervisor)); strings.Count(sent, "You supervise goal") != 1 {
+		t.Fatalf("the director was sent %d briefs at once, want one:\n%s", strings.Count(sent, "You supervise goal"), sent)
+	}
+	if got := waitingFor(t, f, o.goal); !slices.Equal(got, []string{second}) {
+		t.Fatalf("waiting for the director = %q, want the second message", got)
+	}
+	o.touch(t, "send-slow", false)
+	o.say(t, supervisor, "The API is covered.", "ACTIONS:", "WAIT")
+	o.busy(t, supervisor, false)
+	superviseOnce(t, f, o.goal)
+	if s := superviseOnce(t, f, o.goal); !s.Looked || !strings.Contains(unreadIn(t, o.lastBrief(t)), second) {
+		t.Fatalf("supervise once the director is free = %+v, want a look with the second message", s)
 	}
 }
 
@@ -5506,6 +5619,16 @@ func TestWdResumeContinuesWhatWasPaused(t *testing.T) {
 	if got := sends(t, state); len(got) != 1 || got[0] != "Resume where you left off.\n\ncarry on with sqlite" {
 		t.Fatalf("sends = %q, want one resume carrying the note to %s", got, t2)
 	}
+
+	// On a goal, the note also waits for its supervisor.
+	g := newCLIFixture(t)
+	o := lookingSupervisor(t, g)
+	o.busy(t, supervisor, true)
+	g.runOK(t, "pause", o.goal)
+	g.runOK(t, "resume", o.goal, "lead with the breaking changes")
+	if got := waitingFor(t, g, o.goal); !slices.Equal(got, []string{"lead with the breaking changes"}) {
+		t.Fatalf("waiting for the director = %q, want the note", got)
+	}
 }
 
 func TestWdCancelStopsAndDropsWorkUntilWdResumeBringsItBack(t *testing.T) {
@@ -5628,6 +5751,15 @@ func TestWdGoalContinuePicksAGoalUpWhereItStands(t *testing.T) {
 	f.runOK(t, "cancel", f.ids["planEpic"], "not needed")
 	if errStr := f.runFail(t, "goal", "continue", f.ids["planEpic"], "again"); !strings.Contains(errStr, "wd goal start") {
 		t.Fatalf("continuing a dropped goal: %q, want it refused naming wd goal start", errStr)
+	}
+
+	// On a paused goal the text reaches its supervisor too.
+	g := newCLIFixture(t)
+	o := lookingSupervisor(t, g)
+	g.runOK(t, "pause", o.goal)
+	g.runOK(t, "goal", "continue", o.goal, "lead with the breaking changes")
+	if !strings.Contains(unreadIn(t, o.lastBrief(t)), "lead with the breaking changes") {
+		t.Fatalf("the paused goal's supervisor was not given the text:\n%s", readFile(t, filepath.Join(o.state, "sent-"+supervisor)))
 	}
 }
 
@@ -6382,7 +6514,7 @@ func TestAPersonCanAttachFilesToWhatTheySend(t *testing.T) {
 		t.Fatalf("the kept decision's file is gone")
 	}
 	_, said, _ := f.runEnv(t, env, "send", o.goal, "and the headers")
-	if !strings.Contains(said, "Kept as a decision on “Release notes for engineers and customers”; its supervisor couldn't be told now") || !strings.Contains(said, "reads it when it next starts") {
+	if !strings.Contains(said, "Kept as a decision on “Release notes for engineers and customers”; the director couldn't be told now") || !strings.Contains(said, "reads it when it next starts") {
 		t.Fatalf("send whose supervisor cannot start printed %q", said)
 	}
 }

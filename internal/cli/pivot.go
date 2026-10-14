@@ -25,7 +25,7 @@ const (
 const resumeText = "Resume where you left off."
 
 // send says something to work while it runs. A goal keeps it as a decision and
-// its supervisor routes it; a task gets it now when its session is idle,
+// the director routes it; a task gets it now when its session is idle,
 // and when it is ready otherwise.
 func (c *Cli) send(rest []string) error {
 	files, err := c.attachedFiles()
@@ -53,11 +53,11 @@ func (c *Cli) send(rest []string) error {
 			discard(atts)
 			return err
 		}
-		text := fmt.Sprintf("Kept as a decision on %s; its supervisor is finishing the last one and reads it as soon as it is free", quoted(w))
+		text := fmt.Sprintf("Kept as a decision on %s; the director is finishing the last one and reads it as soon as it is free", quoted(w))
 		if why, ok := out["not_told"]; ok {
-			text = fmt.Sprintf("Kept as a decision on %s; its supervisor couldn't be told now (%s) and reads it when it next starts", quoted(w), why)
+			text = fmt.Sprintf("Kept as a decision on %s; the director couldn't be told now (%s) and reads it when it next starts", quoted(w), why)
 		} else if out["looked"] == true {
-			text = fmt.Sprintf("Kept as a decision on %s; its supervisor is reading it now", quoted(w))
+			text = fmt.Sprintf("Kept as a decision on %s; the director is reading it now", quoted(w))
 		}
 		return c.out(out, text)
 	}
@@ -76,10 +76,15 @@ func (c *Cli) send(rest []string) error {
 	return c.out(map[string]any{"ok": true, "told": where, "attachments": atts}, said)
 }
 
-// sendTo is send for one task, for callers that only need to know it worked.
+// sendTo is send for callers that only need to know it worked: a goal keeps
+// it as a decision for its supervisor, as wd send does.
 func (c *Cli) sendTo(id, text string) error {
 	w, err := c.Ledger.Get(id)
 	if err != nil {
+		return err
+	}
+	if core.IsGoal(w.Kind) {
+		_, err = c.tellGoal(w, text, nil)
 		return err
 	}
 	_, err = c.tellTask(w, text)
@@ -107,8 +112,22 @@ func (c *Cli) tellTask(w core.Work, text string) (told, error) {
 }
 
 // tellVia queues text for w and delivers it through h, the session that is
-// to read it.
+// to read it. A goal's supervisor is never h: only a claimed look sends to
+// it, so two processes never send to it at once.
 func (c *Cli) tellVia(w core.Work, h runner.Handle, text string) (told, error) {
+	if core.IsGoal(w.Kind) {
+		p, err := c.project(w.Project)
+		if err != nil {
+			return "", err
+		}
+		sh, has, err := coordinator.Supervisor(c.Ledger, w, p)
+		if err != nil {
+			return "", err
+		}
+		if has && sh.Session == h.Session {
+			return "", fmt.Errorf("%s's supervisor is told only by a look: wd send %s", w.ID, w.ID)
+		}
+	}
 	if _, err := c.Ledger.QueueMessage(w.ID, text); err != nil {
 		return "", err
 	}
@@ -286,7 +305,7 @@ func (c *Cli) resume(rest []string) error {
 	if err != nil {
 		return err
 	}
-	resumed, err := c.resumeWork(w, strings.Join(rest[1:], " "))
+	resumed, err := c.resumeWork(w, strings.Join(rest[1:], " "), nil)
 	if err != nil {
 		return err
 	}
@@ -294,12 +313,14 @@ func (c *Cli) resume(rest []string) error {
 }
 
 // resumeWork returns paused work to where it was and tells each task that was
-// working to carry on, with the note; it returns the ids it resumed.
-func (c *Cli) resumeWork(w core.Work, note string) ([]string, error) {
+// working to carry on, with the note and its files; a goal's note also waits
+// for its supervisor, as wd send to a goal does. It returns the ids it
+// resumed.
+func (c *Cli) resumeWork(w core.Work, note string, atts []core.Attachment) ([]string, error) {
 	note = strings.TrimSpace(note)
 	message := resumeText
-	if note != "" {
-		message += "\n\n" + note
+	if note != "" || len(atts) > 0 {
+		message += "\n\n" + core.WithAttached(note, atts)
 	}
 	if w.State == core.StateDropped {
 		return c.restore(w, message)
@@ -343,6 +364,14 @@ func (c *Cli) resumeWork(w core.Work, note string) ([]string, error) {
 			if _, err := c.tellTask(t, message); err != nil {
 				return nil, err
 			}
+		}
+	}
+	if core.IsGoal(w.Kind) && (note != "" || len(atts) > 0) {
+		if w, err = c.Ledger.Get(w.ID); err != nil {
+			return nil, err
+		}
+		if _, err := c.tellGoal(w, note, atts); err != nil {
+			return nil, err
 		}
 	}
 	return resumed, nil
@@ -489,11 +518,8 @@ func (c *Cli) goalContinue(goal core.Work, text string) error {
 	var lines []string
 	switch {
 	case goal.State == core.StatePaused:
-		if _, err := c.resumeWork(goal, core.WithAttached(text, atts)); err != nil {
+		if _, err := c.resumeWork(goal, text, atts); err != nil {
 			discard(atts)
-			return err
-		}
-		if _, err := c.Ledger.Attach(goal.ID, atts); err != nil {
 			return err
 		}
 	case core.Reopenable(goal.State):
@@ -524,7 +550,7 @@ func (c *Cli) goalContinue(goal core.Work, text string) error {
 			return err
 		}
 		if why, ok := told["not_told"]; ok {
-			lines = append(lines, fmt.Sprintf("Its supervisor couldn't be told now (%s) and reads it when it next starts", why))
+			lines = append(lines, fmt.Sprintf("The director couldn't be told now (%s) and reads it when it next starts", why))
 		}
 	}
 	goal, err = c.Ledger.Get(goal.ID)

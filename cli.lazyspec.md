@@ -454,6 +454,7 @@ could not with their work, the bound that ran out, and the work still open.
 ## Wd Resume Continues What Was Paused
 - `wd resume <id> ["<note>"]` returns each paused task, and a paused goal, to the state it had before it was paused.
 - Each task with a session is sent "Resume where you left off." followed by the note, as `wd send` does.
+- On a goal, the note also waits for the goal's supervisor as `wd send` to a goal does.
 
 ## Wd Cancel Stops And Drops Work Until Wd Resume Brings It Back
 - `wd cancel <id> ["<why>"]` stops every live session under the work and drops it and its open work, as `Drop` does, with the reason or `cancelled`.
@@ -472,20 +473,30 @@ could not with their work, the bound that ran out, and the work still open.
 
 ## Wd Goal Continue Picks A Goal Up Where It Stands
 - `wd goal continue <goal> "<text>"` on an open goal sends it the text, as `wd send` to a goal does.
-- On a paused goal it resumes the goal with the text as the note.
+- On a paused goal it resumes the goal with the text as the note, and the text waits for the goal's supervisor as `wd send` to a goal does.
 - On a done goal it unarchives it when archived, reopens it with the text as the reason, plans it and spawns its tasks, as `wd goal start` does.
 - On a dropped or abandoned goal it is refused naming `wd goal start`.
 - `--json` prints `{goal, tasks}`.
 
 ## A Message Sent While The Director Is Busy Is Delivered When It Is Free
 - What the person says to a goal (`wd send`, `wd goal continue`, `wd answer`, by the person or `--director`) waits for the goal's supervisor until a look delivers it.
-- While the supervisor is working, it waits and `wd send` says it reaches the supervisor as soon as it is free.
+- While the supervisor is working, it waits and `wd send` says the director is finishing the last one and reads it as soon as it is free.
 - Once the supervisor is free and its reply is carried out, the next pass looks with every message still waiting, however its events fall around that reply.
 - A reply carried out while a message waits does not move the goal to needs-input, and its `DONE` is refused saying the person wrote since.
 
 ## Every Message From The Person Gets A Reply
 - The supervision brief lists every message waiting, oldest first, under `The person wrote to you since you last looked`, asking the supervisor to reply to each in words before acting.
 - An answer given while the supervisor works is listed the same way at its next look.
+
+## What Happens Under A Goal While Its Director Works Reaches It At The Next Look
+- A task's report, question, answer, state change or note, and a concern raised, filed after the latest look's brief was built, has the next pass look once no task is working, however it falls around the supervisor's reply being read and carried out.
+- The next brief shows it.
+- What carrying out the supervisor's reply itself filed does not make it look again.
+
+## Only One Process At A Time Sends To A Goal's Director
+- A look is claimed before its brief is sent, and while one look's brief is being sent no other pass, from any process, claims a look on that goal.
+- Nothing sends to a goal's supervisor session except a claimed look: a message, answer or note for it waits for one.
+- A claim whose sender stopped before the brief was sent or taken back lapses after ten minutes, and its messages wait for the next look.
 
 ## A Look Counts Only Once Its Brief Is Delivered
 - A look whose brief cannot be sent or started is taken back: no `look` event stays, and its messages wait for the next pass.
@@ -539,4 +550,4 @@ could not with their work, the bound that ran out, and the work still open.
 - With a file attached, the words may be left out.
 - A missing or unreadable file, or a directory, refuses the command naming it; nothing is sent, copied or recorded.
 - `--json` includes `attachments: [{name, path, size, media_type}]`, `[]` when none.
-- A goal whose supervisor cannot be started still keeps what was sent as a decision, with its files: `wd send` exits 0 saying the supervisor couldn't be told now and reads it when it next starts, and `--json` carries `looked: false` and the reason as `not_told`.
+- A goal whose supervisor cannot be started still keeps what was sent as a decision, with its files: `wd send` exits 0 saying the director couldn't be told now and reads it when it next starts, and `--json` carries `looked: false` and the reason as `not_told`.

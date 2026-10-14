@@ -16,6 +16,7 @@ case "$1" in
   status) if [ -f "$state/busy-$2" ]; then echo 'state: working'; else echo 'state: idle'; fi;;
   send)
     if [ -f "$state/send-fails" ]; then echo 'overseer is unreachable' >&2; exit 1; fi
+    if [ -f "$state/send-slow" ]; then : > "$state/sending-$2"; sleep 2; fi
     printf '%s\n' "$3" >> "$state/sent-$2"
     if [ -f "$state/busy-on-send" ]; then : > "$state/busy-$2"; fi
     echo ok;;

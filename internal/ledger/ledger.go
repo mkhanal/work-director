@@ -25,7 +25,8 @@ const schema = `
 CREATE TABLE IF NOT EXISTS work (id TEXT PRIMARY KEY, project TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
   kind TEXT NOT NULL, state TEXT NOT NULL, runner TEXT, session TEXT, ref TEXT, cwd TEXT, created TEXT NOT NULL, updated TEXT NOT NULL,
   parent TEXT, heading TEXT, claim TEXT, impact TEXT, goal_type TEXT, archived TEXT, done_when TEXT, finish_line TEXT, finish_source TEXT);
-CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), kind TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL, effective TEXT, payload TEXT);
+CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), kind TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL, effective TEXT, payload TEXT,
+  reply INTEGER REFERENCES event(id));
 CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY, text TEXT NOT NULL, project TEXT, card TEXT, source TEXT NOT NULL, at TEXT NOT NULL, work TEXT REFERENCES work(id));
 CREATE TABLE IF NOT EXISTS concern (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), text TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, decision TEXT, at TEXT NOT NULL, resolved_at TEXT);
 CREATE TABLE IF NOT EXISTS worktree (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), path TEXT NOT NULL, branch TEXT, kind TEXT NOT NULL, state TEXT NOT NULL, created TEXT NOT NULL, origin TEXT NOT NULL DEFAULT 'attached');
@@ -35,6 +36,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS worktree_one_active_shared ON worktree(work) W
 CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), text TEXT NOT NULL, at TEXT NOT NULL, delivered TEXT,
   event INTEGER REFERENCES event(id), look INTEGER REFERENCES event(id));
 CREATE TABLE IF NOT EXISTS workspace (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, creates INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL, updated TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS sending (goal TEXT PRIMARY KEY REFERENCES work(id), look INTEGER NOT NULL REFERENCES event(id), at TEXT NOT NULL);
 ` + goalTreeSchema
 
 // Additive migration for ledgers created before parents, worktree origins,
@@ -62,6 +64,10 @@ var addedColumns = []struct{ table, col, decl string }{
 	// event is what a message to a goal's supervisor was filed as, and look
 	// the look that delivered it; both are null on a message to a task.
 	{"message", "event", "INTEGER REFERENCES event(id)"}, {"message", "look", "INTEGER REFERENCES event(id)"},
+	// reply is the look whose supervisor's reply an event was filed carrying
+	// out, null on everything else: what a supervisor did itself is not news
+	// to it at its next look.
+	{"event", "reply", "INTEGER REFERENCES event(id)"},
 }
 
 // workspaceSchema is the additive statement for ledgers created before
@@ -81,6 +87,15 @@ CREATE TABLE IF NOT EXISTS after (work TEXT NOT NULL REFERENCES work(id),
 type Ledger struct {
 	db   *sql.DB
 	path string
+	// reply, when set, is the look whose supervisor's reply this ledger is
+	// carrying out: every event it writes is marked with it.
+	reply *int
+}
+
+// CarryingOut is l writing as the supervisor's reply to look: every event
+// filed through it is marked as that reply's doing.
+func (l *Ledger) CarryingOut(look int) *Ledger {
+	return &Ledger{db: l.db, path: l.path, reply: &look}
 }
 
 // Pragmas are per connection, so they ride on the DSN and apply to every
@@ -181,8 +196,21 @@ func (l *Ledger) inTx(f func(tx *sql.Tx) error) error {
 		return err
 	}
 	defer tx.Rollback()
+	// Transactions are immediate, so every event above the newest one at
+	// the start was written by f.
+	var before int
+	if l.reply != nil {
+		if err := tx.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM event`).Scan(&before); err != nil {
+			return err
+		}
+	}
 	if err := f(tx); err != nil {
 		return err
+	}
+	if l.reply != nil {
+		if _, err := tx.Exec(`UPDATE event SET reply = ? WHERE id > ?`, *l.reply, before); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -1352,6 +1380,38 @@ func (l *Ledger) Undelivered(work string) ([]core.Message, error) {
 	return undelivered(l.db, work)
 }
 
+// MessagesWaiting is every work item with a message queued for its own
+// session not yet delivered: none waiting for a goal's supervisor, which a
+// look delivers.
+func (l *Ledger) MessagesWaiting() ([]core.Work, error) {
+	rows, err := l.db.Query(`SELECT DISTINCT work FROM message WHERE delivered IS NULL AND event IS NULL ORDER BY work`)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]core.Work, 0, len(ids))
+	for _, id := range ids {
+		w, err := l.Get(id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, nil
+}
+
 // querier is what reads the ledger: the database or a transaction on it.
 type querier interface {
 	Query(query string, args ...any) (*sql.Rows, error)
@@ -1804,14 +1864,38 @@ func getEvent(q queryer, id int) (core.Event, error) {
 	return e, nil
 }
 
+// SendingLapses is how long a claimed look holds the goal's supervisor for its
+// brief: a claim older than this belongs to a sender that stopped.
+const SendingLapses = 10 * time.Minute
+
 // ClaimLook files a look on goal, saying why, unless a look or supervised
-// event newer than after is on it already: passes that decide to look at the
-// same moment look once. ok is false when another pass looked first. The
-// look takes every message waiting for the goal's supervisor, returned oldest
-// first: they go with its brief, and come back with ReleaseLook when the
-// brief cannot be delivered.
+// event newer than after is on it already, or another look's brief is still
+// being sent: passes that decide to look at the same moment, from any
+// process, look once, and only the pass that claimed a look sends to the
+// supervisor until SentLook or ReleaseLook ends the claim. ok is false when
+// another pass looked first. The look takes every message waiting for the
+// goal's supervisor, returned oldest first: they go with its brief, and come
+// back with ReleaseLook when the brief cannot be delivered.
 func (l *Ledger) ClaimLook(goal string, after int, why string) (e core.Event, taken []core.Message, ok bool, err error) {
 	err = l.inTx(func(tx *sql.Tx) error {
+		var held int
+		var since string
+		switch err := tx.QueryRow(`SELECT look, at FROM sending WHERE goal = ?`, goal).Scan(&held, &since); {
+		case errors.Is(err, sql.ErrNoRows):
+		case err != nil:
+			return err
+		default:
+			at, err := time.Parse(core.TimeLayout, since)
+			if err != nil {
+				return err
+			}
+			if time.Since(at) < SendingLapses {
+				return nil
+			}
+			if err := releaseLook(tx, held); err != nil {
+				return err
+			}
+		}
 		var latest sql.NullInt64
 		if err := tx.QueryRow(`SELECT MAX(id) FROM event WHERE work = ? AND kind IN (?, ?)`,
 			goal, core.EventLook, core.EventSupervised).Scan(&latest); err != nil {
@@ -1830,23 +1914,59 @@ func (l *Ledger) ClaimLook(goal string, after int, why string) (e core.Event, ta
 		if _, err := tx.Exec(`UPDATE message SET delivered = ?, look = ? WHERE work = ? AND delivered IS NULL`, at, e.ID, goal); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(`INSERT INTO sending (goal, look, at) VALUES (?, ?, ?)`, goal, e.ID, at); err != nil {
+			return err
+		}
 		ok = true
 		return nil
 	})
 	return e, taken, ok, err
 }
 
+// SentLook ends look's claim on its goal's supervisor: its brief reached it.
+func (l *Ledger) SentLook(look core.Event) error {
+	_, err := l.db.Exec(`DELETE FROM sending WHERE look = ?`, look.ID)
+	return err
+}
+
 // ReleaseLook takes back look, whose brief never reached the supervisor: the
 // look is removed and the messages it took wait again, so the next pass looks
 // with them.
 func (l *Ledger) ReleaseLook(look core.Event) error {
-	return l.inTx(func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`UPDATE message SET delivered = NULL, look = NULL WHERE look = ?`, look.ID); err != nil {
-			return err
-		}
-		_, err := tx.Exec(`DELETE FROM event WHERE id = ? AND kind = ?`, look.ID, core.EventLook)
+	return l.inTx(func(tx *sql.Tx) error { return releaseLook(tx, look.ID) })
+}
+
+func releaseLook(tx *sql.Tx, look int) error {
+	if _, err := tx.Exec(`DELETE FROM sending WHERE look = ?`, look); err != nil {
 		return err
-	})
+	}
+	if _, err := tx.Exec(`UPDATE message SET delivered = NULL, look = NULL WHERE look = ?`, look); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`DELETE FROM event WHERE id = ? AND kind = ?`, look, core.EventLook)
+	return err
+}
+
+// Unseen is the events at goal or under it, newer than after, that were not
+// filed carrying out its supervisor's reply, in id order.
+func (l *Ledger) Unseen(goal string, after int) ([]core.Event, error) {
+	rows, err := l.db.Query(`WITH RECURSIVE tree(id) AS (
+			SELECT ? UNION SELECT work.id FROM work JOIN tree ON work.parent = tree.id)
+		SELECT `+eventColumns+` FROM event WHERE work IN (SELECT id FROM tree) AND id > ? AND reply IS NULL
+		ORDER BY id`, goal, after)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []core.Event{}
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // SetFiled records the transcript point work was last read at.

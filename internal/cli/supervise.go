@@ -104,7 +104,7 @@ func (c *Cli) supervise(goal core.Work) (supervision, error) {
 			if err != nil || !mine {
 				return out, err
 			}
-			return c.carryOut(goal, p, said[mark.Entries:])
+			return c.replying(goal).carryOut(goal, p, said[mark.Entries:])
 		}
 	}
 
@@ -129,6 +129,9 @@ func (c *Cli) supervise(goal core.Work) (supervision, error) {
 		if errors.Is(err, runner.ErrBusy) {
 			return out, nil
 		}
+		return out, err
+	}
+	if err := c.Ledger.SentLook(look); err != nil {
 		return out, err
 	}
 	if moved {
@@ -268,26 +271,59 @@ func (c *Cli) tend(tasks []core.Work, p *project.Project) (bool, error) {
 	return working, nil
 }
 
-// sinceLook is what changed under goal since its supervisor last looked or was
-// last read, whether the goal itself was decided on since or the person wrote
-// something it has not been given, and the id of that last look or reading.
+// replying is c carrying out the reply to goal's latest look: what it files
+// is marked as the supervisor's own doing, which is no news at its next look.
+func (c *Cli) replying(goal core.Work) *Cli {
+	looks, err := c.Ledger.Events(goal.ID, kindPtr(core.EventLook))
+	if err != nil || len(looks) == 0 {
+		return c
+	}
+	cc := *c
+	cc.Ledger = c.Ledger.CarryingOut(looks[len(looks)-1].ID)
+	return &cc
+}
+
+// sinceLook is what changed under goal that its supervisor has not been shown:
+// filed after the brief of its latest look was built and not by carrying out
+// its reply. It also says whether the goal itself was decided on since or the
+// person wrote something it has not been given, and the id of the latest look
+// or reading, which a look is claimed against.
 func (c *Cli) sinceLook(goal core.Work, tasks []core.Work) ([]string, bool, int, error) {
 	events, err := c.Ledger.Events(goal.ID, nil)
 	if err != nil {
 		return nil, false, 0, err
 	}
-	var ref core.Event
+	var look core.Event
+	last := 0
 	for _, e := range events {
-		if e.Kind == core.EventLook || e.Kind == core.EventSupervised {
-			ref = e
+		switch e.Kind {
+		case core.EventLook:
+			look, last = e, e.ID
+		case core.EventSupervised:
+			last = e.ID
 		}
+	}
+	unseen, err := c.Ledger.Unseen(goal.ID, look.ID)
+	if err != nil {
+		return nil, false, 0, err
+	}
+	isTask := map[string]bool{}
+	for _, t := range tasks {
+		isTask[t.ID] = true
+	}
+	moved := map[core.EventKind]string{
+		core.EventReport: "a task reported", core.EventQuestion: "a task asked", core.EventAnswer: "a task was answered",
+		core.EventState: "a task changed state", core.EventNote: "a task was noted on",
 	}
 	counts := map[string]int{}
 	decided := false
-	for _, e := range events {
-		if e.ID > ref.ID && (e.Kind == core.EventDecision || e.Kind == core.EventAnswer) {
+	for _, e := range unseen {
+		switch {
+		case e.Work == goal.ID && (e.Kind == core.EventDecision || e.Kind == core.EventAnswer):
 			decided = true
 			counts["the goal was decided on"]++
+		case isTask[e.Work] && moved[e.Kind] != "":
+			counts[moved[e.Kind]]++
 		}
 	}
 	// What the person wrote waits for a look however its events fall
@@ -300,22 +336,9 @@ func (c *Cli) sinceLook(goal core.Work, tasks []core.Work) ([]string, bool, int,
 		decided = true
 		counts["the person wrote"] = len(waiting)
 	}
-	moved := map[core.EventKind]string{
-		core.EventReport: "a task reported", core.EventQuestion: "a task asked", core.EventAnswer: "a task was answered",
-		core.EventState: "a task changed state", core.EventNote: "a task was noted on",
-	}
 	ids := []string{goal.ID}
 	for _, t := range tasks {
 		ids = append(ids, t.ID)
-		evs, err := c.Ledger.Events(t.ID, nil)
-		if err != nil {
-			return nil, false, 0, err
-		}
-		for _, e := range evs {
-			if why, ok := moved[e.Kind]; ok && e.ID > ref.ID {
-				counts[why]++
-			}
-		}
 	}
 	for _, id := range ids {
 		concerns, err := c.Ledger.Concerns(&id)
@@ -323,7 +346,7 @@ func (c *Cli) sinceLook(goal core.Work, tasks []core.Work) ([]string, bool, int,
 			return nil, false, 0, err
 		}
 		for _, cx := range concerns {
-			if cx.Resolved == 0 && (ref.ID == 0 || cx.At > ref.At) {
+			if cx.Resolved == 0 && (look.ID == 0 || cx.At > look.At) {
 				counts["a concern was raised"]++
 			}
 		}
@@ -333,10 +356,10 @@ func (c *Cli) sinceLook(goal core.Work, tasks []core.Work) ([]string, bool, int,
 		why = append(why, fmt.Sprintf("%s (%d)", k, n))
 	}
 	slices.Sort(why)
-	if ref.ID == 0 && len(tasks) > 0 && len(why) > 0 {
+	if look.ID == 0 && len(tasks) > 0 && len(why) > 0 {
 		why = []string{"the first look"}
 	}
-	return why, decided, ref.ID, nil
+	return why, decided, last, nil
 }
 
 // picture is the goal as its supervisor is shown it.

@@ -148,7 +148,7 @@ func (c *Cli) answer(rest []string) error {
 	human := "answered"
 	switch {
 	case where == toldQueued && c.supervised(w):
-		human = fmt.Sprintf("The supervisor of %s is finishing the last one; your answer reaches it as soon as it is free", quoted(w))
+		human = fmt.Sprintf("The director is finishing the last one on %s; your answer reaches it as soon as it is free", quoted(w))
 	case where == toldQueued:
 		human = fmt.Sprintf("The agent on %s is busy; your answer is queued and reaches it as soon as it is free", quoted(w))
 	}
