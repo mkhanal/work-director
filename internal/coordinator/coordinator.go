@@ -613,6 +613,14 @@ func goalSession(l *ledger.Ledger, goal core.Work, p *project.Project, prefixes 
 			if h.Since, err = time.Parse(core.TimeLayout, spawns[i].At); err != nil {
 				return runner.Handle{}, false, fmt.Errorf("goal %s: spawn event %d at %q: %w", goal.ID, spawns[i].ID, spawns[i].At, err)
 			}
+			// A look sent to it since files an event on the goal too.
+			updated, err := time.Parse(core.TimeLayout, goal.Updated)
+			if err != nil {
+				return runner.Handle{}, false, fmt.Errorf("goal %s: updated %q: %w", goal.ID, goal.Updated, err)
+			}
+			if updated.After(h.Since) {
+				h.Since = updated
+			}
 			if prefix == supervisePrefix {
 				if h.Cwd, err = SharedWorktree(l, goal.ID, p.Path); err != nil {
 					return runner.Handle{}, false, err
