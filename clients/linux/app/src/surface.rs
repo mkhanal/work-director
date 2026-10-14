@@ -147,7 +147,7 @@ mod imp {
                 let weak = self.obj().downgrade();
                 glib::idle_add_local_once(move || {
                     if let Some(surface) = weak.upgrade() {
-                        surface.place_bubbles();
+                        surface.place_bubbles(0);
                     }
                 });
             }
@@ -388,7 +388,7 @@ impl Surface {
         for f in first_fold..folds {
             self.show_fold(f);
         }
-        self.place_bubbles();
+        self.place_bubbles(first_para);
     }
 
     fn write_para(&self, p: usize) {
@@ -618,13 +618,17 @@ impl Surface {
 
     /// Sets each bubble's left edge so it sits at the right, as wide as its
     /// words up to the width a bubble may take.
-    fn place_bubbles(&self) {
+    fn place_bubbles(&self, from_para: usize) {
         let width = self.width();
         if width <= 0 {
             return;
         }
-        let bubbles: Vec<(usize, gtk::TextTag)> =
-            self.imp().state.borrow().bubbles.iter().map(|(f, t)| (*f, t.clone())).collect();
+        let bubbles: Vec<(usize, gtk::TextTag)> = {
+            let state = self.imp().state.borrow();
+            let framed: std::collections::HashSet<usize> =
+                state.doc.paras.iter().skip(from_para).flat_map(|p| p.frames.iter().copied()).collect();
+            state.bubbles.iter().filter(|(f, _)| framed.contains(f)).map(|(f, t)| (*f, t.clone())).collect()
+        };
         for (frame, tag) in bubbles {
             let (texts, right) = {
                 let state = self.imp().state.borrow();
@@ -634,6 +638,7 @@ impl Surface {
                     .doc
                     .paras
                     .iter()
+                    .skip(from_para)
                     .filter(|p| p.frames.contains(&frame))
                     .map(|p| p.spans.iter().map(|s| s.content.shown()).collect())
                     .collect();
@@ -794,6 +799,14 @@ impl Surface {
         let open = |f: usize| state.open.get(f).copied().unwrap_or(true);
         let iter_at = |o: usize| buffer.iter_at_offset(o as i32);
         let shows = |p: usize| Doc::para_shows(&state.doc.paras[p], &open);
+        // Each frame's first and last paragraph that shows, in one pass.
+        let mut spans: Vec<Option<(usize, usize)>> = vec![None; state.doc.frames.len()];
+        for (p, para) in state.doc.paras.iter().enumerate().filter(|(p, _)| shows(*p)) {
+            for f in &para.frames {
+                let span = &mut spans[*f];
+                *span = Some(span.map_or((p, p), |(first, _)| (first, p)));
+            }
+        }
         for (id, frame) in state.doc.frames.iter().enumerate() {
             if let Some((a, b)) = state.pills.get(&id) {
                 let first = state.doc.span_at(*a);
@@ -802,7 +815,7 @@ impl Surface {
                     Show::Open(f) => !open(f),
                     Show::Closed(f) => open(f),
                 });
-                let para = state.starts.iter().rposition(|s| s <= a);
+                let para = state.starts.partition_point(|s| s <= a).checked_sub(1);
                 if hidden || para.is_some_and(|p| !shows(p)) {
                     continue;
                 }
@@ -820,9 +833,7 @@ impl Surface {
                 fill_rounded(snapshot, &rect, 6.0, &fill, border.as_ref());
                 continue;
             }
-            let inside: Vec<usize> =
-                (0..state.doc.paras.len()).filter(|p| state.doc.paras[*p].frames.contains(&id) && shows(*p)).collect();
-            let (Some(&first), Some(&last)) = (inside.first(), inside.last()) else { continue };
+            let Some((first, last)) = spans[id] else { continue };
             let (pad_top, _, pad_bottom, pad_left) = frame.look.pad();
             let (top_y, _) = self.line_yrange(&iter_at(state.starts[first]));
             let (last_y, last_h) = self.line_yrange(&iter_at(state.starts[last]));

@@ -668,10 +668,15 @@ fn blocks(doc: &mut Doc, parsed: Vec<Block>, base: &Style) {
                 }
             }
             Block::Bullet { text, number, depth } => {
-                let marker = match &number {
-                    Some(n) => format!("{n} "),
-                    None if depth == 0 => "• ".to_string(),
-                    None => "◦ ".to_string(),
+                // A task item's box stands in for its bullet.
+                let task = [("[x] ", "☑ "), ("[X] ", "☑ "), ("[ ] ", "☐ ")]
+                    .iter()
+                    .find_map(|(mark, shown)| text.strip_prefix(mark).map(|rest| (rest.to_string(), *shown)));
+                let (text, marker) = match (task, &number) {
+                    (Some((rest, shown)), None) => (rest, shown.to_string()),
+                    (_, Some(n)) => (text.clone(), format!("{n} ")),
+                    (None, None) if depth == 0 => (text.clone(), "• ".to_string()),
+                    (None, None) => (text.clone(), "◦ ".to_string()),
                 };
                 // Items of one list follow each other line by line.
                 let follows = i > 0 && after_bullet;
