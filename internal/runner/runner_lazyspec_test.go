@@ -2,6 +2,7 @@ package runner
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -214,11 +215,29 @@ transcript = "cat {log}"
 			before := calls(t, bin)
 			h := Handle{Runner: "claude", Session: testSID, Ref: strPtr("b765c0a2"), Cwd: cwd}
 			err := claude.Send(&h, "interrupting")
-			if err == nil || !strings.Contains(err.Error(), testSID) || !strings.Contains(err.Error(), "working") {
+			if !errors.Is(err, ErrBusy) || !strings.Contains(err.Error(), testSID) {
 				t.Fatalf("send to a working session = %v, want a refusal naming it", err)
 			}
 			if after := strings.TrimPrefix(calls(t, bin), before); strings.Contains(after, "stop") || strings.Contains(after, "--resume") {
 				t.Fatalf("a working session was stopped or resumed:\n%s", after)
+			}
+		})
+		t.Run("opencode and codex refuse a session that is working", func(t *testing.T) {
+			proc := exec.Command("sleep", "30")
+			if err := proc.Start(); err != nil {
+				t.Fatal(err)
+			}
+			defer func() { proc.Process.Kill(); proc.Wait() }()
+			ref := fmt.Sprint(proc.Process.Pid)
+			before := calls(t, bin)
+			for _, r := range []Runner{opencode, codexRunner{}} {
+				h := Handle{Session: "ses_working", Ref: &ref, Cwd: cwd}
+				if err := r.Send(&h, "interrupting"); !errors.Is(err, ErrBusy) || !strings.Contains(err.Error(), "ses_working") {
+					t.Fatalf("send to a working session = %v, want ErrBusy naming it", err)
+				}
+			}
+			if after := strings.TrimPrefix(calls(t, bin), before); after != "" {
+				t.Fatalf("a working session was sent to:\n%s", after)
 			}
 		})
 		t.Run("opencode resumes with -s", func(t *testing.T) {
@@ -255,6 +274,13 @@ transcript = "cat {log}"
 			h, err := codex.Spawn(SpawnOptions{Cwd: cwd, Name: "5 t", Brief: "B"})
 			if err != nil {
 				t.Fatalf("codex spawn: %v", err)
+			}
+			// A send waits for the turn the spawn started to end.
+			if _, done, err := waitFor(func() (bool, bool, error) {
+				s, err := codex.Status(h)
+				return true, s != StatusRunning, err
+			}, 5*time.Second, 20*time.Millisecond); err != nil || !done {
+				t.Fatalf("codex spawn turn never ended: %v", err)
 			}
 			if err := codex.Send(&h, "more"); err != nil {
 				t.Fatalf("codex send: %v", err)
@@ -769,7 +795,7 @@ transcript = "cat {log}"
 			}
 		})
 		t.Run("opencode and codex end the process serving the session", func(t *testing.T) {
-			for _, r := range []Runner{opencode, codex} {
+			for _, r := range []Runner{opencode, codexRunner{}} {
 				proc := exec.Command("sleep", "30")
 				if err := proc.Start(); err != nil {
 					t.Fatalf("start: %v", err)

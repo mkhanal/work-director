@@ -102,6 +102,27 @@ type RunnerError struct {
 
 func (e *RunnerError) Error() string { return e.Runner + ": " + e.Detail }
 
+// ErrBusy is a send refused because the session is working: the message is
+// not lost, it waits until the session is free.
+var ErrBusy = errors.New("is working")
+
+// busyError is the refusal to send to session, which is working.
+func busyError(runner, session string) error {
+	return fmt.Errorf("%s: session %s %w", runner, session, ErrBusy)
+}
+
+// refuseBusy refuses a send to a session status says is working.
+func refuseBusy(name string, r Runner, h Handle) error {
+	status, err := r.Status(h)
+	if err != nil {
+		return err
+	}
+	if status == StatusRunning {
+		return busyError(name, h.Session)
+	}
+	return nil
+}
+
 // RunResult is one command run: exit code and captured output.
 type RunResult struct {
 	Code   int

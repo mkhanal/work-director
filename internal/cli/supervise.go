@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -114,68 +115,89 @@ func (c *Cli) supervise(goal core.Work) (supervision, error) {
 	if len(why) == 0 || (working && !decided) {
 		return out, nil
 	}
-	if _, mine, err := c.Ledger.ClaimLook(goal.ID, last, strings.Join(why, "; ")); err != nil || !mine {
+	look, waiting, mine, err := c.Ledger.ClaimLook(goal.ID, last, strings.Join(why, "; "))
+	if err != nil || !mine {
 		return out, err
 	}
-	// Another pass may have started the supervisor since it was read above.
-	if sh, has, err = coordinator.Supervisor(c.Ledger, goal, p); err != nil {
+	// A look counts only once its brief reaches the supervisor: one that
+	// does not is taken back, and what it carried waits for the next pass.
+	var moved bool
+	if sh, said, moved, err = c.look(goal, p, waiting); err != nil {
+		if rerr := c.Ledger.ReleaseLook(look); rerr != nil {
+			return out, rerr
+		}
+		if errors.Is(err, runner.ErrBusy) {
+			return out, nil
+		}
 		return out, err
 	}
-	if has && sr == nil {
-		if sr, err = runner.RunnerNamed(sh.Runner); err != nil {
-			return out, err
-		}
-		if said, err = runner.Transcript(sr, sh); err != nil {
-			return out, err
-		}
-	}
-	picture, err := c.picture(goal, p)
-	if err != nil {
-		return out, err
-	}
-	brief := coordinator.SupervisionBrief(picture)
-	if has {
-		before := sh.Ref
-		if err := sr.Send(&sh, brief); err != nil {
-			return out, err
-		}
-		if !slices.Equal(refOf(before), refOf(sh.Ref)) {
-			if _, err := c.Ledger.AddEvent(goal.ID, core.EventSpawn, coordinator.SuperviseEvent(sh)); err != nil {
-				return out, err
-			}
-		}
-	} else {
-		name := strOr(c.Args, "runner", p.Runner)
-		if goal.Runner != nil && str(c.Args, "runner") == nil {
-			name = *goal.Runner
-		}
-		rn, err := runner.DetectedRunner(name)
-		if err != nil {
-			return out, err
-		}
-		cwd, err := coordinator.SharedWorktree(c.Ledger, goal.ID, p.Path)
-		if err != nil {
-			return out, err
-		}
-		if sh, err = rn.Spawn(runner.SpawnOptions{
-			Cwd:   cwd,
-			Name:  fmt.Sprintf("%s supervise %s", goal.ID, goal.Title),
-			Brief: brief,
-			Model: p.Model,
-		}); err != nil {
-			return out, err
-		}
-		sh.Runner = name
+	if moved {
 		if _, err := c.Ledger.AddEvent(goal.ID, core.EventSpawn, coordinator.SuperviseEvent(sh)); err != nil {
 			return out, err
 		}
-		said = nil
 	}
 	if err := c.Ledger.SetFiled(goal.ID, core.TranscriptMark{Session: sh.Session, Entries: len(said)}); err != nil {
 		return out, err
 	}
 	out.Looked = true
 	return out, nil
+}
+
+// look gives goal's supervisor the supervision brief with the person's
+// messages waiting, starting the supervisor when the goal has none. It returns
+// the supervisor's session, what it had said before the brief, and whether
+// that session is new or moved, to be recorded; an error means the brief was
+// not delivered.
+func (c *Cli) look(goal core.Work, p *project.Project, waiting []core.Message) (runner.Handle, []string, bool, error) {
+	sh, has, err := coordinator.Supervisor(c.Ledger, goal, p)
+	if err != nil {
+		return sh, nil, false, err
+	}
+	picture, err := c.picture(goal, p)
+	if err != nil {
+		return sh, nil, false, err
+	}
+	for _, m := range waiting {
+		picture.Unread = append(picture.Unread, m.Text)
+	}
+	brief := coordinator.SupervisionBrief(picture)
+	if has {
+		sr, err := runner.RunnerNamed(sh.Runner)
+		if err != nil {
+			return sh, nil, false, err
+		}
+		said, err := runner.Transcript(sr, sh)
+		if err != nil {
+			return sh, nil, false, err
+		}
+		before := sh.Ref
+		if err := sr.Send(&sh, brief); err != nil {
+			return sh, nil, false, err
+		}
+		return sh, said, !slices.Equal(refOf(before), refOf(sh.Ref)), nil
+	}
+	name := strOr(c.Args, "runner", p.Runner)
+	if goal.Runner != nil && str(c.Args, "runner") == nil {
+		name = *goal.Runner
+	}
+	rn, err := runner.DetectedRunner(name)
+	if err != nil {
+		return sh, nil, false, err
+	}
+	cwd, err := coordinator.SharedWorktree(c.Ledger, goal.ID, p.Path)
+	if err != nil {
+		return sh, nil, false, err
+	}
+	if sh, err = rn.Spawn(runner.SpawnOptions{
+		Cwd:   cwd,
+		Name:  fmt.Sprintf("%s supervise %s", goal.ID, goal.Title),
+		Brief: brief,
+		Model: p.Model,
+	}); err != nil {
+		return sh, nil, false, err
+	}
+	sh.Runner = name
+	return sh, nil, true, nil
 }
 
 func refOf(p *string) []string {
@@ -247,8 +269,8 @@ func (c *Cli) tend(tasks []core.Work, p *project.Project) (bool, error) {
 }
 
 // sinceLook is what changed under goal since its supervisor last looked or was
-// last read, whether the goal itself was decided on since, and the id of that
-// last look or reading.
+// last read, whether the goal itself was decided on since or the person wrote
+// something it has not been given, and the id of that last look or reading.
 func (c *Cli) sinceLook(goal core.Work, tasks []core.Work) ([]string, bool, int, error) {
 	events, err := c.Ledger.Events(goal.ID, nil)
 	if err != nil {
@@ -267,6 +289,16 @@ func (c *Cli) sinceLook(goal core.Work, tasks []core.Work) ([]string, bool, int,
 			decided = true
 			counts["the goal was decided on"]++
 		}
+	}
+	// What the person wrote waits for a look however its events fall
+	// around the last look or reading.
+	waiting, err := c.Ledger.Undelivered(goal.ID)
+	if err != nil {
+		return nil, false, 0, err
+	}
+	if len(waiting) > 0 {
+		decided = true
+		counts["the person wrote"] = len(waiting)
 	}
 	moved := map[core.EventKind]string{
 		core.EventReport: "a task reported", core.EventQuestion: "a task asked", core.EventAnswer: "a task was answered",
@@ -471,10 +503,18 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 			courseQuestion, goal.Title, textOr(goal.DoneWhen, "not set"), finish, proposed.Title, proposed.DoneWhen, proposed.Finish, found, proposed.Text)
 		asked = append([]coordinator.Action{{Kind: coordinator.ActAsk, Text: text, Options: []string{changeCourseChoice, keepGoalChoice}}}, asked...)
 	}
+	// What the person wrote while the supervisor worked comes before
+	// anything it asks them or calls done.
+	waiting, err := c.Ledger.Undelivered(goal.ID)
+	if err != nil {
+		return out, err
+	}
 	if done != nil {
-		open, err := c.unfinished(goal)
-		if err != nil {
-			return out, err
+		open := "the person wrote since; it reaches you first"
+		if len(waiting) == 0 {
+			if open, err = c.unfinished(goal); err != nil {
+				return out, err
+			}
 		}
 		if open == "" && (len(held) > 0 || proposed != nil) {
 			open = "a change waits for the person"
@@ -515,8 +555,12 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 		} else if _, err := c.Ledger.AddEvent(goal.ID, core.EventQuestion, qbody); err != nil {
 			return out, err
 		}
-		if _, err := c.Ledger.Transition(goal.ID, core.StateNeedsInput); err != nil {
-			return out, err
+		// The person's waiting words may answer it; the supervisor reads
+		// them first and asks again if they do not.
+		if len(waiting) == 0 {
+			if _, err := c.Ledger.Transition(goal.ID, core.StateNeedsInput); err != nil {
+				return out, err
+			}
 		}
 		for _, q := range asked {
 			if first, _, more := strings.Cut(q.Text, "\n"); more {

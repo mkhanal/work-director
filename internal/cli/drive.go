@@ -719,21 +719,16 @@ func (c *Cli) sendAnswer(p *project.Project) func(work, question, answer string)
 		if !ok {
 			return fail("work %s has no session to answer: the answer is recorded but nobody is waiting", w.ID)
 		}
-		r, err := detectedRunner(h.Runner)
-		if err != nil {
+		if _, err := detectedRunner(h.Runner); err != nil {
 			return err
 		}
-		if err := coordinator.Send(c.Ledger, w.ID, r, h, answer); err != nil {
+		// Queued and delivered as any message is, so a session that started
+		// working meanwhile reads it when it is free rather than losing it.
+		if _, err := c.tellVia(w, h, answer); err != nil {
 			return err
 		}
-		if _, err := c.Ledger.Answer(w.ID, core.Decision{Question: question, Answer: answer, Source: core.AnsweredByDirector}); err != nil {
-			return err
-		}
-		if w.State == core.StateNeedsInput {
-			_, err := c.Ledger.Transition(w.ID, core.StateRunning)
-			return err
-		}
-		return nil
+		_, err = c.Ledger.Answer(w.ID, core.Decision{Question: question, Answer: answer, Source: core.AnsweredByDirector})
+		return err
 	}
 }
 

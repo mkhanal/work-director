@@ -615,6 +615,9 @@ type Message struct {
 	Text      string  `json:"text"`
 	At        string  `json:"at"`
 	Delivered *string `json:"delivered"`
+	// Event is the event the person's message was filed as, for a message
+	// to a goal's supervisor; nil for a message to a task.
+	Event *int `json:"event,omitempty"`
 }
 
 // AtRest reports whether work has come to rest: done, dropped, abandoned or

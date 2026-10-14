@@ -46,6 +46,9 @@ func detach(args []string, cwd, log, dir string) (int, error) {
 	if err := c.Start(); err != nil {
 		return 0, err
 	}
+	// Reaped when it ends, so a long-lived wd never reads a finished turn as
+	// still running.
+	go c.Wait()
 	return c.Process.Pid, nil
 }
 
@@ -111,7 +114,10 @@ func (opencodeRunner) Spawn(o SpawnOptions) (Handle, error) {
 	return Handle{Runner: "opencode", Session: session, Ref: pidRef(pid), Cwd: o.Cwd}, nil
 }
 
-func (opencodeRunner) Send(h *Handle, text string) error {
+func (r opencodeRunner) Send(h *Handle, text string) error {
+	if err := refuseBusy("opencode", r, *h); err != nil {
+		return err
+	}
 	dir, err := logDir()
 	if err != nil {
 		return err

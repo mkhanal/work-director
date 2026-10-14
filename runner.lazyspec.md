@@ -48,7 +48,7 @@ provider is a TOML file of commands under `~/.work-director/runners/`.
 ## Sending Continues The Same Session
 - `send` addresses the runner with the handle's session id, never starting a new session.
 - claude stops a session that is idle or waiting, and resumes it once the process `claude agents` listed for it has exited.
-- claude refuses to send to a session that is working, naming it.
+- Every runner refuses to send to a session that is working, naming it as busy (`ErrBusy`), and sends nothing.
 
 ## A Runner Stops A Session And Keeps Its Conversation
 - `stop` ends the session's current run; a later `send` continues the same conversation.

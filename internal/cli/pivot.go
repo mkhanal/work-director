@@ -53,7 +53,7 @@ func (c *Cli) send(rest []string) error {
 			discard(atts)
 			return err
 		}
-		text := fmt.Sprintf("Kept as a decision on %s; its supervisor reads it at its next look", quoted(w))
+		text := fmt.Sprintf("Kept as a decision on %s; its supervisor is finishing the last one and reads it as soon as it is free", quoted(w))
 		if why, ok := out["not_told"]; ok {
 			text = fmt.Sprintf("Kept as a decision on %s; its supervisor couldn't be told now (%s) and reads it when it next starts", quoted(w), why)
 		} else if out["looked"] == true {
@@ -135,10 +135,12 @@ func (c *Cli) tellVia(w core.Work, h runner.Handle, text string) (told, error) {
 }
 
 // tellGoal keeps text as a decision on the goal, which every later brief and
-// judgement reads, and has the goal's supervisor look at once, so it reaches
-// the tasks it is for rather than every task. Once kept, the decision and its
-// files stay even when the supervisor cannot look: it reads them when it next
-// starts, and not_told says why it was not told now.
+// judgement reads, and as a message waiting for the goal's supervisor, which
+// is asked to look at once, so it reaches the tasks it is for rather than
+// every task. A supervisor that is working is given it at its next look,
+// with whatever else the person wrote meanwhile. Once kept, the decision and
+// its files stay even when the supervisor cannot look, and not_told says why
+// it was not told now.
 func (c *Cli) tellGoal(goal core.Work, text string, atts []core.Attachment) (map[string]any, error) {
 	if core.Reopenable(goal.State) {
 		return nil, fail("%s is done; a message is not a reason to work on it again — wd reopen %s \"<what is being worked on>\"", goal.ID, goal.ID)
@@ -150,6 +152,9 @@ func (c *Cli) tellGoal(goal core.Work, text string, atts []core.Attachment) (map
 	// supervisor reads them as part of it.
 	decision, err := c.Ledger.AddEvent(goal.ID, core.EventDecision, text, atts...)
 	if err != nil {
+		return nil, err
+	}
+	if _, err := c.Ledger.QueueForSupervisor(goal.ID, decision.ID, core.WithAttached(text, atts)); err != nil {
 		return nil, err
 	}
 	// A person writing to a goal waiting on them has answered it.

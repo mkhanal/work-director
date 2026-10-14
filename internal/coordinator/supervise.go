@@ -15,11 +15,12 @@ import (
 )
 
 // Picture is what a goal's supervisor is shown at each look: the goal, what was
-// decided on it, its sub-goals as a tree, those a course change superseded,
-// and what is still unsettled.
+// decided on it, what the person wrote that it has not read yet, its sub-goals
+// as a tree, those a course change superseded, and what is still unsettled.
 type Picture struct {
 	Goal       core.Work
 	Decisions  []string
+	Unread     []string
 	Subs       []SubPicture
 	Superseded []SubPicture
 	Concerns   []core.Concern
@@ -117,6 +118,12 @@ func SupervisionBrief(p Picture) string {
 		b.WriteString("\nDecided since, newest last:\n")
 		for _, d := range p.Decisions {
 			fmt.Fprintf(&b, "- %s\n", d)
+		}
+	}
+	if len(p.Unread) > 0 {
+		b.WriteString("\nThe person wrote to you since you last looked, oldest first. Reply to each of them in words before your COURSE line, then act on them:\n")
+		for _, m := range p.Unread {
+			fmt.Fprintf(&b, "- %s\n", strings.ReplaceAll(strings.TrimSpace(m), "\n", "\n  "))
 		}
 	}
 	where := "the project's checkout"

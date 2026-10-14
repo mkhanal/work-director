@@ -110,6 +110,10 @@ type goalView struct {
 	// first; each was attached with the message filed at the same moment on
 	// the same work. A client reads the file at its path.
 	Attachments []attachment `json:"attachments"`
+	// WaitingForDirector are the events, among Events, holding what the
+	// person said that the supervisor has not been given yet: it reaches the
+	// supervisor once it is free.
+	WaitingForDirector []int `json:"waiting_for_director"`
 }
 
 // attachment is one attachment event as a client shows it.
@@ -295,6 +299,9 @@ func (s *Server) goal(id string) (goalView, error) {
 	view.Proposed = core.Proposed(goal.ID, events)
 	view.Reasoning = reasoningOf(goal.ID, events)
 	view.Attachments = attachmentsIn(events)
+	if view.WaitingForDirector, err = s.ledger.WaitingUnder(goal.ID); err != nil {
+		return goalView{}, err
+	}
 	courses := events
 	if len(chain) > 1 {
 		if courses, err = s.ledger.Events(chain[0].ID, nil); err != nil {

@@ -5,6 +5,7 @@
 package coordinator
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -659,7 +660,11 @@ func Deliver(l *ledger.Ledger, w core.Work, r runner.Runner, h runner.Handle) (i
 	for _, m := range pending {
 		texts = append(texts, m.Text)
 	}
-	if err := Send(l, w.ID, r, h, strings.Join(texts, "\n\n")); err != nil {
+	// A session that started working since its status was read refuses;
+	// the messages stay queued for when it is free.
+	if err := Send(l, w.ID, r, h, strings.Join(texts, "\n\n")); errors.Is(err, runner.ErrBusy) {
+		return 0, nil
+	} else if err != nil {
 		return 0, err
 	}
 	for _, m := range pending {

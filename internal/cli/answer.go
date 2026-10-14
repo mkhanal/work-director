@@ -109,7 +109,8 @@ func (c *Cli) answer(rest []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := c.Ledger.Answer(w.ID, by, atts...); err != nil {
+	answered, err := c.Ledger.Answer(w.ID, by, atts...)
+	if err != nil {
 		discard(atts)
 		return err
 	}
@@ -140,12 +141,15 @@ func (c *Cli) answer(rest []string) error {
 			return err
 		}
 	}
-	where, err := c.deliverAnswer(w, h, has, core.WithAttached(text, atts))
+	where, err := c.deliverAnswer(w, answered, h, has, core.WithAttached(text, atts))
 	if err != nil {
 		return err
 	}
 	human := "answered"
-	if where == toldQueued {
+	switch {
+	case where == toldQueued && c.supervised(w):
+		human = fmt.Sprintf("The supervisor of %s is finishing the last one; your answer reaches it as soon as it is free", quoted(w))
+	case where == toldQueued:
 		human = fmt.Sprintf("The agent on %s is busy; your answer is queued and reaches it as soon as it is free", quoted(w))
 	}
 	if len(said) > 0 {
@@ -184,21 +188,40 @@ func (c *Cli) answerHandle(w core.Work) (runner.Handle, bool, error) {
 	return coordinator.Supervisor(c.Ledger, w, p)
 }
 
-// deliverAnswer sends text through h when there is a session to read it; a
-// goal with none keeps it recorded and goes back to work.
-func (c *Cli) deliverAnswer(w core.Work, h runner.Handle, has bool, text string) (told, error) {
+// supervised reports whether w is a goal its supervisor speaks for: a goal
+// with no session of its own.
+func (c *Cli) supervised(w core.Work) bool {
+	return core.IsGoal(w.Kind) && w.Session == nil && w.Claim == nil
+}
+
+// deliverAnswer hands text, filed as answered, to whoever reads it. A task's
+// session, or a goal's own, is told as wd send does. A supervised goal goes
+// back to work and keeps the answer waiting for its supervisor, which is
+// asked to look at once and given it with whatever else waits; a goal with
+// no supervisor yet keeps it for its first look.
+func (c *Cli) deliverAnswer(w core.Work, answered core.Event, h runner.Handle, has bool, text string) (told, error) {
 	if !core.IsGoal(w.Kind) {
 		return c.tellTask(w, text)
 	}
-	if has {
+	if !c.supervised(w) {
 		return c.tellVia(w, h, text)
 	}
+	if _, err := c.Ledger.QueueForSupervisor(w.ID, answered.ID, text); err != nil {
+		return "", err
+	}
 	if w.State == core.StateNeedsInput {
-		if _, err := c.Ledger.Transition(w.ID, core.StateRunning); err != nil {
+		var err error
+		if w, err = c.Ledger.Transition(w.ID, core.StateRunning); err != nil {
 			return "", err
 		}
 	}
-	return toldRecorded, nil
+	if !has {
+		return toldRecorded, nil
+	}
+	if s, err := c.supervise(w); err != nil || !s.Looked {
+		return toldQueued, nil
+	}
+	return toldDelivered, nil
 }
 
 // openQuestion is the question w waits on: its session's, or one the director

@@ -73,7 +73,10 @@ func (codexRunner) Spawn(o SpawnOptions) (Handle, error) {
 	return Handle{Runner: "codex", Session: session, Ref: pidRef(pid), Cwd: o.Cwd}, nil
 }
 
-func (codexRunner) Send(h *Handle, text string) error {
+func (r codexRunner) Send(h *Handle, text string) error {
+	if err := refuseBusy("codex", r, *h); err != nil {
+		return err
+	}
 	dir, err := codexLogDir()
 	if err != nil {
 		return err

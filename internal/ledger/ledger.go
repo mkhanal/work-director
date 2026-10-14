@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS worktree (id INTEGER PRIMARY KEY, work TEXT NOT NULL 
 CREATE TABLE IF NOT EXISTS filed (work TEXT PRIMARY KEY REFERENCES work(id), session TEXT NOT NULL, entries INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS cursor (project TEXT NOT NULL, name TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (project, name));
 CREATE UNIQUE INDEX IF NOT EXISTS worktree_one_active_shared ON worktree(work) WHERE kind = 'shared' AND state = 'active';
-CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), text TEXT NOT NULL, at TEXT NOT NULL, delivered TEXT);
+CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), text TEXT NOT NULL, at TEXT NOT NULL, delivered TEXT,
+  event INTEGER REFERENCES event(id), look INTEGER REFERENCES event(id));
 CREATE TABLE IF NOT EXISTS workspace (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, creates INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL, updated TEXT NOT NULL);
 ` + goalTreeSchema
 
@@ -58,6 +59,9 @@ var addedColumns = []struct{ table, col, decl string }{
 	// audited against it — and a card promoted on that evidence records its
 	// decision on that work, so the two have to meet somewhere.
 	{"feedback", "work", "TEXT REFERENCES work(id)"},
+	// event is what a message to a goal's supervisor was filed as, and look
+	// the look that delivered it; both are null on a message to a task.
+	{"message", "event", "INTEGER REFERENCES event(id)"}, {"message", "look", "INTEGER REFERENCES event(id)"},
 }
 
 // workspaceSchema is the additive statement for ledgers created before
@@ -1304,6 +1308,16 @@ func dropOpen(tx *sql.Tx, tree []core.Work, why, at string) ([]core.Work, error)
 
 // QueueMessage stores something said to work, undelivered.
 func (l *Ledger) QueueMessage(work, text string) (core.Message, error) {
+	return l.queue(work, text, nil)
+}
+
+// QueueForSupervisor stores something the person said to goal, filed as
+// event, for the goal's supervisor: it waits until a look delivers it.
+func (l *Ledger) QueueForSupervisor(goal string, event int, text string) (core.Message, error) {
+	return l.queue(goal, text, &event)
+}
+
+func (l *Ledger) queue(work, text string, event *int) (core.Message, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return core.Message{}, fmt.Errorf("a message to %s is empty", work)
@@ -1314,7 +1328,7 @@ func (l *Ledger) QueueMessage(work, text string) (core.Message, error) {
 			return err
 		}
 		at := now()
-		res, err := tx.Exec(`INSERT INTO message (work, text, at) VALUES (?, ?, ?)`, work, text, at)
+		res, err := tx.Exec(`INSERT INTO message (work, text, at, event) VALUES (?, ?, ?, ?)`, work, text, at, event)
 		if err != nil {
 			return err
 		}
@@ -1322,7 +1336,7 @@ func (l *Ledger) QueueMessage(work, text string) (core.Message, error) {
 		if err != nil {
 			return err
 		}
-		m = core.Message{ID: int(id), Work: work, Text: text, At: at}
+		m = core.Message{ID: int(id), Work: work, Text: text, At: at, Event: event}
 		return nil
 	})
 	return m, err
@@ -1330,7 +1344,16 @@ func (l *Ledger) QueueMessage(work, text string) (core.Message, error) {
 
 // Undelivered lists work's messages not yet delivered, oldest first.
 func (l *Ledger) Undelivered(work string) ([]core.Message, error) {
-	rows, err := l.db.Query(`SELECT id, work, text, at FROM message WHERE work = ? AND delivered IS NULL ORDER BY id`, work)
+	return undelivered(l.db, work)
+}
+
+// querier is what reads the ledger: the database or a transaction on it.
+type querier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+func undelivered(q querier, work string) ([]core.Message, error) {
+	rows, err := q.Query(`SELECT id, work, text, at, event FROM message WHERE work = ? AND delivered IS NULL ORDER BY id`, work)
 	if err != nil {
 		return nil, err
 	}
@@ -1338,8 +1361,13 @@ func (l *Ledger) Undelivered(work string) ([]core.Message, error) {
 	out := []core.Message{}
 	for rows.Next() {
 		var m core.Message
-		if err := rows.Scan(&m.ID, &m.Work, &m.Text, &m.At); err != nil {
+		var event sql.NullInt64
+		if err := rows.Scan(&m.ID, &m.Work, &m.Text, &m.At, &event); err != nil {
 			return nil, err
+		}
+		if event.Valid {
+			n := int(event.Int64)
+			m.Event = &n
 		}
 		out = append(out, m)
 	}
@@ -1773,8 +1801,11 @@ func getEvent(q queryer, id int) (core.Event, error) {
 
 // ClaimLook files a look on goal, saying why, unless a look or supervised
 // event newer than after is on it already: passes that decide to look at the
-// same moment look once. ok is false when another pass looked first.
-func (l *Ledger) ClaimLook(goal string, after int, why string) (e core.Event, ok bool, err error) {
+// same moment look once. ok is false when another pass looked first. The
+// look takes every message waiting for the goal's supervisor, returned oldest
+// first: they go with its brief, and come back with ReleaseLook when the
+// brief cannot be delivered.
+func (l *Ledger) ClaimLook(goal string, after int, why string) (e core.Event, taken []core.Message, ok bool, err error) {
 	err = l.inTx(func(tx *sql.Tx) error {
 		var latest sql.NullInt64
 		if err := tx.QueryRow(`SELECT MAX(id) FROM event WHERE work = ? AND kind IN (?, ?)`,
@@ -1784,11 +1815,33 @@ func (l *Ledger) ClaimLook(goal string, after int, why string) (e core.Event, ok
 		if int(latest.Int64) != after {
 			return nil
 		}
-		e, err = addEvent(tx, goal, core.EventLook, why, now())
-		ok = err == nil
+		at := now()
+		if e, err = addEvent(tx, goal, core.EventLook, why, at); err != nil {
+			return err
+		}
+		if taken, err = undelivered(tx, goal); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE message SET delivered = ?, look = ? WHERE work = ? AND delivered IS NULL`, at, e.ID, goal); err != nil {
+			return err
+		}
+		ok = true
+		return nil
+	})
+	return e, taken, ok, err
+}
+
+// ReleaseLook takes back look, whose brief never reached the supervisor: the
+// look is removed and the messages it took wait again, so the next pass looks
+// with them.
+func (l *Ledger) ReleaseLook(look core.Event) error {
+	return l.inTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`UPDATE message SET delivered = NULL, look = NULL WHERE look = ?`, look.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`DELETE FROM event WHERE id = ? AND kind = ?`, look.ID, core.EventLook)
 		return err
 	})
-	return e, ok, err
 }
 
 // SetFiled records the transcript point work was last read at.
@@ -1899,6 +1952,28 @@ func (l *Ledger) EventsUnder(work string) ([]core.Event, error) {
 			return nil, err
 		}
 		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// WaitingUnder is the events, at work or under it, that hold something the
+// person said which no look has given a supervisor yet, in id order.
+func (l *Ledger) WaitingUnder(work string) ([]int, error) {
+	rows, err := l.db.Query(`WITH RECURSIVE tree(id) AS (
+			SELECT ? UNION SELECT work.id FROM work JOIN tree ON work.parent = tree.id)
+		SELECT event FROM message WHERE work IN (SELECT id FROM tree) AND event IS NOT NULL AND delivered IS NULL
+		ORDER BY event`, work)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []int{}
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
 	}
 	return out, rows.Err()
 }

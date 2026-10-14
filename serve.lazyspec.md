@@ -205,3 +205,7 @@ with `{"error": "no work <id>"}`.
 - The goal view's `attachments` is every `attachment` event on the goal and its tasks, oldest first, each as `{event, work, at, name, path, size, media_type}`; `[]` when none.
 - A file sent with a decision or an answer has that event's `work` and `at`, so a client shows it with that message.
 - A file is served by its path only; no route returns its bytes.
+
+## A Goal Serves What The Person Said That Still Waits For The Director
+- `GET /api/goal/<id>` returns `waiting_for_director`: the ids of the events under the goal holding what the person said that no look has given the supervisor yet, oldest first, `[]` when none.
+- An event leaves it once a look delivers it, and returns to it when that look is taken back.

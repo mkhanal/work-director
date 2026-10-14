@@ -358,6 +358,9 @@ func (r *specRunnerAdapter) Send(h *Handle, text string) error {
 	if r.spec.Send == "" {
 		return &RunnerError{Runner: r.spec.Name, Detail: "no send command in spec"}
 	}
+	if err := refuseBusy(r.spec.Name, r, *h); err != nil {
+		return err
+	}
 	res, err := shell(fill(r.spec.Send, r.placeholders(*h, text)), h.Cwd)
 	if err != nil {
 		return err

@@ -4668,6 +4668,202 @@ func TestWdGoalSuperviseHasTheGoalsSupervisorLookOnceNoTaskIsWorking(t *testing.
 	}
 }
 
+// touch makes o's fake runner behave as name says.
+func (o overseen) touch(t *testing.T, name string, on bool) {
+	t.Helper()
+	path := filepath.Join(o.state, name)
+	if on {
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+}
+
+// lastBrief is the latest brief the supervisor was sent.
+func (o overseen) lastBrief(t *testing.T) string {
+	t.Helper()
+	sent := readFile(t, filepath.Join(o.state, "sent-"+supervisor))
+	i := strings.LastIndex(sent, "You supervise goal")
+	if i < 0 {
+		t.Fatalf("the supervisor was sent no brief:\n%s", sent)
+	}
+	return sent[i:]
+}
+
+// unreadIn is the part of brief listing what the person wrote since the last look.
+func unreadIn(t *testing.T, brief string) string {
+	t.Helper()
+	i := strings.Index(brief, "The person wrote to you")
+	if i < 0 {
+		t.Fatalf("the brief lists nothing the person wrote:\n%s", brief)
+	}
+	return brief[i:]
+}
+
+// waitingFor is what the person wrote to goal that its supervisor has not been given.
+func waitingFor(t *testing.T, f *cliFixture, goal string) []string {
+	t.Helper()
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	msgs, err := l.Undelivered(goal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := []string{}
+	for _, m := range msgs {
+		out = append(out, m.Text)
+	}
+	return out
+}
+
+// lookingSupervisor is o's goal with its supervisor started and its first
+// reply carried out, so the next thing it is given is what the person says.
+func lookingSupervisor(t *testing.T, f *cliFixture) overseen {
+	t.Helper()
+	o := overseenGoal(t, f)
+	if s := superviseOnce(t, f, o.goal); !s.Looked {
+		t.Fatalf("first supervise = %+v, want a look", s)
+	}
+	o.say(t, supervisor, "Reading the reports.", "ACTIONS:", "WAIT")
+	if s := superviseOnce(t, f, o.goal); !s.Applied {
+		t.Fatalf("supervise after the first reply = %+v, want it carried out", s)
+	}
+	// A brief sent keeps the supervisor working until the test frees it.
+	o.touch(t, "busy-on-send", true)
+	return o
+}
+
+func TestAMessageSentWhileTheDirectorIsBusyIsDeliveredWhenItIsFree(t *testing.T) {
+	f := newCLIFixture(t)
+	o := lookingSupervisor(t, f)
+	first, second := "Should the notes cover the API too?", "And list breaking changes first"
+	if out := f.runOK(t, "send", o.goal, first); !strings.Contains(out, "reading it now") {
+		t.Fatalf("send to an idle director = %q, want it read now", out)
+	}
+	if !strings.Contains(o.lastBrief(t), first) {
+		t.Fatalf("the brief lacks the first message:\n%s", o.lastBrief(t))
+	}
+	if out := f.runOK(t, "send", o.goal, second); !strings.Contains(out, "as soon as it is free") {
+		t.Fatalf("send to a working director = %q, want it said to wait", out)
+	}
+	if got := waitingFor(t, f, o.goal); !slices.Equal(got, []string{second}) {
+		t.Fatalf("waiting for the director = %q, want the second message", got)
+	}
+	if s := superviseOnce(t, f, o.goal); s.Looked || s.Applied {
+		t.Fatalf("supervise while the director works = %+v, want nothing", s)
+	}
+
+	// Its reply to the first neither asks the person nor ends the goal while the second waits.
+	o.say(t, supervisor, "Yes, the API too.", "ACTIONS:", "ASK: Which audience comes first?", "- engineers (recommended)", "- customers")
+	o.busy(t, supervisor, false)
+	if s := superviseOnce(t, f, o.goal); !s.Applied || s.Looked {
+		t.Fatalf("supervise once the director is free = %+v, want its reply carried out", s)
+	}
+	if got := stateOf(t, f, o.goal); got != core.StateRunning {
+		t.Fatalf("goal = %s, want running while the person's message waits", got)
+	}
+	if s := superviseOnce(t, f, o.goal); !s.Looked {
+		t.Fatalf("supervise with a message waiting = %+v, want a look", s)
+	}
+	brief := o.lastBrief(t)
+	if !strings.Contains(brief, second) {
+		t.Fatalf("the next brief lacks the message that waited:\n%s", brief)
+	}
+	if got := waitingFor(t, f, o.goal); len(got) != 0 {
+		t.Fatalf("waiting for the director = %q, want nothing once delivered", got)
+	}
+	f.runOK(t, "send", o.goal, "Thanks")
+	o.say(t, supervisor, "Breaking changes go first.", "ACTIONS:", "DONE: the notes are written")
+	o.busy(t, supervisor, false)
+	if s := superviseOnce(t, f, o.goal); !slices.ContainsFunc(s.Refused, func(r string) bool { return strings.Contains(r, "the person wrote since") }) {
+		t.Fatalf("DONE with a message waiting = %+v, want it refused", s)
+	}
+}
+
+func TestEveryMessageFromThePersonGetsAReply(t *testing.T) {
+	f := newCLIFixture(t)
+	o := lookingSupervisor(t, f)
+	o.busy(t, supervisor, true)
+	msgs := []string{"Cover the API too", "List breaking changes first"}
+	for _, m := range msgs {
+		f.runOK(t, "send", o.goal, m)
+	}
+	o.busy(t, supervisor, false)
+	if s := superviseOnce(t, f, o.goal); !s.Looked {
+		t.Fatalf("supervise once the director is free = %+v, want a look", s)
+	}
+	brief := o.lastBrief(t)
+	unread := unreadIn(t, brief)
+	if !strings.Contains(unread, "Reply to each of them") || strings.Index(unread, msgs[0]) < 0 || strings.Index(unread, msgs[0]) > strings.Index(unread, msgs[1]) {
+		t.Fatalf("the brief does not list each message, oldest first, asking for a reply to each:\n%s", brief)
+	}
+
+	// An answer given while the director works reaches it the same way.
+	o.say(t, supervisor, "Both noted.", "ACTIONS:", "ASK: Which audience comes first?", "- engineers (recommended)", "- customers")
+	o.busy(t, supervisor, false)
+	superviseOnce(t, f, o.goal)
+	if got := stateOf(t, f, o.goal); got != core.StateNeedsInput {
+		t.Fatalf("goal after ASK = %s, want needs-input", got)
+	}
+	o.busy(t, supervisor, true)
+	var answered struct {
+		Told string `json:"told"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "answer", o.goal, "engineers", "--json")), &answered); err != nil {
+		t.Fatal(err)
+	}
+	if answered.Told != "queued" {
+		t.Fatalf("told = %q, want queued while the director works", answered.Told)
+	}
+	o.busy(t, supervisor, false)
+	if s := superviseOnce(t, f, o.goal); !s.Looked {
+		t.Fatalf("supervise once the director is free = %+v, want a look", s)
+	}
+	if brief := o.lastBrief(t); !strings.Contains(unreadIn(t, brief), "engineers") {
+		t.Fatalf("the brief lacks the answer given while the director worked:\n%s", brief)
+	}
+}
+
+func TestALookCountsOnlyOnceItsBriefIsDelivered(t *testing.T) {
+	f := newCLIFixture(t)
+	o := lookingSupervisor(t, f)
+	looks := len(f.bodies(t, o.goal, core.EventLook))
+	o.touch(t, "send-fails", true)
+	if out := f.runOK(t, "send", o.goal, "Cover the API too"); !strings.Contains(out, "couldn't be told now") {
+		t.Fatalf("send whose brief fails = %q, want it said the director was not told", out)
+	}
+	if n := len(f.bodies(t, o.goal, core.EventLook)); n != looks {
+		t.Fatalf("look events = %d, want %d: a brief that never arrived is no look", n, looks)
+	}
+	if got := waitingFor(t, f, o.goal); !slices.Equal(got, []string{"Cover the API too"}) {
+		t.Fatalf("waiting for the director = %q, want the message still waiting", got)
+	}
+	o.touch(t, "send-fails", false)
+	if s := superviseOnce(t, f, o.goal); !s.Looked {
+		t.Fatalf("supervise once a brief can be sent = %+v, want a look", s)
+	}
+	if !strings.Contains(o.lastBrief(t), "Cover the API too") {
+		t.Fatalf("the brief lacks the message whose first brief failed:\n%s", o.lastBrief(t))
+	}
+
+	// A director that started working since it was read refuses, and nothing is noted as failing.
+	o.busy(t, supervisor, true)
+	f.runOK(t, "send", o.goal, "Also the changelog")
+	if notes := f.bodies(t, o.goal, core.EventNote); slices.ContainsFunc(notes, func(n string) bool { return strings.Contains(n, "failed") }) {
+		t.Fatalf("notes = %q, want no failure for a busy director", notes)
+	}
+	if got := waitingFor(t, f, o.goal); !slices.Equal(got, []string{"Also the changelog"}) {
+		t.Fatalf("waiting for the director = %q, want the message waiting", got)
+	}
+}
+
 func TestWdGoalSuperviseCarriesOutWhatTheSupervisorDecided(t *testing.T) {
 	f := newCLIFixture(t)
 	o := overseenGoal(t, f)
@@ -5596,8 +5792,8 @@ func TestAGoalsAnswerReachesItsSupervisorNeverItsPlanner(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer l.Close()
-	if msgs, err := l.Undelivered(goal); err != nil || len(msgs) != 0 {
-		t.Fatalf("messages for the goal = %v (%v), want none: the answer is recorded, not sent", msgs, err)
+	if msgs, err := l.Undelivered(goal); err != nil || len(msgs) != 1 || !strings.Contains(msgs[0].Text, "research") {
+		t.Fatalf("messages for the goal = %v (%v), want the answer waiting for the supervisor's first look", msgs, err)
 	}
 }
 

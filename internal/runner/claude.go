@@ -186,7 +186,7 @@ func (c claudeRunner) Send(h *Handle, text string) error {
 		}
 		switch a.Status {
 		case "busy", "running":
-			return &RunnerError{Runner: "claude", Detail: "session " + h.Session + " is working; a message to it waits until it is idle"}
+			return busyError("claude", h.Session)
 		case "idle", "waiting":
 			if err := c.Stop(*h); err != nil {
 				return err

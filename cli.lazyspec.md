@@ -422,8 +422,8 @@ could not with their work, the bound that ran out, and the work still open.
 - The answer is recorded on the work as an `answer` event with the question it answers, as answered by the person, and reaches the session as `wd send` does.
 
 ## A Goal's Answer Reaches Its Supervisor, Never Its Planner
-- On a goal, the answer is sent to the goal's supervisor as `wd send` does.
-- A goal with no supervisor yet keeps the answer recorded, carries out what it changes, goes back to work, and says `recorded`.
+- On a goal, the answer waits for the goal's supervisor as `wd send` to a goal does: the goal goes back to work and its supervisor looks, saying `delivered`, or `queued` while it is working.
+- A goal with no supervisor yet keeps the answer recorded and waiting for its first look, carries out what it changes, goes back to work, and says `recorded`.
 - The session that planned the goal is never sent an answer.
 
 ## The Director Can Decide A Question Put To The Person
@@ -476,6 +476,20 @@ could not with their work, the bound that ran out, and the work still open.
 - On a done goal it unarchives it when archived, reopens it with the text as the reason, plans it and spawns its tasks, as `wd goal start` does.
 - On a dropped or abandoned goal it is refused naming `wd goal start`.
 - `--json` prints `{goal, tasks}`.
+
+## A Message Sent While The Director Is Busy Is Delivered When It Is Free
+- What the person says to a goal (`wd send`, `wd goal continue`, `wd answer`, by the person or `--director`) waits for the goal's supervisor until a look delivers it.
+- While the supervisor is working, it waits and `wd send` says it reaches the supervisor as soon as it is free.
+- Once the supervisor is free and its reply is carried out, the next pass looks with every message still waiting, however its events fall around that reply.
+- A reply carried out while a message waits does not move the goal to needs-input, and its `DONE` is refused saying the person wrote since.
+
+## Every Message From The Person Gets A Reply
+- The supervision brief lists every message waiting, oldest first, under `The person wrote to you since you last looked`, asking the supervisor to reply to each in words before acting.
+- An answer given while the supervisor works is listed the same way at its next look.
+
+## A Look Counts Only Once Its Brief Is Delivered
+- A look whose brief cannot be sent or started is taken back: no `look` event stays, and its messages wait for the next pass.
+- A supervisor that started working since it was read refuses the brief; nothing is noted as failing, and the next pass looks once it is free.
 
 ## Wd Goal Supervise Has The Goal's Supervisor Look Once No Task Is Working
 - `wd goal supervise <goal>` on a running goal first delivers its tasks' queued messages to sessions that are not running, and notes each running task whose session stopped without a report, as serving does.

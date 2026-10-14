@@ -72,6 +72,49 @@ func TestServe(t *testing.T) {
 	t.Run("Empty Collections Serialize As Empty Arrays", emptyCollectionsSerializeAsEmptyArrays)
 	t.Run("Errors Return JSON", errorsReturnJSON)
 	t.Run("A Goal Serves The Files Attached Under It", aGoalServesTheFilesAttachedUnderIt)
+	t.Run("A Goal Serves What The Person Said That Still Waits For The Director", aGoalServesWhatThePersonSaidThatStillWaitsForTheDirector)
+}
+
+func aGoalServesWhatThePersonSaidThatStillWaitsForTheDirector(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	goal, err := l.Add("p", "Goal", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	waiting := func() string {
+		var view map[string]json.RawMessage
+		getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &view)
+		return string(view["waiting_for_director"])
+	}
+	if got := waiting(); got != "[]" {
+		t.Fatalf("waiting_for_director = %s, want [] before the person says anything", got)
+	}
+	said, err := l.AddEvent(goal.ID, core.EventDecision, "cover the API too")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.QueueForSupervisor(goal.ID, said.ID, said.Body); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := waiting(), fmt.Sprintf("[%d]", said.ID); got != want {
+		t.Fatalf("waiting_for_director = %s, want %s while the director has not been given it", got, want)
+	}
+	look, taken, ok, err := l.ClaimLook(goal.ID, 0, "the person wrote (1)")
+	if err != nil || !ok || len(taken) != 1 {
+		t.Fatalf("claim look = %v, %v, %v", taken, ok, err)
+	}
+	if got := waiting(); got != "[]" {
+		t.Fatalf("waiting_for_director = %s, want [] once a look took it", got)
+	}
+	if err := l.ReleaseLook(look); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := waiting(), fmt.Sprintf("[%d]", said.ID); got != want {
+		t.Fatalf("waiting_for_director = %s, want %s again once its look was taken back", got, want)
+	}
 }
 
 func aGoalServesTheFilesAttachedUnderIt(t *testing.T) {

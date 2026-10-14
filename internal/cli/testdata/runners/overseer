@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # A runner whose every session is a file a test writes: said-<session> is what
 # it said, busy-<session> makes it working, sent-<session> keeps what it was sent.
+# busy-on-send has a session it is sent to start working; send-fails fails a send.
 set -u
 state=${WD_FAKE_STATE:?WD_FAKE_STATE needed}
 mkdir -p "$state"
@@ -13,7 +14,11 @@ case "$1" in
     echo "session=$s";;
   export) cat "$state/said-$2" 2>/dev/null; true;;
   status) if [ -f "$state/busy-$2" ]; then echo 'state: working'; else echo 'state: idle'; fi;;
-  send) printf '%s\n' "$3" >> "$state/sent-$2"; echo ok;;
+  send)
+    if [ -f "$state/send-fails" ]; then echo 'overseer is unreachable' >&2; exit 1; fi
+    printf '%s\n' "$3" >> "$state/sent-$2"
+    if [ -f "$state/busy-on-send" ]; then : > "$state/busy-$2"; fi
+    echo ok;;
   stop) echo "overseer $2" >> "$state/stopped"; echo stopped;;
   models) echo 'overseer/m1';;
   *) echo "unhandled overseer $*" >&2; exit 1;;
