@@ -3,7 +3,7 @@
 # checks in the ledger that each control did what it says: the same checks as
 # scripts/ui/linux/act.sh. Prints one PASS or FAIL line per check; exits
 # non-zero on a FAIL. Needs an unlocked screen and Accessibility access for the
-# terminal running it.
+# terminal running it. The app never comes to the front: see launch.sh.
 #
 #   scripts/ui/macos/act.sh [out]
 set -euo pipefail
@@ -16,36 +16,24 @@ out=$(mkdir -p "${1:-$root/ui-shots/macos-act}" && cd "${1:-$root/ui-shots/macos
 work=$(mktemp -d "${TMPDIR:-/tmp}/wd-ui-act.XXXXXX")
 (cd "$root" && go build -o "$work/wd" ./cmd/wd)
 (cd "$root/clients/macos" && swift build -c release -q)
-swiftc -O -o "$work/press" "$root/scripts/ui/macos/press.swift"
-swiftc -O -o "$work/window" "$root/scripts/ui/macos/window.swift"
 app=$root/clients/macos/.build/release/WorkDirector
+. "$root/scripts/ui/macos/launch.sh"
+ui_tools
 export WD_HOME=$work/home WD_BIN=$work/wd
 eval "$("$root/scripts/ui/seed-goal-tree.sh" "$WD_BIN" | tail -1)"
 db=$WD_HOME/ledger.db
 fail=0
+ui_watch
 
 check() { # name, sql, want
   got=$(sqlite3 -cmd ".timeout 10000" "$db" "$2")
   if [ "$got" = "$3" ]; then echo "PASS $1"; else echo "FAIL $1: got '$got', want '$3'"; fail=1; fi
 }
 open_app() { # work view
-  "$app" -place.work "$1" -goal.view "$2" -detail.agents NO -appearance light >"$work/app.log" 2>&1 &
-  pid=$!
-  for _ in $(seq 150); do
-    osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid) to count windows" 2>/dev/null | grep -qv '^0$' && break
-    sleep 0.2
-  done
-  # A window just counted can still refuse to be placed for a moment.
-  for _ in $(seq 10); do
-    osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid)
-      set position of window 1 to {40, 60}
-      set size of window 1 to {1280, 900}
-    end tell" >/dev/null 2>&1 && break
-    sleep 1
-  done
+  ui_open "$work/app.log" -place.work "$1" -goal.view "$2" -detail.agents NO -appearance light
   sleep 2.5
 }
-close_app() { kill "$pid"; wait "$pid" 2>/dev/null || true; sleep 1; }
+close_app() { ui_close; sleep 1; }
 # press clicks the first element of a role whose title or description contains
 # the text, through the accessibility API: System Events reads the names
 # SwiftUI gives its controls as missing value.
@@ -80,4 +68,5 @@ if grep -q '^finish: research' "$WD_HOME/projects/metariki-eqms.md"; then echo "
 echo "SKIP the finish line changes from the overview (menu, macOS)"
 echo "SKIP merging supersedes one proposed sub-goal (menu, macOS)"
 
+ui_unwatch || fail=1
 exit $fail

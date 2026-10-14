@@ -7,10 +7,23 @@ struct WorkDirectorApp: App {
     @State private var launch = Launch()
     @AppStorage("appearance") private var appearance: AppearanceChoice = .system
 
+    static let background = UserDefaults.standard.bool(forKey: "ui.background")
+
     init() {
         // Run from `swift run` there is no bundle to make the app a regular,
         // frontmost application; inside Work Director.app this is already so.
-        NSApplication.shared.setActivationPolicy(.regular)
+        // A UI check launches it with `-ui.background YES`: it may then never
+        // become active, so it can never take the screen or the keystrokes
+        // of the person using the Mac.
+        NSApplication.shared.setActivationPolicy(Self.background ? .prohibited : .regular)
+        if Self.background {
+            // Its window goes behind every other, so it covers nothing the
+            // person is looking at; a check photographs it all the same.
+            NotificationCenter.default.addObserver(forName: NSWindow.didUpdateNotification, object: nil, queue: .main) { note in
+                guard let window = note.object as? NSWindow else { return }
+                MainActor.assumeIsolated { BackWindows.send(window) }
+            }
+        }
         // A write to a wd that has exited must fail as an error the window can
         // show; the default SIGPIPE would end the app instead.
         signal(SIGPIPE, SIG_IGN)
@@ -51,6 +64,17 @@ struct WorkDirectorApp: App {
         Settings {
             Preferences()
         }
+    }
+}
+
+/// The windows a background launch has sent behind every other, once each.
+@MainActor
+enum BackWindows {
+    private static var sent: Set<ObjectIdentifier> = []
+
+    static func send(_ window: NSWindow) {
+        guard window.isVisible, !window.isSheet, sent.insert(ObjectIdentifier(window)).inserted else { return }
+        window.orderBack(nil)
     }
 }
 
