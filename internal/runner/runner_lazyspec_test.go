@@ -64,8 +64,11 @@ func TestRunner(t *testing.T) {
   "--bg --resume") rm -f `+filepath.Join(bin, "stopped")+`; echo "backgrounded · b765c0a2";;
   "agents --json") status='"status":"idle",'; [ -f `+filepath.Join(bin, "busy")+` ] && status='"status":"busy",'
     [ -f `+filepath.Join(bin, "stopped")+` ] && status=''
+    state=done
+    # Dispatched and its process not up yet: listed as working with no status.
+    [ -f `+filepath.Join(bin, "starting")+` ] && status='' state=working
     [ -f `+filepath.Join(bin, "pid")+` ] && status="$status\"pid\":$(cat `+filepath.Join(bin, "pid")+`),"
-    echo '[{"id":"b765c0a2","sessionId":"`+testSID+`","cwd":"`+cwd+`","kind":"background",'$status'"state":"done"}]';;
+    echo '[{"id":"b765c0a2","sessionId":"`+testSID+`","cwd":"`+cwd+`","kind":"background",'$status'"state":"'$state'"}]';;
   "stop deadbeef") echo 'no background session deadbeef' >&2; exit 1;;
   "stop "*) touch `+filepath.Join(bin, "stopped")+`
     # The process outlives the stop command, as claude's does.
@@ -770,6 +773,48 @@ transcript = "cat {log}"
 		}
 	})
 
+	t.Run("A Session Just Started Is Never Read As Ended", func(t *testing.T) {
+		h := Handle{Runner: "claude", Session: testSID, Ref: strPtr("b765c0a2"), Cwd: cwd}
+		t.Run("claude reads a session whose process is not up yet as running, and will not send to it", func(t *testing.T) {
+			starting := filepath.Join(bin, "starting")
+			if err := os.WriteFile(starting, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(starting)
+			if st, err := claude.Status(h); err != nil || st != StatusRunning {
+				t.Fatalf("starting session status = %q, %v; want running", st, err)
+			}
+			before := len(calls(t, bin))
+			if err := claude.Send(&h, "too soon"); !errors.Is(err, ErrBusy) {
+				t.Fatalf("send to a starting session = %v, want ErrBusy", err)
+			}
+			if after := calls(t, bin)[before:]; strings.Contains(after, "--resume") || strings.Contains(after, "claude stop") {
+				t.Fatalf("send to a starting session stopped or resumed it:\n%s", after)
+			}
+		})
+		t.Run("a shared listing older than the handle's Since is not used", func(t *testing.T) {
+			ShareAgentListing(time.Hour)
+			defer ShareAgentListing(0)
+			defer forgetAgents()
+			stopped := filepath.Join(bin, "stopped")
+			if err := os.WriteFile(stopped, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if st, err := claude.Status(h); err != nil || st != StatusStopped {
+				t.Fatalf("status = %q, %v; want stopped", st, err)
+			}
+			// Another process resumes the session; this one's listing still says stopped.
+			os.Remove(stopped)
+			if st, err := claude.Status(h); err != nil || st != StatusStopped {
+				t.Fatalf("status from the shared listing = %q, %v; want the shared stopped", st, err)
+			}
+			resumed := h
+			resumed.Since = time.Now()
+			if st, err := claude.Status(resumed); err != nil || st != StatusIdle {
+				t.Fatalf("status since the resume = %q, %v; want idle from a fresh listing", st, err)
+			}
+		})
+	})
 	t.Run("A Runner Stops A Session And Keeps Its Conversation", func(t *testing.T) {
 		t.Run("claude stops by its background id", func(t *testing.T) {
 			h := Handle{Runner: "claude", Session: testSID, Ref: strPtr("b765c0a2"), Cwd: cwd}

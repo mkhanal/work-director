@@ -5887,6 +5887,35 @@ FINISH: merged | from: goal
   after: 1
 `
 
+func TestAPlanAlreadyWrittenIsNotAskedForAgain(t *testing.T) {
+	f := newCLIFixture(t)
+	state := filepath.Join(f.dir, "fake-state")
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Release notes", "--json"), "id")
+	if errStr := f.runFail(t, "goal", "begin", goal, "--runner", "finder", "--timeout", "60"); !strings.Contains(errStr, "ended without a plan") {
+		t.Fatalf("begin = %q, want planning failed", errStr)
+	}
+	// The planner went on to write its plan after planning was failed.
+	plan := "NAME: Release notes\nFINISH: complete PR | from: taste\n- The changelog lists each release\n  done when: the changelog has a dated entry per tag\n- Customers read what changed\n  done when: the changelog page lists the release\n"
+	if err := os.WriteFile(filepath.Join(state, "finder-plan"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var rows []struct {
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal([]byte(f.runOK(t, "goal", "plan", goal, "--runner", "finder", "--json")), &rows); err != nil || len(rows) != 2 || rows[0].Title != "The changelog lists each release" {
+		t.Fatalf("re-plan = %+v, %v; want the plan the failed planning wrote", rows, err)
+	}
+	if n, _ := os.ReadFile(filepath.Join(state, "finder-n")); strings.TrimSpace(string(n)) != "1" {
+		t.Fatalf("planners started = %q, want only the first", n)
+	}
+	if spawns := f.bodies(t, goal, core.EventSpawn); len(spawns) != 1 {
+		t.Fatalf("spawn events = %v, want the one planning session", spawns)
+	}
+}
+
 func TestAPlanningSessionThatFailsIsReportedAtOnceWithWhy(t *testing.T) {
 	f := newCLIFixture(t)
 	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Release notes", "--json"), "id")

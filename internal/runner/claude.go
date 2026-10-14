@@ -56,15 +56,19 @@ func forgetAgents() {
 	agentListing.at = time.Time{}
 }
 
-func agents(cwd string) ([]agentRow, error) {
+// agents lists claude's agents. A shared listing answers only when it was
+// read after since: one read before wd last started or sent to a session
+// does not know what that did, and would read the session as ended.
+func agents(cwd string, since time.Time) ([]agentRow, error) {
 	agentListing.Lock()
 	defer agentListing.Unlock()
 	age := time.Since(agentListing.at)
 	ttl := agentListing.ttl
-	if ttl > 0 && age < ttl {
+	shared := ttl > 0 && !agentListing.at.Before(since)
+	if shared && age < ttl {
 		return agentListing.rows, nil
 	}
-	if ttl > 0 && age < staleFor*ttl {
+	if shared && age < staleFor*ttl {
 		if !agentListing.reading {
 			agentListing.reading = true
 			at := agentListing.at
@@ -107,6 +111,28 @@ func listAgents(cwd string) ([]agentRow, error) {
 	return rows, nil
 }
 
+// status is the session's liveness as its row says it.
+func (a agentRow) status() RunnerStatus {
+	switch a.Status {
+	case "waiting":
+		return StatusWaiting
+	case "busy", "running":
+		return StatusRunning
+	case "idle":
+		return StatusIdle
+	case "":
+		// claude lists a session it has just dispatched as working before its
+		// process is up: it is starting, not ended.
+		if a.State == "working" {
+			return StatusRunning
+		}
+		// Any other session listed with no status has no process; it keeps
+		// its conversation and resumes on the next send.
+		return StatusStopped
+	}
+	return StatusUnknown
+}
+
 // claudeRefRe captures the background id from `claude --bg` output:
 // "backgrounded · b765c0a2 · <name>".
 var claudeRefRe = regexp.MustCompile(`backgrounded\s*·\s*([0-9a-f]{8})`)
@@ -140,6 +166,7 @@ func (claudeRunner) Spawn(o SpawnOptions) (Handle, error) {
 		args = append(args, "--worktree", worktreeSlug(o.Name))
 	}
 	args = append(args, o.Brief)
+	since := time.Now()
 	r, err := Run(args, o.Cwd)
 	if err != nil {
 		return Handle{}, err
@@ -150,7 +177,7 @@ func (claudeRunner) Spawn(o SpawnOptions) (Handle, error) {
 	}
 	ref := m[1]
 	row, ok, err := waitFor(func() (*agentRow, bool, error) {
-		rows, err := agents(o.Cwd)
+		rows, err := agents(o.Cwd, since)
 		if err != nil {
 			return nil, false, err
 		}
@@ -167,7 +194,7 @@ func (claudeRunner) Spawn(o SpawnOptions) (Handle, error) {
 	if !ok {
 		return Handle{}, &RunnerError{Runner: "claude", Detail: fmt.Sprintf("session %s not listed by claude agents", ref)}
 	}
-	return Handle{Runner: "claude", Session: row.SessionID, Ref: &ref, Cwd: row.Cwd}, nil
+	return Handle{Runner: "claude", Session: row.SessionID, Ref: &ref, Cwd: row.Cwd, Since: since}, nil
 }
 
 // Send continues the session. Resuming a session whose process is still up,
@@ -176,7 +203,7 @@ func (claudeRunner) Spawn(o SpawnOptions) (Handle, error) {
 // cut its work short.
 func (c claudeRunner) Send(h *Handle, text string) error {
 	defer forgetAgents()
-	rows, err := agents(h.Cwd)
+	rows, err := agents(h.Cwd, h.Since)
 	if err != nil {
 		return err
 	}
@@ -184,9 +211,10 @@ func (c claudeRunner) Send(h *Handle, text string) error {
 		if a.SessionID != h.Session {
 			continue
 		}
-		switch a.Status {
-		case "busy", "running":
+		if a.status() == StatusRunning {
 			return busyError("claude", h.Session)
+		}
+		switch a.Status {
 		case "idle", "waiting":
 			if err := c.Stop(*h); err != nil {
 				return err
@@ -201,6 +229,7 @@ func (c claudeRunner) Send(h *Handle, text string) error {
 			}
 		}
 	}
+	since := time.Now()
 	r, err := Run([]string{"claude", "--bg", "--resume", h.Session, text}, h.Cwd)
 	if err != nil {
 		return err
@@ -208,6 +237,7 @@ func (c claudeRunner) Send(h *Handle, text string) error {
 	if r.Code != 0 {
 		return &RunnerError{Runner: "claude", Detail: "send failed: " + stderrOrStdout(r)}
 	}
+	h.Since = since
 	return nil
 }
 
@@ -229,28 +259,14 @@ func (claudeRunner) Stop(h Handle) error {
 }
 
 func (claudeRunner) Status(h Handle) (RunnerStatus, error) {
-	rows, err := agents(h.Cwd)
+	rows, err := agents(h.Cwd, h.Since)
 	if err != nil {
 		return "", err
 	}
 	for _, a := range rows {
-		if a.SessionID != h.Session {
-			continue
+		if a.SessionID == h.Session {
+			return a.status(), nil
 		}
-		switch a.Status {
-		case "waiting":
-			return StatusWaiting, nil
-		case "busy", "running":
-			return StatusRunning, nil
-		case "idle":
-			return StatusIdle, nil
-		}
-		// A session listed with no status has no process; it keeps its
-		// conversation and resumes on the next send.
-		if a.Status == "" {
-			return StatusStopped, nil
-		}
-		return StatusUnknown, nil
 	}
 	return StatusExited, nil
 }

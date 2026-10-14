@@ -20,6 +20,9 @@ type Handle struct {
 	Session string  `json:"session"`
 	Ref     *string `json:"ref"`
 	Cwd     string  `json:"cwd"`
+	// Since is when wd last started or sent to the session, zero when not
+	// known: what is read of the session must have been read after it.
+	Since time.Time `json:"-"`
 }
 
 // SpawnOptions is everything a runner needs to start a session. Optional

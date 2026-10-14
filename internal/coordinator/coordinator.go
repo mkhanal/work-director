@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"wd/internal/brief"
 	"wd/internal/core"
@@ -555,7 +556,14 @@ func Handle(l *ledger.Ledger, w core.Work, p *project.Project) (runner.Handle, b
 	if err != nil {
 		return runner.Handle{}, false, err
 	}
-	return runner.Handle{Runner: runnerName, Session: *session, Ref: w.Ref, Cwd: cwd}, true, nil
+	h := runner.Handle{Runner: runnerName, Session: *session, Ref: w.Ref, Cwd: cwd}
+	// Starting or sending to a session files an event, which moves the work's
+	// updated: what is read of the session is read after that.
+	h.Since, err = time.Parse(core.TimeLayout, w.Updated)
+	if err != nil {
+		return runner.Handle{}, false, fmt.Errorf("work %s: updated %q: %w", w.ID, w.Updated, err)
+	}
+	return h, true, nil
 }
 
 // planPrefix opens the spawn event that records the session planning a goal.
@@ -578,6 +586,11 @@ func planning(l *ledger.Ledger, goal core.Work, p *project.Project) (runner.Hand
 	return goalSession(l, goal, p, planPrefix, supervisePrefix)
 }
 
+// Planner is the goal's latest planning session, as its spawn events record it.
+func Planner(l *ledger.Ledger, goal core.Work, p *project.Project) (runner.Handle, bool, error) {
+	return goalSession(l, goal, p, planPrefix)
+}
+
 // goalSession is the latest session a spawn event with one of prefixes
 // records on goal. A planner runs in the project's directory and a supervisor
 // in the goal's shared worktree, where it was spawned.
@@ -597,6 +610,9 @@ func goalSession(l *ledger.Ledger, goal core.Work, p *project.Project, prefixes 
 				return runner.Handle{}, false, fmt.Errorf("goal %s: spawn event %q names no session", goal.ID, spawns[i].Body)
 			}
 			h := runner.Handle{Runner: f[0], Session: f[1], Cwd: p.Path}
+			if h.Since, err = time.Parse(core.TimeLayout, spawns[i].At); err != nil {
+				return runner.Handle{}, false, fmt.Errorf("goal %s: spawn event %d at %q: %w", goal.ID, spawns[i].ID, spawns[i].At, err)
+			}
 			if prefix == supervisePrefix {
 				if h.Cwd, err = SharedWorktree(l, goal.ID, p.Path); err != nil {
 					return runner.Handle{}, false, err

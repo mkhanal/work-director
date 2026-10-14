@@ -876,7 +876,7 @@ func (c *Cli) begin(goal core.Work, p *project.Project) error {
 		return fail("nothing was started: %s", asked.question)
 	}
 	if err != nil {
-		if _, ferr := c.Ledger.AddEvent(goal.ID, core.EventNote, "planning failed: "+err.Error()); ferr != nil {
+		if _, ferr := c.Ledger.AddEvent(goal.ID, core.EventNote, planFailedPrefix+err.Error()); ferr != nil {
 			return ferr
 		}
 		return fmt.Errorf("goal %s filed; %w", goal.ID, err)
@@ -1218,29 +1218,35 @@ func (c *Cli) planGoal(goal core.Work, p *project.Project, propose bool) ([]core
 	if err != nil {
 		return nil, fail("%v", err)
 	}
-	h, err := rn.Spawn(runner.SpawnOptions{
-		Cwd:   p.Path,
-		Name:  fmt.Sprintf("%s plan", goal.ID),
-		Brief: planBrief,
-		Agent: agent,
-		Model: model,
-	})
+	outcomes, finish, reply, written, err := c.writtenPlan(goal, p)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.Ledger.AddEvent(goal.ID, core.EventSpawn, coordinator.PlanEvent(h)); err != nil {
-		return nil, err
-	}
-	outcomes, finish, reply, err := awaitPlan(rn, h, time.Duration(wait)*time.Second)
-	// The planning session answers once; whatever it said, it is not left running.
-	if serr := runner.Dismiss(rn, h); serr != nil && err == nil {
-		err = serr
-	}
-	if err != nil {
-		return nil, err
-	}
-	if outcomes == nil {
-		return nil, fail("plan session %s produced no outcomes", h.Session)
+	if !written {
+		h, err := rn.Spawn(runner.SpawnOptions{
+			Cwd:   p.Path,
+			Name:  fmt.Sprintf("%s plan", goal.ID),
+			Brief: planBrief,
+			Agent: agent,
+			Model: model,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if _, err := c.Ledger.AddEvent(goal.ID, core.EventSpawn, coordinator.PlanEvent(h)); err != nil {
+			return nil, err
+		}
+		outcomes, finish, reply, err = awaitPlan(rn, h, time.Duration(wait)*time.Second)
+		// The planning session answers once; whatever it said, it is not left running.
+		if serr := runner.Dismiss(rn, h); serr != nil && err == nil {
+			err = serr
+		}
+		if err != nil {
+			return nil, err
+		}
+		if outcomes == nil {
+			return nil, fail("plan session %s produced no outcomes", h.Session)
+		}
 	}
 	// A sub-goal keeps the outcome its parent's plan named it by.
 	if top {
@@ -1339,6 +1345,59 @@ func (c *Cli) awaitPerson(id string) error {
 		}
 	}
 	return nil
+}
+
+// planFailedPrefix opens the note filed on a goal whose planning failed.
+const planFailedPrefix = "planning failed: "
+
+// writtenPlan is the plan goal's last planning session wrote after its
+// planning was filed as failed: a session read as ended too soon may still
+// have answered, and its plan is used rather than asked for again. written is
+// false when planning did not last fail or its session holds no plan.
+func (c *Cli) writtenPlan(goal core.Work, p *project.Project) ([]coordinator.PlanOutcome, coordinator.PlanFinish, []string, bool, error) {
+	none := func(err error) ([]coordinator.PlanOutcome, coordinator.PlanFinish, []string, bool, error) {
+		return nil, coordinator.PlanFinish{}, nil, false, err
+	}
+	notes, err := c.Ledger.Events(goal.ID, kindPtr(core.EventNote))
+	if err != nil {
+		return none(err)
+	}
+	failed := false
+	for i := len(notes) - 1; i >= 0; i-- {
+		body := notes[i].Body
+		if strings.HasPrefix(body, planFailedPrefix) {
+			failed = true
+			break
+		}
+		if strings.HasPrefix(body, "plan: ") || strings.HasPrefix(body, core.ProposedPrefix) {
+			break
+		}
+	}
+	if !failed {
+		return none(nil)
+	}
+	h, ok, err := coordinator.Planner(c.Ledger, goal, p)
+	if err != nil || !ok {
+		return none(err)
+	}
+	rn, err := runner.RunnerNamed(h.Runner)
+	if err != nil {
+		return none(err)
+	}
+	texts, err := runner.Transcript(rn, h)
+	if err != nil {
+		return none(err)
+	}
+	outcomes := coordinator.ParseOutcomes(texts)
+	if len(outcomes) == 0 {
+		return none(nil)
+	}
+	// It has answered; it is not left running.
+	if err := runner.Dismiss(rn, h); err != nil {
+		return none(err)
+	}
+	finish, _ := coordinator.ParseFinish(texts)
+	return outcomes, finish, texts, true, nil
 }
 
 // awaitPlan reads the planning session until it lists outcomes or asks a

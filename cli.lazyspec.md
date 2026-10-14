@@ -121,6 +121,9 @@ verify event.
 - `wd stop <goal>` stops the goal's own live session as well as its tasks'.
 - The goal's own session is its latest planning or supervising session.
 
+## A Plan Already Written Is Not Asked For Again
+- Planning a goal whose last planning was filed as failed first reads that planning session's conversation; when it holds a plan, that plan is filed and no new planner is started.
+
 ## A Planning Session That Fails Is Reported At Once With Why
 - `wd goal plan` stops as soon as its planning session ends on an error, failing with that error, and files no sub-goals.
 
