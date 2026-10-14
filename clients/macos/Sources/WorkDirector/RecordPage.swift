@@ -24,6 +24,7 @@ struct GoalRecordView: View {
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
                 HStack(spacing: 6) {
                     ForEach(RecordKind.allCases, id: \.self) { k in
                         FilterChip(label: k.label, selected: kind == k) { kind = k }

@@ -10,7 +10,7 @@ extension GoalRecord {
         func cell(_ table: String, _ row: Int, _ column: Int, header: Bool = false, last: Bool = false) -> Box {
             var c = Cell(table: table, row: row, column: column, columns: 5, header: header, align: column == 4 ? .trailing : .leading)
             c.width = widths[column]
-            c.lined = true
+            c.look = .lined
             c.last = last
             return .cell(c)
         }

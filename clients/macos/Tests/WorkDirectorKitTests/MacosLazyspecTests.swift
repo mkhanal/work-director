@@ -1916,6 +1916,88 @@ struct SeededTree {
         """, "the record copies as its rows: \(record.copied(0..<record.length))")
     }
 
+    @Test("Copying Across A Goal's Overview Keeps Every Line It Spans")
+    func copyingAcrossTheOverview() throws {
+        func work(_ id: String, _ title: String, _ state: String, kind: String = "task") -> String {
+            workJSON(state: state)
+                .replacingOccurrences(of: #""id":"w1""#, with: #""id":"\#(id)""#)
+                .replacingOccurrences(of: #""title":"T""#, with: #""title":"\#(title)""#)
+                .replacingOccurrences(of: #""kind":"task""#, with: #""kind":"\#(kind)""#)
+        }
+        func node(_ w: String, doneWhen: String = "null", after: String = "[]", steps: String = "[]", children: [String] = []) -> String {
+            #"{"work":\#(w),"group":false,"done_when":\#(doneWhen),"after":\#(after),"waiting_on":[],"why_not_moving":null,"owner":{"runner":"claude","agent":null},"planned_into":null,"progress":null,"doing":null,"steps":\#(steps),"judged":null,"needs_you":0,"stopped":null,"blocked_because":null,"children":[\#(children.joined(separator: ","))]}"#
+        }
+        let steps = #"[{"n":1,"text":"Read past releases","state":"done"},{"n":2,"text":"Write the template","state":"doing"}]"#
+        let tree = [
+            node(work("tag", "Every release is tagged", "done"), doneWhen: #""each release has a tag""#),
+            node(work("note", "Customers get a release note", "running"), steps: steps),
+        ].joined(separator: ",")
+        func goal(proposed: Bool, tree: String) throws -> GoalDetail {
+            let json = """
+            {"goal":\(work("g", "Release notes", proposed ? "queued" : "running", kind: "goal")),"tasks":[],"rollup":{"counts":{},"done":0,"total":2},"events":[],"claims":[],"landings":[],
+             "delivery":null,"activity":{},"reports":{},"waiting":[],"chain":[],"tree":[\(tree)],"paths":{},
+             "done_when":"every release has notes","finish":{"line":"complete PR","source":"taste"},
+             "progress":{"done":1,"total":2,"superseded":0},"not_done_because":["1 sub-goal is still open"],"needs_you":[],
+             "course":{"verdict":"on course","why":"the tag format suits the rest","at":"t"},"superseded":[],"proposed":\(proposed),
+             "reasoning":{"why":"Two outcomes, each judged on its own.","left_out":null,"judge_by":"Notes for the last release."}}
+            """
+            return try JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
+        }
+        let g = try goal(proposed: false, tree: tree)
+        let overview = g.overview(opened: ["note"], working: ["note"], asks: ["q1"], did: [], ago: { _ in "4 min ago" }, clock: { _ in "10:00" })
+        #expect(overview.copied(0..<overview.length) == """
+        Done when
+        Every release has notes
+        Finishes at
+        \(g.finishWords!.line)
+        From your taste.
+        Course
+        On course checked 4 min ago
+        The tag format suits the rest
+        Sub-goals 1 of 2 done
+        Every release is tagged
+        Done when each release has a tag · claude
+        Done
+        Customers get a release note
+        claude · 2 steps
+        ✓ Read past releases
+        ● Write the template
+        The agent's own plan · Hide steps
+        \(g.tree[1].badge.text)
+        Not done yet, because
+        ○ 1 sub-goal is still open
+        """, "the cards, every row and what holds it read as one text, no control copied: \(overview.copied(0..<overview.length))")
+        let marks = overview.items.flatMap(\.paras).flatMap(\.runs).compactMap(\.mark)
+        #expect(marks.contains(.block("ask/q1")) && marks.contains(.slot("add")) && marks.contains(.slot("working/note")),
+                "the question, Add sub-goal and the moving mark sit inside the one text")
+        let starts = overview.starts
+        let rows = overview.items.indices.filter { overview.items[$0].id.hasPrefix("row-") }
+        #expect(overview.copied(starts[0]..<(starts[rows[1]] + 10)).hasSuffix("Done\nCustomers"), "one drag spans the cards and two rows")
+
+        let titles = overview.items.flatMap(\.paras).flatMap(\.runs).filter { $0.face == .bodyMedium && $0.mark == nil }
+        #expect(titles.map { $0.toggle ?? $0.link } == ["note", actLink(OverviewAct.focus, "tag")].map(Optional.some).reversed(),
+                "a row with steps folds them from its title; one without shows its agent")
+        let menu = overview.items.first { $0.id == "row-tag" }?.copies
+        #expect(menu == [MenuCopy("Copy Title and ID", "Every release is tagged (tag)"), MenuCopy("Copy Done When", "each release has a tag")])
+
+        let proposedTree = [node(work("tag", "Every release is tagged", "queued"), doneWhen: #""each release has a tag""#),
+                            node(work("note", "Customers get a release note", "queued"), after: #"["tag"]"#)].joined(separator: ",")
+        let p = try goal(proposed: true, tree: proposedTree)
+        let rowsProposed = try #require(p.proposal)
+        let proposal = p.proposalText(rowsProposed, status: "Nothing starts until you approve", failure: nil)
+        #expect(proposal.copied(0..<proposal.length) == """
+        Nothing starts until you approve
+        Proposed sub-goals   drag to reorder · each is about one agent's work
+        Every release is tagged
+        Done when each release has a tag
+        Starts first  One agent
+        Customers get a release note
+        After 1  One agent
+        """, "the proposal reads as one text: \(proposal.copied(0..<proposal.length))")
+        let why = try #require(p.reasoning).transcript
+        #expect(why.copied(0..<why.length) == "WHY THIS BREAKDOWN\nTwo outcomes, each judged on its own.\nHOW YOU'D JUDGE IT\nNotes for the last release.")
+    }
+
     @Test("A Message Waiting For The Director Says So")
     func aMessageWaitingForTheDirectorSaysSo() {
         let mine = #"{"question":"","answer":"Cover the API too","source":"person","runner":"","model":"","tokens":0,"reverses":0,"reversed_by":0}"#

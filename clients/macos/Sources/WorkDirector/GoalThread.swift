@@ -22,9 +22,9 @@ struct GoalThread: View {
                 Text("Nothing here yet.").font(TypeScale.callout).foregroundStyle(Palette.text3)
             }
             if !transcript.items.isEmpty {
-                TranscriptText(transcript: transcript, key: "goal/\(goal.goal.id)/\(filter)", open: focus) { id in
+                TranscriptText(transcript: transcript, key: "goal/\(goal.goal.id)/\(filter)", open: focus, toggle: { id in
                     toggled.formSymmetricDifference([id])
-                }
+                })
             }
             if filter == .all {
                 ForEach(store.outbox.filter { m in m.work == goal.goal.id || goal.nodes.contains { $0.id == m.work } }.filter { !$0.arrived(in: goal) }) { message in

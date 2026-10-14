@@ -8,7 +8,7 @@ import Foundation
 
 /// The type a piece of text is set in, from the design's type table.
 public enum Face: Hashable, Sendable {
-    case body, bodyMedium, heading1, title, callout, calloutMedium, meta, metaStrong, caption, code, codeSmall, micro
+    case body, bodyMedium, heading1, title, headline, callout, calloutMedium, calloutStrong, meta, metaStrong, caption, code, codeSmall, micro
     /// A badge's words, and a sub-goal tag's.
     case tag, tagMedium
 }
@@ -16,6 +16,10 @@ public enum Face: Hashable, Sendable {
 /// The colour a piece of text is set in, from the design's palette.
 public enum Ink: Hashable, Sendable {
     case text, text2, text3, link, failure
+    /// What waits on the person; and a mark that has nothing to say.
+    case attention, grey
+    /// A step being worked on now.
+    case live
     /// A step's own words; a badge's settled green.
     case stepText, settled
 }
@@ -50,10 +54,25 @@ public enum Pill: Hashable, Sendable {
 public enum Mark: Hashable, Sendable {
     case symbol(String)
     case avatar(Avatar)
+    /// A sub-goal's state, the size its row shows it, with room after it.
+    case state(Avatar)
     case chevron(open: Bool)
     /// Room of this many points, beside a pill.
     case space(Double)
+    /// The small arrow that says a menu opens here.
+    case menu
+    /// A control the app sets here, by its id, as wide as the control.
+    case slot(String)
+    /// A control the app sets across the whole line, by its id: all its
+    /// paragraph holds.
+    case block(String)
 }
+
+/// The scheme of a link that asks the app to act: `wd-act:<verb>/<id>`.
+public let actScheme = "wd-act"
+
+/// A link that asks the app to act on something by its id.
+public func actLink(_ verb: String, _ id: String) -> String { actScheme + ":" + verb + "/" + id }
 
 public struct Run: Hashable, Sendable {
     public var text: String
@@ -70,6 +89,11 @@ public struct Run: Hashable, Sendable {
     public var toggle: String?
     /// Set on a rounded tint.
     public var pill: Pill?
+    /// A control the app lays over these words, by its id: the words still
+    /// read and copy as text.
+    public var over: String?
+    /// What a pointer resting on it is told.
+    public var help: String?
 
     public init(_ text: String, _ face: Face, _ ink: Ink = .text, bold: Bool = false, italic: Bool = false,
                 strike: Bool = false, chip: Bool = false, link: String? = nil, toggle: String? = nil) {
@@ -89,6 +113,12 @@ public struct Run: Hashable, Sendable {
         run.mark = mark
         return run
     }
+
+    /// A control set in the text, by its id.
+    public static func slot(_ id: String, _ face: Face = .callout) -> Run { .mark(.slot(id), face) }
+
+    /// A control set across the whole line, by its id.
+    public static func block(_ id: String) -> Run { .mark(.block(id), .callout) }
 
     /// A badge or a tag: its words on a rounded tint, room drawn either side
     /// and a space after it that is copied.
@@ -115,6 +145,29 @@ public enum Gap: Hashable, Sendable {
     case item
     /// A new speaker.
     case turn
+    /// One part of a page and the next.
+    case section
+}
+
+/// How a table's cells are drawn.
+public enum CellLook: Hashable, Sendable {
+    /// A grid with a filled header row.
+    case grid
+    /// Rows parted by a hairline under each, with no grid or header fill.
+    case lined
+    /// Cards side by side, each column as wide as the next, all as tall as
+    /// the tallest.
+    case card
+    /// Rows of a list: room around each, a hairline between them.
+    case row
+    /// No lines and no room: words placed in columns.
+    case bare
+}
+
+/// A tint behind a cell.
+public enum CellTint: Hashable, Sendable {
+    /// A row that waits on the person.
+    case needsYou
 }
 
 /// One cell of a table.
@@ -127,10 +180,30 @@ public struct Cell: Hashable, Sendable {
     public let align: MarkdownTable.Alignment
     /// A fixed width in points; nil shares what is left.
     public var width: Double? = nil
-    /// Rows parted by a hairline under each, with no grid or header fill.
-    public var lined = false
+    public var look = CellLook.grid
     /// Under the last row of its table: no hairline.
     public var last = false
+    public var tint: CellTint?
+    /// Points further in at its start: a row nested under another.
+    public var inset: Double = 0
+
+    public init(table: String, row: Int, column: Int, columns: Int, header: Bool = false, align: MarkdownTable.Alignment = .leading,
+                width: Double? = nil, look: CellLook = .grid, last: Bool = false, tint: CellTint? = nil) {
+        self.table = table
+        self.row = row
+        self.column = column
+        self.columns = columns
+        self.header = header
+        self.align = align
+        self.width = width
+        self.look = look
+        self.last = last
+        self.tint = tint
+    }
+
+    /// Whether copying it ends in a tab: a cell of a table read as rows,
+    /// before the last of its row.
+    var tabbed: Bool { (look == .grid || look == .lined) && column < columns - 1 }
 }
 
 /// The box a paragraph sits in; consecutive paragraphs with the same box are
@@ -152,6 +225,8 @@ public enum Box: Hashable, Sendable {
     /// A hairline card on the page, or one filled plain.
     case card(String)
     case plain(String)
+    /// A hairline frame with no room inside: around a list's rows.
+    case frame(String)
     /// An agent's card, a little tighter.
     case agent(String)
     /// The director's own answer, in its settled tint.
@@ -205,11 +280,32 @@ public struct Para: Hashable, Sendable {
 
     public var text: String { runs.map(\.text).joined() }
 
+    /// Whether all it holds is controls set in the text: nothing of it is copied.
+    var onlyControls: Bool {
+        !runs.isEmpty && runs.allSatisfy { run in
+            switch run.mark {
+            case .slot, .block, .space: true
+            default: false
+            }
+        }
+    }
+
     /// What ends this paragraph when it is copied: a cell before the last of
     /// its row ends in a tab.
     var terminator: String {
-        if case .cell(let c) = box, c.column < c.columns - 1 { return "\t" }
+        if case .cell(let c) = box, c.tabbed { return "\t" }
         return "\n"
+    }
+}
+
+/// An entry on an item's menu that copies something it holds.
+public struct MenuCopy: Hashable, Sendable {
+    public let title: String
+    public let text: String
+
+    public init(_ title: String, _ text: String) {
+        self.title = title
+        self.text = text
     }
 }
 
@@ -221,16 +317,19 @@ public struct TranscriptItem: Hashable, Sendable {
     public let source: String
     /// The call, when the item is one.
     public let tool: ToolCall?
+    /// More to copy from its menu: each entry's title and what it copies.
+    public let copies: [MenuCopy]
     /// Its text: each paragraph and a newline after it.
     public let string: String
     /// Its length in UTF-16 units, as a text view counts.
     public let length: Int
 
-    public init(id: String, paras: [Para], source: String, tool: ToolCall? = nil) {
+    public init(id: String, paras: [Para], source: String, tool: ToolCall? = nil, copies: [MenuCopy] = []) {
         self.id = id
         self.paras = paras
         self.source = source
         self.tool = tool
+        self.copies = copies
         string = paras.map { $0.text + "\n" }.joined()
         length = string.utf16.count
     }
@@ -275,7 +374,7 @@ public struct Transcript: Hashable, Sendable {
                 let text = Array(para.text.utf16)
                 let end = at + text.count
                 let lo = max(range.lowerBound, at), hi = min(range.upperBound, end + 1)
-                if lo < hi {
+                if lo < hi, !para.onlyControls {
                     var words = String(decoding: text[(lo - at)..<min(hi - at, text.count)], as: UTF16.self)
                     if para.hang || para.label, let tab = words.firstIndex(of: "\t") { words.replaceSubrange(tab...tab, with: " ") }
                     out += words.replacingOccurrences(of: Self.markCharacter, with: "").replacingOccurrences(of: Self.lineBreak, with: "\n")

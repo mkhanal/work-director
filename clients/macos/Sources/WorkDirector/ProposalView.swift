@@ -16,7 +16,6 @@ struct ProposalView: View {
     @State private var sheet: Sheet?
     @State private var busy: String?
     @State private var failure: String?
-    @State private var dropTarget: String?
 
     enum Sheet: Identifiable {
         case edit(TreeNode), drop(TreeNode), add, replan
@@ -63,87 +62,81 @@ struct ProposalView: View {
         }
     }
 
+    /// The proposal is one text, its controls set in it: a drag or Select
+    /// All spans every card.
     private var main: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                if let busy {
-                    ProgressView().controlSize(.small)
-                    Text(busy).font(TypeScale.caption).foregroundStyle(Palette.text3)
-                } else {
-                    Text("Nothing starts until you approve").font(TypeScale.caption).foregroundStyle(Palette.text3)
-                }
-                Spacer()
-                Button(ControlName.discard) { run(Plan.cancel(goal.goal.id, reason: "the proposed breakdown was discarded")) }
-                    .buttonStyle(.canvas).accessibilityLabel(ControlName.discard)
-                Button(ControlName.replan) { sheet = .replan }
-                    .buttonStyle(.canvas).accessibilityLabel(ControlName.replan)
-                Button(ControlName.approve) { run(Plan.approve(goal.goal.id)) }
-                    .buttonStyle(.canvasPrimary).accessibilityLabel(ControlName.approve)
-            }
-            .disabled(busy != nil)
-            if let failure {
-                Label(failure, systemImage: "exclamationmark.triangle.fill")
-                    .font(TypeScale.meta).foregroundStyle(Palette.failure).textSelection(.enabled)
-            }
-            SplitRow(spacing: Space.s3) {
-                VStack(alignment: .leading, spacing: 4) {
-                    CardLabel("Done when")
-                    TextField("What makes this goal done", text: $doneWhen, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .font(TypeScale.callout)
-                        .lineLimit(1...4)
-                        .padding(.horizontal, 10).padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Palette.page, in: RoundedRectangle(cornerRadius: Radius.option))
-                        .overlay(RoundedRectangle(cornerRadius: Radius.option).strokeBorder(Palette.buttonBorder))
-                        .onSubmit {
-                            if doneWhen != (goal.doneWhen ?? ""), let plan = try? Plan.editGoal(goal.goal.id, doneWhen: doneWhen) { run(plan) }
-                        }
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    CardLabel("Finishes at")
-                    FinishMenu(goal: goal.goal.id, current: goal.finish?.line, name: ControlName.finishMenu(goal.finishWords?.line), run: run) {
-                        HStack {
-                            Text(goal.finishWords?.line ?? "Not decided yet")
-                                .font(TypeScale.calloutStrong)
-                                .foregroundStyle(Palette.text)
-                                .lineLimit(1)
-                            Spacer(minLength: 4)
-                            Text("▾").font(TypeScale.small).foregroundStyle(Palette.text2)
-                        }
-                        .padding(.horizontal, 10).padding(.vertical, 8)
-                        .background(Palette.page, in: RoundedRectangle(cornerRadius: Radius.option))
-                        .overlay(RoundedRectangle(cornerRadius: Radius.option).strokeBorder(Palette.buttonBorder))
-                    }
-                    if let source = goal.finishWords?.source {
-                        Text(source).font(TypeScale.caption).foregroundStyle(Palette.text3).fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-            HStack(spacing: 10) {
-                Text("Proposed sub-goals").font(TypeScale.title).foregroundStyle(Palette.text)
-                Text("drag to reorder · each is about one agent's work").font(TypeScale.caption).foregroundStyle(Palette.text3)
-            }
-            .padding(.top, 6)
-            ForEach(Array(rows.enumerated()), id: \.element.id) { i, row in
-                ProposedCard(row: row, others: rows.filter { $0.id != row.id },
-                             edit: { sheet = .edit(row.node) }, split: { run(Plan.splitGoal(row.node.id)) },
-                             merge: { other in run(Plan.merge(row, other)) }, drop: { sheet = .drop(row.node) })
-                    .overlay(alignment: .top) {
-                        if dropTarget == row.id { Rectangle().fill(Palette.accent).frame(height: 2).offset(y: -8) }
-                    }
-                    .draggable(row.id)
-                    .dropDestination(for: String.self) { ids, _ in
-                        guard let moved = ids.first, moved != row.id else { return false }
-                        perform(goal.reorder(moving: moved, to: i), doing: "Reordering…")
-                        return true
-                    } isTargeted: { over in
-                        dropTarget = over ? row.id : (dropTarget == row.id ? nil : dropTarget)
-                    }
-            }
-            Button("+ Add sub-goal") { sheet = .add }.buttonStyle(.canvas).accessibilityLabel("Add sub-goal")
+        var slots: [String: AnyView] = [
+            ProposalSlot.decide: AnyView(decide),
+            ProposalSlot.terms: AnyView(terms),
+            ProposalSlot.add: AnyView(Button("+ Add sub-goal") { sheet = .add }.buttonStyle(.canvas).accessibilityLabel("Add sub-goal")),
+        ]
+        for row in rows {
+            slots[ProposalSlot.grip(row.id)] = AnyView(Grip(row: row))
+            slots[ProposalSlot.actions(row.id)] = AnyView(
+                CardActions(row: row, others: rows.filter { $0.id != row.id },
+                            edit: { sheet = .edit(row.node) }, split: { run(Plan.splitGoal(row.node.id)) },
+                            merge: { other in run(Plan.merge(row, other)) }, drop: { sheet = .drop(row.node) }))
         }
+        return TranscriptText(transcript: goal.proposalText(rows, status: busy ?? "Nothing starts until you approve", failure: failure),
+                              key: "proposal/\(goal.goal.id)", slots: slots, drop: { moved, onto in
+            guard let i = rows.firstIndex(where: { "card-" + $0.id == onto }), moved != rows[i].id, rows.contains(where: { $0.id == moved }) else { return false }
+            perform(goal.reorder(moving: moved, to: i), doing: "Reordering…")
+            return true
+        })
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Discard, Re-plan and Approve, or what is under way.
+    private var decide: some View {
+        HStack(spacing: 10) {
+            if busy != nil { ProgressView().controlSize(.small) }
+            Button(ControlName.discard) { run(Plan.cancel(goal.goal.id, reason: "the proposed breakdown was discarded")) }
+                .buttonStyle(.canvas).accessibilityLabel(ControlName.discard)
+            Button(ControlName.replan) { sheet = .replan }
+                .buttonStyle(.canvas).accessibilityLabel(ControlName.replan)
+            Button(ControlName.approve) { run(Plan.approve(goal.goal.id)) }
+                .buttonStyle(.canvasPrimary).accessibilityLabel(ControlName.approve)
+        }
+        .disabled(busy != nil)
+    }
+
+    /// What makes the goal done, as a field, and where it finishes.
+    private var terms: some View {
+        SplitRow(spacing: Space.s3) {
+            VStack(alignment: .leading, spacing: 4) {
+                CardLabel("Done when")
+                TextField("What makes this goal done", text: $doneWhen, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(TypeScale.callout)
+                    .lineLimit(1...4)
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Palette.page, in: RoundedRectangle(cornerRadius: Radius.option))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.option).strokeBorder(Palette.buttonBorder))
+                    .onSubmit {
+                        if doneWhen != (goal.doneWhen ?? ""), let plan = try? Plan.editGoal(goal.goal.id, doneWhen: doneWhen) { run(plan) }
+                    }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                CardLabel("Finishes at")
+                FinishMenu(goal: goal.goal.id, current: goal.finish?.line, name: ControlName.finishMenu(goal.finishWords?.line), run: run) {
+                    HStack {
+                        Text(goal.finishWords?.line ?? "Not decided yet")
+                            .font(TypeScale.calloutStrong)
+                            .foregroundStyle(Palette.text)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text("▾").font(TypeScale.small).foregroundStyle(Palette.text2)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(Palette.page, in: RoundedRectangle(cornerRadius: Radius.option))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.option).strokeBorder(Palette.buttonBorder))
+                }
+                if let source = goal.finishWords?.source {
+                    Text(source).font(TypeScale.caption).foregroundStyle(Palette.text3).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 
     /// Runs writes in order, stopping at the first refused.
@@ -176,21 +169,10 @@ struct ReasoningPanel: View {
     let reasoning: Reasoning
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.s4) {
-            ForEach(reasoning.sections, id: \.label) { section in
-                VStack(alignment: .leading, spacing: Space.s2) {
-                    MicroLabel(section.label)
-                    Text(section.text)
-                        .font(TypeScale.callout).lineSpacing(TypeScale.calloutLeading)
-                        .foregroundStyle(Palette.text)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                }
-            }
-        }
-        .frame(width: 280, alignment: .topLeading)
-        .padding(.leading, Space.s5)
-        .overlay(alignment: .leading) { Rectangle().fill(Palette.hairline).frame(width: 1) }
+        TranscriptText(transcript: reasoning.transcript)
+            .frame(width: 280, alignment: .topLeading)
+            .padding(.leading, Space.s5)
+            .overlay(alignment: .leading) { Rectangle().fill(Palette.hairline).frame(width: 1) }
     }
 }
 
@@ -222,9 +204,31 @@ struct FinishMenu<Label: View>: View {
     }
 }
 
-/// One proposed sub-goal: its grip, number, title, done-when and chips, with
-/// Edit, Split (a task only), Merge with another card and Drop.
-struct ProposedCard: View {
+/// A proposed card's grip, dragged to reorder it, and its number.
+struct Grip: View {
+    let row: ProposedRow
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: IconSize.small))
+                .foregroundStyle(Palette.grey)
+                .frame(width: 14, height: 22)
+                .help("Drag to reorder")
+            Text("\(row.number)")
+                .font(TypeScale.meta.weight(.semibold))
+                .foregroundStyle(Palette.text)
+                .frame(width: 22, height: 22)
+                .background(Palette.inner, in: Circle())
+        }
+        .frame(width: 58, alignment: .leading)
+        .contentShape(Rectangle())
+        .draggable(row.id)
+    }
+}
+
+/// A proposed card's Edit, Split (a task only), Merge with another card and Drop.
+struct CardActions: View {
     let row: ProposedRow
     let others: [ProposedRow]
     let edit: () -> Void
@@ -233,54 +237,28 @@ struct ProposedCard: View {
     let drop: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: IconSize.small))
-                .foregroundStyle(Palette.grey)
-                .frame(height: 22)
-                .help("Drag to reorder")
-            Text("\(row.number)")
-                .font(TypeScale.meta.weight(.semibold))
-                .foregroundStyle(Palette.text)
-                .frame(width: 22, height: 22)
-                .background(Palette.inner, in: Circle())
-            VStack(alignment: .leading, spacing: 6) {
-                Text(row.node.work.title).font(TypeScale.bodyMedium).foregroundStyle(Palette.text)
-                if let doneWhen = row.node.doneWhen {
-                    Text("Done when " + doneWhen).font(TypeScale.caption).foregroundStyle(Palette.text3)
-                }
-                HStack(spacing: 6) {
-                    ForEach(row.chips, id: \.self) { SubGoalTag(text: $0) }
-                }
-            }
-            Spacer(minLength: Space.s2)
-            HStack(spacing: 8) {
-                Button("Edit", action: edit).accessibilityLabel(ControlName.card("Edit", row))
-                if !row.node.work.kind.isGoal { Button("Split", action: split).accessibilityLabel(ControlName.card("Split", row)) }
-                if others.count == 1, let other = others.first {
-                    Button("Merge with \(other.number)") { merge(other) }
-                        .accessibilityLabel(ControlName.card("Merge", row, then: " with \(other.number)"))
-                } else if !others.isEmpty {
-                    Menu("Merge with…") {
-                        ForEach(others) { other in
-                            Button("\(other.number) · \(other.node.work.title)") { merge(other) }
-                        }
+        HStack(spacing: 8) {
+            Button("Edit", action: edit).accessibilityLabel(ControlName.card("Edit", row))
+            if !row.node.work.kind.isGoal { Button("Split", action: split).accessibilityLabel(ControlName.card("Split", row)) }
+            if others.count == 1, let other = others.first {
+                Button("Merge with \(other.number)") { merge(other) }
+                    .accessibilityLabel(ControlName.card("Merge", row, then: " with \(other.number)"))
+            } else if !others.isEmpty {
+                Menu("Merge with…") {
+                    ForEach(others) { other in
+                        Button("\(other.number) · \(other.node.work.title)") { merge(other) }
                     }
-                    .menuStyle(.button)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .accessibilityLabel(ControlName.card("Merge", row, then: " with…"))
                 }
-                Button("Drop", action: drop).accessibilityLabel(ControlName.card("Drop", row))
+                .menuStyle(.button)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .accessibilityLabel(ControlName.card("Merge", row, then: " with…"))
             }
-            .buttonStyle(.plain)
-            .font(TypeScale.caption)
-            .foregroundStyle(Palette.link)
+            Button("Drop", action: drop).accessibilityLabel(ControlName.card("Drop", row))
         }
-        .canvasCard()
-        .contentShape(Rectangle())
-        .textSelection(.enabled)
-        .copyable([row.node.work.title, row.node.doneWhen.map { "Done when " + $0 }].compactMap { $0 }.joined(separator: "\n"))
+        .buttonStyle(.plain)
+        .font(TypeScale.caption)
+        .foregroundStyle(Palette.link)
     }
 }
 

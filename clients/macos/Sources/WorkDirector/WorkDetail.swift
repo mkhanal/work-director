@@ -151,7 +151,6 @@ struct WorkDetail: View {
                             page(loaded)
                         }
                     }
-                    .textSelection(.enabled)
                     .readingColumn()
                     Color.clear.frame(height: 1).id(Self.bottom)
                 }

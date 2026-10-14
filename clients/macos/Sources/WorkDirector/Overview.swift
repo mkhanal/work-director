@@ -27,51 +27,49 @@ struct GoalOverview: View {
         }
     }
 
+    /// The whole overview is one text, its controls set in it: a drag or
+    /// Select All spans the cards, every sub-goal's row and what follows.
     private var overview: some View {
-        VStack(alignment: .leading, spacing: Space.section) {
-            cards
-            ForEach(goal.needsYou) { ask in
+        let asked = Set(goal.needsYou.map(\.work))
+        let taskAsks = goal.tasks.filter { !asked.contains($0.id) }.compactMap { task in goal.activity[task.id]?.asking.map { (task, $0) } }
+        let asks = goal.needsYou.map(\.question.id) + taskAsks.map(\.1.id)
+        let working = Set(goal.nodes.map(\.id).filter(goal.isWorking))
+        let transcript = goal.overview(opened: openedRows, working: working, asks: asks, did: nested ? did : [], ago: agoWords, clock: clock)
+        var slots: [String: AnyView] = [:]
+        for ask in goal.needsYou {
+            slots[OverviewSlot.ask(ask.question.id)] = AnyView(
                 QuestionCard(store: store, workID: ask.work, question: ask.question, title: "Needs you",
                              path: goal.pathParts(of: ask).map { part in PathPart(title: part.title, open: part.opens.map { id in { open(id) } }) },
-                             at: goal.askedAt(ask.question), change: ask.change, product: goal.goal.project, answered: answered)
-                    .id(ask.question.id)
-            }
-            let asked = Set(goal.needsYou.map(\.work))
-            ForEach(goal.tasks.filter { !asked.contains($0.id) }) { task in
-                if let question = goal.activity[task.id]?.asking {
-                    QuestionCard(store: store, workID: task.id, question: question, title: "Needs you",
-                                 path: [PathPart(title: goal.paths[task.id] ?? task.title, open: { focus(task.id) })], answered: answered)
-                }
-            }
-            subGoals
-            if !goal.notDoneBecause.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    CardLabel("Not done yet, because")
-                    FlowLayout(spacing: 24) {
-                        ForEach(Array(goal.notDoneBecause.enumerated()), id: \.offset) { i, why in
-                            HStack(spacing: 4) {
-                                Text("○").foregroundStyle(i == 0 && why.contains("sub-goal") ? Palette.orange : Palette.grey)
-                                Text(why.prefix(1).uppercased() + why.dropFirst()).foregroundStyle(Palette.text)
-                            }
-                            .font(TypeScale.callout)
-                        }
-                    }
-                }
-                .canvasCard(padding: EdgeInsets(top: 12, leading: Space.cardH, bottom: 12, trailing: Space.cardH))
-            }
-            if nested && !did.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("What the director did here").font(TypeScale.title).foregroundStyle(Palette.text).padding(.bottom, 6)
-                    ForEach(did) { entry in
-                        HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
-                            Text(clock(entry.at)).font(TypeScale.caption).foregroundStyle(Palette.text3).frame(width: 52, alignment: .leading)
-                            Text(entry.sentence).font(TypeScale.callout).lineSpacing(TypeScale.calloutLeading).foregroundStyle(Palette.text).textSelection(.enabled)
-                        }
-                        .padding(.vertical, 6)
-                    }
-                }
-            }
+                             at: goal.askedAt(ask.question), change: ask.change, product: goal.goal.project, answered: answered))
         }
+        for (task, question) in taskAsks {
+            slots[OverviewSlot.ask(question.id)] = AnyView(
+                QuestionCard(store: store, workID: task.id, question: question, title: "Needs you",
+                             path: [PathPart(title: goal.paths[task.id] ?? task.title, open: { focus(task.id) })], answered: answered))
+        }
+        if !nested && goal.progress.total > 0 {
+            slots[OverviewSlot.progress] = AnyView(ProgressBar(done: goal.progress.done, total: goal.progress.total))
+        }
+        if !goal.goal.atRest {
+            slots[OverviewSlot.add] = AnyView(Button("+ Add sub-goal") { adding = true }.buttonStyle(.canvas).accessibilityLabel("Add sub-goal"))
+        }
+        for id in working { slots[OverviewSlot.working(id)] = AnyView(WorkingMark(size: 4)) }
+        var overs: [String: AnyView] = [:]
+        if !nested {
+            overs[OverviewSlot.finish] = AnyView(
+                FinishMenu(goal: goal.goal.id, current: goal.finish?.line, name: ControlName.finishMenu(goal.finishWords?.line), run: run) {
+                    Color.clear.contentShape(Rectangle()).frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .disabled(goal.goal.atRest))
+        }
+        return TranscriptText(transcript: transcript, key: "overview/\(goal.goal.id)", act: { verb, id in
+            switch verb {
+            case OverviewAct.open: open(id)
+            case OverviewAct.focus: focus(id)
+            case OverviewAct.carry: run(.carryOn(id))
+            default: break
+            }
+        }, slots: slots, overs: overs, toggle: toggle)
         .task(id: "\(goal.goal.id)-\(goal.events.count)") {
             guard nested else { return }
             did = (try? await store.record(goal.goal.id))?.entries.filter { $0.by == "director" } ?? []
@@ -84,222 +82,12 @@ struct GoalOverview: View {
         }
     }
 
-    /// Done when, Finishes at (top goals only) and Course, side by side.
-    private var cards: some View {
-        HStack(alignment: .top, spacing: Space.s3) {
-            VStack(alignment: .leading, spacing: 4) {
-                CardLabel("Done when")
-                Text(goal.doneWhenSentence ?? "Not set yet.")
-                    .font(TypeScale.callout).lineSpacing(TypeScale.calloutLeading)
-                    .foregroundStyle(goal.doneWhen == nil ? Palette.text3 : Palette.text)
-                    .textSelection(.enabled)
-            }
-            .canvasCard(stretch: true)
-            if !nested {
-                VStack(alignment: .leading, spacing: 4) {
-                    CardLabel("Finishes at")
-                    FinishMenu(goal: goal.goal.id, current: goal.finish?.line, name: ControlName.finishMenu(goal.finishWords?.line), run: run) {
-                        HStack(spacing: 4) {
-                            if let finish = goal.finishWords {
-                                Text(finish.line).font(TypeScale.headline).foregroundStyle(Palette.text)
-                            } else {
-                                Text("Not decided yet").font(TypeScale.callout).foregroundStyle(Palette.text3)
-                            }
-                            Text("▾").font(TypeScale.small).foregroundStyle(Palette.text2)
-                        }
-                    }
-                    .disabled(goal.goal.atRest)
-                    if let finish = goal.finishWords {
-                        Text(finish.source).font(TypeScale.caption).foregroundStyle(Palette.text3)
-                    }
-                }
-                .canvasCard(stretch: true)
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                CardLabel("Course")
-                if let course = goal.course {
-                    let checked = Text("checked \(agoWords(course.at))").font(TypeScale.caption).foregroundStyle(Palette.text3)
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 6) { Badge(course.badge); checked.fixedSize() }
-                        VStack(alignment: .leading, spacing: 4) { Badge(course.badge); checked }
-                    }
-                    if !course.why.isEmpty {
-                        Text(course.why.sentence).font(TypeScale.caption).foregroundStyle(Palette.text3).padding(.top, 2)
-                    }
-                } else {
-                    Text("Not checked yet").font(TypeScale.callout).foregroundStyle(Palette.text3)
-                }
-            }
-            .canvasCard(stretch: true)
-        }
-        .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var subGoals: some View {
-        VStack(alignment: .leading, spacing: Space.s2) {
-            HStack(spacing: Space.s3) {
-                Text("Sub-goals").font(TypeScale.title).foregroundStyle(Palette.text)
-                if !nested && goal.progress.total > 0 {
-                    ProgressBar(done: goal.progress.done, total: goal.progress.total)
-                }
-                if goal.progress.total + goal.progress.superseded > 0 {
-                    Text(goal.progressLine).font(TypeScale.caption).foregroundStyle(Palette.text3)
-                }
-                Spacer()
-                if !goal.goal.atRest {
-                    Button("+ Add sub-goal") { adding = true }.buttonStyle(.canvas).accessibilityLabel("Add sub-goal")
-                }
-            }
-            if goal.tree.isEmpty {
-                Text(goal.goal.state == .queued ? "Not planned yet." : "No sub-goals: one agent takes it whole.")
-                    .font(TypeScale.callout).foregroundStyle(Palette.text3)
-                    .canvasCard()
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(goal.tree.enumerated()), id: \.element.id) { i, node in
-                        if i > 0 { Rectangle().fill(Palette.inner).frame(height: 1) }
-                        SubGoalRow(node: node, depth: 0, superseded: goal.superseded, working: Set(goal.nodes.map(\.id).filter(goal.isWorking)),
-                                   opened: openedRows, toggle: toggle, open: open, focus: focus, run: run)
-                    }
-                }
-                .background(Palette.page, in: RoundedRectangle(cornerRadius: Radius.card))
-                .clipShape(RoundedRectangle(cornerRadius: Radius.card))
-                .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Palette.hairline))
-            }
-        }
-    }
-
     private var openedRows: Set<String> { opened ?? Set([goal.openSteps].compactMap { $0 }) }
 
     private func toggle(_ id: String) {
         var now = openedRows
         if now.contains(id) { now.remove(id) } else { now.insert(id) }
         withAnimation(.easeOut(duration: 0.15)) { opened = now }
-    }
-}
-
-/// One sub-goal: its icon, title, line and badge; a goal opens its page, a
-/// task folds its steps, a group folds the tasks it gathers.
-struct SubGoalRow: View {
-    let node: TreeNode
-    let depth: Int
-    let superseded: [SupersededWork]
-    /// The sub-goals a session runs in or under.
-    let working: Set<String>
-    let opened: Set<String>
-    let toggle: (String) -> Void
-    let open: (String) -> Void
-    let focus: (String) -> Void
-    let run: (Plan) -> Void
-
-    private var isOpen: Bool { opened.contains(node.id) }
-    private var gone: Bool { node.work.state.mark == .superseded }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: Space.s3) {
-                StateIcon(mark: node.mark).padding(.top, 1)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(node.work.title + (node.opensAsGoal ? " ›" : ""))
-                        .font(TypeScale.bodyMedium)
-                        .strikethrough(gone)
-                        .foregroundStyle(gone ? Palette.text2 : Palette.text)
-                        .multilineTextAlignment(.leading)
-                    HStack(spacing: 0) {
-                        Text(node.meta(superseded: superseded))
-                        if node.folds && !isOpen && node.work.state.mark == .working {
-                            Text(" · ")
-                            Text("Show steps (\(node.steps.filter { $0.state == .done }.count) of \(node.steps.filter { $0.state != .dropped }.count))").foregroundStyle(Palette.link)
-                        }
-                        if node.stopped != nil {
-                            Text(" · ")
-                            Button("Tell it to carry on") { run(.carryOn(node.id)) }
-                                .buttonStyle(.plain).foregroundStyle(Palette.link)
-                                .help("Ask its agent to pick up where it stopped")
-                        }
-                    }
-                    .font(TypeScale.caption)
-                    .foregroundStyle(Palette.text3)
-                    .lineLimit(2)
-                }
-                Spacer(minLength: Space.s2)
-                if working.contains(node.id) { WorkingMark(size: 4).padding(.top, 6) }
-                Badge(node.badge)
-            }
-            .padding(EdgeInsets(top: 14, leading: 16 + CGFloat(depth) * 32, bottom: 14, trailing: 16))
-            .contentShape(Rectangle())
-            .textSelection(.disabled)
-            .onTapGesture { choose() }
-            .contextMenu {
-                CopyItems(text: node.work.title)
-                Button("Copy Title and ID") { copyText(Clip.work(node.work)) }
-                if let doneWhen = node.doneWhen { Button("Copy Done When") { copyText(doneWhen) } }
-            }
-            .help(node.opensAsGoal ? "Open this sub-goal" : node.folds || node.group ? (isOpen ? "Hide" : "Show") : "Show this agent's conversation")
-            if isOpen && node.folds {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(node.steps, id: \.n) { StepLine(step: $0) }
-                    HStack(spacing: 0) {
-                        Text("The agent's own plan · ")
-                        Button("Hide steps") { toggle(node.id) }.buttonStyle(.plain).foregroundStyle(Palette.link)
-                    }
-                    .font(TypeScale.caption).foregroundStyle(Palette.text3).padding(.top, 4)
-                }
-                .padding(EdgeInsets(top: 0, leading: 48 + CGFloat(depth) * 32, bottom: 14, trailing: 16))
-            }
-            if isOpen && node.group {
-                ForEach(node.children) { child in
-                    Rectangle().fill(Palette.inner).frame(height: 1)
-                    SubGoalRow(node: child, depth: depth + 1, superseded: superseded, working: working, opened: opened, toggle: toggle, open: open, focus: focus, run: run)
-                }
-            }
-        }
-        .background(node.work.state == .needsInput ? Palette.needsYouRow : .clear)
-        .opacity(gone ? 0.75 : 1)
-    }
-
-    private func choose() {
-        if node.opensAsGoal { open(node.id) } else if node.folds || node.group { toggle(node.id) } else { focus(node.id) }
-    }
-}
-
-/// One step of an agent's own plan.
-struct StepLine: View {
-    let step: PlanStep
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Text(glyph).foregroundStyle(color)
-            Text(step.text).strikethrough(step.state == .dropped).foregroundStyle(text)
-        }
-        .font(step.state == .doing ? TypeScale.calloutStrong : TypeScale.callout)
-        .lineSpacing(TypeScale.calloutLeading)
-        .textSelection(.enabled)
-        .copyable(step.text)
-    }
-
-    private var glyph: String {
-        switch step.state {
-        case .done: "✓"
-        case .doing: "●"
-        case .todo, .dropped: "○"
-        }
-    }
-
-    private var color: Color {
-        switch step.state {
-        case .done: Palette.green
-        case .doing: BadgeTone.live.text
-        case .todo, .dropped: Palette.text3
-        }
-    }
-
-    private var text: Color {
-        switch step.state {
-        case .done: Palette.stepText
-        case .doing: BadgeTone.live.text
-        case .todo, .dropped: Palette.text3
-        }
     }
 }
 

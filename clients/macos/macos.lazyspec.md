@@ -295,3 +295,10 @@ hold only that product's work; with none, every product's.
 - Reading the conversation again changes nothing before the first step that changed, so a selection there stays.
 - A goal's conversation is one selection too: the person's messages, the plan with each sub-goal's badge, each turn's speaker, sub-goal and time, the lines for what happened, and what was asked, answered, reported, done and refused. Only questions waiting on the person, messages still on their way and work under way sit after it.
 - A goal's record is one selection: its column names, each day, and each row's time, kind, what, where and by whom; copied, a row reads as one line, its cells separated by tabs.
+
+## Copying Across A Goal's Overview Keeps Every Line It Spans
+- A goal's overview is one selection: what done means, where it finishes, its course, each sub-goal's title, line, unfolded steps and badge, what still holds it from done and what the director did there; a drag or Select All spans all of it.
+- A question waiting on the person and the page's controls sit inside it without breaking it, and are never copied.
+- Copied, each card's label and words read a line each, and each sub-goal its title, its line and its badge.
+- A sub-goal's title opens its page, folds its steps or shows its agent's conversation, as choosing its row does; its menu copies its title and id, and what makes it done.
+- A proposed breakdown is one selection too: each proposed sub-goal's title, done-when and chips; why the planner broke it down so is one beside it.

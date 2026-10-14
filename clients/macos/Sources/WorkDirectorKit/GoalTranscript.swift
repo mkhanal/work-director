@@ -75,7 +75,7 @@ private struct GoalTranscriptBuilder {
         guard let item, !item.paras.isEmpty else { return }
         var paras = item.paras
         paras[0].gap = items.isEmpty ? .none : .turn
-        items.append(TranscriptItem(id: item.id, paras: paras, source: item.source, tool: item.tool))
+        items.append(TranscriptItem(id: item.id, paras: paras, source: item.source, tool: item.tool, copies: item.copies))
     }
 
     func open(_ id: String) -> Bool { toggled.contains(id) }
