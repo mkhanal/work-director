@@ -818,6 +818,16 @@ pub fn told(label: &str, at: Option<&str>, said: &str) -> Doc {
     doc
 }
 
+/// What a message the person sent says while the director is still busy with
+/// the one before it.
+pub const WAITING_FOR_DIRECTOR: &str = "Waiting for the director to finish the last one";
+
+/// Says under the person's words that the director has not been given them yet.
+pub fn waiting_for_director(doc: &mut Doc) {
+    doc.para(HEAD_GAP, false).align(Align::End);
+    doc.text(WAITING_FOR_DIRECTOR, Style::META.ink(Ink::Text3));
+}
+
 /// Words that fold after `lines` lines, with Show all and Show less.
 pub fn folded(doc: &mut Doc, text: &str, lines: usize, style: Style) {
     let all: Vec<&str> = text.split('\n').collect();

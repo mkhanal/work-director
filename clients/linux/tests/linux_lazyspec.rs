@@ -2526,3 +2526,27 @@ fn copying_across_the_conversation_keeps_every_line_it_spans() {
     assert_eq!(run.copied(0, before, &|f| run.folds[f]), earlier, "what was shown keeps its place when more arrives");
     assert!(run.shown().starts_with(&shown));
 }
+
+/// A Message Waiting For The Director Says So
+#[test]
+fn a_message_waiting_for_the_director_says_so() {
+    let goal = |waiting: Value| {
+        let mut v = json!({"goal": work_json("g", "running"), "tasks": [], "rollup": {"counts": {}, "done": 0, "total": 0},
+            "events": [], "claims": [], "landings": [], "delivery": null, "activity": {}, "reports": {}, "waiting": []});
+        if !waiting.is_null() {
+            v["waiting_for_director"] = waiting;
+        }
+        goal_view(v)
+    };
+    assert!(goal(json!([7])).waits_for_director(7), "a message the director has not been given waits");
+    assert!(!goal(json!([])).waits_for_director(7), "once given, it no longer waits");
+    assert!(!goal(Value::Null).waits_for_director(7), "a wd that does not say shows nothing waiting");
+
+    let mut said = transcript::told("You", Some("12:09"), "Cover the API too");
+    transcript::waiting_for_director(&mut said);
+    assert_eq!(
+        said.copied(0, said.len(), &|_| true),
+        format!("You · 12:09\nCover the API too\n{}", transcript::WAITING_FOR_DIRECTOR),
+        "the words say it waits for the director to finish the last one"
+    );
+}

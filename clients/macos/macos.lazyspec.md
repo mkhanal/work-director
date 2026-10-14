@@ -126,6 +126,9 @@ hold only that product's work; with none, every product's.
 - The question a goal waits on the person for is answered in place, one answer per question, its choices offered as a session's are.
 - A question still open shows once, as the card that answers it, titled with who asks; once answered it reads as a turn with its answer.
 
+## A Message Waiting For The Director Says So
+- A message of the person's on a goal that the director has not been given yet reads `Waiting for the director to finish the last one` under it, until the director is given it.
+
 ## A Goal Is Read As Its Overview, Its Conversation Or Its Record
 - A goal page's tabs are Overview, Conversation and Record.
 - Everything folds each run of two or more updates — looks, state changes, checks, landings and messages told to a task — into one row.

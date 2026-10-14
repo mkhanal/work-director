@@ -185,6 +185,9 @@ hold only that product's work; with none, every product's.
 - A question reads with its answer, and the answer says whether the director gave it or the person did; the answer's message to the session is not shown again.
 - The question a goal waits on the person for is answered in place, one answer per question, its choices offered as a session's are.
 
+## A Message Waiting For The Director Says So
+- A message of the person's on a goal that the director has not been given yet reads `Waiting for the director to finish the last one` under it, until the director is given it.
+
 ## A Goal Is Read As Its Overview, Its Conversation Or Its Record
 - Everything folds each run of two or more updates — looks, state changes, checks, landings and messages told to a task — into one row.
 - A report reads as its verdict, what it said with it, its files and its named sections.

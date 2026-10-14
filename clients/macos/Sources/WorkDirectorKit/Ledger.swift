@@ -225,6 +225,9 @@ public struct GoalDetail: Codable, Sendable, Hashable {
     public let reasoning: Reasoning?
     /// The files attached under the goal, oldest first.
     let attachments: [Attachment]?
+    /// The events holding what the person said that the director has not
+    /// been given yet; nil from a `wd` that does not say.
+    let waitingForDirector: [Int]?
 
     enum CodingKeys: String, CodingKey {
         case goal, tasks, rollup, events, claims, landings, delivery, activity, asking, reports, waiting
@@ -232,7 +235,12 @@ public struct GoalDetail: Codable, Sendable, Hashable {
         case doneWhen = "done_when"
         case notDoneBecause = "not_done_because"
         case needsYou = "needs_you"
+        case waitingForDirector = "waiting_for_director"
     }
+
+    /// Whether what event `id` holds still waits for the director to finish
+    /// what it is doing.
+    public func waitsForDirector(_ id: Int) -> Bool { waitingForDirector?.contains(id) == true }
 }
 
 public struct WaitingTask: Codable, Sendable, Hashable {

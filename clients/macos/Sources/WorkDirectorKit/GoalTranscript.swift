@@ -5,6 +5,10 @@ import Foundation
 // for what happened, the cards for what was answered and reported. Only what
 // waits on the person to act sits outside it, after it.
 
+/// What a message the person sent says while the director is still busy with
+/// the one before it.
+public let waitingForDirectorWords = "Waiting for the director to finish the last one"
+
 /// The scheme of a link that opens an agent's conversation.
 public let openScheme = "wd-open"
 
@@ -124,7 +128,7 @@ private struct GoalTranscriptBuilder {
         return paras
     }
 
-    func you(id: String, text: String, at: String, label: String, files: [Attachment]) -> TranscriptItem {
+    func you(id: String, text: String, at: String, label: String, files: [Attachment], waiting: Bool = false) -> TranscriptItem {
         let box = Box.bubble(id)
         var paras = [Para([Run("\(label) · \(time(at))", .caption, .text3)], align: .trailing)]
         if !text.isEmpty || files.isEmpty {
@@ -141,6 +145,7 @@ private struct GoalTranscriptBuilder {
             paras.append(Para([.mark(.symbol(file.isImage ? "photo" : "doc"), .callout, .text2), name, Run(" " + fileSize(file.size), .caption, .text3)],
                               gap: .line, align: .trailing))
         }
+        if waiting { paras.append(Para([Run(waitingForDirectorWords, .caption, .text3)], gap: .line, align: .trailing)) }
         return TranscriptItem(id: id, paras: paras, source: text)
     }
 
@@ -200,7 +205,8 @@ private struct GoalTranscriptBuilder {
         let id = "e\(step.id)"
         switch step {
         case .event(let e) where goal.isYours(e):
-            return you(id: id, text: e.decision?.answer ?? e.answerText, at: e.at, label: e.kind == "answer" ? "You answered" : "You", files: goal.files(with: e))
+            return you(id: id, text: e.decision?.answer ?? e.answerText, at: e.at, label: e.kind == "answer" ? "You answered" : "You", files: goal.files(with: e),
+                       waiting: goal.waitsForDirector(e.id))
         case .event(let e) where e.kind == "attachment":
             return you(id: id, text: "", at: e.at, label: e.work == goal.goal.id ? "You attached" : "You attached to \(name(of: e.work))", files: goal.files(with: e))
         case .event(let e) where e.kind == "report":
@@ -264,7 +270,8 @@ private struct GoalTranscriptBuilder {
         let asking = TranscriptItem(id: id, paras: paras, source: q.body)
         guard let answer else { return [asking] }
         let said = answer.answeredByDirector ? directorTurn("e\(answer.id)", answer)
-            : you(id: "e\(answer.id)", text: answer.answerText, at: answer.at, label: "You answered", files: goal.files(with: answer))
+            : you(id: "e\(answer.id)", text: answer.answerText, at: answer.at, label: "You answered", files: goal.files(with: answer),
+                  waiting: goal.waitsForDirector(answer.id))
         return [asking, said]
     }
 

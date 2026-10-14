@@ -1854,4 +1854,25 @@ struct SeededTree {
         01:0x\tHousekeeping\trefreshed dependencies\tGuide\tdirector
         """, "the record copies as its rows: \(record.copied(0..<record.length))")
     }
+
+    @Test("A Message Waiting For The Director Says So")
+    func aMessageWaitingForTheDirectorSaysSo() {
+        let mine = #"{"question":"","answer":"Cover the API too","source":"person","runner":"","model":"","tokens":0,"reverses":0,"reversed_by":0}"#
+        let said = #"{"id":1,"work":"w1","kind":"decision","body":"Cover the API too","at":"2026-10-12T01:01:00Z","effective":null,"decision":\#(mine)}"#
+        func goal(waiting: String) -> GoalDetail {
+            let json = """
+            {"goal":\(workJSON(state: "running")),"tasks":[],"rollup":{"counts":{},"done":0,"total":0},"events":[\(said)],"claims":[],"landings":[],
+             "delivery":null,"activity":{},"reports":{},"waiting":[],\(treeless)\(waiting)}
+            """
+            return try! JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
+        }
+        func text(_ g: GoalDetail) -> String {
+            let t = g.transcript(.all, time: { _ in "10:00" }, day: { _ in nil })
+            return t.copied(0..<t.length)
+        }
+        #expect(text(goal(waiting: #","waiting_for_director":[1]"#)).hasSuffix("Cover the API too\nWaiting for the director to finish the last one"),
+                "a message the director has not been given says it waits")
+        #expect(!text(goal(waiting: #","waiting_for_director":[]"#)).contains("Waiting for the director"), "once given, it no longer waits")
+        #expect(!text(goal(waiting: "")).contains("Waiting for the director"), "a wd that does not say shows nothing waiting")
+    }
 }

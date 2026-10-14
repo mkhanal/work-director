@@ -417,9 +417,19 @@ pub struct GoalDetail {
     pub reasoning: Option<Reasoning>,
     /// Every file sent anywhere under the goal, oldest first.
     pub attachments: Vec<Attachment>,
+    /// The events holding what the person said that the director has not been
+    /// given yet; empty from a wd that does not say.
+    #[serde(default)]
+    pub waiting_for_director: Vec<i64>,
 }
 
 impl GoalDetail {
+    /// Whether what event `id` holds still waits for the director to finish
+    /// what it is doing.
+    pub fn waits_for_director(&self, id: i64) -> bool {
+        self.waiting_for_director.contains(&id)
+    }
+
     /// Whether this goal is a sub-goal of another.
     pub fn nested(&self) -> bool {
         self.chain.len() > 1

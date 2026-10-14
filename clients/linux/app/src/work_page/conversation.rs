@@ -134,9 +134,14 @@ impl WorkPage {
                 let files: Vec<Attachment> = g.attached_to(&e).into_iter().cloned().collect();
                 yours.push((if said.is_empty() { "Sent files".to_string() } else { said.clone() }, id.clone()));
                 let label = if e.kind == "answer" { "You answered" } else { "You" };
-                Turn::key(&id, &(&e, &files))
-                    .copying(&said)
-                    .text(move || yours_with_files(&said, label, Some(e.at.as_str()), &files))
+                let waiting = g.waits_for_director(e.id);
+                Turn::key(&id, &(&e, &files, waiting)).copying(&said).text(move || {
+                    let mut rich = yours_with_files(&said, label, Some(e.at.as_str()), &files);
+                    if waiting {
+                        transcript::waiting_for_director(&mut rich.doc);
+                    }
+                    rich
+                })
             }
             ThreadStep::Event(e) if g.finished_line(&e).is_some() => {
                 let text = format!("{} · {}", g.finished_line(&e).unwrap_or_default(), kit::time::when(&e.at));
@@ -175,9 +180,14 @@ impl WorkPage {
                     .join("\n\n");
                 let files: Vec<Attachment> =
                     answer.as_ref().map(|a| g.attached_to(a).into_iter().cloned().collect()).unwrap_or_default();
-                Turn::key(&id, &(&q, &answer, &decided, &files))
-                    .copying(&said)
-                    .text(move || exchange_turn(&q, answer.as_ref(), &decided, &files, &asker, target, weak))
+                let waiting = answer.as_ref().is_some_and(|a| g.waits_for_director(a.id));
+                Turn::key(&id, &(&q, &answer, &decided, &files, waiting)).copying(&said).text(move || {
+                    let mut rich = exchange_turn(&q, answer.as_ref(), &decided, &files, &asker, target, weak);
+                    if waiting {
+                        transcript::waiting_for_director(&mut rich.doc);
+                    }
+                    rich
+                })
             }
             ThreadStep::Look(e) => {
                 let text = format!("Supervisor looking · {} · {}", e.body, kit::time::when(&e.at));
