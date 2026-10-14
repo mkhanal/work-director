@@ -61,7 +61,7 @@ func (c *Cli) send(rest []string) error {
 		}
 		return c.out(out, text)
 	}
-	where, err := c.tellTask(w, core.WithAttached(text, atts))
+	where, err := c.tellTask(w, core.WithAttached(text, atts), core.SentByPerson)
 	if err != nil {
 		discard(atts)
 		return err
@@ -87,14 +87,14 @@ func (c *Cli) sendTo(id, text string) error {
 		_, err = c.tellGoal(w, text, nil)
 		return err
 	}
-	_, err = c.tellTask(w, text)
+	_, err = c.tellTask(w, text, core.SentByPerson)
 	return err
 }
 
 // tellTask queues text for a task with a session and delivers everything
 // waiting when the session is not running. A running session keeps it queued:
 // resuming a session that is working starts a copy of it instead.
-func (c *Cli) tellTask(w core.Work, text string) (told, error) {
+func (c *Cli) tellTask(w core.Work, text string, by core.Sender) (told, error) {
 	// Finished work is refused before anything is stored: a goal someone is
 	// asking a question of must not end up carrying a message it never
 	// accepted, and a message is not a reason to work on it again.
@@ -108,13 +108,21 @@ func (c *Cli) tellTask(w core.Work, text string) (told, error) {
 	if err != nil {
 		return "", err
 	}
-	return c.tellVia(w, h, text)
+	return c.tellVia(w, h, text, by)
+}
+
+// sentBy is who a message carrying out what answeredBy decided is from.
+func sentBy(answeredBy string) core.Sender {
+	if answeredBy == core.AnsweredByDirector {
+		return core.SentByDirector
+	}
+	return core.SentByPerson
 }
 
 // tellVia queues text for w and delivers it through h, the session that is
 // to read it. A goal's supervisor is never h: only a claimed look sends to
 // it, so two processes never send to it at once.
-func (c *Cli) tellVia(w core.Work, h runner.Handle, text string) (told, error) {
+func (c *Cli) tellVia(w core.Work, h runner.Handle, text string, by core.Sender) (told, error) {
 	if core.IsGoal(w.Kind) {
 		p, err := c.project(w.Project)
 		if err != nil {
@@ -128,7 +136,7 @@ func (c *Cli) tellVia(w core.Work, h runner.Handle, text string) (told, error) {
 			return "", fmt.Errorf("%s's supervisor is told only by a look: wd send %s", w.ID, w.ID)
 		}
 	}
-	if _, err := c.Ledger.QueueMessage(w.ID, text); err != nil {
+	if _, err := c.Ledger.QueueMessage(w.ID, text, by); err != nil {
 		return "", err
 	}
 	if w.State == core.StatePaused {
@@ -261,13 +269,25 @@ func (c *Cli) pause(rest []string) error {
 	if err != nil {
 		return err
 	}
+	paused, err := c.pauseWork(w)
+	if err != nil {
+		return err
+	}
+	return c.out(map[string]any{"paused": paused}, "Paused "+withAgents(w, paused)+"; resume it to carry on")
+}
+
+// pauseWork stops w's running sessions, keeping their conversations, and
+// holds it paused: a task itself, or every open task of a goal and then the
+// goal. It returns the tasks it paused.
+func (c *Cli) pauseWork(w core.Work) ([]string, error) {
 	if core.AtRest(w.State) || w.State == core.StatePaused {
-		return fail("%s isn't running: there is nothing to pause", quoted(w))
+		return nil, fail("%s isn't running: there is nothing to pause", quoted(w))
 	}
 	targets := []core.Work{w}
 	if core.IsGoal(w.Kind) {
+		var err error
 		if targets, err = c.Ledger.Tasks(w.ID); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	var paused, failed []string
@@ -280,19 +300,31 @@ func (c *Cli) pause(rest []string) error {
 			continue
 		}
 		if _, err := c.Ledger.Transition(t.ID, core.StatePaused); err != nil {
-			return err
+			return nil, err
 		}
 		paused = append(paused, t.ID)
 	}
 	if len(failed) > 0 {
-		return fail("Couldn't stop %s; the rest are paused and %s is not", core.AndList(failed), quoted(w))
+		return nil, fail("Couldn't stop %s; the rest are paused and %s is not", core.AndList(failed), quoted(w))
 	}
 	if core.IsGoal(w.Kind) {
 		if _, err := c.Ledger.Transition(w.ID, core.StatePaused); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return c.out(map[string]any{"paused": paused}, "Paused "+withAgents(w, paused)+"; resume it to carry on")
+	return paused, nil
+}
+
+// pausedPrefix opens the note filed on a sub-goal its supervisor paused.
+const pausedPrefix = "paused: "
+
+// pauseSubGoal holds sub-goal w paused for its supervisor, with why.
+func (c *Cli) pauseSubGoal(w core.Work, why string) error {
+	if _, err := c.pauseWork(w); err != nil {
+		return err
+	}
+	_, err := c.Ledger.AddEvent(w.ID, core.EventNote, pausedPrefix+why)
+	return err
 }
 
 // resume returns paused work to the state it was paused from, and sends every
@@ -361,7 +393,7 @@ func (c *Cli) resumeWork(w core.Work, note string, atts []core.Attachment) ([]st
 		if _, ok, err := coordinator.Handle(c.Ledger, t, p); err != nil {
 			return nil, err
 		} else if ok {
-			if _, err := c.tellTask(t, message); err != nil {
+			if _, err := c.tellTask(t, message, core.SentByPerson); err != nil {
 				return nil, err
 			}
 		}
@@ -397,7 +429,7 @@ func (c *Cli) restore(w core.Work, message string) ([]string, error) {
 		if _, ok, err := coordinator.Handle(c.Ledger, t, p); err != nil {
 			return nil, err
 		} else if ok {
-			if _, err := c.tellTask(t, message); err != nil {
+			if _, err := c.tellTask(t, message, core.SentByPerson); err != nil {
 				return nil, err
 			}
 		}

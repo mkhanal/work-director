@@ -5200,6 +5200,46 @@ func TestAGoalIsDeclaredDoneOnlyWhenEveryPartOfDoneHolds(t *testing.T) {
 	}
 }
 
+func TestASupervisorHearsWhatThePersonToldAnAgentAndCanPauseIt(t *testing.T) {
+	f := newCLIFixture(t)
+	o := overseenGoal(t, f)
+	f.runOK(t, "send", o.a, "hold off on this until the release ships")
+	o.say(t, "task-"+o.a, "Understood, holding until the release ships.")
+	if s := superviseOnce(t, f, o.goal); !s.Looked {
+		t.Fatalf("supervise after a reply = %+v, want a look", s)
+	}
+	brief := readFile(t, filepath.Join(o.state, "brief-"+supervisor))
+	for _, want := range []string{"hold off on this until the release ships", "Understood, holding until the release ships.", "PAUSE <"} {
+		if !strings.Contains(brief, want) {
+			t.Fatalf("brief missing %q:\n%s", want, brief)
+		}
+	}
+	o.say(t, supervisor, "ACTIONS:", "SEND "+o.b+": stop after this change", "PAUSE "+o.b+": the person wants one issue at a time")
+	if s := superviseOnce(t, f, o.goal); !s.Applied || len(s.Refused) != 0 {
+		t.Fatalf("supervise = %+v, want SEND and PAUSE carried out", s)
+	}
+	if stopped := readFile(t, filepath.Join(o.state, "stopped")); !strings.Contains(stopped, "overseer task-"+o.b) {
+		t.Fatalf("stopped = %q, want the paused sub-goal's session stopped", stopped)
+	}
+	if notes := f.bodies(t, o.b, core.EventNote); !slices.Contains(notes, "paused: the person wants one issue at a time") {
+		t.Fatalf("notes = %q, want why it was paused", notes)
+	}
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	if b, err := l.Get(o.b); err != nil || b.State != core.StatePaused {
+		t.Fatalf("%s = %+v, %v; want it paused", o.b, b, err)
+	}
+	for id, want := range map[string]core.Sender{o.a: core.SentByPerson, o.b: core.SentByDirector} {
+		sent, err := l.Events(id, kindPtr(core.EventSent))
+		if err != nil || len(sent) == 0 || sent[len(sent)-1].SentBy != want {
+			t.Fatalf("sent to %s = %+v, %v; want it sent by the %s", id, sent, err, want)
+		}
+	}
+}
+
 func TestASubGoalClosesOnlyWhenItsDoneWhenIsJudgedMet(t *testing.T) {
 	f := newCLIFixture(t)
 	o := overseenGoal(t, f)

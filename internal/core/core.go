@@ -359,6 +359,8 @@ type Event struct {
 	// Attachment is the file an attachment event stored; nil on any other
 	// event.
 	Attachment *Attachment `json:"-"`
+	// SentBy is who wrote a sent event's message; empty on any other event.
+	SentBy Sender `json:"-"`
 }
 
 // Attachment is one file a person attached, as copied into the director's
@@ -618,7 +620,22 @@ type Message struct {
 	// Event is the event the person's message was filed as, for a message
 	// to a goal's supervisor; nil for a message to a task.
 	Event *int `json:"event,omitempty"`
+	// By is who wrote it.
+	By Sender `json:"by"`
 }
+
+// Sender is who wrote a message to work: the person, or the director (a
+// supervisor, a judgement sent back, an answer the director settled).
+type Sender string
+
+const (
+	SentByPerson   Sender = "person"
+	SentByDirector Sender = "director"
+)
+
+var Senders = []Sender{SentByPerson, SentByDirector}
+
+func ParseSender(s string) (Sender, error) { return parse("sender", Senders, s) }
 
 // AtRest reports whether work has come to rest: done, dropped, abandoned or
 // superseded.

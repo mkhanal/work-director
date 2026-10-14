@@ -65,6 +65,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("A Running Session's Report Moves Its Work On", aRunningSessionsReportMovesItsWorkOn)
 	t.Run("Work Reads As Working Only While An Agent Is Working", workReadsAsWorkingOnlyWhileAnAgentIsWorking)
+	t.Run("A Reply To The Person Reads As A Reply, Not A Stop", aReplyToThePersonReadsAsAReplyNotAStop)
 	t.Run("A Message To A Task Reaches It Whatever State Its Goal Is In", aMessageToATaskReachesItWhateverStateItsGoalIsIn)
 	t.Run("A Running Goal Is Supervised While Serving", aRunningGoalIsSupervisedWhileServing)
 	t.Run("Work Items Serve Over HTTP", workItemsServeOverHTTP)
@@ -1942,6 +1943,134 @@ func workReadsAsWorkingOnlyWhileAnAgentIsWorking(t *testing.T) {
 	}
 }
 
+func aReplyToThePersonReadsAsAReplyNotAStop(t *testing.T) {
+	s := newTestServer(t)
+	said := map[string]string{
+		"review": "Nothing changed here; the commit to review is on the goal.",
+		"held":   "Understood, I've stopped work on the flaky test for this session.",
+		"asks":   "Dropped it.\nShall I drop the other branch too?",
+		"bossed": "OK.",
+	}
+	steps := map[string][]runner.Entry{}
+	for session, text := range said {
+		steps[session] = []runner.Entry{{Kind: runner.EntryText, Text: "working"}, {Kind: runner.EntryText, Text: text}}
+	}
+	withSessions(s, &sessionRunner{steps: steps})
+	goal, err := s.ledger.Add("p", "Ship the release", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tell := func(w core.Work, text string, by core.Sender) {
+		t.Helper()
+		m, err := s.ledger.QueueMessage(w.ID, text, by)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.ledger.MarkDelivered(m.ID); err != nil {
+			t.Fatal(err)
+		}
+		if w.State != core.StateRunning {
+			if _, err := s.ledger.Transition(w.ID, core.StateRunning); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	review := inSession(t, s, "Tag the release", "review", &goal.ID)
+	if review, err = s.ledger.Transition(review.ID, core.StateReview); err != nil {
+		t.Fatal(err)
+	}
+	tell(review, "what do you want me to review", core.SentByPerson)
+	held := inSession(t, s, "Fix the flaky test", "held", &goal.ID)
+	tell(held, "ignore this bug for this session", core.SentByPerson)
+	asks := inSession(t, s, "Prune branches", "asks", &goal.ID)
+	tell(asks, "drop the stale branch", core.SentByPerson)
+	bossed := inSession(t, s, "Write the changelog", "bossed", &goal.ID)
+	tell(bossed, "Your sub-goal's done-when is not met yet: dates", core.SentByDirector)
+
+	want := map[string]core.State{review.ID: core.StateReview, held.ID: core.StatePaused, asks.ID: core.StateNeedsInput, bossed.ID: core.StateNeedsInput}
+	stop := make(chan struct{})
+	ended := make(chan error, 1)
+	go func() { ended <- s.watchSessions(stop) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for id, st := range want {
+		for {
+			w, err := s.ledger.Get(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if w.State == st {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s is %s, want %s", w.Title, w.State, st)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	time.Sleep(sessionWatch + time.Second)
+	close(stop)
+	if err := <-ended; err != nil {
+		t.Fatal(err)
+	}
+	for id, note := range map[string]string{
+		review.ID: "replied: " + said["review"],
+		held.ID:   "replied: " + said["held"],
+		asks.ID:   "replied: " + said["asks"],
+		bossed.ID: "stopped without a report: " + said["bossed"],
+	} {
+		notes, err := s.ledger.Events(id, kindOf(core.EventNote))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(notes) != 1 || notes[0].Body != note {
+			t.Fatalf("notes = %+v, want the one note %q", notes, note)
+		}
+		if w, _ := s.ledger.Get(id); w.State != want[id] {
+			t.Fatalf("%s is %s, want it still %s", w.Title, w.State, want[id])
+		}
+	}
+
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	type stop2 struct {
+		Said string `json:"said"`
+		At   string `json:"at"`
+	}
+	var view struct {
+		Tree []struct {
+			Work    core.Work `json:"work"`
+			Stopped *stop2    `json:"stopped"`
+			Replied *stop2    `json:"replied"`
+		} `json:"tree"`
+		NeedsYou []needYou `json:"needs_you"`
+	}
+	getJSON(t, api.URL+"/api/goal/"+goal.ID, http.StatusOK, &view)
+	for _, n := range view.Tree {
+		switch n.Work.ID {
+		case review.ID, held.ID, asks.ID:
+			if n.Stopped != nil || n.Replied == nil || n.Work.Session == nil || n.Replied.Said != said[*n.Work.Session] {
+				t.Errorf("%s serves stopped %+v, replied %+v; want its reply and no stop", n.Work.Title, n.Stopped, n.Replied)
+			}
+		case bossed.ID:
+			if n.Replied != nil || n.Stopped == nil {
+				t.Errorf("%s serves stopped %+v, replied %+v; want a stop", n.Work.Title, n.Stopped, n.Replied)
+			}
+		}
+	}
+	asked := map[string]runner.QuestionItem{}
+	for _, n := range view.NeedsYou {
+		if len(n.Question.Items) == 1 {
+			asked[n.Work] = n.Question.Items[0]
+		}
+	}
+	if q, ok := asked[asks.ID]; !ok || q.Question != said["asks"] || len(q.Options) != 2 {
+		t.Fatalf("needs_you = %+v, want the reply's question offered Yes and No", view.NeedsYou)
+	}
+	if _, ok := asked[held.ID]; ok {
+		t.Fatalf("needs_you = %+v, want no ask for a reply that asked nothing", view.NeedsYou)
+	}
+}
+
 func aMessageToATaskReachesItWhateverStateItsGoalIsIn(t *testing.T) {
 	s := newTestServer(t)
 	r := &sessionRunner{steps: map[string][]runner.Entry{"tagger": {{Kind: runner.EntryText, Text: "Tagged v2."}}}}
@@ -1962,7 +2091,7 @@ func aMessageToATaskReachesItWhateverStateItsGoalIsIn(t *testing.T) {
 	}
 	// Queued a moment after the session finished its turn, while it still read as working.
 	for _, id := range []string{tagger.ID, paused.ID} {
-		if _, err := s.ledger.QueueMessage(id, "Also tag v2.1"); err != nil {
+		if _, err := s.ledger.QueueMessage(id, "Also tag v2.1", core.SentByPerson); err != nil {
 			t.Fatal(err)
 		}
 	}

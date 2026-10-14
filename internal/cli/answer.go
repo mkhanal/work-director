@@ -200,11 +200,15 @@ func (c *Cli) supervised(w core.Work) bool {
 // asked to look at once and given it with whatever else waits; a goal with
 // no supervisor yet keeps it for its first look.
 func (c *Cli) deliverAnswer(w core.Work, answered core.Event, h runner.Handle, has bool, text string) (told, error) {
+	by := core.SentByPerson
+	if answered.Decision != nil {
+		by = sentBy(answered.Decision.Source)
+	}
 	if !core.IsGoal(w.Kind) {
-		return c.tellTask(w, text)
+		return c.tellTask(w, text, by)
 	}
 	if !c.supervised(w) {
-		return c.tellVia(w, h, text)
+		return c.tellVia(w, h, text, by)
 	}
 	if _, err := c.Ledger.QueueForSupervisor(w.ID, answered.ID, text); err != nil {
 		return "", err

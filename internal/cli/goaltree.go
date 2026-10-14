@@ -196,13 +196,13 @@ func (c *Cli) editSubGoal(w core.Work, title, doneWhen *string, by string) (stri
 	if err := c.reshaped(w, fmt.Sprintf("edited %s: %s", w.ID, what), by); err != nil {
 		return "", nil, err
 	}
-	told, err := c.tellWorking(w.ID, "Your sub-goal changed. "+what)
+	told, err := c.tellWorking(w.ID, "Your sub-goal changed. "+what, sentBy(by))
 	return what, told, err
 }
 
 // tellWorking tells every agent working under id, id included, text; it
 // returns the work it told.
-func (c *Cli) tellWorking(id, text string) ([]string, error) {
+func (c *Cli) tellWorking(id, text string, by core.Sender) ([]string, error) {
 	tree, err := c.Ledger.Under(id)
 	if err != nil {
 		return nil, err
@@ -212,7 +212,7 @@ func (c *Cli) tellWorking(id, text string) ([]string, error) {
 		if t.Kind != core.WorkTask || t.Session == nil || (t.State != core.StateRunning && t.State != core.StateNeedsInput) {
 			continue
 		}
-		if _, err := c.tellTask(t, text); err != nil {
+		if _, err := c.tellTask(t, text, by); err != nil {
 			return nil, err
 		}
 		told = append(told, t.ID)

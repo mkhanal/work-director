@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS filed (work TEXT PRIMARY KEY REFERENCES work(id), ses
 CREATE TABLE IF NOT EXISTS cursor (project TEXT NOT NULL, name TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (project, name));
 CREATE UNIQUE INDEX IF NOT EXISTS worktree_one_active_shared ON worktree(work) WHERE kind = 'shared' AND state = 'active';
 CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY, work TEXT NOT NULL REFERENCES work(id), text TEXT NOT NULL, at TEXT NOT NULL, delivered TEXT,
-  event INTEGER REFERENCES event(id), look INTEGER REFERENCES event(id));
+  event INTEGER REFERENCES event(id), look INTEGER REFERENCES event(id), by TEXT NOT NULL DEFAULT 'person');
 CREATE TABLE IF NOT EXISTS workspace (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, creates INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL, updated TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sending (goal TEXT PRIMARY KEY REFERENCES work(id), look INTEGER NOT NULL REFERENCES event(id), at TEXT NOT NULL);
 ` + goalTreeSchema
@@ -64,6 +64,8 @@ var addedColumns = []struct{ table, col, decl string }{
 	// event is what a message to a goal's supervisor was filed as, and look
 	// the look that delivered it; both are null on a message to a task.
 	{"message", "event", "INTEGER REFERENCES event(id)"}, {"message", "look", "INTEGER REFERENCES event(id)"},
+	// by is who wrote a message; every message before it was the person's.
+	{"message", "by", "TEXT NOT NULL DEFAULT 'person'"},
 	// reply is the look whose supervisor's reply an event was filed carrying
 	// out, null on everything else: what a supervisor did itself is not news
 	// to it at its next look.
@@ -306,6 +308,12 @@ func scanWork(s rowScanner) (core.Work, error) {
 	return w, nil
 }
 
+// sentPayload is what the sent event of a message the person did not write
+// carries: who wrote it.
+type sentPayload struct {
+	By core.Sender `json:"by"`
+}
+
 func scanEvent(s rowScanner) (core.Event, error) {
 	var e core.Event
 	var kind string
@@ -336,6 +344,17 @@ func scanEvent(s rowScanner) (core.Event, error) {
 			return core.Event{}, fmt.Errorf("event %d: attachment payload: %w", e.ID, err)
 		}
 		e.Attachment = &a
+	} else if e.Kind == core.EventSent {
+		e.SentBy = core.SentByPerson
+		if payload.Valid && payload.String != "" {
+			var p sentPayload
+			if err := json.Unmarshal([]byte(payload.String), &p); err != nil {
+				return core.Event{}, fmt.Errorf("event %d: sent payload: %w", e.ID, err)
+			}
+			if e.SentBy, err = core.ParseSender(string(p.By)); err != nil {
+				return core.Event{}, fmt.Errorf("event %d: %w", e.ID, err)
+			}
+		}
 	} else if payload.Valid && payload.String != "" {
 		var d core.Decision
 		if err := json.Unmarshal([]byte(payload.String), &d); err != nil {
@@ -1339,18 +1358,18 @@ func dropOpen(tx *sql.Tx, tree []core.Work, why, at string) ([]core.Work, error)
 	return dropped, nil
 }
 
-// QueueMessage stores something said to work, undelivered.
-func (l *Ledger) QueueMessage(work, text string) (core.Message, error) {
-	return l.queue(work, text, nil)
+// QueueMessage stores something by said to work, undelivered.
+func (l *Ledger) QueueMessage(work, text string, by core.Sender) (core.Message, error) {
+	return l.queue(work, text, nil, by)
 }
 
 // QueueForSupervisor stores something the person said to goal, filed as
 // event, for the goal's supervisor: it waits until a look delivers it.
 func (l *Ledger) QueueForSupervisor(goal string, event int, text string) (core.Message, error) {
-	return l.queue(goal, text, &event)
+	return l.queue(goal, text, &event, core.SentByPerson)
 }
 
-func (l *Ledger) queue(work, text string, event *int) (core.Message, error) {
+func (l *Ledger) queue(work, text string, event *int, by core.Sender) (core.Message, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return core.Message{}, fmt.Errorf("a message to %s is empty", work)
@@ -1361,7 +1380,7 @@ func (l *Ledger) queue(work, text string, event *int) (core.Message, error) {
 			return err
 		}
 		at := now()
-		res, err := tx.Exec(`INSERT INTO message (work, text, at, event) VALUES (?, ?, ?, ?)`, work, text, at, event)
+		res, err := tx.Exec(`INSERT INTO message (work, text, at, event, by) VALUES (?, ?, ?, ?, ?)`, work, text, at, event, by)
 		if err != nil {
 			return err
 		}
@@ -1369,7 +1388,7 @@ func (l *Ledger) queue(work, text string, event *int) (core.Message, error) {
 		if err != nil {
 			return err
 		}
-		m = core.Message{ID: int(id), Work: work, Text: text, At: at, Event: event}
+		m = core.Message{ID: int(id), Work: work, Text: text, At: at, Event: event, By: by}
 		return nil
 	})
 	return m, err
@@ -1418,7 +1437,7 @@ type querier interface {
 }
 
 func undelivered(q querier, work string) ([]core.Message, error) {
-	rows, err := q.Query(`SELECT id, work, text, at, event FROM message WHERE work = ? AND delivered IS NULL ORDER BY id`, work)
+	rows, err := q.Query(`SELECT id, work, text, at, event, by FROM message WHERE work = ? AND delivered IS NULL ORDER BY id`, work)
 	if err != nil {
 		return nil, err
 	}
@@ -1427,8 +1446,12 @@ func undelivered(q querier, work string) ([]core.Message, error) {
 	for rows.Next() {
 		var m core.Message
 		var event sql.NullInt64
-		if err := rows.Scan(&m.ID, &m.Work, &m.Text, &m.At, &event); err != nil {
+		var by string
+		if err := rows.Scan(&m.ID, &m.Work, &m.Text, &m.At, &event, &by); err != nil {
 			return nil, err
+		}
+		if m.By, err = core.ParseSender(by); err != nil {
+			return nil, fmt.Errorf("message %d: %w", m.ID, err)
 		}
 		if event.Valid {
 			n := int(event.Int64)
@@ -1477,12 +1500,13 @@ func (l *Ledger) Withdraw(work string) ([]core.Message, error) {
 	return out, err
 }
 
-// MarkDelivered stamps a message delivered and files a sent event with its text.
+// MarkDelivered stamps a message delivered and files a sent event with its
+// text and who wrote it.
 func (l *Ledger) MarkDelivered(id int) error {
 	return l.inTx(func(tx *sql.Tx) error {
-		var work, text string
+		var work, text, by string
 		var delivered sql.NullString
-		err := tx.QueryRow(`SELECT work, text, delivered FROM message WHERE id = ?`, id).Scan(&work, &text, &delivered)
+		err := tx.QueryRow(`SELECT work, text, delivered, by FROM message WHERE id = ?`, id).Scan(&work, &text, &delivered, &by)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("no message %d", id)
 		}
@@ -1496,7 +1520,19 @@ func (l *Ledger) MarkDelivered(id int) error {
 		if _, err := tx.Exec(`UPDATE message SET delivered = ? WHERE id = ?`, at, id); err != nil {
 			return err
 		}
-		_, err = addEvent(tx, work, core.EventSent, text, at)
+		sender, err := core.ParseSender(by)
+		if err != nil {
+			return fmt.Errorf("message %d: %w", id, err)
+		}
+		sent, err := addEvent(tx, work, core.EventSent, text, at)
+		if err != nil || sender == core.SentByPerson {
+			return err
+		}
+		payload, err := json.Marshal(sentPayload{By: sender})
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(`UPDATE event SET payload = ? WHERE id = ?`, string(payload), sent.ID)
 		return err
 	})
 }

@@ -33,11 +33,15 @@ type Picture struct {
 // without reporting, what it last said; Superseded is why a course change
 // abandoned it. Children are the sub-goals under it.
 type SubPicture struct {
-	Work       core.Work
-	After      []string
-	Steps      []core.Step
-	Report     string
-	Stopped    string
+	Work    core.Work
+	After   []string
+	Steps   []core.Step
+	Report  string
+	Stopped string
+	// Told is what the person last told its agent, and Replied what the
+	// agent answered, while that reply is its latest exchange.
+	Told       string
+	Replied    string
 	Superseded string
 	Children   []SubPicture
 }
@@ -89,6 +93,10 @@ func writeSubs(b *strings.Builder, subs []SubPicture, indent string) {
 		}
 		if s.Stopped != "" {
 			fmt.Fprintf(b, "%sstopped without a report; it last said: %s\n", more, strings.ReplaceAll(clip(s.Stopped, reportClip), "\n", nl))
+		}
+		if s.Replied != "" {
+			fmt.Fprintf(b, "%sthe person told its agent: %s\n", more, strings.ReplaceAll(clip(s.Told, reportClip), "\n", nl))
+			fmt.Fprintf(b, "%sit replied: %s\n", more, strings.ReplaceAll(clip(s.Replied, reportClip), "\n", nl))
 		}
 		writeSubs(b, s.Children, more)
 	}
@@ -166,6 +174,7 @@ const actionList = `SEND <id>: <what its agent does next>
 GOAL <parent>: <an outcome a person would say> | done when: <checkable from a report, verify or PR> [| after: <id>,<id>] [| split]  (a new sub-goal under the goal or one of its sub-goals; split plans it further)
 START <id>  (a sub-goal filed and never started)
 SUPERSEDE <id>: <why the course no longer needs it>  (stops its agents)
+PAUSE <id>: <why>  (holds a sub-goal the person told to stop or wait, and stops its agents; resuming it carries on)
 EDIT <id>: [title: <title>] [| done when: <done when>]
 AFTER <id>: <id>,<id> | none
 MET <id>: <why its done-when holds>  (closes a sub-goal in review; nothing closes on its report alone)
@@ -304,6 +313,7 @@ const (
 	ActGoal      ActionKind = "goal"
 	ActStart     ActionKind = "start"
 	ActSupersede ActionKind = "supersede"
+	ActPause     ActionKind = "pause"
 	ActEdit      ActionKind = "edit"
 	ActAfter     ActionKind = "after"
 	ActMet       ActionKind = "met"
@@ -355,6 +365,8 @@ func (a Action) Line() string {
 		return "START " + a.Work
 	case ActSupersede:
 		return fmt.Sprintf("SUPERSEDE %s: %s", a.Work, a.Text)
+	case ActPause:
+		return fmt.Sprintf("PAUSE %s: %s", a.Work, a.Text)
 	case ActEdit:
 		var parts []string
 		if a.Title != "" {
@@ -401,6 +413,7 @@ var (
 	goalActRe    = regexp.MustCompile(`^GOAL\s+(\S+?):\s*(\S.*)$`)
 	startRe      = regexp.MustCompile(`^START\s+(\S+)$`)
 	supersedeRe  = regexp.MustCompile(`^SUPERSEDE\s+(\S+?):\s*(\S.*)$`)
+	pauseActRe   = regexp.MustCompile(`^PAUSE\s+(\S+?):\s*(\S.*)$`)
 	editRe       = regexp.MustCompile(`^EDIT\s+(\S+?):\s*(\S.*)$`)
 	afterActRe   = regexp.MustCompile(`^AFTER\s+(\S+?):\s*(\S.*)$`)
 	metRe        = regexp.MustCompile(`^MET\s+(\S+?):\s*(\S.*)$`)
@@ -528,6 +541,9 @@ func action(l string) (Action, bool) {
 	if m := supersedeRe.FindStringSubmatch(l); m != nil {
 		return Action{Kind: ActSupersede, Work: m[1], Text: strings.TrimSpace(m[2])}, true
 	}
+	if m := pauseActRe.FindStringSubmatch(l); m != nil {
+		return Action{Kind: ActPause, Work: m[1], Text: strings.TrimSpace(m[2])}, true
+	}
 	if m := editRe.FindStringSubmatch(l); m != nil {
 		f, ok := fields(strings.Split(m[2], "|"), "title", "done when")
 		if !ok || (f["title"] == "" && f["done when"] == "") {
@@ -602,12 +618,19 @@ const stoppedPrefix = "stopped without a report: "
 // stoppedClip is how much of what a stopped session last said its note keeps.
 const stoppedClip = 4000
 
-// Stopped is the note filed on work whose session stopped without a question
-// or a report, with what it last said, so the stop is a fact on the record and
-// its goal's supervisor looks. Nothing works on it any more, so it waits on
-// the person: it moves to needs-input, and so does running work whose latest
-// exchange is such a note already. It files once at a point of the transcript
-// and reports whether it filed.
+// repliedPrefix opens the note filed on work whose session answered the
+// person's message with neither a question nor a report.
+const repliedPrefix = "replied: "
+
+// Stopped is the note filed on work whose session went quiet without a
+// question or a report, with what it last said, so it is a fact on the record
+// and its goal's supervisor looks. After a message from the person it is a
+// reply: the work waits on the person when the reply asks something, and
+// otherwise returns to review or blocked when it was there before the message,
+// else is held paused. Any other quiet is a stop: nothing works on it any
+// more, so it waits on the person in needs-input. Running work whose latest
+// exchange is such a note already moves the same way. It files once at a point
+// of the transcript and reports whether it filed.
 func Stopped(l *ledger.Ledger, w core.Work, h runner.Handle, texts []string) (bool, error) {
 	if w.State != core.StateRunning || len(texts) == 0 {
 		return false, nil
@@ -616,21 +639,36 @@ func Stopped(l *ledger.Ledger, w core.Work, h runner.Handle, texts []string) (bo
 	if askRe.MatchString(last) || statusRe.MatchString(last) {
 		return false, nil
 	}
-	filed, err := l.File(w.ID, core.EventNote, stoppedPrefix+clip(last, stoppedClip), core.TranscriptMark{Session: h.Session, Entries: len(texts)})
+	events, err := l.Events(w.ID, nil)
+	if err != nil {
+		return false, err
+	}
+	msg, replying := personMessage(events)
+	prefix := stoppedPrefix
+	if replying {
+		prefix = repliedPrefix
+	}
+	filed, err := l.File(w.ID, core.EventNote, prefix+clip(last, stoppedClip), core.TranscriptMark{Session: h.Session, Entries: len(texts)})
 	if err != nil {
 		return false, err
 	}
 	if !filed {
-		events, err := l.Events(w.ID, nil)
-		if err != nil {
+		if events, err = l.Events(w.ID, nil); err != nil {
 			return false, err
 		}
-		if _, _, ok := StoppedNote(events); !ok {
+		note, ok := quietNote(events)
+		if !ok {
 			return false, nil
 		}
+		replying = strings.HasPrefix(events[note].Body, repliedPrefix)
+		msg, _ = personMessage(events[:note])
 	}
-	if _, err := l.Transition(w.ID, core.StateNeedsInput); err != nil {
-		// Another pass reading the same stop may have moved it first.
+	target := core.StateNeedsInput
+	if replying {
+		target = replyState(last, events[:msg])
+	}
+	if _, err := l.Transition(w.ID, target); err != nil {
+		// Another pass reading the same quiet may have moved it first.
 		if now, gerr := l.Get(w.ID); gerr != nil || now.State == core.StateRunning {
 			return false, err
 		}
@@ -638,10 +676,99 @@ func Stopped(l *ledger.Ledger, w core.Work, h runner.Handle, texts []string) (bo
 	return filed, nil
 }
 
-// StoppedQuestion is what work that stopped without a report waits on the
-// person for: what it last said, offered Yes and No when it ends asking one.
+// personMessage is the index in events, one work's, of the person's latest
+// message to it since its last report, question, stop or reply.
+func personMessage(events []core.Event) (int, bool) {
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		switch e.Kind {
+		case core.EventSent:
+			if e.SentBy == core.SentByPerson {
+				return i, true
+			}
+		case core.EventReport, core.EventQuestion:
+			return 0, false
+		case core.EventNote:
+			if strings.HasPrefix(e.Body, stoppedPrefix) || strings.HasPrefix(e.Body, repliedPrefix) {
+				return 0, false
+			}
+		}
+	}
+	return 0, false
+}
+
+// quietNote is the index of the stop or reply note that is the latest
+// exchange in events, one work's.
+func quietNote(events []core.Event) (int, bool) {
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		switch e.Kind {
+		case core.EventNote:
+			if strings.HasPrefix(e.Body, stoppedPrefix) || strings.HasPrefix(e.Body, repliedPrefix) {
+				return i, true
+			}
+		case core.EventReport, core.EventSent, core.EventQuestion, core.EventAnswer:
+			return 0, false
+		}
+	}
+	return 0, false
+}
+
+// replyState is where work goes once its agent replied said to the person:
+// needs-input when the reply asks something, else review or blocked when the
+// work was there before the person's message, else paused. before is the
+// work's events up to that message.
+func replyState(said string, before []core.Event) core.State {
+	lines := strings.Split(strings.TrimSpace(said), "\n")
+	if strings.HasSuffix(lastSentence(lines[len(lines)-1]), "?") {
+		return core.StateNeedsInput
+	}
+	for i := len(before) - 1; i >= 0; i-- {
+		if before[i].Kind != core.EventState {
+			continue
+		}
+		if s := core.State(before[i].Body); s == core.StateReview || s == core.StateBlocked {
+			return s
+		}
+		break
+	}
+	return core.StatePaused
+}
+
+// ReplyExchange is what the person last told work's agent and what it
+// replied, while that reply is the work's latest exchange. events are one
+// work's.
+func ReplyExchange(events []core.Event) (told, replied string, ok bool) {
+	note, ok := quietNote(events)
+	if !ok {
+		return "", "", false
+	}
+	replied, ok = strings.CutPrefix(events[note].Body, repliedPrefix)
+	if !ok {
+		return "", "", false
+	}
+	if msg, sent := personMessage(events[:note]); sent {
+		told = events[msg].Body
+	}
+	return told, replied, true
+}
+
+// RepliedNote is what work's agent replied to the person and the note filing
+// it, when the work's latest exchange is that reply. events are one work's.
+func RepliedNote(events []core.Event) (string, core.Event, bool) {
+	i, ok := quietNote(events)
+	if !ok {
+		return "", core.Event{}, false
+	}
+	said, replied := strings.CutPrefix(events[i].Body, repliedPrefix)
+	return said, events[i], replied
+}
+
+// StoppedQuestion is what work that stopped without a report, or replied to
+// the person asking something, waits on the person for: what it last said,
+// offered Yes and No when it ends asking one.
 func StoppedQuestion(e core.Event) runner.Question {
-	said := strings.TrimSpace(strings.TrimPrefix(e.Body, stoppedPrefix))
+	said := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(e.Body, stoppedPrefix), repliedPrefix))
 	it := runner.QuestionItem{Question: said, Options: []runner.Option{}}
 	lines := strings.Split(said, "\n")
 	ask := runner.QuestionItem{Question: lastSentence(lines[len(lines)-1]), Options: []runner.Option{}}
@@ -675,18 +802,12 @@ func StoppedSaying(events []core.Event) string {
 // latest exchange is the note that it stopped without a report. events are
 // one work's.
 func StoppedNote(events []core.Event) (string, core.Event, bool) {
-	for i := len(events) - 1; i >= 0; i-- {
-		e := events[i]
-		switch e.Kind {
-		case core.EventNote:
-			if s, ok := strings.CutPrefix(e.Body, stoppedPrefix); ok {
-				return s, e, true
-			}
-		case core.EventReport, core.EventSent, core.EventQuestion, core.EventAnswer:
-			return "", core.Event{}, false
-		}
+	i, ok := quietNote(events)
+	if !ok {
+		return "", core.Event{}, false
 	}
-	return "", core.Event{}, false
+	said, stopped := strings.CutPrefix(events[i].Body, stoppedPrefix)
+	return said, events[i], stopped
 }
 
 // QuestionBody is a supervisor's questions as one question event: each on its

@@ -397,7 +397,8 @@ func errorKind(err error) string {
 
 // waitingOn is what work waits on the person for: the question it last asked
 // that nothing has answered, else what its last report said it needs, else
-// what it last said when its session stopped without a report.
+// what it last said when its session stopped without a report or replied to
+// the person asking something.
 func waitingOn(events []core.Event, work string) (runner.Question, bool) {
 	for i := len(events) - 1; i >= 0; i-- {
 		e := events[i]
@@ -413,6 +414,9 @@ func waitingOn(events []core.Event, work string) (runner.Question, bool) {
 			return coordinator.ReportQuestion(e), true
 		case core.EventNote:
 			if _, _, ok := coordinator.StoppedNote([]core.Event{e}); ok {
+				return coordinator.StoppedQuestion(e), true
+			}
+			if _, _, ok := coordinator.RepliedNote([]core.Event{e}); ok {
 				return coordinator.StoppedQuestion(e), true
 			}
 		}

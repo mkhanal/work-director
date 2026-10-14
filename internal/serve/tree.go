@@ -38,8 +38,8 @@ type judgement struct {
 	Why     string `json:"why"`
 }
 
-// stop is what running work last said when its session stopped without a
-// report, and when that was noted.
+// stop is what work's agent last said when its session went quiet, stopped
+// or having replied to the person, and when that was noted.
 type stop struct {
 	Said string `json:"said"`
 	At   string `json:"at"`
@@ -55,6 +55,7 @@ type node struct {
 	WaitingOn    []string    `json:"waiting_on"`
 	WhyNotMoving *string     `json:"why_not_moving"`
 	Stopped      *stop       `json:"stopped"`
+	Replied      *stop       `json:"replied"`
 	Blocked      *string     `json:"blocked_because"`
 	Owner        *owner      `json:"owner"`
 	PlannedInto  *int        `json:"planned_into"`
@@ -260,6 +261,7 @@ func (s *Server) node(t tree, w core.Work) (node, error) {
 	}
 	n.WhyNotMoving = t.whyNotMoving(w, n.WaitingOn)
 	n.Stopped = t.stopped(w)
+	n.Replied = t.replied(w)
 	if n.Blocked, err = s.blockedBecause(t, w); err != nil {
 		return n, err
 	}
@@ -345,6 +347,25 @@ func (t tree) stopped(w core.Work) *stop {
 		}
 	}
 	said, e, ok := coordinator.StoppedNote(own)
+	if !ok {
+		return nil
+	}
+	return &stop{Said: said, At: e.At}
+}
+
+// replied is what work not at rest last replied to the person, and when,
+// while that reply is its latest exchange, or nil.
+func (t tree) replied(w core.Work) *stop {
+	if core.AtRest(w.State) {
+		return nil
+	}
+	var own []core.Event
+	for _, e := range t.events {
+		if e.Work == w.ID {
+			own = append(own, e)
+		}
+	}
+	said, e, ok := coordinator.RepliedNote(own)
 	if !ok {
 		return nil
 	}

@@ -434,6 +434,7 @@ func (c *Cli) subPictures(parent string, superseded *[]coordinator.SubPicture) (
 			return nil, err
 		}
 		sp := coordinator.SubPicture{Work: w, Stopped: coordinator.StoppedSaying(evs)}
+		sp.Told, sp.Replied, _ = coordinator.ReplyExchange(evs)
 		for _, e := range evs {
 			switch {
 			case e.Kind == core.EventReport:
@@ -627,7 +628,7 @@ func (c *Cli) applyAction(goal core.Work, p *project.Project, a coordinator.Acti
 		if err != nil {
 			return err
 		}
-		_, err = c.tellTask(t, a.Text)
+		_, err = c.tellTask(t, a.Text, core.SentByDirector)
 		return err
 	case coordinator.ActGoal:
 		parent := goal
@@ -675,6 +676,12 @@ func (c *Cli) applyAction(goal core.Work, p *project.Project, a coordinator.Acti
 		}
 		_, err = c.supersedeSubGoal(t, a.Text, core.AnsweredByDirector)
 		return err
+	case coordinator.ActPause:
+		t, err := child(a.Work)
+		if err != nil {
+			return err
+		}
+		return c.pauseSubGoal(t, a.Text)
 	case coordinator.ActEdit:
 		t, err := child(a.Work)
 		if err != nil {
@@ -698,7 +705,7 @@ func (c *Cli) applyAction(goal core.Work, p *project.Project, a coordinator.Acti
 		if err != nil {
 			return err
 		}
-		_, err = c.tellWorking(t.ID, "Your sub-goal now waits on: "+what)
+		_, err = c.tellWorking(t.ID, "Your sub-goal now waits on: "+what, core.SentByDirector)
 		return err
 	case coordinator.ActMet:
 		t, err := c.judged(child, a)
@@ -749,7 +756,7 @@ func (c *Cli) tellMissed(id, missing string) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.tellTask(t, "Your sub-goal's done-when is not met yet: "+missing)
+	_, err = c.tellTask(t, "Your sub-goal's done-when is not met yet: "+missing, core.SentByDirector)
 	return err
 }
 

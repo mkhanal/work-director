@@ -341,7 +341,7 @@ func TestCoordinator(t *testing.T) {
 			"first duty is the top goal's done-when",
 			"COURSE: on course | correct | pivot — <why>",
 			"offer choices whenever the answer is one of a few",
-			"ACTIONS:", "SEND <", "GOAL <parent>: <", "START <", "SUPERSEDE <", "EDIT <", "AFTER <", "MET <", "MISSED <", "CHORE: <", "PROPOSE: <",
+			"ACTIONS:", "SEND <", "GOAL <parent>: <", "START <", "SUPERSEDE <", "PAUSE <", "EDIT <", "AFTER <", "MET <", "MISSED <", "CHORE: <", "PROPOSE: <",
 			"RESOLVE <", "ASK: <", "DONE: <", "WAIT",
 		} {
 			if !strings.Contains(brief, want) {
@@ -439,7 +439,7 @@ func TestCoordinator(t *testing.T) {
 			"COURSE: correct — the guide has no owner",
 			"ACTIONS:\n- SEND t1: call detectOperationalImpacts and print impacts\nGOAL g1: Whoever deploys gets a guide | done when: a guide covers migrations and rollback | after: t1,t2 | split",
 			"GOAL s2: Notes are grouped | done when: each change sits under its type",
-			"START t9\nSUPERSEDE t8: the skill already does it\nEDIT t3: title: Collect every change | done when: no change is missed\nEDIT t4: done when: tags exist",
+			"START t9\nSUPERSEDE t8: the skill already does it\nPAUSE t7: the person wants one issue at a time\nEDIT t3: title: Collect every change | done when: no change is missed\nEDIT t4: done when: tags exist",
 			"AFTER t5: t1, t2\nAFTER t6: none\nMET t1: changes are grouped by type in the report\nMISSED t2: rollback is not covered",
 			"CHORE: refresh the lockfile\nPROPOSE: Ship release notes | done when: every release has notes | finish: merged — the person lands on main",
 			"PROPOSE: Fix the SDK's retries | done when: no batch is dropped | finish: complete PR | found: the SDK drops a batch on 429 — events are lost",
@@ -453,6 +453,7 @@ func TestCoordinator(t *testing.T) {
 			{Kind: ActGoal, Work: "s2", Title: "Notes are grouped", DoneWhen: "each change sits under its type"},
 			{Kind: ActStart, Work: "t9"},
 			{Kind: ActSupersede, Work: "t8", Text: "the skill already does it"},
+			{Kind: ActPause, Work: "t7", Text: "the person wants one issue at a time"},
 			{Kind: ActEdit, Work: "t3", Title: "Collect every change", DoneWhen: "no change is missed"},
 			{Kind: ActEdit, Work: "t4", DoneWhen: "tags exist"},
 			{Kind: ActAfter, Work: "t5", After: []string{"t1", "t2"}},
@@ -803,7 +804,7 @@ func TestCoordinator(t *testing.T) {
 		move(t, l, child.ID, core.StateRunning)
 		move(t, l, child.ID, core.StateNeedsInput)
 		for _, text := range []string{"use postgres", "keep the old API"} {
-			if _, err := l.QueueMessage(child.ID, text); err != nil {
+			if _, err := l.QueueMessage(child.ID, text, core.SentByPerson); err != nil {
 				t.Fatalf("queue: %v", err)
 			}
 		}

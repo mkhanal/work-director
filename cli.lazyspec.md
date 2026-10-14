@@ -525,6 +525,11 @@ could not with their work, the bound that ran out, and the work still open.
 - A reply is carried out once, however many passes read it at once.
 - The reply, what was done and what was refused are one `supervised` event on the goal.
 
+## A Supervisor Hears What The Person Told An Agent And Can Pause It
+- The supervision brief shows, under a sub-goal whose agent last replied to the person, what the person told it and what it replied.
+- `PAUSE <id>: <why>` stops a sub-goal's sessions and holds it paused, with why filed on it as a `paused: ` note.
+- What the director sends a task (a supervisor's `SEND`, a done-when sent back, a change it made, an answer it settled) is filed as sent by the director; what the person sends or answers, as sent by the person.
+
 ## A Sub-Goal Closes Only When Its Done-When Is Judged Met
 - A sub-goal in review closes on `MET` with the judgement filed.
 - `MISSED` files what is missing, tells its agent, and puts it back to work.

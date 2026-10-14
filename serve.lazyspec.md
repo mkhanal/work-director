@@ -165,9 +165,16 @@ JSON message per line to stdout:
 - A report already filed at that point of the conversation is not filed again.
 
 ## Work Reads As Working Only While An Agent Is Working
-- While serving, a running work item whose session is not running and ends on neither a question nor a report has a `note` filed, `stopped without a report: ` and what it last said, and moves to needs-input.
+- While serving, a running work item whose session is not running, ends on neither a question nor a report, and has had no message from the person since its last report, has a `note` filed, `stopped without a report: ` and what it last said, and moves to needs-input.
 - It is noted once at that point of the conversation; running work whose latest exchange is that note already moves to needs-input without a second note.
 - Its goal lists it in `needs_you`, asking what it last said, offered Yes and No when that ends on a yes-or-no question.
+
+## A Reply To The Person Reads As A Reply, Not A Stop
+- While serving, a running work item whose session is not running and ends on neither a question nor a report, after a message from the person since its last report, has a `note` filed, `replied: ` and what it said, once at that point of the conversation.
+- A reply ending on a question moves the work to needs-input, and its goal lists it in `needs_you` asking it.
+- Any other reply returns the work to review or blocked when it was in that state before the person's message, and to paused otherwise.
+- A message from the director, such as a supervisor's, is not the person's: going quiet after it is a stop.
+- Each tree node serves `replied`, `{said, at}`, while its work is not at rest and its latest exchange is that reply; it is never served as `stopped`.
 
 ## A Message To A Task Reaches It Whatever State Its Goal Is In
 - While serving, a message queued for a work item whose session was working is delivered once its session is not, whatever state the item or its goal is in, paused work aside.
