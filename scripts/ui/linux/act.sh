@@ -8,10 +8,14 @@ mkdir -p /build /shots
 (cd /repo && go build -o /build/wd ./cmd/wd)
 (cd /repo/clients/linux && cargo build --release --workspace -q)
 app=$CARGO_TARGET_DIR/release/work-director
-install -m 755 /build/wd "$(dirname "$app")/wd"
-export WD_HOME=/data/home XDG_CONFIG_HOME=/data/config HOME=/data PATH=/build:$PATH
+# The wd beside the app reaches agents only through stand-ins: see stand-ins.sh.
+. /repo/scripts/ui/stand-ins.sh
+stand_ins /data/stand-ins /build/wd
+install -m 755 /data/stand-ins/wd "$(dirname "$app")/wd"
+export WD_HOME=/data/home XDG_CONFIG_HOME=/data/config HOME=/data PATH=/data/stand-ins/bin:/build:$PATH
 mkdir -p "$XDG_CONFIG_HOME/work-director"
 eval "$(/repo/scripts/ui/seed-goal-tree.sh /build/wd | tail -1)"
+seeded=$(sqlite3 "$WD_HOME/ledger.db" "SELECT coalesce(max(id), 0) FROM event")
 
 Xvfb :99 -screen 0 1600x1100x24 >/tmp/xvfb.log 2>&1 &
 export DISPLAY=:99 GTK_A11Y=atspi NO_AT_BRIDGE=0
@@ -111,5 +115,6 @@ has "Ctrl+A copies from the brief" /shots/copied-all.txt "Write the customer rel
 has "Ctrl+A copies to the reply's end" /shots/copied-all.txt "Next I generate the note for v1.0.0 as a sample."
 close
 
+stand_ins_check "$db" "$seeded" || fail=1
 cp "$db" /shots/ledger.db; cp /tmp/app.log /shots/app.log
 exit $fail

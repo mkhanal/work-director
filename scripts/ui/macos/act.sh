@@ -17,9 +17,9 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/wd-ui-act.XXXXXX")
 (cd "$root" && go build -o "$work/wd" ./cmd/wd)
 (cd "$root/clients/macos" && swift build -c release -q)
 app=$root/clients/macos/.build/release/WorkDirector
+export WD_HOME=$work/home WD_BIN=$work/wd
 . "$root/scripts/ui/macos/launch.sh"
 ui_tools
-export WD_HOME=$work/home WD_BIN=$work/wd
 eval "$("$root/scripts/ui/seed-goal-tree.sh" "$WD_BIN" | tail -1)"
 db=$WD_HOME/ledger.db
 fail=0
