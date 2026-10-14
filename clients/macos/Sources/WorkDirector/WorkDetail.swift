@@ -223,7 +223,7 @@ struct WorkDetail: View {
                                 filter = .all
                                 Task {
                                     try? await Task.sleep(for: .milliseconds(150))
-                                    withAnimation { proxy.scrollTo(id, anchor: .top) }
+                                    NotificationCenter.default.post(name: .revealItem, object: "e\(id)")
                                 }
                             }
                         }

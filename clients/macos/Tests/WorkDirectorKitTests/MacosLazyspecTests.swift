@@ -1793,5 +1793,53 @@ struct SeededTree {
         guard case .text(let m) = more[0] else { return }
         #expect(Transcript.firstChange(from: t, to: m) == t.items.count, "a new step changes nothing before it")
         #expect(Transcript.firstChange(from: t, to: t) == nil)
+
+        // A goal's conversation reads as one text too.
+        func event(_ id: Int, _ work: String, _ kind: String, _ body: String, decision: String = "null") -> String {
+            let quoted = String(data: try! JSONEncoder().encode(body), encoding: .utf8)!
+            return #"{"id":\#(id),"work":"\#(work)","kind":"\#(kind)","body":\#(quoted),"at":"2026-10-12T01:\#(String(format: "%02d", id)):00Z","effective":null,"decision":\#(decision)}"#
+        }
+        func work(_ id: String, _ title: String, _ state: String, runner: String? = nil) -> String {
+            workJSON(state: state).replacingOccurrences(of: #""id":"w1""#, with: #""id":"\#(id)""#)
+                .replacingOccurrences(of: #""title":"T""#, with: #""title":"\#(title)""#)
+                .replacingOccurrences(of: #""runner":null"#, with: runner.map { #""runner":"\#($0)""# } ?? #""runner":null"#)
+        }
+        let director = #"{"question":"q","answer":"forward only","source":"director","runner":"","model":"","tokens":0,"reverses":0,"reversed_by":0}"#
+        let mine = #"{"question":"","answer":"English only","source":"person","runner":"","model":"","tokens":0,"reverses":0,"reversed_by":0}"#
+        let events = [
+            event(1, "g", "decision", "English only", decision: mine),
+            event(2, "g", "supervised", "Told the note agent to map names.\n\nDone:\n- SEND a: map names\nRefused:\n- START b — already under way"),
+            event(3, "a", "question", "Down scripts?"),
+            event(4, "a", "answer", "forward only", decision: director),
+            event(5, "g", "look", "a task asked"),
+            event(6, "a", "note", "stopped without a report: halfway through billing"),
+        ].joined(separator: ",")
+        let json = """
+        {"goal":\(work("g", "Release notes", "running")),"tasks":[\(work("a", "Customer note", "running", runner: "claude"))],
+         "rollup":{"counts":{},"done":0,"total":1},"events":[\(events)],"claims":[],"landings":[],"delivery":null,"activity":{},"reports":{},"waiting":[],\(treeless)}
+        """
+        let goal = try! JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
+        let thread = goal.transcript(.all, time: { _ in "10:00" }, day: { _ in "Monday" })
+        #expect(thread.copied(0..<thread.length) == """
+        Monday
+        You · 10:00
+        English only
+        Director · 10:00
+        Told the note agent to map names.
+        Customer note · Working
+        SEND a: map names
+        START b — already under way
+        claude · 10:00
+        Asked the director
+        Down scripts?
+        Director answered · forward only
+        Director looking: a task asked · 10:00
+        claude · 10:00 stopped without a report
+        halfway through billing
+        """, "every header, line and card of a goal's conversation is one text: \(thread.copied(0..<thread.length))")
+        let begins = thread.starts
+        let look = thread.items.firstIndex { $0.id == "e5" }!
+        #expect(thread.copied(begins[1]..<(begins[look] + 16)).hasSuffix("Director answered · forward only\nDirector looking"),
+                "one drag spans the person's message, the director's turn, a card and a line")
     }
 }

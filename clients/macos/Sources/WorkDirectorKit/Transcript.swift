@@ -8,17 +8,41 @@ import Foundation
 
 /// The type a piece of text is set in, from the design's type table.
 public enum Face: Hashable, Sendable {
-    case body, bodyMedium, heading1, title, callout, calloutMedium, meta, caption, code, codeSmall, micro
+    case body, bodyMedium, heading1, title, callout, calloutMedium, meta, metaStrong, caption, code, codeSmall, micro
+    /// A badge's words, and a sub-goal tag's.
+    case tag, tagMedium
 }
 
 /// The colour a piece of text is set in, from the design's palette.
 public enum Ink: Hashable, Sendable {
     case text, text2, text3, link, failure
+    /// A step's own words; a badge's settled green.
+    case stepText, settled
 }
 
 /// A speaker's mark beside their name.
 public enum Avatar: Hashable, Sendable {
-    case working, done
+    case working, done, needsYou, waiting, superseded
+    /// The person.
+    case you
+
+    public init(_ mark: StateMark) {
+        switch mark {
+        case .done: self = .done
+        case .needsYou: self = .needsYou
+        case .working: self = .working
+        case .waiting: self = .waiting
+        case .superseded: self = .superseded
+        }
+    }
+}
+
+/// A rounded tint behind a run: a badge in its colour role, a failure, or a
+/// sub-goal's tag.
+public enum Pill: Hashable, Sendable {
+    case tone(Tone)
+    case failure
+    case tag
 }
 
 /// Something drawn in the text rather than written: it takes one character
@@ -27,6 +51,8 @@ public enum Mark: Hashable, Sendable {
     case symbol(String)
     case avatar(Avatar)
     case chevron(open: Bool)
+    /// Room of this many points, beside a pill.
+    case space(Double)
 }
 
 public struct Run: Hashable, Sendable {
@@ -42,6 +68,8 @@ public struct Run: Hashable, Sendable {
     public var mark: Mark?
     /// Clicking this run folds or unfolds the item with this id.
     public var toggle: String?
+    /// Set on a rounded tint.
+    public var pill: Pill?
 
     public init(_ text: String, _ face: Face, _ ink: Ink = .text, bold: Bool = false, italic: Bool = false,
                 strike: Bool = false, chip: Bool = false, link: String? = nil, toggle: String? = nil) {
@@ -60,6 +88,16 @@ public struct Run: Hashable, Sendable {
         var run = Run(Transcript.markCharacter, face, ink, toggle: toggle)
         run.mark = mark
         return run
+    }
+
+    /// A badge or a tag: its words on a rounded tint, room drawn either side
+    /// and a space after it that is copied.
+    public static func pill(_ text: String, _ pill: Pill, after: String = " ") -> [Run] {
+        let face: Face = pill == .tag ? .tagMedium : .tag
+        let ink: Ink = pill == .tag ? .stepText : .text
+        var words = Run(text, face, ink)
+        words.pill = pill
+        return [.mark(.space(pill == .tag ? 7 : 6), face), words, .mark(.space(pill == .tag ? 7 : 6), face)] + (after.isEmpty ? [] : [Run(after, .meta, .text2)])
     }
 }
 
@@ -87,6 +125,12 @@ public struct Cell: Hashable, Sendable {
     public let columns: Int
     public let header: Bool
     public let align: MarkdownTable.Alignment
+    /// A fixed width in points; nil shares what is left.
+    public var width: Double? = nil
+    /// Rows parted by a hairline under each, with no grid or header fill.
+    public var lined = false
+    /// Under the last row of its table: no hairline.
+    public var last = false
 }
 
 /// The box a paragraph sits in; consecutive paragraphs with the same box are
@@ -103,6 +147,26 @@ public enum Box: Hashable, Sendable {
     case quote(String)
     case rule(String)
     case cell(Cell)
+    /// What the person said: a bubble on the right, as wide as its words.
+    case bubble(String)
+    /// A hairline card on the page, or one filled plain.
+    case card(String)
+    case plain(String)
+    /// An agent's card, a little tighter.
+    case agent(String)
+    /// The director's own answer, in its settled tint.
+    case settled(String)
+    /// The director's answer inside a card.
+    case answered(String)
+    /// Something that happened: its line centred between hairlines.
+    case event(String)
+    /// Where a day begins: its name, then a hairline.
+    case day(String)
+}
+
+/// How a paragraph's lines sit across its column.
+public enum Align: Hashable, Sendable {
+    case leading, center, trailing
 }
 
 public struct Para: Hashable, Sendable {
@@ -117,8 +181,19 @@ public struct Para: Hashable, Sendable {
     public var box: Box?
     /// Cut to one line, the rest of it still copied.
     public var oneLine = false
+    /// The card it sits in, around its own box.
+    public var outer: Box?
+    public var align = Align.leading
+    /// Points it starts further in: past a label column.
+    public var lead: Double = 0
+    /// Its first words are a label set in the column `lead` makes room for.
+    public var label = false
 
-    public init(_ runs: [Run], indent: Int = 0, nest: Int = 0, hang: Bool = false, gap: Gap = .none, box: Box? = nil, oneLine: Bool = false) {
+    public init(_ runs: [Run], indent: Int = 0, nest: Int = 0, hang: Bool = false, gap: Gap = .none, box: Box? = nil, oneLine: Bool = false,
+                outer: Box? = nil, align: Align = .leading, lead: Double = 0) {
+        self.outer = outer
+        self.align = align
+        self.lead = lead
         self.runs = runs
         self.indent = indent
         self.nest = nest
@@ -202,7 +277,7 @@ public struct Transcript: Hashable, Sendable {
                 let lo = max(range.lowerBound, at), hi = min(range.upperBound, end + 1)
                 if lo < hi {
                     var words = String(decoding: text[(lo - at)..<min(hi - at, text.count)], as: UTF16.self)
-                    if para.hang, let tab = words.firstIndex(of: "\t") { words.replaceSubrange(tab...tab, with: " ") }
+                    if para.hang || para.label, let tab = words.firstIndex(of: "\t") { words.replaceSubrange(tab...tab, with: " ") }
                     out += words.replacingOccurrences(of: Self.markCharacter, with: "").replacingOccurrences(of: Self.lineBreak, with: "\n")
                     if hi > end { out += para.terminator }
                 }
@@ -315,7 +390,7 @@ extension Transcript {
     }
 }
 
-private struct Builder {
+struct Builder {
     let steps: [Step]
     let speaker: String
     let running: Bool

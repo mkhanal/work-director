@@ -14,19 +14,21 @@ struct TranscriptText: View {
     /// Keeps the laid-out text for this key, so coming back to a long
     /// conversation shows it at once.
     var key: String? = nil
+    var open: (String) -> Void = { _ in }
     var toggle: (String) -> Void = { _ in }
     /// Counts layouts finished off the main thread, so the page measures the
     /// text again when one lands.
     @State private var laidOut = 0
 
     var body: some View {
-        TranscriptRepresentable(transcript: transcript, key: key, toggle: toggle, laidOut: laidOut) { laidOut += 1 }
+        TranscriptRepresentable(transcript: transcript, key: key, open: open, toggle: toggle, laidOut: laidOut) { laidOut += 1 }
     }
 }
 
 private struct TranscriptRepresentable: NSViewRepresentable {
     let transcript: Transcript
     let key: String?
+    let open: (String) -> Void
     let toggle: (String) -> Void
     let laidOut: Int
     let landed: () -> Void
@@ -39,6 +41,7 @@ private struct TranscriptRepresentable: NSViewRepresentable {
 
     func updateNSView(_ view: TranscriptTextView, context: Context) {
         view.toggle = toggle
+        view.open = open
         view.landed = landed
         view.show(transcript)
     }
@@ -74,6 +77,8 @@ final class TranscriptTextView: NSTextView {
     /// The text this view shows; it owns the layout manager and container.
     private var owner: NSTextStorage
     var toggle: (String) -> Void = { _ in }
+    /// Opens an agent's conversation, by its work's id.
+    var open: (String) -> Void = { _ in }
     var landed: () -> Void = {}
 
     /// Past this many characters a change is set and laid out off the main thread.
@@ -111,6 +116,17 @@ final class TranscriptTextView: NSTextView {
         // too, so a fold can be pressed by keyboard and VoiceOver.
         linkTextAttributes = [.cursor: NSCursor.pointingHand]
         setAccessibilityLabel("Conversation")
+        NotificationCenter.default.addObserver(self, selector: #selector(reveal(_:)), name: .revealItem, object: nil)
+    }
+
+    /// Scrolls an item this text shows to the top of the page.
+    @objc private func reveal(_ note: Notification) {
+        guard let id = note.object as? String, let i = shown.items.firstIndex(where: { $0.id == id }),
+              let layout = layoutManager, let container = textContainer else { return }
+        let glyphs = layout.glyphRange(forCharacterRange: NSRange(location: shown.starts[i], length: max(1, shown.items[i].length - 1)), actualCharacterRange: nil)
+        let at = layout.boundingRect(forGlyphRange: glyphs, in: container)
+        let tall = enclosingScrollView?.contentView.bounds.height ?? visibleRect.height
+        scrollToVisible(NSRect(x: 0, y: max(0, at.minY - Space.s3), width: 1, height: max(tall - Space.s3, at.height)))
     }
 
     override init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
@@ -124,7 +140,7 @@ final class TranscriptTextView: NSTextView {
     /// only this view decides when it is laid out again.
     nonisolated private static func stack(_ text: NSAttributedString, width: CGFloat) -> (NSTextStorage, NSTextContainer) {
         let storage = NSTextStorage(attributedString: text)
-        let layout = NSLayoutManager()
+        let layout = PillLayoutManager()
         storage.addLayoutManager(layout)
         let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
         container.lineFragmentPadding = 0
@@ -315,6 +331,11 @@ final class TranscriptTextView: NSTextView {
     override func clicked(onLink link: Any, at charIndex: Int) {
         if let url = link as? URL, url.scheme == TranscriptSetter.foldScheme {
             toggle(String(url.absoluteString.dropFirst(TranscriptSetter.foldScheme.count + 1)))
+        } else if let url = link as? URL, url.scheme == openScheme {
+            open(String(url.absoluteString.dropFirst(openScheme.count + 1)))
+        } else if let url = link as? URL, url.isFileURL {
+            let image = ["png", "jpg", "jpeg", "gif", "heic", "tiff", "webp"].contains(url.pathExtension.lowercased())
+            if image { QuickLook.shared.show(url) } else { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         } else {
             super.clicked(onLink: link, at: charIndex)
         }
@@ -386,9 +407,16 @@ private final class Action: NSMenuItem {
     @objc private func fire() { run() }
 }
 
+extension Notification.Name {
+    /// Asks the text showing an item, by its id, to scroll it into view.
+    static let revealItem = Notification.Name("wd.revealItem")
+}
+
 extension NSAttributedString.Key {
     /// The id of the item a click on this text folds or unfolds.
     static let wdToggle = NSAttributedString.Key("wdToggle")
+    /// The rounded tint drawn behind a badge's or tag's words.
+    static let wdPill = NSAttributedString.Key("wdPill")
 }
 
 /// Sets a transcript's pieces in the design's type and colours.
@@ -415,6 +443,9 @@ enum TranscriptSetter {
         case .callout: font = .systemFont(ofSize: 13)
         case .calloutMedium: font = .systemFont(ofSize: 13, weight: .medium)
         case .meta: font = .systemFont(ofSize: 12, weight: .medium)
+        case .metaStrong: font = .systemFont(ofSize: 12, weight: .semibold)
+        case .tag: font = .systemFont(ofSize: 10.5, weight: .semibold)
+        case .tagMedium: font = .systemFont(ofSize: 11, weight: .medium)
         case .caption: font = .systemFont(ofSize: 12)
         case .code: font = .monospacedSystemFont(ofSize: 12.5, weight: .regular)
         case .codeSmall: font = .monospacedSystemFont(ofSize: 12, weight: .regular)
@@ -432,6 +463,8 @@ enum TranscriptSetter {
         case .text3: NSColor(Palette.text3)
         case .link: NSColor(Palette.link)
         case .failure: NSColor(Palette.failure)
+        case .stepText: NSColor(Palette.stepText)
+        case .settled: NSColor(BadgeTone.settled.text)
         }
     }
 
@@ -465,26 +498,46 @@ enum TranscriptSetter {
         var tables: [String: NSTextTable] = [:]
 
         mutating func add(_ para: Para, to out: NSMutableAttributedString) {
-            let x = CGFloat(para.indent) * Space.turnIndent + CGFloat(para.nest) * TranscriptSetter.nestStep
+            let column = CGFloat(para.indent) * Space.turnIndent
+            let nest = CGFloat(para.nest) * TranscriptSetter.nestStep
+            let lead = CGFloat(para.lead)
             let face = para.runs.first(where: { $0.mark == nil })?.face ?? .body
             let style = NSMutableParagraphStyle()
+            let gap = TranscriptSetter.gap(para.gap)
             // The space above a box goes outside it, not inside its first line.
-            let opens = para.box.map { box in
-                if case .cell(let c) = box { return tables[c.table] == nil }
-                return boxes[box] == nil
-            } ?? false
-            if !opens { style.paragraphSpacingBefore = TranscriptSetter.gap(para.gap) }
+            var blocks: [NSTextBlock] = []
+            var spent = false
+            if let outer = para.outer {
+                spent = opens(outer)
+                blocks.append(block(outer, x: column, gap: spent ? gap : 0))
+            }
+            if let box = para.box {
+                let opening = opens(box)
+                blocks.append(block(box, x: para.outer == nil ? column + nest : nest, gap: opening && !spent ? gap : 0))
+                spent = spent || opening
+            }
+            if !spent { style.paragraphSpacingBefore = gap }
             style.lineSpacing = TranscriptSetter.leading(face)
             if para.oneLine { style.lineBreakMode = .byTruncatingTail }
-            if let box = para.box {
-                style.textBlocks = [block(box, x: x, gap: TranscriptSetter.gap(para.gap))]
-                if case .cell(let c) = box {
-                    style.alignment = switch c.align {
-                    case .leading: .natural
-                    case .center: .center
-                    case .trailing: .right
-                    }
+            style.alignment = switch para.align {
+            case .leading: .natural
+            case .center: .center
+            case .trailing: .right
+            }
+            // Inside a box, the box holds the column and the nesting.
+            let x = para.box != nil ? lead : para.outer != nil ? nest + lead : column + nest + lead
+            if !blocks.isEmpty { style.textBlocks = blocks }
+            if case .cell(let c) = para.box {
+                style.alignment = switch c.align {
+                case .leading: .natural
+                case .center: .center
+                case .trailing: .right
                 }
+            }
+            if para.label {
+                style.firstLineHeadIndent = x - lead
+                style.headIndent = x
+                style.tabStops = [NSTextTab(textAlignment: .natural, location: x)]
             } else if para.hang {
                 style.firstLineHeadIndent = x
                 style.headIndent = x + 22
@@ -497,6 +550,11 @@ enum TranscriptSetter {
             for run in para.runs { out.append(TranscriptSetter.text(run)) }
             out.append(NSAttributedString(string: "\n", attributes: [.font: TranscriptSetter.font(face)]))
             out.addAttribute(.paragraphStyle, value: style, range: NSRange(location: start, length: out.length - start))
+        }
+
+        private func opens(_ box: Box) -> Bool {
+            if case .cell(let c) = box { return tables[c.table] == nil }
+            return boxes[box] == nil
         }
 
         private mutating func block(_ box: Box, x: CGFloat, gap: CGFloat) -> NSTextBlock {
@@ -512,18 +570,34 @@ enum TranscriptSetter {
                     t.layoutAlgorithm = .automaticLayoutAlgorithm
                     t.setWidth(x, type: .absoluteValueType, for: .margin, edge: .minX)
                     t.setWidth(gap, type: .absoluteValueType, for: .margin, edge: .minY)
-                    t.setWidth(Space.s1, type: .absoluteValueType, for: .margin, edge: .maxY)
+                    if c.lined {
+                        t.setContentWidth(100, type: .percentageValueType)
+                    } else {
+                        t.setWidth(Space.s1, type: .absoluteValueType, for: .margin, edge: .maxY)
+                    }
                     return t
                 }()
                 tables[c.table] = table
                 let cell = NSTextTableBlock(table: table, startingRow: c.row, rowSpan: 1, startingColumn: c.column, columnSpan: 1)
-                cell.setWidth(Space.s1 + 2, type: .absoluteValueType, for: .padding, edge: .minY)
-                cell.setWidth(Space.s1 + 2, type: .absoluteValueType, for: .padding, edge: .maxY)
-                cell.setWidth(10, type: .absoluteValueType, for: .padding, edge: .minX)
-                cell.setWidth(10, type: .absoluteValueType, for: .padding, edge: .maxX)
-                cell.setWidth(1, type: .absoluteValueType, for: .border)
-                cell.setBorderColor(NSColor(Palette.hairline))
-                if c.header { cell.backgroundColor = NSColor(Palette.plainCard) }
+                if c.lined {
+                    cell.setWidth(9, type: .absoluteValueType, for: .padding, edge: .minY)
+                    cell.setWidth(9, type: .absoluteValueType, for: .padding, edge: .maxY)
+                    if c.column < c.columns - 1 { cell.setWidth(12, type: .absoluteValueType, for: .padding, edge: .maxX) }
+                    if let width = c.width { cell.setContentWidth(CGFloat(width), type: .absoluteValueType) }
+                    cell.verticalAlignment = .baselineAlignment
+                    if !c.last {
+                        cell.setWidth(1, type: .absoluteValueType, for: .border, edge: .maxY)
+                        cell.setBorderColor(NSColor(c.header ? Palette.hairline : Palette.rowSeparator), for: .maxY)
+                    }
+                } else {
+                    cell.setWidth(Space.s1 + 2, type: .absoluteValueType, for: .padding, edge: .minY)
+                    cell.setWidth(Space.s1 + 2, type: .absoluteValueType, for: .padding, edge: .maxY)
+                    cell.setWidth(10, type: .absoluteValueType, for: .padding, edge: .minX)
+                    cell.setWidth(10, type: .absoluteValueType, for: .padding, edge: .maxX)
+                    cell.setWidth(1, type: .absoluteValueType, for: .border)
+                    cell.setBorderColor(NSColor(Palette.hairline))
+                    if c.header { cell.backgroundColor = NSColor(Palette.plainCard) }
+                }
                 made = cell
             case .told:
                 made = CardBlock(fill: NSColor(Palette.page), stroke: NSColor(Palette.hairline), padding: Space.s3, x: x + Space.turnIndent,
@@ -531,7 +605,7 @@ enum TranscriptSetter {
             case .brief:
                 made = CardBlock(fill: NSColor(Palette.page), stroke: NSColor(Palette.hairline), padding: Space.s3, x: x + Space.turnIndent,
                                  mark: Marks.symbol("doc.text.fill", size: IconSize.turn, weight: .regular, color: .secondaryLabelColor, box: Space.avatar))
-            case .director:
+            case .director, .settled:
                 made = CardBlock(fill: NSColor(Palette.settled.opacity(0.08)), stroke: NSColor(Palette.settled.opacity(0.3)), padding: Space.s3, x: x)
             case .asked:
                 made = CardBlock(fill: NSColor(Palette.plainCard), stroke: NSColor(Palette.hairline), padding: Space.cardH, x: x)
@@ -541,6 +615,20 @@ enum TranscriptSetter {
                 made = CardBlock(fill: nil, stroke: nil, padding: Space.s1, x: x, bar: NSColor(Palette.buttonBorder))
             case .rule:
                 made = CardBlock(fill: nil, stroke: nil, padding: 0, x: x, rule: NSColor(Palette.hairline))
+            case .bubble:
+                made = BubbleBlock(fill: NSColor(Palette.bubbleFill), stroke: NSColor(Palette.bubbleBorder), padding: 10, x: max(x, 96), across: 14, radius: Radius.bubble)
+            case .card:
+                made = CardBlock(fill: NSColor(Palette.page), stroke: NSColor(Palette.hairline), padding: 12, x: x, across: 14)
+            case .plain:
+                made = CardBlock(fill: NSColor(Palette.plainCard), stroke: NSColor(Palette.hairline), padding: 12, x: x, across: 14)
+            case .agent:
+                made = CardBlock(fill: NSColor(Palette.page), stroke: NSColor(Palette.hairline), padding: Space.s3, x: x)
+            case .answered:
+                made = CardBlock(fill: NSColor(Palette.answeredFill), stroke: NSColor(Palette.answeredBorder), padding: 8, x: x, across: 10, radius: Radius.option)
+            case .event:
+                made = LineBlock(color: NSColor(Palette.hairline), x: x, both: true)
+            case .day:
+                made = LineBlock(color: NSColor(Palette.separator), x: x, both: false)
             }
             if !(made is NSTextTableBlock) { made.setWidth(gap, type: .absoluteValueType, for: .margin, edge: .minY) }
             boxes[box] = made
@@ -555,6 +643,11 @@ enum TranscriptSetter {
         if run.strike { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
         if run.chip { attributes[.backgroundColor] = NSColor(Palette.sunken) }
         if let link = run.link, let url = URL(string: link) { attributes[.link] = url }
+        if let pill = run.pill {
+            let look = PillLook(pill)
+            attributes[.wdPill] = look
+            attributes[.foregroundColor] = look.text
+        }
         if let id = run.toggle {
             attributes[.wdToggle] = id
             attributes[.link] = URL(string: foldScheme + ":" + id)
@@ -587,6 +680,8 @@ enum Marks {
             return symbol(open ? "chevron.down" : "chevron.right", size: IconSize.tiny, weight: .bold, color: NSColor(Palette.text3), box: 10, gap: Space.s1)
         case .symbol(let name):
             return symbol(name, size: IconSize.control - 1, weight: .regular, color: TranscriptSetter.color(ink), box: 16, gap: Space.s1 + 2)
+        case .space(let width):
+            return NSImage(size: NSSize(width: width, height: 1))
         }
     }
 
@@ -616,6 +711,32 @@ enum Marks {
             check.lineWidth = 2 * s
             NSColor.white.setStroke()
             check.stroke()
+        case .needsYou:
+            let ring = NSBezierPath(ovalIn: NSRect(x: 2 * s, y: 2 * s, width: 16 * s, height: 16 * s))
+            ring.lineWidth = 2 * s
+            NSColor(Palette.orange).setStroke()
+            ring.stroke()
+            NSColor(Palette.orange).setFill()
+            NSBezierPath(ovalIn: NSRect(x: 7 * s, y: 7 * s, width: 6 * s, height: 6 * s)).fill()
+        case .waiting:
+            let ring = NSBezierPath(ovalIn: NSRect(x: 2 * s, y: 2 * s, width: 16 * s, height: 16 * s))
+            ring.lineWidth = 2 * s
+            ring.setLineDash([3 * s, 3 * s], count: 2, phase: 0)
+            NSColor(Palette.grey).setStroke()
+            ring.stroke()
+        case .superseded:
+            let ring = NSBezierPath(ovalIn: NSRect(x: 2 * s, y: 2 * s, width: 16 * s, height: 16 * s))
+            ring.lineWidth = 2 * s
+            NSColor(Palette.grey).setStroke()
+            ring.stroke()
+            let bar = NSBezierPath()
+            bar.move(to: NSPoint(x: 5 * s, y: 10 * s))
+            bar.line(to: NSPoint(x: 15 * s, y: 10 * s))
+            bar.lineWidth = 2 * s
+            bar.stroke()
+        case .you:
+            symbol("person.crop.circle.fill", size: IconSize.avatar, weight: .regular, color: NSColor(Palette.accent), box: size)
+                .draw(in: NSRect(x: 0, y: 0, width: size, height: size))
         case .working:
             let ring = NSBezierPath(ovalIn: NSRect(x: 2 * s, y: 2 * s, width: 16 * s, height: 16 * s))
             ring.lineWidth = 2 * s
@@ -635,14 +756,18 @@ enum Marks {
 /// A box drawn behind its paragraphs: a rounded card, a code block, a quote's
 /// bar or a rule. A card for what the session was told carries its mark in
 /// the column left of it.
-final class CardBlock: NSTextBlock {
+class CardBlock: NSTextBlock {
     private let fill: NSColor?
     private let stroke: NSColor?
     private let mark: NSImage?
     private let bar: NSColor?
     private let rule: NSColor?
 
-    init(fill: NSColor?, stroke: NSColor?, padding: CGFloat, x: CGFloat, mark: NSImage? = nil, bar: NSColor? = nil, rule: NSColor? = nil) {
+    private let radius: CGFloat
+
+    init(fill: NSColor?, stroke: NSColor?, padding: CGFloat, x: CGFloat, across: CGFloat? = nil, radius: CGFloat = Radius.card,
+         mark: NSImage? = nil, bar: NSColor? = nil, rule: NSColor? = nil) {
+        self.radius = radius
         self.fill = fill
         self.stroke = stroke
         self.mark = mark
@@ -651,6 +776,10 @@ final class CardBlock: NSTextBlock {
         super.init()
         setWidth(x, type: .absoluteValueType, for: .margin, edge: .minX)
         setWidth(padding, type: .absoluteValueType, for: .padding)
+        if let across {
+            setWidth(across, type: .absoluteValueType, for: .padding, edge: .minX)
+            setWidth(across, type: .absoluteValueType, for: .padding, edge: .maxX)
+        }
         setContentWidth(100, type: .percentageValueType)
         if bar != nil { setWidth(Space.s3 + 3, type: .absoluteValueType, for: .padding, edge: .minX) }
         if rule != nil {
@@ -675,7 +804,7 @@ final class CardBlock: NSTextBlock {
             NSBezierPath(roundedRect: NSRect(x: box.minX, y: box.minY, width: 3, height: box.height), xRadius: 1.5, yRadius: 1.5).fill()
             return
         }
-        let shape = NSBezierPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), xRadius: Radius.card, yRadius: Radius.card)
+        let shape = NSBezierPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), xRadius: radius, yRadius: radius)
         if let fill {
             fill.setFill()
             shape.fill()
@@ -688,6 +817,105 @@ final class CardBlock: NSTextBlock {
         if let mark {
             let at = NSRect(x: box.minX - Space.turnIndent, y: box.minY + Space.s3, width: mark.size.width, height: mark.size.height)
             mark.draw(in: at, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        }
+    }
+}
+
+/// What the person said: a card on the right, only as wide as its words.
+final class BubbleBlock: CardBlock {
+    override func rectForLayout(at startingPoint: NSPoint, in rect: NSRect, textContainer: NSTextContainer, characterRange: NSRange) -> NSRect {
+        let r = super.rectForLayout(at: startingPoint, in: rect, textContainer: textContainer, characterRange: characterRange)
+        guard let storage = textContainer.layoutManager?.textStorage,
+              let range = storage.string.utf16.count >= NSMaxRange(characterRange) ? Optional(characterRange) : nil else { return r }
+        let words = NSMutableAttributedString(attributedString: storage.attributedSubstring(from: range))
+        words.removeAttribute(.paragraphStyle, range: NSRange(location: 0, length: words.length))
+        let natural = ceil(words.boundingRect(with: NSSize(width: 100_000, height: 100_000), options: [.usesLineFragmentOrigin]).width) + 1
+        let width = min(r.width, natural)
+        return NSRect(x: r.maxX - width, y: r.minY, width: width, height: r.height)
+    }
+}
+
+/// Something that happened: hairlines either side of its centred words, or
+/// a day's name with a hairline after it.
+final class LineBlock: NSTextBlock {
+    private let color: NSColor
+    private let both: Bool
+
+    init(color: NSColor, x: CGFloat, both: Bool) {
+        self.color = color
+        self.both = both
+        super.init()
+        setWidth(x, type: .absoluteValueType, for: .margin, edge: .minX)
+        setWidth(Space.s1, type: .absoluteValueType, for: .padding, edge: .minY)
+        setWidth(Space.s1, type: .absoluteValueType, for: .padding, edge: .maxY)
+        setContentWidth(100, type: .percentageValueType)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func drawBackground(withFrame frameRect: NSRect, in controlView: NSView, characterRange: NSRange, layoutManager: NSLayoutManager) {
+        guard let container = layoutManager.textContainers.first, characterRange.length > 0 else { return }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: NSRange(location: characterRange.location, length: characterRange.length - 1), actualCharacterRange: nil)
+        let words = layoutManager.boundingRect(forGlyphRange: glyphs, in: container)
+        let left = frameRect.minX + width(for: .margin, edge: .minX)
+        let right = frameRect.maxX - width(for: .margin, edge: .maxX)
+        let y = words.midY.rounded()
+        color.setFill()
+        if both { NSRect(x: left, y: y, width: max(0, words.minX - 10 - left), height: 1).fill() }
+        NSRect(x: words.maxX + (both ? 10 : Space.s3), y: y, width: max(0, right - words.maxX - (both ? 10 : Space.s3)), height: 1).fill()
+    }
+}
+
+/// How a pill is drawn: its tint, its edge and its words' colour.
+final class PillLook: NSObject {
+    let fill: NSColor
+    let stroke: NSColor?
+    let text: NSColor
+
+    init(_ pill: Pill) {
+        switch pill {
+        case .tone(let tone):
+            fill = NSColor(BadgeTone(tone).fill)
+            stroke = nil
+            text = NSColor(BadgeTone(tone).text)
+        case .failure:
+            fill = NSColor(Palette.failure.opacity(0.14))
+            stroke = nil
+            text = NSColor(Palette.failure)
+        case .tag:
+            fill = NSColor(Palette.tagFill)
+            stroke = NSColor(Palette.hairline)
+            text = NSColor(Palette.stepText)
+        }
+    }
+}
+
+/// Lays out a transcript and draws its pills behind their words.
+final class PillLayoutManager: NSLayoutManager {
+    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+        guard let storage = textStorage, let container = textContainers.first else { return }
+        let chars = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        let selected = (container.textView?.selectedRanges ?? []).map(\.rangeValue)
+        storage.enumerateAttribute(.wdPill, in: chars) { value, range, _ in
+            guard let look = value as? PillLook else { return }
+            if selected.contains(where: { NSIntersectionRange($0, range).length > 0 }) { return }
+            let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont ?? .systemFont(ofSize: 11)
+            enumerateEnclosingRects(forGlyphRange: glyphs, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0), in: container) { rect, _ in
+                let line = self.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+                let baseline = line.minY + self.location(forGlyphAt: glyphs.location).y
+                let height = ceil(font.ascender - font.descender) + 4
+                let box = NSRect(x: rect.minX - 6 + origin.x, y: baseline - font.ascender - 2 + origin.y, width: rect.width + 12, height: height)
+                let shape = NSBezierPath(roundedRect: box, xRadius: Radius.badge, yRadius: Radius.badge)
+                look.fill.setFill()
+                shape.fill()
+                if let stroke = look.stroke {
+                    stroke.setStroke()
+                    shape.lineWidth = 1
+                    NSBezierPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), xRadius: Radius.badge, yRadius: Radius.badge).stroke()
+                }
+            }
         }
     }
 }

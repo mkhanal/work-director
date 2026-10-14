@@ -43,64 +43,13 @@ struct FilterChips: View {
 }
 
 /// Where one day's turns begin.
-struct DayLine: View {
-    let day: String
-
-    var body: some View {
-        HStack(spacing: Space.s3) {
-            Text(day).font(TypeScale.meta.weight(.semibold)).foregroundStyle(.secondary)
-            Rectangle().fill(Palette.separator).frame(height: 1)
-        }
-        .padding(.top, Space.s2)
-    }
-
-    /// The day an item falls on, when it is not the day of the one before.
-    static func day(of item: ThreadItem, after previous: ThreadItem?) -> String? {
-        guard let date = date(of: item) else { return nil }
-        if let previous, let before = self.date(of: previous), Calendar.current.isDate(date, inSameDayAs: before) { return nil }
+enum DayLine {
+    /// The day an ISO time falls on, as a reader names it.
+    static func day(_ at: String) -> String? {
+        guard let date = instant(at) else { return nil }
         if Calendar.current.isDateInToday(date) { return "Today" }
         if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
         return date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
-    }
-
-    private static func date(of item: ThreadItem) -> Date? {
-        let at: String = switch item {
-        case .step(let s): s.event.at
-        case .updates(let run): run[0].event.at
-        }
-        return instant(at)
-    }
-}
-
-/// A run of updates folded into one line, opened to each.
-struct UpdatesRow: View {
-    let run: [ThreadStep]
-    let line: (ThreadStep) -> AnyView
-    @State private var open = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Space.s2) {
-            Button { withAnimation(.easeOut(duration: 0.15)) { open.toggle() } } label: {
-                HStack(spacing: Space.s3) {
-                    Rectangle().fill(Palette.separator).frame(height: 1)
-                    HStack(spacing: Space.s1 + 2) {
-                        Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: IconSize.tiny, weight: .bold))
-                        Text("\(run.count) updates")
-                        Text("· " + when(run[0].event.at))
-                    }
-                    .font(TypeScale.meta)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize()
-                    Rectangle().fill(Palette.separator).frame(height: 1)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Show each update")
-            if open {
-                ForEach(run, id: \.id) { step in line(step) }
-            }
-        }
     }
 }
 
