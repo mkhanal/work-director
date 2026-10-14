@@ -78,6 +78,10 @@ final class TranscriptTextView: NSTextView {
 
     /// Past this many characters a change is set and laid out off the main thread.
     static let long = 20_000
+    /// How much of the end of a long transcript shows while the rest is set.
+    static let glance = 6_000
+    /// Up to this many characters a text is measured at any width asked.
+    static let short = 10_000
 
     /// Laid-out conversations by key, the most recent last.
     @MainActor static var kept: [String: TranscriptTextView] = [:]
@@ -93,7 +97,9 @@ final class TranscriptTextView: NSTextView {
     init() {
         let (storage, container) = Self.stack(NSAttributedString(), width: 600)
         owner = storage
-        super.init(frame: NSRect(x: 0, y: 0, width: 600, height: 10), textContainer: container)
+        // No width until the page gives one: the first it asks about is the
+        // width the text is laid out for.
+        super.init(frame: .zero, textContainer: container)
         isEditable = false
         isSelectable = true
         isRichText = true
@@ -143,18 +149,26 @@ final class TranscriptTextView: NSTextView {
             return
         }
         if let setting, setting.transcript == next { return }
-        guard let storage = textStorage, let from = Transcript.firstChange(from: shown, to: next) else {
+        guard let from = Transcript.firstChange(from: shown, to: next) else {
             if setting != nil { generation += 1; setting = nil }
             return
         }
         let start = from < shown.items.count ? shown.starts[from] : shown.length
         if next.length - start > Self.long {
-            setLater(next, width: laid?.width ?? frame.width)
+            // Nothing on screen yet: its end shows at once, the rest when set.
+            if shown.items.isEmpty { glance(next) }
+            setLater(next, width: setting?.width ?? laid?.width ?? frame.width)
             return
         }
         generation += 1
         setting = nil
-        let tail = TranscriptSetter.text(next.items[from...])
+        edit(from: start, to: next, items: next.items[from...])
+    }
+
+    /// The text from a character on replaced by items, the selection kept.
+    private func edit(from start: Int, to next: Transcript, items: ArraySlice<TranscriptItem>) {
+        guard let storage = textStorage else { return }
+        let tail = TranscriptSetter.text(items)
         let selection = selectedRanges.map(\.rangeValue)
         storage.beginEditing()
         storage.replaceCharacters(in: NSRange(location: start, length: storage.length - start), with: tail)
@@ -162,6 +176,16 @@ final class TranscriptTextView: NSTextView {
         restore(selection)
         shown = next
         laid = nil
+    }
+
+    /// The end of a long transcript, as much as fills a window or two.
+    private func glance(_ next: Transcript) {
+        var at = next.items.count, length = 0
+        while at > 0, length < Self.glance {
+            at -= 1
+            length += next.items[at].length
+        }
+        edit(from: 0, to: Transcript(items: Array(next.items[at...])), items: next.items[at...])
     }
 
     /// Sets and lays out a transcript off the main thread, then shows it
@@ -204,15 +228,18 @@ final class TranscriptTextView: NSTextView {
         if !kept.isEmpty { setSelectedRanges(kept, affinity: .downstream, stillSelecting: false) }
     }
 
-    /// The text's height at a width. A long text is laid out again only for
-    /// the width it is given, off the main thread; asked about another width
-    /// meanwhile, its height is scaled from the width it has.
+    /// The text's height at a width. Once placed, the text is laid out only
+    /// for the width it is given; asked about another width, as the page does
+    /// when it sizes itself, its height is scaled from the width it has.
     func height(for width: CGFloat) -> CGFloat {
-        if let laid, laid.width == width, setting == nil { return laid.height }
+        if let laid, laid.width == width { return laid.height }
         guard let container = textContainer else { return 0 }
-        let current = container.containerSize.width
-        if setting != nil || (shown.length > Self.long && width != current) { return estimate(width) }
-        container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        if width != container.containerSize.width {
+            // A short text is measured at any width asked; a longer one only
+            // until it has a height to scale.
+            if shown.length > Self.long || (shown.length > Self.short && (frame.width > 0 || lastHeight != nil)) { return estimate(width) }
+            container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        }
         let height = Self.measure(container)
         // Measuring another width leaves the text laid out for its own.
         if frame.width > 0, frame.width != width {
@@ -225,17 +252,17 @@ final class TranscriptTextView: NSTextView {
 
     override func setFrameSize(_ size: NSSize) {
         super.setFrameSize(size)
-        guard size.width > 0, let container = textContainer, size.width != (setting?.width ?? container.containerSize.width) else { return }
-        // While the window is dragged, a long text keeps its width; it is
-        // laid out for the new one when the drag ends.
-        if inLiveResize, setting == nil, shown.length > Self.long { return }
-        if let setting {
-            setLater(setting.transcript, width: size.width)
-        } else if shown.length > Self.long {
-            setLater(shown, width: size.width)
+        guard size.width > 0, let container = textContainer else { return }
+        if let setting, setting.width != size.width { setLater(setting.transcript, width: size.width) }
+        guard size.width != container.containerSize.width else { return }
+        if shown.length > Self.long {
+            // While the window is dragged, a long text keeps its width; it
+            // is laid out for the new one when the drag ends.
+            if setting == nil, !inLiveResize { setLater(shown, width: size.width) }
         } else {
             container.containerSize = NSSize(width: size.width, height: .greatestFiniteMagnitude)
             laid = nil
+            DispatchQueue.main.async { [weak self] in self?.landed() }
         }
     }
 
