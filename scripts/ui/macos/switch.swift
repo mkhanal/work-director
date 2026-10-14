@@ -3,7 +3,10 @@
 // accessibility API, then reads the window until an element's text holds the
 // awaited words. Each read waits for the app's main thread, so the time is
 // how long until the app shows the words and answers again; the longest
-// single read is the longest the app stopped answering.
+// single read is the longest the app stopped answering. The app may answer a
+// read from a run loop nested inside a long stretch of work, so this can read
+// short; run the app with WD_SWITCH_LOG=1 for the longest pass of its main run
+// loop after each switch, which it measures itself.
 //   swift switch.swift <pid> <role> [last:]<text> <awaited words> [timeout s]
 import ApplicationServices
 import Foundation

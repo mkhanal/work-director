@@ -99,8 +99,13 @@ final class TranscriptTextView: NSTextView {
     private var dragging = false
     /// The width the text is laid out for, and its height there.
     private var laid: (width: CGFloat, height: CGFloat)? {
-        didSet { if let laid { lastHeight = laid.height } }
+        didSet {
+            if let laid { lastHeight = laid.height } else { measured = [:] }
+        }
     }
+    /// Heights the text was measured at for widths other than its own,
+    /// until it changes.
+    private var measured: [CGFloat: CGFloat] = [:]
     private var lastHeight: CGFloat?
     private var appearanceName: NSAppearance.Name?
     /// The text this view shows; it owns the layout manager and container.
@@ -291,22 +296,24 @@ final class TranscriptTextView: NSTextView {
 
     /// The text's height at a width. Once placed, the text is laid out only
     /// for the width it is given; asked about another width, as the page does
-    /// when it sizes itself, its height is scaled from the width it has.
+    /// when it sizes itself, a short text is measured on a copy, once a width
+    /// until it changes, and a long one's height is scaled from the width it has.
     func height(for width: CGFloat) -> CGFloat {
         if let laid, laid.width == width { return laid.height }
-        guard let container = textContainer else { return 0 }
+        if let known = measured[width] { return known }
+        guard let container = textContainer, let storage = textStorage else { return 0 }
+        if frame.width > 0, frame.width != width {
+            if shown.length > Self.short { return estimate(width) }
+            let (copy, scratch) = Self.stack(NSAttributedString(attributedString: storage), width: width)
+            let height = withExtendedLifetime(copy) { Self.measure(scratch) }
+            measured[width] = height
+            return height
+        }
         if width != container.containerSize.width {
-            // A short text is measured at any width asked; a longer one only
-            // until it has a height to scale.
-            if shown.length > Self.long || (shown.length > Self.short && (frame.width > 0 || lastHeight != nil)) { return estimate(width) }
+            if shown.length > Self.long || (shown.length > Self.short && lastHeight != nil) { return estimate(width) }
             container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         }
         let height = Self.measure(container)
-        // Measuring another width leaves the text laid out for its own.
-        if frame.width > 0, frame.width != width {
-            container.containerSize = NSSize(width: frame.width, height: .greatestFiniteMagnitude)
-            return height
-        }
         laid = (width, height)
         return height
     }
@@ -323,12 +330,8 @@ final class TranscriptTextView: NSTextView {
         } else {
             container.containerSize = NSSize(width: size.width, height: .greatestFiniteMagnitude)
             laid = nil
-            // A control as wide as the line is set again for the new width.
-            if shown.items.contains(where: { $0.paras.contains(where: \.isWholeSlot) }) {
-                let all = shown
-                shown = Transcript(items: [])
-                show(all)
-            }
+            // A control as wide as the line is measured again for the new
+            // width when it is next placed.
             placing = true
             DispatchQueue.main.async { [weak self] in self?.landed() }
         }
@@ -484,21 +487,14 @@ final class TranscriptTextView: NSTextView {
         guard let layout = layoutManager, let container = textContainer, let storage = textStorage else { return }
         // A control alone on its line takes the height it needs at the width
         // the text now has; one that needs another sets the text again.
-        let changed = shown.items.lazy.flatMap(\.paras).filter(\.isWholeSlot).contains { para in
+        var changed = false
+        for para in shown.items.lazy.flatMap(\.paras) where para.isWholeSlot {
             guard case .block(let id) = para.runs[0].mark, let known = room[id], known.width != lineWidth(para),
-                  let size = measure(id, whole: para) else { return false }
+                  let size = measure(id, whole: para) else { continue }
             room[id] = size
-            return true
+            changed = resize(id) || changed
         }
-        if changed {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                let all = self.shown
-                self.shown = Transcript(items: [])
-                self.show(all)
-                self.landed()
-            }
-        }
+        if changed { DispatchQueue.main.async { [weak self] in self?.landed() } }
         layout.ensureLayout(for: container)
         let origin = textContainerOrigin
         var seen: Set<String> = []
@@ -539,10 +535,29 @@ final class TranscriptTextView: NSTextView {
         let whole = shown.items.lazy.flatMap(\.paras).first { p in p.isWholeSlot && p.runs[0].mark == .block(id) }
         guard let size = measure(id, whole: whole), abs(size.height - known.height) > 0.5 || abs(size.width - known.width) > 0.5 else { return }
         room[id] = size
-        let all = shown
-        shown = Transcript(items: [])
-        show(all)
-        landed()
+        if resize(id) { landed() }
+    }
+
+    /// Gives a control's room in the text its new size, laying out again only
+    /// the line it is on.
+    private func resize(_ id: String) -> Bool {
+        guard let storage = textStorage, let size = room[id] else { return false }
+        var found = false
+        storage.enumerateAttribute(.wdSlot, in: NSRange(location: 0, length: storage.length)) { value, range, stop in
+            guard value as? String == id, let attachment = storage.attribute(.attachment, at: range.location, effectiveRange: nil) as? NSTextAttachment,
+                  let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont else { return }
+            attachment.image = NSImage(size: size)
+            attachment.bounds = CGRect(x: 0, y: (font.capHeight - size.height) / 2, width: size.width, height: size.height)
+            storage.beginEditing()
+            storage.edited(.editedAttributes, range: range, changeInLength: 0)
+            storage.endEditing()
+            found = true
+            stop.pointee = true
+        }
+        guard found else { return false }
+        laid = nil
+        placing = true
+        return true
     }
 
     override func viewWillDraw() {

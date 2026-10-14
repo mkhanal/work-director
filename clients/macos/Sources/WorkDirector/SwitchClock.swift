@@ -4,7 +4,7 @@ import os
 /// Times a switch from choosing work to seeing it: set WD_SWITCH_LOG=1 and
 /// each switch logs, on standard error and as signposts under "switch", how
 /// long until the page showed something and until it showed the fresh read,
-/// and how long the main thread was held at once in the 1.5 s after it.
+/// and the longest pass of the main run loop in the 1.5 s after it.
 @MainActor
 enum SwitchClock {
     static let on = ProcessInfo.processInfo.environment["WD_SWITCH_LOG"] == "1"
@@ -46,27 +46,35 @@ enum SwitchClock {
         }
     }
 
-    /// Counts each stretch the main run loop works between waits. Unlike a
-    /// probe from outside, which the app may answer from a nested run loop
-    /// mid-stretch, this sees every stretch whole.
+    /// Counts each pass the main run loop makes: a press or keystroke that
+    /// comes in waits at most one pass, so the longest is the worst a person
+    /// would feel. Unlike a probe from outside, which the app may answer from
+    /// a nested run loop mid-pass, this sees every pass whole, including the
+    /// layout and drawing done just before it waits.
     private static func watchMainThread() {
         guard observer == nil else { return }
-        let made = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.afterWaiting.rawValue | CFRunLoopActivity.beforeWaiting.rawValue,
-                                                      true, 0) { _, activity in
+        func close() {
+            guard let since = busySince else { return }
+            busySince = nil
+            guard var c = counting else { return }
+            let span = ContinuousClock.now - since
+            c.longest = max(c.longest, span)
+            c.total += span
+            counting = c
+        }
+        let begins = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.afterWaiting.rawValue | CFRunLoopActivity.beforeTimers.rawValue,
+                                                        true, CFIndex.min) { _, _ in
             MainActor.assumeIsolated {
-                if activity == .afterWaiting {
-                    busySince = .now
-                } else if let since = busySince {
-                    busySince = nil
-                    guard var c = counting else { return }
-                    let span = ContinuousClock.now - since
-                    c.longest = max(c.longest, span)
-                    c.total += span
-                    counting = c
-                }
+                close()
+                busySince = .now
             }
         }
-        observer = made
-        CFRunLoopAddObserver(CFRunLoopGetMain(), made, .commonModes)
+        // Last of all before the wait, after the window's layout and drawing.
+        let ends = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max) { _, _ in
+            MainActor.assumeIsolated { close() }
+        }
+        observer = begins
+        CFRunLoopAddObserver(CFRunLoopGetMain(), begins, .commonModes)
+        CFRunLoopAddObserver(CFRunLoopGetMain(), ends, .commonModes)
     }
 }
