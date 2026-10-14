@@ -1841,5 +1841,17 @@ struct SeededTree {
         let look = thread.items.firstIndex { $0.id == "e5" }!
         #expect(thread.copied(begins[1]..<(begins[look] + 16)).hasSuffix("Director answered · forward only\nDirector looking"),
                 "one drag spans the person's message, the director's turn, a card and a line")
+
+        // So does a goal's record.
+        let rows = [RecordEntry(event: 2, at: "2026-10-12T01:02:00Z", kind: "decision", what: "English only", where: "Release notes (top)", by: "you"),
+                    RecordEntry(event: 1, at: "2026-10-12T01:01:00Z", kind: "chore", what: "refreshed dependencies", where: "Guide", by: "director")]
+        let record = GoalRecord.transcript(rows, time: { _ in "01:0x" })
+        let day = GoalRecord.days(rows)[0].day
+        #expect(record.copied(0..<record.length) == """
+        Time\tKind\tWhat\tWhere\tBy
+        \(day)
+        01:0x\tDecision\tEnglish only\tRelease notes (top)\tyou
+        01:0x\tHousekeeping\trefreshed dependencies\tGuide\tdirector
+        """, "the record copies as its rows: \(record.copied(0..<record.length))")
     }
 }

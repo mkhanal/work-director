@@ -57,49 +57,11 @@ struct GoalRecordView: View {
         }
     }
 
-    private func table(_ entries: [RecordEntry]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            RecordRow(time: Text("Time"), kind: Text("Kind"), what: Text("What"), place: Text("Where"), by: Text("By"))
-                .font(TypeScale.caption)
-                .foregroundStyle(Palette.text3)
-                .padding(.bottom, 9)
-            Rectangle().fill(Palette.hairline).frame(height: 1)
-            if entries.isEmpty {
-                Text("Nothing here yet.").font(TypeScale.callout).foregroundStyle(Palette.text3).padding(.vertical, Space.s3)
-            }
-            ForEach(GoalRecord.days(entries)) { day in
-                Text(day.day).font(TypeScale.caption.weight(.semibold)).foregroundStyle(Palette.stepText)
-                    .padding(EdgeInsets(top: 14, leading: 0, bottom: 6, trailing: 0))
-                ForEach(Array(day.entries.enumerated()), id: \.offset) { i, e in
-                    RecordRow(time: Text(clock(e.at)).font(TypeScale.caption).foregroundStyle(Palette.text3),
-                              kind: Badge(e.badge),
-                              what: Text(e.text).font(TypeScale.callout).lineSpacing(TypeScale.calloutLeading).foregroundStyle(Palette.text).textSelection(.enabled),
-                              place: Text(e.where).font(TypeScale.caption).foregroundStyle(Palette.text2),
-                              by: Text(e.by).font(TypeScale.caption).foregroundStyle(Palette.text3))
-                        .padding(.vertical, 9)
-                        .copyable(e.text)
-                    if i < day.entries.count - 1 { Rectangle().fill(Palette.rowSeparator).frame(height: 1) }
-                }
-            }
-        }
-    }
-}
-
-/// One row of the record's table: 52 · 96 · what · 220 · 90, 12 apart.
-struct RecordRow<Time: View, Kind: View, What: View, Place: View, By: View>: View {
-    let time: Time
-    let kind: Kind
-    let what: What
-    let place: Place
-    let by: By
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            time.frame(width: 52, alignment: .leading)
-            kind.frame(width: 96, alignment: .leading)
-            what.frame(maxWidth: .infinity, alignment: .leading)
-            place.frame(width: 220, alignment: .leading)
-            by.frame(width: 90, alignment: .trailing)
+    /// The table as one text: a drag or Select All spans its days and rows.
+    @ViewBuilder private func table(_ entries: [RecordEntry]) -> some View {
+        TranscriptText(transcript: GoalRecord.transcript(entries, time: clock), key: "record/\(goal.goal.id)/\(kind)/\(place ?? "")")
+        if entries.isEmpty {
+            Text("Nothing here yet.").font(TypeScale.callout).foregroundStyle(Palette.text3).padding(.vertical, Space.s3)
         }
     }
 }

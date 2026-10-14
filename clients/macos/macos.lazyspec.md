@@ -283,3 +283,4 @@ hold only that product's work; with none, every product's.
 - Copy as Markdown gives each item the selection touches as it was written.
 - Reading the conversation again changes nothing before the first step that changed, so a selection there stays.
 - A goal's conversation is one selection too: the person's messages, the plan with each sub-goal's badge, each turn's speaker, sub-goal and time, the lines for what happened, and what was asked, answered, reported, done and refused. Only questions waiting on the person, messages still on their way and work under way sit after it.
+- A goal's record is one selection: its column names, each day, and each row's time, kind, what, where and by whom; copied, a row reads as one line, its cells separated by tabs.
