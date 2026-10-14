@@ -122,6 +122,7 @@ hold only that product's work; with none, every product's.
 - A supervisor's reply shows what it said without its action lines, then what was done, each with the task it told, started or filed, and then what was refused.
 - A look shows as the supervisor looking, with why.
 - A task that stopped without a report shows as such, with what it last said.
+- A task's reply to the person shows as its reply, with what it said.
 - A question reads with its answer, and the answer says whether the director gave it or the person did; the answer's message to the session is not shown again.
 - The question a goal waits on the person for is answered in place, one answer per question, its choices offered as a session's are.
 - A question still open shows once, as the card that answers it, titled with who asks; once answered it reads as a turn with its answer.
@@ -152,10 +153,11 @@ hold only that product's work; with none, every product's.
 - The button says what it does: Check it, Deliver it, Confirm it's finished or Mark it done, or the words `wd` serves for the gate.
 
 ## A Notification Says What Happened And Where
-- Its title says what happened: Question for you, Approve the plan, Change of course proposed, Choose where it finishes, Plan change to approve, Blocked, Stopped without finishing, Finished or Ready for review.
-- Its body names the goal, then what about it: a question's first line and how many more came with it, how many sub-goals a plan has, the course's proposed title, what under it is blocked and why when `wd` says, what under it stopped without finishing and the first line it last said, or where it finished.
+- Its title says what happened: Question for you, Approve the plan, Change of course proposed, Choose where it finishes, Plan change to approve, Blocked, Stopped without finishing, Replied, Finished or Ready for review.
+- Its body names the goal, then what about it: a question's first line and how many more came with it, how many sub-goals a plan has, the course's proposed title, what under it is blocked and why when `wd` says, what under it stopped without finishing and the first line it last said, what under it replied to the person and the first line of its reply, or where it finished.
 - Stopped without finishing is told once each time work's agent stops without reporting.
 - Work waiting on the person since its agent stopped is told as Stopped without finishing, not again as a question.
+- Replied is told once for each reply an agent gives the person, never as Stopped without finishing; a reply that asks something is not told again as a question.
 - Ready for review is told when work reaches Ready to Push, In Review or Ready to Close.
 - Nothing is told from the first read, twice, or about work the person wrote to from the app in the last few seconds.
 - Clicking it opens its goal; with notifications turned off in Settings, none is shown.

@@ -83,6 +83,9 @@ pub struct Node {
     pub why_not_moving: Option<String>,
     /// Set while running work's session has stopped without a report.
     pub stopped: Option<Stop>,
+    /// Set while its agent's latest word is a reply to the person, until
+    /// it is at rest: what it replied and when.
+    pub replied: Option<Stop>,
     /// Why blocked work is blocked, when anything said.
     pub blocked_because: Option<String>,
     pub owner: Option<Owner>,

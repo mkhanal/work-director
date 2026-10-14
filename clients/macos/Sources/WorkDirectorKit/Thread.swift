@@ -11,6 +11,8 @@ public enum ThreadStep: Sendable, Hashable, Identifiable {
     case supervisor(Event, SupervisorReply)
     /// A task's session stopped without a report, and what it last said.
     case stopped(Event, said: String)
+    /// A task's agent replied to the person, and what it said.
+    case replied(Event, said: String)
     /// A question asked on the goal or a task, with its answer once it has one.
     case exchange(Event, answer: Event?)
     /// The director declined to answer part of a question put to the person, and why.
@@ -18,7 +20,7 @@ public enum ThreadStep: Sendable, Hashable, Identifiable {
 
     public var event: Event {
         switch self {
-        case .event(let e), .look(let e), .supervisor(let e, _), .stopped(let e, _), .exchange(let e, _), .declined(let e, _): e
+        case .event(let e), .look(let e), .supervisor(let e, _), .stopped(let e, _), .replied(let e, _), .exchange(let e, _), .declined(let e, _): e
         }
     }
 
@@ -42,6 +44,7 @@ public struct SupervisorAction: Sendable, Hashable {
 }
 
 private let stoppedPrefix = "stopped without a report: "
+private let repliedPrefix = "replied: "
 private let supervisePrefix = "supervise "
 
 extension GoalDetail {
@@ -87,6 +90,8 @@ extension GoalDetail {
             return .supervisor(e, reply(e.body))
         case "note" where e.body.hasPrefix(stoppedPrefix):
             return .stopped(e, said: String(e.body.dropFirst(stoppedPrefix.count)))
+        case "note" where e.body.hasPrefix(repliedPrefix):
+            return .replied(e, said: String(e.body.dropFirst(repliedPrefix.count)))
         case "note":
             return e.directorDeclined.map { .declined(e, $0) }
         case "attachment" where showsAlone(e):
@@ -283,6 +288,7 @@ extension GoalDetail {
             case .exchange(let q, let a): return q.work == goal.id || a.map { isYours($0) || $0.answeredByDirector } == true
             case .supervisor, .look, .declined: return true
             case .stopped: return false
+            case .replied: return true
             }
         case .subGoal(let id):
             return within(step.event.work, id)

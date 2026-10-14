@@ -622,6 +622,8 @@ struct SeededTree {
             event(10, "a", "sent", "sqlite", "08:00"),
             event(11, "g", "question", "Tag v1.0.0?\n- yes (recommended)\n- no", "09:00"),
             answer(12, "g", "yes", by: "person", "10:00"),
+            event(14, "a", "sent", "hold off until the release ships", "10:30"),
+            event(15, "a", "note", "replied: Understood, holding until the release ships.", "10:45"),
         ].joined(separator: ",")
         let asking = #"{"id":"event-11","items":[{"header":"","question":"Tag v1.0.0?","multi":false,"options":[{"label":"yes (recommended)","description":""},{"label":"no","description":""}]}],"answers":null,"reply":null}"#
         let json = """
@@ -632,7 +634,7 @@ struct SeededTree {
         #expect(goal.supervised)
         #expect(goal.asking?.items.first?.options.map(\.label) == ["yes (recommended)", "no"])
         let steps = goal.thread
-        #expect(steps.map(\.id) == [1, 3, 4, 5, 7, 8, 11], "oldest first; a state change that does not end work, a spawn and an answer's message are left out")
+        #expect(steps.map(\.id) == [1, 3, 4, 5, 7, 8, 11, 14, 15], "oldest first; a state change that does not end work, a spawn and an answer's message are left out")
         guard case .exchange(_, let auto?) = steps[5] else { Issue.record("step 6 is \(steps[5])"); return }
         #expect(auto.id == 9 && auto.answeredByDirector && !goal.isYours(auto))
         guard case .exchange(let asked, let mine?) = steps[6] else { Issue.record("step 7 is \(steps[6])"); return }
@@ -641,6 +643,8 @@ struct SeededTree {
         #expect(goal.yours.map(\.id) == [1, 12])
         guard case .stopped(_, let said) = steps[1] else { Issue.record("step 2 is \(steps[1])"); return }
         #expect(said == "wiring belongs to the collector")
+        guard case .replied(_, let replied) = steps[8] else { Issue.record("step 9 is \(steps[8])"); return }
+        #expect(replied == "Understood, holding until the release ships.")
         guard case .look(let look) = steps[2] else { Issue.record("step 3 is \(steps[2])"); return }
         #expect(look.body == "a task was noted on (1)")
         guard case .supervisor(_, let reply) = steps[3] else { Issue.record("step 4 is \(steps[3])"); return }
@@ -808,10 +812,10 @@ struct SeededTree {
              "progress": ["done": 0, "total": total, "superseded": 0], "needs_you": needsYou, "finish": NSNull(),
              "finished": finished ?? NSNull(), "proposed": proposed]
         }
-        func node(_ w: [String: Any], _ children: [[String: Any]] = [], stopped: [String: Any]? = nil, because: String? = nil) -> [String: Any] {
+        func node(_ w: [String: Any], _ children: [[String: Any]] = [], stopped: [String: Any]? = nil, replied: [String: Any]? = nil, because: String? = nil) -> [String: Any] {
             ["work": w, "group": false, "done_when": NSNull(), "after": [String](), "waiting_on": [String](), "why_not_moving": NSNull(),
              "owner": NSNull(), "planned_into": NSNull(), "progress": NSNull(), "doing": NSNull(), "steps": [Any](), "judged": NSNull(),
-             "needs_you": 0, "stopped": stopped ?? NSNull(), "blocked_because": because ?? NSNull(), "children": children]
+             "needs_you": 0, "stopped": stopped ?? NSNull(), "replied": replied ?? NSNull(), "blocked_because": because ?? NSNull(), "children": children]
         }
         func ask(_ id: String, on work: String, _ text: String, change: [String: Any]? = nil) -> [String: Any] {
             ["work": work, "path": work, "change": change ?? NSNull(),
@@ -883,6 +887,17 @@ struct SeededTree {
                                  ["g": detail(export, tree: [node(work("x", "Write the README", "needs-input", kind: "task"), stopped: ["said": "Shall I add examples?", "at": "t3"])],
                                               asks: [ask("event-9", on: "x", "Shall I add examples?")])])
         #expect(Notice.between(try readme(nil), waits).map(\.title) == ["Stopped without finishing"], "a stop waiting on the person is not told again as a question")
+        func answered(_ replied: [String: Any]?, _ state: String = "paused", asks: [[String: Any]] = []) throws -> Sighting {
+            try sighting([row(export, "in-flight")], [],
+                         ["g": detail(export, tree: [node(work("x", "Write the README", state, kind: "task"), replied: replied)], asks: asks)])
+        }
+        let reply = try answered(["said": "Understood, holding until the release ships.\nMore detail", "at": "t4"])
+        #expect(Notice.between(try answered(nil), reply).map { [$0.title, $0.body] } == [["Replied", "Ship the export — Write the README\nUnderstood, holding until the release ships."]],
+                "a reply to the person is told as a reply")
+        #expect(Notice.between(reply, reply).isEmpty, "a reply is told once")
+        let asking = try answered(["said": "Shall I drop the other branch too?", "at": "t5"], "needs-input",
+                                  asks: [ask("event-12", on: "x", "Shall I drop the other branch too?")])
+        #expect(Notice.between(try answered(nil), asking).map(\.title) == ["Replied"], "a reply that asks is not told again as a question")
         #expect(Notice.between(before, after, told: Set(told.flatMap(\.keys))).isEmpty, "nothing is told twice")
         #expect(!Notice.between(before, after, quiet: ["g", "q3"]).contains { $0.work == "g" || $0.body.contains("Sync never") },
                 "what the person just did is not told back to them")

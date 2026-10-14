@@ -42,11 +42,14 @@ extension GoalDetail {
 /// goal, in plain words.
 public struct Notice: Sendable, Hashable {
     public enum Kind: String, Sendable {
-        case question, plan, course, finish, planChange, blocked, stopped, finished, review
+        case question, plan, course, finish, planChange, blocked, stopped, replied, finished, review
     }
 
     /// One stop of one work, told once.
     static func stoppedKey(_ work: String, _ stopped: Stopped) -> String { "stopped:\(work):\(stopped.at)" }
+
+    /// One reply of one work's agent to the person, told once.
+    static func repliedKey(_ work: String, _ replied: Stopped) -> String { "replied:\(work):\(replied.at)" }
 
     public let kind: Kind
     public let title: String
@@ -86,8 +89,8 @@ public struct Notice: Sendable, Hashable {
 
             if let detail, let known = earlier.knownQuestions(w.id) {
                 let fresh = detail.needsYou.filter { !known.contains($0.question.id) && $0.question.pending }
-                // A stop waiting on the person is told as a stop, not again as a question.
-                let stopped = Set(detail.nodes.filter { $0.stopped != nil }.map(\.work.id))
+                // A stop or a reply waiting on the person is told as such, not again as a question.
+                let stopped = Set(detail.nodes.filter { $0.stopped != nil || $0.replied != nil }.map(\.work.id))
                 let asked = fresh.filter { $0.change == nil && !stopped.contains($0.work) }
                 let items = asked.flatMap(\.question.items)
                 if let first = items.first {
@@ -126,6 +129,14 @@ public struct Notice: Sendable, Hashable {
                     let lines = ["\(w.title) — \(node.work.title)"] + (stopped.firstLine.isEmpty ? [] : [stopped.firstLine])
                     said.append(Notice(kind: .stopped, title: "Stopped without finishing", body: lines.joined(separator: "\n"), work: w.id,
                                        keys: [Self.stoppedKey(node.work.id, stopped)], about: [w.id, node.work.id]))
+                }
+            }
+            if let detail, let known = earlier.knownReplied(w.id) {
+                for node in detail.nodes {
+                    guard let replied = node.replied, !known.contains(Self.repliedKey(node.work.id, replied)) else { continue }
+                    let lines = ["\(w.title) — \(node.work.title)"] + (replied.firstLine.isEmpty ? [] : [replied.firstLine])
+                    said.append(Notice(kind: .replied, title: "Replied", body: lines.joined(separator: "\n"), work: w.id,
+                                       keys: [Self.repliedKey(node.work.id, replied)], about: [w.id, node.work.id]))
                 }
             }
 
@@ -202,6 +213,14 @@ extension Sighting {
     /// under it may have stopped where this sighting did not read.
     func knownStopped(_ id: String) -> Set<String>? {
         if let d = goals[id] { return Set(d.nodes.compactMap { n in n.stopped.map { Notice.stoppedKey(n.work.id, $0) } }) }
+        if let g = board.goals.first(where: { $0.work.id == id }), !g.work.atRest { return nil }
+        return []
+    }
+
+    /// The replies already seen under a goal at this sighting; nil when work
+    /// under it may have replied where this sighting did not read.
+    func knownReplied(_ id: String) -> Set<String>? {
+        if let d = goals[id] { return Set(d.nodes.compactMap { n in n.replied.map { Notice.repliedKey(n.work.id, $0) } }) }
         if let g = board.goals.first(where: { $0.work.id == id }), !g.work.atRest { return nil }
         return []
     }

@@ -52,6 +52,8 @@ pub enum ThreadStep {
     Supervisor(Event, SupervisorReply),
     /// A task's session stopped without a report, and what it last said.
     Stopped(Event, String),
+    /// A task's agent replied to the person, and what it said.
+    Replied(Event, String),
     /// A question asked on the goal or a task, with its answer once it has one.
     Exchange(Event, Option<Event>),
     /// The director declined to answer part of a question put to the person, and why.
@@ -65,6 +67,7 @@ impl ThreadStep {
             | ThreadStep::Look(e)
             | ThreadStep::Supervisor(e, _)
             | ThreadStep::Stopped(e, _)
+            | ThreadStep::Replied(e, _)
             | ThreadStep::Exchange(e, _)
             | ThreadStep::Declined(e, _) => e,
         }
@@ -101,6 +104,7 @@ pub struct AskedItem {
 }
 
 const STOPPED_PREFIX: &str = "stopped without a report: ";
+const REPLIED_PREFIX: &str = "replied: ";
 const DECIDED_PREFIX: &str = "the director decided ";
 const DECLINED_PREFIX: &str = "the director declined ";
 const SUPERVISE_PREFIX: &str = "supervise ";
@@ -162,9 +166,13 @@ impl GoalDetail {
             "supervised" => Some(ThreadStep::Supervisor(e.clone(), self.reply(&e.body))),
             "note" => match e.director_declined() {
                 Some(declined) => Some(ThreadStep::Declined(e.clone(), declined)),
-                None => {
-                    e.body.strip_prefix(STOPPED_PREFIX).map(|said| ThreadStep::Stopped(e.clone(), said.to_string()))
-                }
+                None => e
+                    .body
+                    .strip_prefix(STOPPED_PREFIX)
+                    .map(|said| ThreadStep::Stopped(e.clone(), said.to_string()))
+                    .or_else(|| {
+                        e.body.strip_prefix(REPLIED_PREFIX).map(|said| ThreadStep::Replied(e.clone(), said.to_string()))
+                    }),
             },
             _ => None,
         }

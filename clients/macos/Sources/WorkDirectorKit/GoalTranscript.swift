@@ -229,8 +229,9 @@ private struct GoalTranscriptBuilder {
             return TranscriptItem(id: id, paras: paras, source: choice.question + "\n" + choice.why)
         case .supervisor(let e, let reply):
             return supervisor(id, e, reply)
-        case .stopped(let e, let said):
-            var paras = [header(work: e.work, at: e.at, detail: "stopped without a report", link: opener(e.work))]
+        case .stopped(let e, let said), .replied(let e, let said):
+            let detail = if case .replied = step { "replied" } else { "stopped without a report" }
+            var paras = [header(work: e.work, at: e.at, detail: detail, link: opener(e.work))]
             let all = said.components(separatedBy: "\n")
             let folds = said.count > 400 || all.count > 4
             var shown = folds && !open(id) ? Array(all.prefix(4)) : all

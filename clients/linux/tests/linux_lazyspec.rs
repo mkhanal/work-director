@@ -892,6 +892,8 @@ fn a_goal_reads_as_one_conversation_with_its_supervisor_and_its_agents() {
             event(10, "a", "sent", "sqlite", "08:00"),
             event(11, "g", "question", "Tag v1.0.0?\n- yes (recommended)\n- no", "09:00"),
             answer(12, "g", "yes", "person", "10:00"),
+            event(14, "a", "sent", "hold off until the release ships", "10:30"),
+            event(15, "a", "note", "replied: Understood, holding until the release ships.", "10:45"),
         ],
         "claims": [], "landings": [], "delivery": null, "activity": {}, "reports": {},
         "asking": {"id": "event-11", "items": [{"header": "", "question": "Tag v1.0.0?", "multi": false,
@@ -906,7 +908,7 @@ fn a_goal_reads_as_one_conversation_with_its_supervisor_and_its_agents() {
     let steps = goal.thread();
     assert_eq!(
         steps.iter().map(|s| s.id()).collect::<Vec<_>>(),
-        vec![1, 3, 4, 5, 7, 8, 11],
+        vec![1, 3, 4, 5, 7, 8, 11, 14, 15],
         "oldest first; a state change that does not end work, a spawn and an answer's message are left out"
     );
     let ThreadStep::Exchange(_, Some(auto)) = &steps[5] else { panic!("step 6 is {:?}", steps[5]) };
@@ -920,6 +922,8 @@ fn a_goal_reads_as_one_conversation_with_its_supervisor_and_its_agents() {
     assert_eq!(goal.yours().iter().map(|e| e.id).collect::<Vec<_>>(), vec![1, 12]);
     let ThreadStep::Stopped(_, said) = &steps[1] else { panic!("step 2 is {:?}", steps[1]) };
     assert_eq!(said, "wiring belongs to the collector");
+    let ThreadStep::Replied(_, replied) = &steps[8] else { panic!("step 9 is {:?}", steps[8]) };
+    assert_eq!(replied, "Understood, holding until the release ships.");
     let ThreadStep::Look(look) = &steps[2] else { panic!("step 3 is {:?}", steps[2]) };
     assert_eq!(look.body, "a task was noted on (1)");
     let ThreadStep::Supervisor(_, reply) = &steps[3] else { panic!("step 4 is {:?}", steps[3]) };
@@ -1941,6 +1945,37 @@ fn a_notification_says_what_happened_and_where() {
         Notice::between(Some(&was), &waits, &none, &none).iter().map(|n| n.title.as_str()).collect::<Vec<_>>(),
         vec!["Stopped without finishing"],
         "a stop waiting on the person is not told again as a question"
+    );
+    let answered = |replied: Value, state: &str, asks: Vec<Value>| {
+        let mut x = node(work("x", "Write the README", state, "task", "u3"), vec![]);
+        x["replied"] = replied;
+        sighting(
+            vec![row(goal("g", "Ship the export", "running"), "in-flight", 0, 0, None, false)],
+            vec![],
+            vec![("g", detail(goal("g", "Ship the export", "running"), vec![x], asks))],
+        )
+    };
+    let reply = answered(
+        json!({"said": "Understood, holding until the release ships.\nMore detail", "at": "2026-10-13T12:00:00Z"}),
+        "paused",
+        vec![],
+    );
+    let told_reply = Notice::between(Some(&was), &reply, &none, &none);
+    assert_eq!(
+        told_reply.iter().map(|n| [n.title.as_str(), n.body.as_str()]).collect::<Vec<_>>(),
+        vec![["Replied", "Ship the export — Write the README\nUnderstood, holding until the release ships."]],
+        "a reply to the person is told as a reply"
+    );
+    assert!(Notice::between(Some(&reply), &reply, &none, &none).is_empty(), "a reply is told once");
+    let asking = answered(
+        json!({"said": "Shall I drop the other branch too?", "at": "2026-10-13T12:05:00Z"}),
+        "needs-input",
+        vec![ask("event-12", "x", "Shall I drop the other branch too?", Value::Null)],
+    );
+    assert_eq!(
+        Notice::between(Some(&was), &asking, &none, &none).iter().map(|n| n.title.as_str()).collect::<Vec<_>>(),
+        vec!["Replied"],
+        "a reply that asks is not told again as a question"
     );
     let keys: HashSet<String> = told.iter().flat_map(|n| n.keys.iter().cloned()).collect();
     assert!(Notice::between(Some(&before), &after, &keys, &none).is_empty(), "nothing is told twice");

@@ -72,6 +72,9 @@ public struct TreeNode: Codable, Sendable, Hashable, Identifiable {
     /// Set while its work runs, or waits on the person, since its agent
     /// stopped without reporting.
     public let stopped: Stopped?
+    /// Set while its agent's latest word is a reply to the person, until
+    /// it is at rest: what it replied and when.
+    public let replied: Stopped?
     /// Why blocked work is blocked, when wd knows.
     public let blockedBecause: String?
     public let children: [TreeNode]
@@ -82,7 +85,7 @@ public struct TreeNode: Codable, Sendable, Hashable, Identifiable {
     public var opensAsGoal: Bool { work.kind.isGoal && !group }
 
     enum CodingKeys: String, CodingKey {
-        case work, group, after, owner, progress, doing, steps, judged, children, stopped
+        case work, group, after, owner, progress, doing, steps, judged, children, stopped, replied
         case doneWhen = "done_when"
         case waitingOn = "waiting_on"
         case whyNotMoving = "why_not_moving"

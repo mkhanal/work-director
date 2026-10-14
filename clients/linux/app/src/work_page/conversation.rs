@@ -206,7 +206,14 @@ impl WorkPage {
             ThreadStep::Stopped(e, said) => {
                 let task = self.named(g, &e.work);
                 let weak = self.me.clone();
-                Turn::key(&id, &(&e, &said)).copying(&said).text(move || stopped_turn(&e, &said, task, weak))
+                Turn::key(&id, &(&e, &said))
+                    .copying(&said)
+                    .text(move || stopped_turn(&e, &said, task, weak, "stopped without a report"))
+            }
+            ThreadStep::Replied(e, said) => {
+                let task = self.named(g, &e.work);
+                let weak = self.me.clone();
+                Turn::key(&id, &(&e, &said)).copying(&said).text(move || stopped_turn(&e, &said, task, weak, "replied"))
             }
         })
     }
@@ -829,17 +836,19 @@ pub(super) fn agent_chip(task: &Work, phase: Phase, told: &str, now: Option<&str
     chip
 }
 
-/// A task that stopped without a report, and what it last said.
+/// A task's agent going quiet: stopped without a report, or having replied
+/// to the person, as `what` says.
 pub(super) fn stopped_turn(
     e: &Event,
     said: &str,
     task: Option<(String, String, WorkState)>,
     page: Weak<WorkPage>,
+    what: &str,
 ) -> Rich {
     let avatar = task.as_ref().map(|t| Icon::State(t.2));
     let mut head = Rich::new(transcript::head(avatar, if task.is_some() { "" } else { "A task" }, None, None));
     task_tag(&mut head, &task, &page);
-    transcript::meta_tail(&mut head.doc, Some(e.at.as_str()), Some("stopped without a report"));
+    transcript::meta_tail(&mut head.doc, Some(e.at.as_str()), Some(what));
     let mut body = Doc::new();
     transcript::folded(&mut body, said, 3, Style::BODY.ink(Ink::Text2));
     turn(Some(head), Rich::new(body))

@@ -104,6 +104,7 @@ pub enum NoticeKind {
     PlanChange,
     Blocked,
     Stopped,
+    Replied,
     Finished,
     Review,
 }
@@ -192,9 +193,12 @@ impl Notice {
                     .iter()
                     .filter(|n| !known.contains(&n.question.id) && n.question.pending())
                     .collect();
-                // A stop waiting on the person is told as a stop, not again as a question.
-                let stopped: HashSet<&str> =
-                    nodes(&detail.tree).into_iter().filter(|n| n.stopped.is_some()).map(|n| n.work.id.as_str()).collect();
+                // A stop or a reply waiting on the person is told as such, not again as a question.
+                let stopped: HashSet<&str> = nodes(&detail.tree)
+                    .into_iter()
+                    .filter(|n| n.stopped.is_some() || n.replied.is_some())
+                    .map(|n| n.work.id.as_str())
+                    .collect();
                 let asked: Vec<_> =
                     fresh.iter().filter(|n| n.change.is_none() && !stopped.contains(n.work.as_str())).collect();
                 let items: Vec<_> = asked.iter().flat_map(|n| &n.question.items).collect();
@@ -284,6 +288,28 @@ impl Notice {
                         format!("{} — {}\n{}", w.title, n.work.title, stop.first_line()),
                         id,
                         vec![format!("stopped:{}:{}", n.work.id, stop.at)],
+                        &[id, &n.work.id],
+                    ));
+                }
+            }
+
+            // An agent's reply to the person, once per reply.
+            if let (Some(detail), Some(was)) = (detail, earlier.goals.get(id)) {
+                let replies_before: HashSet<(&str, &str)> = nodes(&was.tree)
+                    .into_iter()
+                    .filter_map(|n| n.replied.as_ref().map(|s| (n.work.id.as_str(), s.at.as_str())))
+                    .collect();
+                for n in nodes(&detail.tree) {
+                    let Some(reply) = &n.replied else { continue };
+                    if replies_before.contains(&(n.work.id.as_str(), reply.at.as_str())) {
+                        continue;
+                    }
+                    said.push(notice(
+                        NoticeKind::Replied,
+                        "Replied",
+                        format!("{} — {}\n{}", w.title, n.work.title, reply.first_line()),
+                        id,
+                        vec![format!("replied:{}:{}", n.work.id, reply.at)],
                         &[id, &n.work.id],
                     ));
                 }
