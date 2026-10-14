@@ -169,6 +169,11 @@ JSON message per line to stdout:
 - It is noted once at that point of the conversation; running work whose latest exchange is that note already moves to needs-input without a second note.
 - Its goal lists it in `needs_you`, asking what it last said, offered Yes and No when that ends on a yes-or-no question.
 
+## A Message To A Task Reaches It Whatever State Its Goal Is In
+- While serving, a message queued for a work item whose session was working is delivered once its session is not, whatever state the item or its goal is in, paused work aside.
+- Work in review, needs-input or blocked that is delivered a message goes back to running, so its reply is read as any running session's is.
+- A goal's supervisor is never sent one this way: what the person says to a goal waits for a look.
+
 ## A Running Goal Is Supervised While Serving
 - While serving, each running top goal (a goal with no goal above it) is supervised every few seconds, as `wd goal supervise` does.
 - A sub-goal is not supervised on its own: its top goal's supervisor looks after it.

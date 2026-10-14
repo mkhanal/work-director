@@ -65,6 +65,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("A Running Session's Report Moves Its Work On", aRunningSessionsReportMovesItsWorkOn)
 	t.Run("Work Reads As Working Only While An Agent Is Working", workReadsAsWorkingOnlyWhileAnAgentIsWorking)
+	t.Run("A Message To A Task Reaches It Whatever State Its Goal Is In", aMessageToATaskReachesItWhateverStateItsGoalIsIn)
 	t.Run("A Running Goal Is Supervised While Serving", aRunningGoalIsSupervisedWhileServing)
 	t.Run("Work Items Serve Over HTTP", workItemsServeOverHTTP)
 	t.Run("A Work Item Serves The Next Gate It Waits On", aWorkItemServesTheNextGateItWaitsOn)
@@ -1938,6 +1939,60 @@ func workReadsAsWorkingOnlyWhileAnAgentIsWorking(t *testing.T) {
 	}
 	if q := asked[noted.ID]; q.Question != "Ready to land. Waiting for your go." || len(q.Options) != 0 {
 		t.Fatalf("noted asks %+v, want what it last said with no choices", q)
+	}
+}
+
+func aMessageToATaskReachesItWhateverStateItsGoalIsIn(t *testing.T) {
+	s := newTestServer(t)
+	r := &sessionRunner{steps: map[string][]runner.Entry{"tagger": {{Kind: runner.EntryText, Text: "Tagged v2."}}}}
+	withSessions(s, r)
+	goal, err := s.ledger.Add("p", "Release v2", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tagger := inSession(t, s, "Tag the release", "tagger", &goal.ID)
+	paused := inSession(t, s, "Write the changelog", "changelog", &goal.ID)
+	for id, st := range map[string]core.State{goal.ID: core.StateRunning, tagger.ID: core.StateReview, paused.ID: core.StatePaused} {
+		if _, err := s.ledger.Transition(id, st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.ledger.Transition(goal.ID, core.StateReview); err != nil {
+		t.Fatal(err)
+	}
+	// Queued a moment after the session finished its turn, while it still read as working.
+	for _, id := range []string{tagger.ID, paused.ID} {
+		if _, err := s.ledger.QueueMessage(id, "Also tag v2.1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stop := make(chan struct{})
+	ended := make(chan error, 1)
+	go func() { ended <- s.watchSessions(stop) }()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		waiting, err := s.ledger.Undelivered(tagger.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(waiting) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the message to a task under a goal in review was never delivered")
+		}
+	}
+	close(stop)
+	if err := <-ended; err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.sent, []string{"Also tag v2.1"}) {
+		t.Fatalf("sent = %q, want the one message to the idle task, none to paused work", r.sent)
+	}
+	if w, _ := s.ledger.Get(tagger.ID); w.State != core.StateRunning {
+		t.Fatalf("a task in review given a message is %s, want running", w.State)
+	}
+	if waiting, _ := s.ledger.Undelivered(paused.ID); len(waiting) != 1 {
+		t.Fatalf("paused work's message = %+v, want it still waiting", waiting)
 	}
 }
 

@@ -2,6 +2,7 @@ package serve
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -269,7 +270,43 @@ func (s *Server) watchSessions(stop <-chan struct{}) error {
 				return err
 			}
 		}
+		if err := s.deliverWaiting(); err != nil {
+			return err
+		}
 	}
+}
+
+// deliverWaiting hands each work item's queued messages to its session once
+// it is not working, whatever state the item or its goal is in: a message
+// queued while the session was busy has nothing else to deliver it. Paused
+// work keeps its messages until it is resumed, and a goal's supervisor is
+// given what waits for it by a look. Work delivered to goes back to running,
+// so its reply is read as any running session's is.
+func (s *Server) deliverWaiting() error {
+	waiting, err := s.ledger.MessagesWaiting()
+	if err != nil {
+		return err
+	}
+	for _, w := range waiting {
+		if w.State == core.StatePaused || core.AtRest(w.State) || (core.IsGoal(w.Kind) && w.Session == nil && w.Claim == nil) {
+			continue
+		}
+		r, h, ok, err := s.sessions(w)
+		if err != nil || !ok {
+			continue
+		}
+		sent, err := coordinator.Deliver(s.ledger, w, r, h)
+		if err != nil {
+			// A session that cannot be reached now is tried again next tick.
+			continue
+		}
+		if sent > 0 && w.State != core.StateRunning && slices.Contains(core.Transitions[w.State], core.StateRunning) {
+			if _, err := s.ledger.Transition(w.ID, core.StateRunning); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // superviseGoals supervises every running top goal on the board every few
