@@ -9,6 +9,7 @@ use serde::Deserialize;
 
 use crate::attach::Attachment;
 use crate::conversation::{Activity, Question};
+use crate::plan::Plan;
 use crate::tree::{Course, Finish, Link, NeedYou, Node, Progress, Reasoning, Superseded};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
@@ -421,6 +422,27 @@ pub struct GoalDetail {
     /// given yet; empty from a wd that does not say.
     #[serde(default)]
     pub waiting_for_director: Vec<i64>,
+    /// That the project's own checks fail on main, and the sub-goal that
+    /// fixes them; none while they do not, or from a wd that does not say.
+    #[serde(default)]
+    pub checks_fail_on_main: Option<ChecksOnMain>,
+}
+
+/// The concern a top goal holds while the project's own checks fail on main.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+pub struct ChecksOnMain {
+    pub concern: i64,
+    /// The concern, in a sentence.
+    pub says: String,
+    /// The sub-goal that fixes them, none while one is open.
+    pub fix: Option<SubGoalPlan>,
+}
+
+/// A sub-goal the person can add: its outcome and what makes it done.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+pub struct SubGoalPlan {
+    pub outcome: String,
+    pub done_when: String,
 }
 
 impl GoalDetail {
@@ -428,6 +450,14 @@ impl GoalDetail {
     /// what it is doing.
     pub fn waits_for_director(&self, id: i64) -> bool {
         self.waiting_for_director.contains(&id)
+    }
+
+    /// The plan that adds the sub-goal fixing the project's checks under the
+    /// top goal, while wd offers one.
+    pub fn fix_checks(&self) -> Option<Plan> {
+        let fix = self.checks_fail_on_main.as_ref()?.fix.as_ref()?;
+        let top = self.chain.first().map_or(self.goal.id.as_str(), |l| l.id.as_str());
+        Plan::add_sub_goal(top, &fix.outcome, &fix.done_when).ok()
     }
 
     /// Whether this goal is a sub-goal of another.

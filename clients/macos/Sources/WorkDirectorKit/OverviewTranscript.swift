@@ -30,6 +30,8 @@ public enum OverviewAct {
     public static let focus = "focus"
     /// Asks a stopped agent to carry on.
     public static let carry = "carry"
+    /// Adds the sub-goal that fixes the project's checks, under the top goal.
+    public static let fixChecks = "fix-checks"
 }
 
 extension GoalDetail {
@@ -66,6 +68,7 @@ extension GoalDetail {
                 items.append(item)
             }
         }
+        if let checks = checksFailOnMain { add(checksCard(checks)) }
         if !notDoneBecause.isEmpty { add(notDone) }
         if chain.count > 1 && !did.isEmpty {
             add(TranscriptItem(id: "did", paras: [Para([Run("What the director did here", .title)])], source: "What the director did here"))
@@ -208,6 +211,19 @@ extension GoalDetail {
         if let doneWhen = node.doneWhen { copies.append(MenuCopy("Copy Done When", doneWhen)) }
         let source = "- \(node.work.title) — \(node.badge.text)" + (node.meta(superseded: superseded).isEmpty ? "" : "\n  " + node.meta(superseded: superseded))
         return TranscriptItem(id: "row-" + node.id, paras: paras, source: source, copies: copies)
+    }
+
+    /// That the project's own checks fail on main, in a card, with the link
+    /// that starts their fix while none is open.
+    private func checksCard(_ checks: ChecksOnMain) -> TranscriptItem {
+        let box = Box.card("checks")
+        var paras = [Para([Run("The project's checks", .meta, .text3)], box: box),
+                     Para([.mark(.symbol("exclamationmark.triangle"), .callout, .attention), Run(checks.says, .callout)], gap: .line, box: box)]
+        if checks.fix != nil {
+            let top = chain.first?.id ?? goal.id
+            paras.append(Para([Run("Start a task to fix them", .callout, .link, link: actLink(OverviewAct.fixChecks, top))], gap: .line, box: box))
+        }
+        return TranscriptItem(id: "checks", paras: paras, source: "The project's checks\n" + checks.says)
     }
 
     /// What still holds the goal from done, in a card.

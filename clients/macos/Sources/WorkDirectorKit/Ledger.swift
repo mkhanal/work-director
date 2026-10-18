@@ -228,6 +228,9 @@ public struct GoalDetail: Codable, Sendable, Hashable {
     /// The events holding what the person said that the director has not
     /// been given yet; nil from a `wd` that does not say.
     let waitingForDirector: [Int]?
+    /// That the project's own checks fail on main, and the sub-goal that
+    /// fixes them; nil while they do not, or from a `wd` that does not say.
+    public let checksFailOnMain: ChecksOnMain?
 
     enum CodingKeys: String, CodingKey {
         case goal, tasks, rollup, events, claims, landings, delivery, activity, asking, reports, waiting
@@ -236,11 +239,32 @@ public struct GoalDetail: Codable, Sendable, Hashable {
         case notDoneBecause = "not_done_because"
         case needsYou = "needs_you"
         case waitingForDirector = "waiting_for_director"
+        case checksFailOnMain = "checks_fail_on_main"
     }
 
     /// Whether what event `id` holds still waits for the director to finish
     /// what it is doing.
     public func waitsForDirector(_ id: Int) -> Bool { waitingForDirector?.contains(id) == true }
+}
+
+/// The concern a top goal holds while the project's own checks fail on main.
+public struct ChecksOnMain: Codable, Sendable, Hashable {
+    public let concern: Int
+    /// The concern, in a sentence.
+    public let says: String
+    /// The sub-goal that fixes them, nil while one is open.
+    public let fix: SubGoalPlan?
+}
+
+/// A sub-goal the person can add: its outcome and what makes it done.
+public struct SubGoalPlan: Codable, Sendable, Hashable {
+    public let outcome: String
+    public let doneWhen: String
+
+    enum CodingKeys: String, CodingKey {
+        case outcome
+        case doneWhen = "done_when"
+    }
 }
 
 public struct WaitingTask: Codable, Sendable, Hashable {

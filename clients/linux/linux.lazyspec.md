@@ -119,6 +119,11 @@ hold only that product's work; with none, every product's.
 - A sub-goal is added with its outcome and what makes it done.
 - What holds the goal back from done is listed, and a sub-goal's page lists what the director did under it.
 
+## A Goal's Overview Says When The Project's Checks Fail On Main, With A Way To Fix Them
+- While wd serves `checks_fail_on_main`, the overview shows its sentence in a card under the sub-goals.
+- While it offers a fix, the card's `Start a task to fix them` adds that sub-goal under the top goal.
+- A wd that does not serve it shows no card.
+
 ## A Sub-Goal Reads As Working Only While An Agent Works On It
 - A sub-goal's badge says the state `wd` serves it, a group of an older plan's tasks included: Working, To review, Needs you or Blocked among them; its steps are counted on it only while it is working.
 - The moving mark shows on a row only while a session in it or under it runs.

@@ -70,6 +70,13 @@ impl WorkPage {
             ),
         }
 
+        if let Some(checks) = &g.checks_fail_on_main {
+            let shown = (checks.says.clone(), g.fix_checks());
+            let app = self.app.clone();
+            turns.push(
+                Turn::key("o-checks", &shown).with(move || checks_fail_on_main(&shown.0, shown.1.as_ref(), &app)),
+            );
+        }
         if !g.not_done_because.is_empty() {
             let because = g.not_done_because.clone();
             turns.push(Turn::key("o-because", &because).with(move || not_done_because(&because)));
@@ -334,6 +341,27 @@ fn sub_goal_row(row: &SubGoalRow, last: bool, app: &App, page: Weak<WorkPage>) -
     }
     ui::context_menu(&outer, &ui::copy_menu(&format!("{}\n{}", row.title, row.meta)));
     outer.upcast()
+}
+
+/// That the project's own checks fail on main, with the link that starts
+/// their fix while none is open.
+fn checks_fail_on_main(says: &str, fix: Option<&Plan>, app: &App) -> gtk::Widget {
+    let card = ui::wd_card(6);
+    card.set_margin_top(0);
+    card.append(&ui::label("The project's checks"));
+    let row = ui::hbox(6);
+    row.append(&ui::line("⚠", &["callout", "needs-text"]));
+    row.append(&ui::text(says, &["callout"]));
+    card.append(&row);
+    if let Some(plan) = fix {
+        let start = ui::inline_link("Start a task to fix them");
+        start.set_halign(gtk::Align::Start);
+        start.set_tooltip_text(Some(&plan.command_line()));
+        let (app, plan) = (app.clone(), plan.clone());
+        start.connect_clicked(move |_| app.run(plan.clone()));
+        card.append(&start);
+    }
+    card.upcast()
 }
 
 /// What keeps the goal from done, the first in the colour of what needs doing.

@@ -296,6 +296,11 @@ hold only that product's work; with none, every product's.
 - A goal's conversation is one selection too: the person's messages, the plan with each sub-goal's badge, each turn's speaker, sub-goal and time, the lines for what happened, and what was asked, answered, reported, done and refused. Only questions waiting on the person, messages still on their way and work under way sit after it.
 - A goal's record is one selection: its column names, each day, and each row's time, kind, what, where and by whom; copied, a row reads as one line, its cells separated by tabs.
 
+## A Goal's Overview Says When The Project's Checks Fail On Main, With A Way To Fix Them
+- While wd serves `checks_fail_on_main`, the overview shows its sentence in a card under the sub-goals.
+- While it offers a fix, the card's `Start a task to fix them` adds that sub-goal under the top goal.
+- A `wd` that does not serve it shows no card.
+
 ## Copying Across A Goal's Overview Keeps Every Line It Spans
 - A goal's overview is one selection: what done means, where it finishes, its course, each sub-goal's title, line, unfolded steps and badge, what still holds it from done and what the director did there; a drag or Select All spans all of it.
 - A question waiting on the person and the page's controls sit inside it without breaking it, and are never copied.

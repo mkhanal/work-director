@@ -967,6 +967,39 @@ fn node_json(id: &str, kind: &str, state: &str, fields: Value) -> Value {
     n
 }
 
+/// A Goal's Overview Says When The Project's Checks Fail On Main, With A Way To Fix Them
+#[test]
+fn a_goals_overview_says_when_the_projects_checks_fail_on_main_with_a_way_to_fix_them() {
+    let says = "The project's own checks fail on main (lint, validate), so they can't prove changes right now.";
+    let view = |checks: Option<Value>| {
+        let mut v = json!({
+            "goal": work_json("g", "running"), "tasks": [], "rollup": {"counts": {}, "done": 0, "total": 0},
+            "events": [], "claims": [], "landings": [], "delivery": null, "activity": {}, "reports": {}, "asking": null,
+            "chain": [{"id": "top", "title": "Top", "state": "running"}, {"id": "g", "title": "Sub", "state": "running"}],
+        });
+        if let Some(c) = checks {
+            v["checks_fail_on_main"] = c;
+        }
+        goal_view(v)
+    };
+    let fixing = view(Some(json!({"concern": 3, "says": says,
+        "fix": {"outcome": "The project's own checks pass again", "done_when": "every check passes"}})));
+    assert_eq!(fixing.checks_fail_on_main.as_ref().map(|c| c.says.as_str()), Some(says));
+    let plan = fixing.fix_checks().expect("a fix offered");
+    assert_eq!(
+        plan.argv,
+        strings(&["goal", "add", "top", "The project's own checks pass again", "--done-when", "every check passes"]),
+        "the fix goes under the top goal"
+    );
+    let fixed = view(Some(json!({"concern": 3, "says": says, "fix": null})));
+    assert!(fixed.checks_fail_on_main.is_some() && fixed.fix_checks().is_none(), "no fix while one is open");
+    let older = view(None);
+    assert!(
+        older.checks_fail_on_main.is_none() && older.fix_checks().is_none(),
+        "a wd that does not say shows nothing"
+    );
+}
+
 /// A Goal Page Shows What Done Means, What Needs You And Its Sub-Goals
 #[test]
 fn a_goal_page_shows_what_done_means_what_needs_you_and_its_sub_goals() {

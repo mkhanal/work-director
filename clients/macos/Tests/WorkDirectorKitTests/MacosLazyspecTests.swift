@@ -1934,6 +1934,35 @@ struct SeededTree {
         """, "the record copies as its rows: \(record.copied(0..<record.length))")
     }
 
+    @Test("A Goal's Overview Says When The Project's Checks Fail On Main, With A Way To Fix Them")
+    func checksFailOnMainCard() throws {
+        let says = "The project's own checks fail on main (lint, validate), so they can't prove changes right now."
+        func goal(_ checks: String?) throws -> GoalDetail {
+            let field = checks.map { #","checks_fail_on_main":\#($0)"# } ?? ""
+            let json = """
+            {"goal":\(workJSON(state: "running").replacingOccurrences(of: #""kind":"task""#, with: #""kind":"goal""#)),"tasks":[],"rollup":{"counts":{},"done":0,"total":0},
+             "events":[],"claims":[],"landings":[],"delivery":null,"activity":{},"reports":{},"waiting":[],"chain":[{"id":"top","title":"Top","state":"running"}],"tree":[],"paths":{},
+             "done_when":null,"finish":null,"progress":{"done":0,"total":0,"superseded":0},"not_done_because":[],"needs_you":[],"course":null,
+             "superseded":[],"proposed":false\(field)}
+            """
+            return try JSONDecoder().decode(GoalDetail.self, from: Data(json.utf8))
+        }
+        func text(_ g: GoalDetail) -> String {
+            let o = g.overview(opened: [], working: [], asks: [], did: [], ago: { _ in "" }, clock: { _ in "" })
+            return o.copied(0..<o.length)
+        }
+        let fixing = try goal(#"{"concern":3,"says":"\#(says)","fix":{"outcome":"The project's own checks pass again","done_when":"every check passes"}}"#)
+        #expect(fixing.checksFailOnMain?.fix?.outcome == "The project's own checks pass again")
+        #expect(text(fixing).contains("The project's checks\n" + says + "\nStart a task to fix them"), "the card: \(text(fixing))")
+        let links = fixing.overview(opened: [], working: [], asks: [], did: [], ago: { _ in "" }, clock: { _ in "" })
+            .items.flatMap(\.paras).flatMap(\.runs).compactMap(\.link)
+        #expect(links.contains(actLink(OverviewAct.fixChecks, "top")), "the fix goes under the top goal: \(links)")
+        let fixed = try goal(#"{"concern":3,"says":"\#(says)","fix":null}"#)
+        #expect(text(fixed).contains(says) && !text(fixed).contains("Start a task to fix them"))
+        let older = try goal(nil)
+        #expect(older.checksFailOnMain == nil && !text(older).contains("The project's checks"))
+    }
+
     @Test("Copying Across A Goal's Overview Keeps Every Line It Spans")
     func copyingAcrossTheOverview() throws {
         func work(_ id: String, _ title: String, _ state: String, kind: String = "task") -> String {

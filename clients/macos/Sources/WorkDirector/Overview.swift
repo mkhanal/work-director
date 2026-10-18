@@ -67,6 +67,8 @@ struct GoalOverview: View {
             case OverviewAct.open: open(id)
             case OverviewAct.focus: focus(id)
             case OverviewAct.carry: run(.carryOn(id))
+            case OverviewAct.fixChecks:
+                if let fix = goal.checksFailOnMain?.fix, let plan = try? Plan.addSubGoal(id, outcome: fix.outcome, doneWhen: fix.doneWhen) { run(plan) }
             default: break
             }
         }, slots: slots, overs: overs, toggle: toggle)
