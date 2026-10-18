@@ -28,6 +28,7 @@ use self::record::record_turns;
 use crate::agents::AgentsPanel;
 use crate::app::{work_menu, App, Place};
 use crate::composer::Composer;
+use crate::find_bar::FindBar;
 use crate::side_panel::SidePanel;
 use crate::turns::{Turn, Turns};
 use crate::ui::{self, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6};
@@ -126,6 +127,7 @@ pub struct WorkPage {
     column: gtk::Box,
     header: Header,
     turns: Turns,
+    pub find: Rc<FindBar>,
     composer: Rc<Composer>,
     composer_box: gtk::Box,
     jump: gtk::Button,
@@ -354,7 +356,8 @@ impl WorkPage {
             if key != gdk::Key::Escape {
                 return glib::Propagation::Proceed;
             }
-            if let Some(page) = weak.upgrade() {
+            // Escape in the find bar closes it, and is no tap toward stopping.
+            if let Some(page) = weak.upgrade().filter(|p| !p.find.widget.is_search_mode()) {
                 let mut taps = page.escape.get();
                 let twice = taps.tap(Instant::now());
                 page.escape.set(taps);
@@ -680,6 +683,7 @@ impl WorkPage {
                     None => vec![Turn::key("loading", &()).with(|| ui::waiting("Reading…").upcast())],
                 };
                 self.turns.update(turns);
+                self.find.refresh(false);
                 return;
             };
             self.render_header(loaded, &state);
@@ -725,6 +729,7 @@ impl WorkPage {
         };
         self.state.borrow_mut().yours = yours;
         self.turns.update(turns);
+        self.find.refresh(false);
         self.render_bars();
         let focused = {
             let state = self.state.borrow();
@@ -1057,6 +1062,7 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
     jump.set_margin_end(SPACE_6);
     jump.set_margin_bottom(SPACE_3);
     jump.set_visible(false);
+    let find = FindBar::new(&scroller, &column);
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&scroller));
     overlay.add_overlay(&jump);
@@ -1073,6 +1079,7 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
     body.add_css_class("page");
     body.append(&top);
     body.append(&ui::hairline());
+    body.append(&find.widget);
     body.append(&overlay);
     body.append(&composer_box);
 
@@ -1154,6 +1161,7 @@ fn build(app: &App, id: &str, me: Weak<WorkPage>) -> WorkPage {
         column,
         header,
         turns,
+        find,
         composer,
         composer_box,
         jump,

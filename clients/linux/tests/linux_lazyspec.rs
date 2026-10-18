@@ -2701,3 +2701,61 @@ fn a_panic_leaves_a_note_of_what_was_on_screen() {
     assert!(shown.contains("On screen: wd-7, its page; a goal opens on overview"), "{shown}");
     assert!(shown.contains("a_panic_leaves_a_note_of_what_was_on_screen"), "the backtrace names the test: {shown}");
 }
+
+/// Find Searches The Words The Page Shows
+#[test]
+fn find_searches_the_words_the_page_shows() {
+    use kit::find;
+    use kit::transcript::{self, Doc};
+    let step = |kind: StepKind, text: &str| Step {
+        kind,
+        at: Some("12:10".into()),
+        text: Some(text.into()),
+        tool: None,
+        question: None,
+    };
+    let mut page = Doc::default();
+    page.append(transcript::told("Told", Some("12:09"), "Fix the Café sign-up"));
+    page.append(transcript::turn(
+        None,
+        transcript::step(&step(StepKind::Thinking, "The cafe form drops the e-mail."), false),
+    ));
+    page.append(transcript::turn(
+        None,
+        transcript::step(&step(StepKind::Text, "The CAFÉ form now\nkeeps the **e-mail**."), false),
+    ));
+    let shown = page.shown();
+    let closed = |f: usize| page.folds[f];
+    let words = |(a, b): (usize, usize)| shown.chars().skip(a).take(b - a).collect::<String>();
+
+    let found = page.find("cafe", &closed);
+    let said: Vec<String> = found.iter().map(|m| words(*m)).collect();
+    assert_eq!(said, ["Café", "CAFÉ"], "case and accents are ignored, a folded step's words are not searched");
+    let open = |_: usize| true;
+    assert_eq!(page.find("cafe", &open).len(), 3, "an opened step's words are searched");
+    assert_eq!(
+        page.find("e-mail", &closed).iter().map(|m| words(*m)).collect::<Vec<_>>(),
+        ["e-mail"],
+        "a match spans bold words within a line"
+    );
+    assert!(
+        page.find("now keeps", &closed).is_empty() && page.find("nowkeeps", &closed).is_empty(),
+        "never across two lines"
+    );
+    assert!(page.find("Thinkingthe", &open).is_empty(), "never across a step's chevron or into what it holds");
+    assert!(page.find("", &closed).is_empty());
+
+    assert_eq!(find::step(None, 3, true), Some(0));
+    assert_eq!(find::step(Some(2), 3, true), Some(0), "next wraps to the first");
+    assert_eq!(find::step(Some(0), 3, false), Some(2), "previous wraps to the last");
+    assert_eq!(find::step(Some(0), 0, true), None);
+    assert_eq!(find::label(Some(2), 12), "3 of 12");
+    assert_eq!(find::label(None, 0), "No results");
+
+    let at = [(0, 4), (0, 40), (1, 7)];
+    assert_eq!(find::keep(Some(&(0, 40)), &at), Some(1), "a refresh keeps the current match");
+    assert_eq!(find::keep(Some(&(0, 20)), &at), Some(1), "gone, the next after it is current");
+    assert_eq!(find::keep(Some(&(2, 0)), &at), Some(2), "past the last, the last");
+    assert_eq!(find::keep(None, &at), Some(0));
+    assert_eq!(find::keep(Some(&(0, 4)), &[] as &[(usize, usize)]), None);
+}

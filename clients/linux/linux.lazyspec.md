@@ -280,3 +280,10 @@ hold only that product's work; with none, every product's.
 ## A Panic Leaves A Note Of What Was On Screen
 - A panic first writes `$WD_HOME/crashes/<time>-linux-<pid>/note.json`: its message and where it was raised, its backtrace, the build, and the page last opened; then it reports as it would have.
 - `wd crashes` reads the note.
+
+## Find Searches The Words The Page Shows
+- Ctrl+F on a goal's or task's page opens a find bar at its top, its field focused; every match in the page's text is highlighted as it is typed, the current one stronger and scrolled into view.
+- A match ignores case and accents; it is found only in words the page shows, never inside a folded step, a chevron or a control, and never across two lines.
+- Enter or Ctrl+G goes to the next match, Shift+Enter or Ctrl+Shift+G to the previous, wrapping round; the bar says which match of how many, or No results.
+- As the page refreshes or a fold opens, matches are found again and the current one stays where it was: the first at or after it, else the last.
+- Escape closes the bar: the highlights go and the current match is left selected, to copy.

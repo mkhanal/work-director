@@ -103,6 +103,8 @@ pub struct State {
     pointed: Option<usize>,
     menu: gio::SimpleActionGroup,
     pressed: Option<(f64, f64)>,
+    /// Told when a fold opens or closes, so a find counts what now shows.
+    folded: Option<Rc<dyn Fn()>>,
 }
 
 mod imp {
@@ -614,6 +616,69 @@ impl Surface {
             *open = !*open;
         }
         self.show_fold(f);
+        let folded = self.imp().state.borrow().folded.clone();
+        if let Some(folded) = folded {
+            folded();
+        }
+    }
+
+    /// Runs `f` whenever a fold opens or closes; it replaces what ran before.
+    pub fn on_fold(&self, f: Rc<dyn Fn()>) {
+        self.imp().state.borrow_mut().folded = Some(f);
+    }
+
+    /// Where `query` occurs in the words this shows, as character ranges.
+    pub fn find(&self, query: &str) -> Vec<(usize, usize)> {
+        let state = self.imp().state.borrow();
+        let open = |f: usize| state.open.get(f).copied().unwrap_or(true);
+        state.doc.find(query, &open)
+    }
+
+    /// Highlights each match found, the current one stronger; none clears them.
+    pub fn mark_found(&self, found: &[(usize, usize)], current: Option<(usize, usize)>) {
+        let buffer = self.buffer();
+        let table = buffer.tag_table();
+        let tag = |name: &str, background: &str, ink: Option<&str>| {
+            let tag = table.lookup(name).unwrap_or_else(|| {
+                let tag = gtk::TextTag::new(Some(name));
+                tag.set_background_rgba(Some(&gdk::RGBA::parse(background).expect("a find colour parses")));
+                if let Some(ink) = ink {
+                    tag.set_foreground_rgba(Some(&gdk::RGBA::parse(ink).expect("a find colour parses")));
+                }
+                table.add(&tag);
+                tag
+            });
+            // Above every style tag, made before or after it.
+            tag.set_priority(table.size() - 1);
+            tag
+        };
+        let all = tag("find-match", "rgba(255, 204, 0, 0.38)", None);
+        let strong = tag("find-current", "rgb(255, 200, 0)", Some("rgb(28, 28, 28)"));
+        let (start, end) = buffer.bounds();
+        buffer.remove_tag(&all, &start, &end);
+        buffer.remove_tag(&strong, &start, &end);
+        let range = |(a, b): (usize, usize)| (buffer.iter_at_offset(a as i32), buffer.iter_at_offset(b as i32));
+        for m in found {
+            let (a, b) = range(*m);
+            buffer.apply_tag(&all, &a, &b);
+        }
+        if let Some(m) = current {
+            let (a, b) = range(m);
+            buffer.apply_tag(&strong, &a, &b);
+        }
+    }
+
+    /// The top and bottom of the line holding character `at`, in this widget's coordinates.
+    pub fn line_at(&self, at: usize) -> (f32, f32) {
+        let iter = self.buffer().iter_at_offset(at as i32);
+        let (y, height) = self.line_yrange(&iter);
+        let (_, y) = self.buffer_to_window_coords(gtk::TextWindowType::Widget, 0, y);
+        (y as f32, (y + height) as f32)
+    }
+
+    pub fn select(&self, (a, b): (usize, usize)) {
+        let buffer = self.buffer();
+        buffer.select_range(&buffer.iter_at_offset(a as i32), &buffer.iter_at_offset(b as i32));
     }
 
     /// Sets each bubble's left edge so it sits at the right, as wide as its

@@ -8,6 +8,7 @@ pub mod conversation;
 pub mod copy;
 pub mod crash;
 pub mod escape;
+pub mod find;
 pub mod follow;
 pub mod ledger;
 pub mod locator;

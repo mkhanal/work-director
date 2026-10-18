@@ -6,6 +6,7 @@
 
 use crate::conversation::{Step, StepKind, ToolCall};
 use crate::copy;
+use crate::find;
 use crate::ledger::WorkState;
 use crate::look::{Mark, Tone};
 use crate::markdown::{self, Align, Block, Table};
@@ -527,6 +528,39 @@ impl Doc {
         para.folds.iter().all(|f| open(*f))
     }
 
+    /// Whether a span shows, given which folds are open.
+    pub fn span_shows(span: &Span, open: &dyn Fn(usize) -> bool) -> bool {
+        match span.style.show {
+            Show::Always => true,
+            Show::Open(f) => open(f),
+            Show::Closed(f) => !open(f),
+        }
+    }
+
+    /// Where `query` occurs in the words shown, with the folds `open` says
+    /// are open, as character ranges: case and accents ignored, never across
+    /// a paragraph's end, an icon, a table, a widget, a control's label or
+    /// words a fold hides.
+    pub fn find(&self, query: &str, open: &dyn Fn(usize) -> bool) -> Vec<(usize, usize)> {
+        let mut hay = find::Haystack::default();
+        let mut start = 0;
+        for para in &self.paras {
+            if Doc::para_shows(para, open) {
+                let mut at = start;
+                for span in &para.spans {
+                    match &span.content {
+                        Content::Text(t) if Doc::span_shows(span, open) => hay.words(t, at),
+                        _ => hay.wall(),
+                    }
+                    at += span.content.len();
+                }
+            }
+            hay.wall();
+            start += para.len() + 1;
+        }
+        hay.find(&find::needle(query))
+    }
+
     /// What copying characters `from..to` gives, with the folds `open` says
     /// are open: the words shown, without ornaments; a table as its rows,
     /// tab-separated; a blank line before each block.
@@ -543,12 +577,7 @@ impl Doc {
                 for span in &para.spans {
                     let len = span.content.len();
                     let (a, b) = (from.max(at), to.min(at + len));
-                    let shows = match span.style.show {
-                        Show::Always => true,
-                        Show::Open(f) => open(f),
-                        Show::Closed(f) => !open(f),
-                    };
-                    if a < b && shows {
+                    if a < b && Doc::span_shows(span, open) {
                         match &span.content {
                             Content::Text(t) => {
                                 line.extend(t.chars().skip(a - at).take(b - a));

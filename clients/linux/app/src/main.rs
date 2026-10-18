@@ -4,6 +4,7 @@
 mod agents;
 mod app;
 mod composer;
+mod find_bar;
 mod new_goal_page;
 mod pages;
 mod question;
@@ -52,6 +53,9 @@ fn main() -> glib::ExitCode {
         load_css();
         application.set_accels_for_action("win.new-goal", &["<Control>n"]);
         application.set_accels_for_action("win.command", &["<Control>k"]);
+        application.set_accels_for_action("win.find", &["<Control>f"]);
+        application.set_accels_for_action("win.find-next", &["<Control>g"]);
+        application.set_accels_for_action("win.find-previous", &["<Shift><Control>g"]);
     });
     application.connect_activate(move |application| activate(application, &login));
     application.run()

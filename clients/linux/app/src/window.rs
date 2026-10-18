@@ -161,6 +161,13 @@ impl Window {
         }
     }
 
+    /// Finds on the work page shown; other pages have nothing to find in.
+    fn find(&self, f: impl Fn(&WorkPage)) {
+        if let Some(page) = &self.current.borrow().work {
+            f(page);
+        }
+    }
+
     fn rename(&self, id: &str) {
         self.open(Place::Work(id.to_string()));
         if let Some(page) = &self.current.borrow().work {
@@ -183,6 +190,9 @@ impl Window {
         simple("new-goal", Box::new(|w| w.open(Place::NewGoal)));
         simple("command", Box::new(|w| w.app.ask_command()));
         simple("add-product", Box::new(|w| w.add_product()));
+        simple("find", Box::new(|w| w.find(|page| page.find.open())));
+        simple("find-next", Box::new(|w| w.find(|page| page.find.step(true))));
+        simple("find-previous", Box::new(|w| w.find(|page| page.find.step(false))));
 
         let with_id = |name: &str, f: IdAction| {
             let action = gio::SimpleAction::new(name, Some(glib::VariantTy::STRING));
