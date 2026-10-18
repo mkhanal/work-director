@@ -128,9 +128,11 @@ func New(path string) (*Ledger, error) {
 }
 
 // startedSchema is the tree of files a task's checkout held when it started,
-// as git names it: what it changed is read against this. A whole table, for
-// ledgers created before it existed.
-const startedSchema = `CREATE TABLE IF NOT EXISTS started (work TEXT PRIMARY KEY REFERENCES work(id), tree TEXT NOT NULL, at TEXT NOT NULL);`
+// as git names it: what it changed is read against this; and, by the spawn
+// event that started a chore, the note filing what it said when it finished.
+// Whole tables, for ledgers created before they existed.
+const startedSchema = `CREATE TABLE IF NOT EXISTS started (work TEXT PRIMARY KEY REFERENCES work(id), tree TEXT NOT NULL, at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS chore_done (spawn INTEGER PRIMARY KEY REFERENCES event(id), note INTEGER NOT NULL REFERENCES event(id));`
 
 func migrate(db *sql.DB) error {
 	if _, err := db.Exec(startedSchema); err != nil {
@@ -2028,6 +2030,55 @@ func (l *Ledger) Started(work string) (tree string, ok bool, err error) {
 		return "", false, nil
 	}
 	return tree, err == nil, err
+}
+
+// ChoreDone files body as the note saying what the chore started by spawn, an
+// event on goal, said when it finished, once: a chore already filed is left
+// alone, and an earlier note with the same body that no chore holds yet is
+// taken as its own rather than filed again. It reports whether it filed.
+func (l *Ledger) ChoreDone(goal string, spawn int, body string) (bool, error) {
+	filed := false
+	err := l.inTx(func(tx *sql.Tx) error {
+		var held int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM chore_done WHERE spawn = ?`, spawn).Scan(&held); err != nil || held > 0 {
+			return err
+		}
+		var note int
+		err := tx.QueryRow(`SELECT id FROM event WHERE work = ? AND kind = ? AND body = ? AND id > ?
+			AND id NOT IN (SELECT note FROM chore_done) ORDER BY id LIMIT 1`, goal, core.EventNote, body, spawn).Scan(&note)
+		if errors.Is(err, sql.ErrNoRows) {
+			e, err := addEvent(tx, goal, core.EventNote, body, now())
+			if err != nil {
+				return err
+			}
+			note, filed = e.ID, true
+		} else if err != nil {
+			return err
+		}
+		_, err = tx.Exec(`INSERT INTO chore_done (spawn, note) VALUES (?, ?)`, spawn, note)
+		return err
+	})
+	return filed, err
+}
+
+// ChoresDone is the body of the note each finished chore on goal filed, by
+// the id of the spawn event that started it.
+func (l *Ledger) ChoresDone(goal string) (map[int]string, error) {
+	rows, err := l.db.Query(`SELECT d.spawn, e.body FROM chore_done d JOIN event e ON e.id = d.note WHERE e.work = ?`, goal)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int]string{}
+	for rows.Next() {
+		var spawn int
+		var body string
+		if err := rows.Scan(&spawn, &body); err != nil {
+			return nil, err
+		}
+		out[spawn] = body
+	}
+	return out, rows.Err()
 }
 
 // SetFiled records the transcript point work was last read at.

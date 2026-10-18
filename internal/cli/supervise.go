@@ -857,19 +857,25 @@ const choreDonePrefix = "chore finished: "
 // choreClip is how much of what a finished chore said its note keeps.
 const choreClip = 2000
 
-// goalChore is one chore started on a goal: its session, what it is for, and
-// what it said when it finished, nil while it works.
+// goalChore is one chore started on a goal: the spawn event that started it,
+// its session, what it is for, and what it said when it finished, nil while
+// it works.
 type goalChore struct {
+	spawn    int
 	handle   runner.Handle
 	what     string
 	finished *string
 }
 
 // chores are the chores started on goal, oldest first. A chore's purpose is
-// the note filed right after its spawn, and what it said is the first
-// finished note after it: one chore runs at a time.
+// the note filed right after its spawn; what it said when it finished is the
+// note the ledger holds for that spawn.
 func (c *Cli) chores(goal core.Work, p *project.Project) ([]goalChore, error) {
 	events, err := c.Ledger.Events(goal.ID, nil)
+	if err != nil {
+		return nil, err
+	}
+	done, err := c.Ledger.ChoresDone(goal.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -878,37 +884,39 @@ func (c *Cli) chores(goal core.Work, p *project.Project) ([]goalChore, error) {
 		return nil, err
 	}
 	var out []goalChore
-	for _, e := range events {
-		switch {
-		case e.Kind == core.EventSpawn && strings.HasPrefix(e.Body, chorePrefix):
-			name, session, ok := strings.Cut(strings.TrimPrefix(e.Body, chorePrefix), ":")
-			if !ok {
-				return nil, fmt.Errorf("goal %s: chore spawn %q names no session", goal.ID, e.Body)
-			}
-			since, err := time.Parse(core.TimeLayout, e.At)
-			if err != nil {
-				return nil, fmt.Errorf("goal %s: chore spawn %d at %q: %w", goal.ID, e.ID, e.At, err)
-			}
-			out = append(out, goalChore{handle: runner.Handle{Runner: name, Session: session, Cwd: cwd, Since: since}})
-		case e.Kind == core.EventNote && len(out) > 0:
-			last := &out[len(out)-1]
-			if what, ok := strings.CutPrefix(e.Body, "chore: "); ok && last.what == "" {
-				last.what = what
-			} else if said, ok := strings.CutPrefix(e.Body, choreDonePrefix); ok && last.finished == nil {
-				last.finished = &said
-			}
+	for i, e := range events {
+		if e.Kind != core.EventSpawn || !strings.HasPrefix(e.Body, chorePrefix) {
+			continue
 		}
+		name, session, ok := strings.Cut(strings.TrimPrefix(e.Body, chorePrefix), ":")
+		if !ok {
+			return nil, fmt.Errorf("goal %s: chore spawn %q names no session", goal.ID, e.Body)
+		}
+		since, err := time.Parse(core.TimeLayout, e.At)
+		if err != nil {
+			return nil, fmt.Errorf("goal %s: chore spawn %d at %q: %w", goal.ID, e.ID, e.At, err)
+		}
+		ch := goalChore{spawn: e.ID, handle: runner.Handle{Runner: name, Session: session, Cwd: cwd, Since: since}}
+		if i+1 < len(events) && events[i+1].Kind == core.EventNote {
+			ch.what, _ = strings.CutPrefix(events[i+1].Body, "chore: ")
+		}
+		if body, ok := done[e.ID]; ok {
+			said := strings.TrimPrefix(body, choreDonePrefix)
+			ch.finished = &said
+		}
+		out = append(out, ch)
 	}
 	return out, nil
 }
 
 // tendChores files what each of goal's chores said once its session has
-// finished, and returns the chore still working, if any.
+// finished, once per chore, and returns the chore still working, if any.
 func (c *Cli) tendChores(goal core.Work, p *project.Project) (*goalChore, error) {
 	all, err := c.chores(goal, p)
 	if err != nil {
 		return nil, err
 	}
+	var working *goalChore
 	for i := range all {
 		ch := &all[i]
 		if ch.finished != nil {
@@ -929,14 +937,14 @@ func (c *Cli) tendChores(goal core.Work, p *project.Project) (*goalChore, error)
 		// A session that has said nothing yet has not finished: it has not
 		// started.
 		if status == runner.StatusRunning || len(said) == 0 {
-			return ch, nil
+			working = ch
+			continue
 		}
-		last := clipLine(said[len(said)-1], choreClip)
-		if _, err := c.Ledger.AddEvent(goal.ID, core.EventNote, choreDonePrefix+last); err != nil {
+		if _, err := c.Ledger.ChoreDone(goal.ID, ch.spawn, choreDonePrefix+clipLine(said[len(said)-1], choreClip)); err != nil {
 			return nil, err
 		}
 	}
-	return nil, nil
+	return working, nil
 }
 
 // chore starts a session in goal's worktree to do what, on the project's

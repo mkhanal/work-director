@@ -5705,6 +5705,41 @@ func TestAChoreIsNotStartedAgainWhileOneIsWorkingAndWhatItDidReachesTheNextLook(
 	if notes := f.bodies(t, o.goal, core.EventNote); strings.Count(strings.Join(notes, "\n"), "chore finished:") != 1 {
 		t.Fatalf("notes = %q, want what the chore did filed once", notes)
 	}
+
+	// Chores that finished side by side, one already noted before the ledger
+	// kept which note is whose, are each filed once however many passes run.
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range []string{"a", "b", "c"} {
+		if _, err := l.AddEvent(o.goal, core.EventSpawn, "chore:overseer:chore-"+x); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := l.AddEvent(o.goal, core.EventNote, "chore: chore "+x); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := l.AddEvent(o.goal, core.EventNote, "chore finished: chore c is done"); err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	for _, x := range []string{"a", "b", "c"} {
+		o.say(t, "chore-"+x, "chore "+x+" is done")
+	}
+	looksBefore := len(f.bodies(t, o.goal, core.EventLook))
+	for range 4 {
+		superviseOnce(t, f, o.goal)
+	}
+	notes := strings.Join(f.bodies(t, o.goal, core.EventNote), "\n")
+	for _, x := range []string{"a", "b", "c"} {
+		if n := strings.Count(notes, "chore finished: chore "+x+" is done"); n != 1 {
+			t.Fatalf("chore %s's finish was filed %d times over four passes, want once:\n%s", x, n, notes)
+		}
+	}
+	if looks := f.bodies(t, o.goal, core.EventLook); len(looks) > looksBefore+1 {
+		t.Fatalf("looks over four passes = %q, want at most one for the chores finishing", looks[looksBefore:])
+	}
 }
 
 func TestAPlanChangeWaitsForThePersonInAskMode(t *testing.T) {
