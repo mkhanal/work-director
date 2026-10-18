@@ -10,6 +10,6 @@ let package = Package(
     targets: [
         .target(name: "WorkDirectorKit"),
         .executableTarget(name: "WorkDirector", dependencies: ["WorkDirectorKit"]),
-        .testTarget(name: "WorkDirectorKitTests", dependencies: ["WorkDirectorKit"]),
+        .testTarget(name: "WorkDirectorKitTests", dependencies: ["WorkDirectorKit", "WorkDirector"]),
     ]
 )

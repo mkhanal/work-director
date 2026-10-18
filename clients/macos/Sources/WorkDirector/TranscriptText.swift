@@ -881,7 +881,11 @@ enum TranscriptSetter {
                 let table = tables[c.table] ?? {
                     let t = NSTextTable()
                     t.numberOfColumns = c.columns
-                    t.collapsesBorders = true
+                    // Borders are never collapsed: collapsing them, AppKit
+                    // takes every box around a cell for a cell of an outer
+                    // table, and a table in a card would end the app when
+                    // drawn. A grid's cells draw only their right and bottom
+                    // edges instead, the first row and column their outer ones.
                     t.hidesEmptyCells = false
                     t.layoutAlgorithm = .automaticLayoutAlgorithm
                     t.setWidth(x, type: .absoluteValueType, for: .margin, edge: .minX)
@@ -949,7 +953,10 @@ enum TranscriptSetter {
                     cell.setWidth(Space.s1 + 2, type: .absoluteValueType, for: .padding, edge: .maxY)
                     cell.setWidth(10, type: .absoluteValueType, for: .padding, edge: .minX)
                     cell.setWidth(10, type: .absoluteValueType, for: .padding, edge: .maxX)
-                    cell.setWidth(1, type: .absoluteValueType, for: .border)
+                    cell.setWidth(1, type: .absoluteValueType, for: .border, edge: .maxX)
+                    cell.setWidth(1, type: .absoluteValueType, for: .border, edge: .maxY)
+                    if c.column == 0 { cell.setWidth(1, type: .absoluteValueType, for: .border, edge: .minX) }
+                    if c.row == 0 { cell.setWidth(1, type: .absoluteValueType, for: .border, edge: .minY) }
                     cell.setBorderColor(NSColor(Palette.hairline))
                     if c.header { cell.backgroundColor = NSColor(Palette.plainCard) }
                 }
