@@ -18,6 +18,7 @@ struct WorkDetail: View {
     /// the person moves between work, so its toolbar and frame are not built
     /// again; what it holds starts afresh for each work.
     @State private var page: Page
+    @State private var find = PageFind()
     @AppStorage("detail.tab") private var tab: Tab = .conversation
     @AppStorage("goal.view") private var goalView: GoalView = .overview
     private static let bottom = "bottom"
@@ -152,6 +153,7 @@ struct WorkDetail: View {
                 if focus == nil {
                     pageTop(loaded)
                 }
+                FindBar(find: find)
                 ScrollView {
                     VStack(alignment: .leading, spacing: Space.s5) {
                         if let focus, let focusFeed, let task = focusedTask(focus, in: loaded) {

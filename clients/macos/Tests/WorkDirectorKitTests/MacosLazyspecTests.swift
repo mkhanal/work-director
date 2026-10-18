@@ -1,5 +1,7 @@
+import AppKit
 import Foundation
 import Testing
+@testable import WorkDirector
 @testable import WorkDirectorKit
 
 /// Everything one test run writes, in one folder named for its process. A run
@@ -2107,5 +2109,83 @@ struct SeededTree {
 
         #expect(try CrashLog.gather(home: home.dir, reports: reports, alive: { $0 == 999_993 }).isEmpty, "each crash is paired once")
         #expect(throws: Never.self) { try CrashLog.catchExceptions() }
+    }
+
+    @Test("Find Searches The Words The Page Shows")
+    @MainActor
+    func findSearchesTheWordsThePageShows() async {
+        #expect(Find.ranges(of: "resume", in: "Résumé, RESUME and resumes") == [NSRange(location: 0, length: 6), NSRange(location: 8, length: 6), NSRange(location: 19, length: 6)],
+                "case and accents are ignored")
+        #expect(Find.ranges(of: "", in: "anything").isEmpty)
+        #expect(Find.label(nil, of: 0, query: "") == "" && Find.label(nil, of: 0, query: "x") == "No results" && Find.label(2, of: 12, query: "x") == "3 of 12")
+        #expect(Find.step(11, by: 1, count: 12) == 0 && Find.step(0, by: -1, count: 12) == 11, "next and previous go round")
+
+        func step(_ kind: StepKind, _ text: String) -> Step { Step(kind: kind, at: "2026-10-13T10:00:00Z", text: text, tool: nil, question: nil) }
+        func text(_ steps: [Step], toggled: Set<String> = []) -> Transcript {
+            guard case .text(let t) = Transcript.pieces(steps, speaker: "Claude", running: false, toggled: toggled, time: { _ in "10:00" })[0] else { fatalError("no text") }
+            return t
+        }
+        let first = [step(.prompt, "Make the tests pass"), step(.thinking, "The tests fail on a missing file.\nI will add it."), step(.text, "All tests pass.")]
+        let second = [step(.text, "The tests pass again.")]
+        // Two transcripts on one page, the second below the first; the window is never shown.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 800), styleMask: [.titled], backing: .buffered, defer: true)
+        let page = NSView(frame: window.contentLayoutRect)
+        window.contentView = page
+        let top = TranscriptTextView(), bottom = TranscriptTextView()
+        for (view, y) in [(top, 400.0), (bottom, 0.0)] {
+            view.frame = NSRect(x: 0, y: y, width: 640, height: 400)
+            page.addSubview(view)
+        }
+        top.show(text(first))
+        bottom.show(text(second))
+        let find = PageFind()
+        find.window = window
+        find.run(.show)
+        #expect(find.shown)
+
+        find.query = "add it"
+        await find.search(scroll: true)
+        #expect(find.count == 0 && find.label == "No results", "a folded step's hidden words are not found")
+        top.show(text(first, toggled: ["s1"]))
+        await find.search(scroll: true)
+        #expect(find.count == 1, "unfolded, they are")
+
+        // Opened afresh, the first match is the first at or after the top of what shows.
+        find.close()
+        find.run(.show)
+        find.query = "TESTS"
+        await find.search(scroll: true)
+        #expect(find.count == 4 && find.label == "1 of 4", "every transcript on the page, top to bottom")
+        #expect(find.currentMatch?.view === top)
+        find.run(.previous)
+        #expect(find.label == "4 of 4" && find.currentMatch?.view === bottom, "previous goes round to the last")
+        find.run(.next)
+        find.run(.next)
+        #expect(find.label == "2 of 4" && find.currentMatch?.view === top)
+
+        let current = find.currentMatch!.range
+        let layout = top.layoutManager!, storage = top.textStorage!
+        #expect(layout.temporaryAttribute(.backgroundColor, atCharacterIndex: current.location, effectiveRange: nil) as? NSColor == NSColor.findHighlightColor, "the current match is marked")
+        #expect(storage.attribute(.backgroundColor, at: current.location, effectiveRange: nil) == nil, "marks are never part of the text")
+        top.setSelectedRange(NSRange(location: 0, length: storage.length))
+        let copied = NSPasteboard(name: NSPasteboard.Name("wd-find-test-\(ProcessInfo.processInfo.processIdentifier)"))
+        _ = top.writeSelection(to: copied, types: [.string])
+        #expect(copied.string(forType: .string) == top.shown.copied(0..<top.shown.length), "copying is unchanged by the marks")
+        copied.releaseGlobally()
+
+        // A refresh adds a step: the matches follow, the current one stays.
+        top.show(text(first + [step(.text, "More tests to come.")], toggled: ["s1"]))
+        await find.search(scroll: false)
+        #expect(find.count == 5 && find.label == "2 of 5" && find.currentMatch?.range == current)
+
+        find.close()
+        #expect(!find.shown && find.count == 0)
+        #expect(top.selectedRange() == current, "closing leaves the current match selected")
+        #expect(layout.temporaryAttribute(.backgroundColor, atCharacterIndex: current.location, effectiveRange: nil) == nil, "and its marks go")
+
+        bottom.setSelectedRange(Find.ranges(of: "again", in: bottom.textStorage!.string)[0])
+        window.makeFirstResponder(bottom)
+        find.run(.useSelection)
+        #expect(find.shown && find.query == "again", "⌘E finds what is selected")
     }
 }

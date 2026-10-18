@@ -92,6 +92,8 @@ private struct Laid: @unchecked Sendable {
 
 final class TranscriptTextView: NSTextView {
     private(set) var shown = Transcript(items: [])
+    /// Counts changes to the text, so a search of it knows it is stale.
+    private(set) var version = 0
     /// What is being set off the main thread, and for which width.
     private var setting: (transcript: Transcript, width: CGFloat)?
     private var generation = 0
@@ -239,6 +241,12 @@ final class TranscriptTextView: NSTextView {
         laid = nil
         placing = true
         needsDisplay = true
+        changed()
+    }
+
+    private func changed() {
+        version += 1
+        NotificationCenter.default.post(name: .transcriptChanged, object: self)
     }
 
     /// The end of a long transcript, as much as fills a window or two.
@@ -283,6 +291,7 @@ final class TranscriptTextView: NSTextView {
         laid = (width, made.height)
         placing = true
         landed()
+        changed()
     }
 
     private func restore(_ selection: [NSRange]) {

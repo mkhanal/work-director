@@ -94,6 +94,7 @@ struct WorkDirectorApp: App {
                 Button("Reload") { NotificationCenter.default.post(name: .reload, object: nil) }
                     .keyboardShortcut("r", modifiers: .command)
             }
+            FindCommands()
         }
         Settings {
             Preferences()

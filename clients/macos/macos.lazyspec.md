@@ -308,3 +308,12 @@ hold only that product's work; with none, every product's.
 - An exception the app dies of, one AppKit crashes on included, first writes `$WD_HOME/crashes/<time>-macos-<pid>/note.json`: its name, reason and stack, what was on screen and what was done.
 - On the next launch a running file whose process is gone becomes such a note, or joins its exception's, and the system's `WorkDirector-*.ips` for that process is copied beside it; `wd crashes` reads the pair.
 - A clean quit leaves nothing behind.
+
+## Find Searches The Words The Page Shows
+- ⌘F on a page showing a conversation, record or overview opens a find bar at its top; Done or Esc closes it.
+- It finds what was typed with case and accents ignored, in every transcript the page shows, top to bottom; a folded step's hidden words are not found.
+- Every match is marked and the current one more strongly, scrolled into view; the bar reads "3 of 12", or No results.
+- ⌘G and Return go to the next match, ⇧⌘G and Shift-Return to the previous one, round from the last to the first.
+- Marks are never part of the text: what is selected and copied is unchanged by them.
+- As the page refreshes, the matches follow it and the current match stays where it was.
+- Closing the bar leaves the current match selected; ⌘E finds what is selected.
