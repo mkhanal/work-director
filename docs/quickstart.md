@@ -92,3 +92,25 @@ as one button:
   your own go in `~/.work-director/taste/cards/<category>/<id>.md`; every brief reads them on
   the next command, and one with a shipped card's id replaces it.
 - Everything the app does is a `wd` command, so a terminal and the app always agree.
+
+## When the app crashes
+
+`wd crashes` lists every crash of the desktop apps and of the `wd serve` they run, newest
+first; `wd crashes <id>` shows one: why it crashed, what was on screen, the last things the
+app did (pages shown, the names of its requests to `wd`), and the backtraces. Add `--json`
+to hand it to an agent.
+
+- Each crash is a folder in `~/.work-director/crashes/<time>-<macos|linux>-<pid>/`:
+  `note.json`, and on macOS the system's crash report (`WorkDirector-*.ips`), copied there
+  from `~/Library/Logs/DiagnosticReports` the next time the app opens.
+- An exception the macOS app dies of writes the note as it dies. A Swift trap (an index out
+  of range, a force unwrap) cannot be caught: the app keeps
+  `crashes/running-macos-<pid>.json` up to date instead, and the next launch turns it into
+  the note, the system's report giving the reason.
+- A `wd serve` that panics leaves what Go printed in
+  `~/.work-director/logs/serve-<time>-<pid>.log`.
+- Release builds of the macOS app keep their function names. Their source lines are in
+  `WorkDirector.dSYM`: `dist/` beside a local build, a `-dSYM.zip` asset on each release.
+  With it anywhere Spotlight indexes, new crash reports carry file and line; for an older
+  one, `atos -o WorkDirector.dSYM/Contents/Resources/DWARF/WorkDirector -l <load address>
+  <addresses>`.

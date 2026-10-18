@@ -68,6 +68,10 @@ jobs:
           zip="Work-Director-${GITHUB_REF_NAME}-macos-$(uname -m).zip"
           ditto -c -k --keepParent "dist/Work Director.app" "dist/$zip"
           (cd dist && shasum -a 256 "$zip" > "$zip.sha256" && cat "$zip.sha256" >> checksums.txt)
+          # The app's symbols, for reading a crash report of this release.
+          dsym="Work-Director-${GITHUB_REF_NAME}-macos-$(uname -m)-dSYM.zip"
+          ditto -c -k --keepParent dist/WorkDirector.dSYM "dist/$dsym"
+          (cd dist && shasum -a 256 "$dsym" > "$dsym.sha256" && cat "$dsym.sha256" >> checksums.txt)
           "dist/Work Director.app/Contents/MacOS/wd" --version | grep -F "${GITHUB_REF_NAME}"
 
       - name: build the mac disk image

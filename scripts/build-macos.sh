@@ -19,7 +19,11 @@ app="dist/Work Director.app"
 swift build --package-path clients/macos -c release --product WorkDirector
 bin=$(swift build --package-path clients/macos -c release --show-bin-path)
 
-rm -rf "$app"
+# The app is not stripped, so a crash report names its functions; their
+# source files and lines are in dist/WorkDirector.dSYM. macOS's crash reporter
+# finds a dSYM by its UUID through Spotlight, and atos reads one given.
+rm -rf "$app" dist/WorkDirector.dSYM
+dsymutil "$bin/WorkDirector" -o dist/WorkDirector.dSYM
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin/WorkDirector" "$app/Contents/MacOS/WorkDirector"
 CGO_ENABLED=0 go build -trimpath \
@@ -51,4 +55,4 @@ PLIST
 codesign --force --sign - "$app/Contents/MacOS/wd"
 codesign --force --sign - "$app"
 
-echo "built $app ($version, $commit)"
+echo "built $app ($version, $commit), its symbols in dist/WorkDirector.dSYM"
