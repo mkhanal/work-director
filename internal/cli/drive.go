@@ -70,7 +70,7 @@ func (c *Cli) closeFinished(goal core.Work) (driver.Closing, error) {
 			out.Blocked[t.ID] = stopped
 			continue
 		}
-		gate, err := c.closeOne(t)
+		gate, _, err := c.closeOne(t)
 		if err != nil {
 			return out, err
 		}
@@ -118,45 +118,56 @@ func (c *Cli) closeReady(id string) (ready bool, stopped string, err error) {
 const stoppedAtNote = "drive stopped at "
 
 // closeOne runs the gates for one piece of finished work and returns the gate
-// that stopped it, or "" when it closed.
-func (c *Cli) closeOne(t core.Work) (string, error) {
-	pass, body, _, err := c.runVerify(t.ID)
+// that stopped it and why in a clause for the person, or "" when it closed.
+// Work that changed nothing in its checkout has nothing for the checks to
+// prove, so it closes without them.
+func (c *Cli) closeOne(t core.Work) (gate, why string, err error) {
+	p, err := c.project(t.Project)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	if !pass {
-		// The gate is doing its job. What it found goes on the work, because a
+	dir, err := c.workDir(t, p)
+	if err != nil {
+		return "", "", err
+	}
+	changed, err := c.changedSinceStart(t, dir)
+	if err != nil {
+		return "", "", err
+	}
+	if !changed {
+		if _, err := c.Ledger.AddEvent(t.ID, core.EventNote, noChangesNote); err != nil {
+			return "", "", err
+		}
+	} else if why, err := c.checkToClose(t, p, dir); err != nil || why != "" {
+		// The gate is doing its job. What it found is on the work, because a
 		// loop that reported a clean run over a tree that does not build would
 		// be believed, and believed wrongly is worse than stopped.
-		if _, err := c.Ledger.AddEvent(t.ID, core.EventNote, stoppedAtNote+"verify\n"+body); err != nil {
-			return "", err
-		}
-		return "verify", nil
+		return "verify", why, err
 	}
 	// A task under a goal needs no landing link of its own: the goal is what
 	// lands, and a task holding its own would claim a place the change is not.
 	if t.Parent == nil {
 		if _, err := c.recordPR(t.ID, nil); err != nil {
 			if _, err := c.Ledger.AddEvent(t.ID, core.EventNote, stoppedAtNote+"pull request\n"+err.Error()); err != nil {
-				return "", err
+				return "", "", err
 			}
-			return "pull request", nil
+			return "pull request", "it has no landing to point at: " + err.Error(), nil
 		}
 	}
 	if _, err := c.Ledger.SoftDone(t.ID, t.Parent == nil); err != nil {
 		var nr core.NotReady
 		if errors.As(err, &nr) {
 			if _, err := c.Ledger.AddEvent(t.ID, core.EventNote, stoppedAtNote+"soft-done\n"+nr.Error()); err != nil {
-				return "", err
+				return "", "", err
 			}
-			return "soft-done", nil
+			return "soft-done", nr.Error(), nil
 		}
-		return "", err
+		return "", "", err
 	}
 	if _, err := c.Ledger.Transition(t.ID, core.StateDone); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return "", nil
+	return "", "", nil
 }
 
 // tasteJudgeOnce asks about the taste, which needs its own brief and so its own

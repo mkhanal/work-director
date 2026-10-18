@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY, work TEXT NOT NULL R
   event INTEGER REFERENCES event(id), look INTEGER REFERENCES event(id), by TEXT NOT NULL DEFAULT 'person');
 CREATE TABLE IF NOT EXISTS workspace (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, creates INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL, updated TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sending (goal TEXT PRIMARY KEY REFERENCES work(id), look INTEGER NOT NULL REFERENCES event(id), at TEXT NOT NULL);
-` + goalTreeSchema
+` + startedSchema + goalTreeSchema
 
 // Additive migration for ledgers created before parents, worktree origins,
 // goal types, structured decisions or the epic rename existed. A worktree row
@@ -127,7 +127,15 @@ func New(path string) (*Ledger, error) {
 	return &Ledger{db: db}, nil
 }
 
+// startedSchema is the tree of files a task's checkout held when it started,
+// as git names it: what it changed is read against this. A whole table, for
+// ledgers created before it existed.
+const startedSchema = `CREATE TABLE IF NOT EXISTS started (work TEXT PRIMARY KEY REFERENCES work(id), tree TEXT NOT NULL, at TEXT NOT NULL);`
+
 func migrate(db *sql.DB) error {
+	if _, err := db.Exec(startedSchema); err != nil {
+		return err
+	}
 	if _, err := db.Exec(workspaceSchema); err != nil {
 		return err
 	}
@@ -2003,6 +2011,23 @@ func (l *Ledger) Unseen(goal string, after int) ([]core.Event, error) {
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// StartedAt records tree as the files work's checkout held when it started.
+// The first start is kept: a task started again is still measured from it.
+func (l *Ledger) StartedAt(work, tree string) error {
+	_, err := l.db.Exec(`INSERT INTO started (work, tree, at) VALUES (?, ?, ?) ON CONFLICT (work) DO NOTHING`, work, tree, now())
+	return err
+}
+
+// Started is the tree of files work's checkout held when it started; ok is
+// false when none was kept.
+func (l *Ledger) Started(work string) (tree string, ok bool, err error) {
+	err = l.db.QueryRow(`SELECT tree FROM started WHERE work = ?`, work).Scan(&tree)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return tree, err == nil, err
 }
 
 // SetFiled records the transcript point work was last read at.

@@ -26,6 +26,19 @@ type Picture struct {
 	Concerns   []core.Concern
 	Checks     []string
 	Worktree   string
+	// Done and Refused are what came of the supervisor's last reply: the
+	// actions carried out, and those that did not happen with why.
+	Done    []string
+	Refused []string
+	// Chores are the chores started on the goal, oldest first.
+	Chores []ChorePicture
+}
+
+// ChorePicture is one chore as its supervisor sees it: what it is for, and
+// what it said when it finished, empty while it works.
+type ChorePicture struct {
+	What     string
+	Finished string
 }
 
 // SubPicture is one sub-goal as its supervisor sees it: its row, what it waits
@@ -43,7 +56,9 @@ type SubPicture struct {
 	Told       string
 	Replied    string
 	Superseded string
-	Children   []SubPicture
+	// Held is why closing it stopped, while it is in review since.
+	Held     string
+	Children []SubPicture
 }
 
 // reportClip bounds each report in the brief: the supervisor reads every
@@ -93,6 +108,9 @@ func writeSubs(b *strings.Builder, subs []SubPicture, indent string) {
 		}
 		if s.Stopped != "" {
 			fmt.Fprintf(b, "%sstopped without a report; it last said: %s\n", more, strings.ReplaceAll(clip(s.Stopped, reportClip), "\n", nl))
+		}
+		if s.Held != "" {
+			fmt.Fprintf(b, "%scould not close: %s\n", more, strings.ReplaceAll(clip(s.Held, reportClip), "\n", nl))
 		}
 		if s.Replied != "" {
 			fmt.Fprintf(b, "%sthe person told its agent: %s\n", more, strings.ReplaceAll(clip(s.Told, reportClip), "\n", nl))
@@ -144,6 +162,25 @@ func SupervisionBrief(p Picture) string {
 		b.WriteString("\nSuperseded by a course change, with why; do not propose them again:\n")
 		for _, s := range p.Superseded {
 			fmt.Fprintf(&b, "- %s %s: %s\n", s.Work.ID, s.Work.Title, s.Superseded)
+		}
+	}
+	if len(p.Done)+len(p.Refused) > 0 {
+		b.WriteString("\nYour last reply, as carried out:\n")
+		for _, d := range p.Done {
+			fmt.Fprintf(&b, "- done: %s\n", clip(d, 300))
+		}
+		for _, r := range p.Refused {
+			fmt.Fprintf(&b, "- not done: %s\n", r)
+		}
+	}
+	if len(p.Chores) > 0 {
+		b.WriteString("\nChores you started, oldest first; one runs at a time:\n")
+		for _, ch := range p.Chores {
+			said := "still working"
+			if ch.Finished != "" {
+				said = "finished, saying: " + strings.ReplaceAll(clip(ch.Finished, reportClip), "\n", "\n  ")
+			}
+			fmt.Fprintf(&b, "- %s — %s\n", clip(ch.What, 300), said)
 		}
 	}
 	if len(p.Concerns) > 0 {
@@ -514,6 +551,26 @@ func Said(texts []string) string {
 		}
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+// ReplyOutcome is what a supervised event says came of the reply it files: the
+// lines under its Done: and Refused: headings.
+func ReplyOutcome(body string) (done, refused []string) {
+	var into *[]string
+	for _, line := range strings.Split(body, "\n") {
+		switch line {
+		case "Done:":
+			into = &done
+			continue
+		case "Refused:":
+			into = &refused
+			continue
+		}
+		if item, ok := strings.CutPrefix(line, "- "); ok && into != nil {
+			*into = append(*into, item)
+		}
+	}
+	return done, refused
 }
 
 // action is the one action line l says, if it says one.

@@ -513,6 +513,13 @@ func (c *Cli) spawn(rest []string) error {
 		wt := flag(a, "worktree")
 		runnerWorktree = &wt
 	}
+	// A session the runner puts in a worktree of its own starts somewhere wd
+	// does not know yet, so only a checkout wd chose keeps its start.
+	if runnerWorktree == nil || !*runnerWorktree {
+		if err := c.keepStart(id, cwd); err != nil {
+			return err
+		}
+	}
 	briefText, err := c.briefFor(id)
 	if err != nil {
 		return err
@@ -588,6 +595,9 @@ func (c *Cli) spawnTasks(goal core.Work, p *project.Project, runners []string, d
 		runnerName := runners[i%len(runners)]
 		rn := detected[runnerName]
 		if err := c.Ledger.SetCwd(child.ID, cwd); err != nil {
+			return nil, nil, err
+		}
+		if err := c.keepStart(child.ID, cwd); err != nil {
 			return nil, nil, err
 		}
 		briefText, err := c.briefFor(child.ID)
@@ -2021,9 +2031,13 @@ func (c *Cli) verify(rest []string) error {
 		return fail("usage: wd verify <id>")
 	}
 	id := rest[0]
-	pass, body, results, err := c.runVerify(id)
+	pass, body, runs, err := c.runVerify(id)
 	if err != nil {
 		return err
+	}
+	results := make([]string, len(runs))
+	for i, r := range runs {
+		results[i] = r.String()
 	}
 	if err := c.out(map[string]any{"pass": pass, "results": results}, body); err != nil {
 		return err
@@ -2038,7 +2052,7 @@ func (c *Cli) verify(rest []string) error {
 // records the result. It is separate from the command so a driven run can put a
 // gate through it without printing a second document into the middle of its own
 // output, which on the JSON rail would be two documents where there must be one.
-func (c *Cli) runVerify(id string) (pass bool, body string, results []string, err error) {
+func (c *Cli) runVerify(id string) (pass bool, body string, runs []checkRun, err error) {
 	w, err := c.Ledger.Get(id)
 	if err != nil {
 		return false, "", nil, err
@@ -2062,17 +2076,14 @@ func (c *Cli) runVerify(id string) (pass bool, body string, results []string, er
 	if len(checks) == 0 {
 		return false, "", nil, fail("project %s lists no verify commands and %s defines no checks; add them under verify: in its project file", p.Name, cwd)
 	}
-	results = []string{}
+	if runs, err = runChecks(checks, cwd); err != nil {
+		return false, "", nil, err
+	}
 	pass = true
-	for _, cmdline := range checks {
-		r, rerr := runner.Run([]string{"bash", "-lc", cmdline}, cwd)
-		if rerr != nil {
-			return false, "", nil, rerr
-		}
-		if r.Code != 0 {
-			pass = false
-		}
-		results = append(results, fmt.Sprintf("%s → %d\n%s", cmdline, r.Code, lastLines(strings.TrimSpace(r.Stdout+r.Stderr), 5)))
+	results := make([]string, len(runs))
+	for i, r := range runs {
+		pass = pass && r.Code == 0
+		results[i] = r.String()
 	}
 	body = "fail\n"
 	if pass {
@@ -2082,7 +2093,30 @@ func (c *Cli) runVerify(id string) (pass bool, body string, results []string, er
 	if _, err := c.Ledger.AddEvent(id, core.EventVerify, body); err != nil {
 		return false, "", nil, err
 	}
-	return pass, body, results, nil
+	return pass, body, runs, nil
+}
+
+// checkRun is one check run: its command, its exit code and the end of what
+// it printed.
+type checkRun struct {
+	Cmd  string
+	Code int
+	Tail string
+}
+
+func (r checkRun) String() string { return fmt.Sprintf("%s → %d\n%s", r.Cmd, r.Code, r.Tail) }
+
+// runChecks runs each check in dir.
+func runChecks(checks []string, dir string) ([]checkRun, error) {
+	runs := make([]checkRun, 0, len(checks))
+	for _, cmdline := range checks {
+		r, err := runner.Run([]string{"bash", "-lc", cmdline}, dir)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, checkRun{Cmd: cmdline, Code: r.Code, Tail: lastLines(strings.TrimSpace(r.Stdout+r.Stderr), 5)})
+	}
+	return runs, nil
 }
 
 func lastLines(text string, n int) string {

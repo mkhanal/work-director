@@ -3730,11 +3730,14 @@ func TestARefusedGateIsHeldOnTheWorkAndTriedOnce(t *testing.T) {
 	f := newCLIFixture(t)
 	publish(t, f.sample)
 	driveProject(t, f)
-	// Its verify cannot pass, so the gate has something to say.
+	// Its work fails a check main passes, so the gate has something to say.
 	path := filepath.Join(f.wdHome, "projects", "driven.md")
-	broken := "---\npath: " + f.sample + "\nrunner: driven\nmode: auto\nstack: [go]\nverify: [test -f NOT-THERE]\ndefault_branch: main\n---\nA project that cannot pass its own verify.\n"
+	broken := "---\npath: " + f.sample + "\nrunner: driven\nmode: auto\nstack: [go]\nverify: [test ! -f broken.txt]\ndefault_branch: main\n---\nA project whose work breaks its own verify.\n"
 	if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
 		t.Fatalf("write project: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(f.sample, "broken.txt"), []byte("broken\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	goal, task := drivenGoal(t, f, "Cannot be verified")
 	judgeAnswer(t, f, true)
@@ -5321,6 +5324,377 @@ func TestAChoreRunsAsASessionOnTheGoalNotAsWork(t *testing.T) {
 	}
 	if string(before) != string(after) {
 		t.Fatalf("a chore filed work: %s", after)
+	}
+}
+
+// checked is a goal on the overseen project whose tasks were spawned by wd in
+// the goal's own worktree, each reported done, with the supervisor started on
+// it: what closing a task runs depends on what the task changed there.
+type checked struct {
+	overseen
+	tasks      []string
+	titles     []string
+	worktree   string
+	supervisor string
+}
+
+// checkedGoal files a goal with one task per title, spawns each, writes what
+// each task's entry in changes says into the worktree, reports each done and
+// has the supervisor look once. verify is the project's checks.
+func checkedGoal(t *testing.T, f *cliFixture, verify []string, titles []string, changes map[int]string) checked {
+	t.Helper()
+	o := overseen{state: filepath.Join(f.dir, "fake-state")}
+	if err := os.MkdirAll(o.state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := checked{overseen: o, titles: titles}
+	c.project(t, f, verify)
+	c.goal = jsonString(t, f.runOK(t, "goal", "add", "overseen", "Know where the data leaks", "--json"), "id")
+	for _, title := range titles {
+		id := jsonString(t, f.runOK(t, "add", "overseen", title, "--goal", c.goal, "--json"), "id")
+		f.runOK(t, "spawn", id)
+		c.tasks = append(c.tasks, id)
+	}
+	c.worktree = filepath.Join(f.wdHome, "worktrees", "overseen-goal-"+c.goal)
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, err := l.Get(c.goal); err != nil || g.State != core.StateRunning {
+		if _, err := l.Transition(c.goal, core.StateRunning); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, id := range c.tasks {
+		if file, ok := changes[i]; ok {
+			if err := os.WriteFile(filepath.Join(c.worktree, file), []byte("written by "+id+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := l.AddEvent(id, core.EventReport, "DONE\nSTATUS: DONE"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := l.Transition(id, core.StateReview); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.Close()
+	if s := superviseOnce(t, f, c.goal); !s.Looked {
+		t.Fatalf("first supervise = %+v, want a look", s)
+	}
+	for _, sp := range f.bodies(t, c.goal, core.EventSpawn) {
+		if rest, ok := strings.CutPrefix(sp, "supervise overseer "); ok {
+			c.supervisor = rest
+		}
+	}
+	if c.supervisor == "" {
+		t.Fatalf("no supervisor was started on %s", c.goal)
+	}
+	return c
+}
+
+// project writes the overseen project with checks verify.
+func (c checked) project(t *testing.T, f *cliFixture, verify []string) {
+	t.Helper()
+	body := "---\npath: " + f.sample + "\nrunner: overseer\nmode: auto\nverify: [" + strings.Join(verify, ", ") + "]\n---\n"
+	if err := os.WriteFile(filepath.Join(f.wdHome, "projects", "overseen.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// reply has the supervisor reply with lines and carries the reply out.
+func (c checked) reply(t *testing.T, f *cliFixture, lines ...string) supervised {
+	t.Helper()
+	c.say(t, c.supervisor, lines...)
+	return superviseOnce(t, f, c.goal)
+}
+
+// lastSupervised is the body of the goal's latest supervised event.
+func (c checked) lastSupervised(t *testing.T, f *cliFixture) string {
+	t.Helper()
+	sup := f.bodies(t, c.goal, core.EventSupervised)
+	if len(sup) == 0 {
+		t.Fatalf("%s has no supervised event", c.goal)
+	}
+	return sup[len(sup)-1]
+}
+
+// openConcerns are the texts of the open concerns on work.
+func openConcerns(t *testing.T, f *cliFixture, work string) []string {
+	t.Helper()
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	cs, err := l.Concerns(&work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := []string{}
+	for _, cx := range cs {
+		if cx.Resolved == 0 {
+			out = append(out, cx.Text)
+		}
+	}
+	return out
+}
+
+func TestATaskThatChangedNothingClosesWithoutRunningTheChecks(t *testing.T) {
+	f := newCLIFixture(t)
+	c := checkedGoal(t, f, []string{"test -f README.md"}, []string{"Audit the routes", "Write the findings down"}, nil)
+	untouched, written := c.tasks[0], c.tasks[1]
+	c.reply(t, f, "ACTIONS:", "MET "+untouched+": the audit is complete")
+	if err := os.WriteFile(filepath.Join(c.worktree, "findings.md"), []byte("findings\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c.reply(t, f, "ACTIONS:", "MET "+written+": the findings are written")
+	for _, id := range c.tasks {
+		if got := stateOf(t, f, id); got != core.StateDone {
+			t.Fatalf("%s after MET = %s, want done", id, got)
+		}
+	}
+	if v := f.bodies(t, untouched, core.EventVerify); len(v) != 0 {
+		t.Fatalf("checks ran on %s, which changed nothing: %q", untouched, v)
+	}
+	if notes := f.bodies(t, untouched, core.EventNote); !slices.Contains(notes, "closed: no changes to check") {
+		t.Fatalf("notes on %s = %q, want it closed with no changes to check", untouched, notes)
+	}
+	if v := f.bodies(t, written, core.EventVerify); len(v) != 1 || !strings.HasPrefix(v[0], "pass") {
+		t.Fatalf("verify on %s, which wrote a file = %q, want its checks run", written, v)
+	}
+}
+
+func TestACheckThatFailsOnMainTooDoesNotHoldATask(t *testing.T) {
+	f := newCLIFixture(t)
+	verify := []string{"test -f README.md", "test -f NOT-THERE", "test ! -f broken.txt"}
+	c := checkedGoal(t, f, verify, []string{"Map the routes", "Rename the module"}, map[int]string{0: "routes.md"})
+	mapped, broke := c.tasks[0], c.tasks[1]
+	c.reply(t, f, "ACTIONS:", "MET "+mapped+": every route is mapped")
+	if got := stateOf(t, f, mapped); got != core.StateDone {
+		t.Fatalf("%s, failing only a check main fails too, = %s; want done", mapped, got)
+	}
+	notes := strings.Join(f.bodies(t, mapped, core.EventNote), "\n")
+	if !strings.Contains(notes, "test -f NOT-THERE") || strings.Contains(notes, "test ! -f broken.txt") {
+		t.Fatalf("notes on %s = %q, want the check that fails on main named", mapped, notes)
+	}
+	want := "The project's own checks fail on main (test -f NOT-THERE), so they can't prove changes right now."
+	if got := openConcerns(t, f, c.goal); !slices.Equal(got, []string{want}) {
+		t.Fatalf("open concerns on the goal = %q, want one: %q", got, want)
+	}
+	if list := gitOut(t, f.sample, "worktree", "list"); len(strings.Split(list, "\n")) != 4 {
+		t.Fatalf("worktrees after checking main:\n%s\nwant the checkout main was checked in removed", list)
+	}
+	// A second task failing the same check on main does not raise it again.
+	third := jsonString(t, f.runOK(t, "add", "overseen", "List the logins", "--goal", c.goal, "--json"), "id")
+	f.runOK(t, "spawn", third)
+	if err := os.WriteFile(filepath.Join(c.worktree, "logins.md"), []byte("logins\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reportDone(t, f, third)
+	c.reply(t, f, "ACTIONS:", "MET "+third+": the logins are listed")
+	if got := stateOf(t, f, third); got != core.StateDone {
+		t.Fatalf("%s = %s, want done", third, got)
+	}
+	if got := openConcerns(t, f, c.goal); len(got) != 1 {
+		t.Fatalf("open concerns = %q, want still one", got)
+	}
+	// A check that passes on main holds the task that fails it.
+	if err := os.WriteFile(filepath.Join(c.worktree, "broken.txt"), []byte("broken\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c.reply(t, f, "ACTIONS:", "MET "+broke+": the module is renamed")
+	if got := stateOf(t, f, broke); got != core.StateReview {
+		t.Fatalf("%s, failing a check main passes, = %s; want it held in review", broke, got)
+	}
+	held := f.bodies(t, broke, core.EventNote)
+	if len(held) == 0 || !strings.HasPrefix(held[len(held)-1], "drive stopped at verify") || !strings.Contains(held[len(held)-1], "`test ! -f broken.txt` passes on main") {
+		t.Fatalf("notes on %s = %q, want it held at verify naming the check that passes on main", broke, held)
+	}
+	// Checks that pass in full settle the concern.
+	if err := os.Remove(filepath.Join(c.worktree, "broken.txt")); err != nil {
+		t.Fatal(err)
+	}
+	c.project(t, f, []string{"test -f README.md", "test ! -f broken.txt"})
+	c.reply(t, f, "ACTIONS:", "MET "+broke+": the module is renamed")
+	if got := stateOf(t, f, broke); got != core.StateDone {
+		t.Fatalf("%s with its checks passing = %s, want done", broke, got)
+	}
+	if got := openConcerns(t, f, c.goal); len(got) != 0 {
+		t.Fatalf("open concerns once the checks pass = %q, want none", got)
+	}
+}
+
+func TestWhatTheDirectorCouldNotDoIsToldInPlainWordsAndAtItsNextLook(t *testing.T) {
+	f := newCLIFixture(t)
+	c := checkedGoal(t, f, []string{"test ! -f broken.txt"}, []string{"Rename the module", "Draft the design"}, map[int]string{0: "broken.txt"})
+	broke, running := c.tasks[0], c.tasks[1]
+	c.reply(t, f, "Closing the rename now.", "ACTIONS:", "MET "+broke+": the module is renamed", "START "+running)
+	body := c.lastSupervised(t, f)
+	refused := body[strings.Index(body, "Refused:"):]
+	for _, want := range []string{"Couldn't close “Rename the module”", "checks", "stays in review", "Couldn't start “Draft the design”"} {
+		if !strings.Contains(refused, want) {
+			t.Fatalf("refused = %q, want %q", refused, want)
+		}
+	}
+	if strings.Contains(refused, "MET "+broke) || strings.Contains(refused, broke) {
+		t.Fatalf("refused = %q, want the work named by its title, not its action or id", refused)
+	}
+	// The next look carries what the reply did not do, and why the task is still in review.
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.AddEvent(c.goal, core.EventDecision, "keep going"); err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	if s := superviseOnce(t, f, c.goal); !s.Looked {
+		t.Fatalf("supervise after a decision = %+v, want a look", s)
+	}
+	brief := c.lastBriefTo(t, c.supervisor)
+	for _, want := range []string{"Your last reply", "Couldn't close “Rename the module”", "could not close", "test ! -f broken.txt"} {
+		if !strings.Contains(brief, want) {
+			t.Fatalf("the next brief lacks %q:\n%s", want, brief)
+		}
+	}
+}
+
+// lastBriefTo is the latest supervision brief session was sent.
+func (o overseen) lastBriefTo(t *testing.T, session string) string {
+	t.Helper()
+	sent := readFile(t, filepath.Join(o.state, "sent-"+session))
+	i := strings.LastIndex(sent, "You supervise goal")
+	if i < 0 {
+		t.Fatalf("%s was sent no brief:\n%s", session, sent)
+	}
+	return sent[i:]
+}
+
+// reportDone files a DONE report on id and moves it to review.
+func reportDone(t *testing.T, f *cliFixture, id string) {
+	t.Helper()
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	if _, err := l.AddEvent(id, core.EventReport, "DONE\nSTATUS: DONE"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Transition(id, core.StateReview); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAGoalNothingCanMoveAsksThePersonWhatToDo(t *testing.T) {
+	// stuck is a goal whose one task's close stopped at its checks, with a
+	// second task waiting on it, and the question the goal then asks.
+	stuck := func(t *testing.T) (*cliFixture, checked, string) {
+		t.Helper()
+		f := newCLIFixture(t)
+		c := checkedGoal(t, f, []string{"test ! -f broken.txt"}, []string{"Rename the module"}, map[int]string{0: "broken.txt"})
+		waiting := jsonString(t, f.runOK(t, "add", "overseen", "Rename the callers", "--goal", c.goal, "--json"), "id")
+		f.runOK(t, "goal", "after", waiting, c.tasks[0])
+		c.reply(t, f, "Closing the rename now.", "ACTIONS:", "MET "+c.tasks[0]+": the module is renamed")
+		if got := stateOf(t, f, c.goal); got != core.StateRunning {
+			t.Fatalf("goal right after the refused close = %s, want running", got)
+		}
+		// The callers' task filed since has the supervisor look; it waits.
+		if s := superviseOnce(t, f, c.goal); !s.Looked {
+			t.Fatalf("supervise after a task was filed = %+v, want a look", s)
+		}
+		if got := stateOf(t, f, c.goal); got != core.StateRunning {
+			t.Fatalf("goal while its supervisor looks = %s, want running", got)
+		}
+		c.reply(t, f, "Waiting on the rename.", "ACTIONS:", "WAIT")
+		superviseOnce(t, f, c.goal)
+		if got := stateOf(t, f, c.goal); got != core.StateNeedsInput {
+			t.Fatalf("goal with nothing able to move = %s, want needs-input", got)
+		}
+		qs := f.bodies(t, c.goal, core.EventQuestion)
+		if len(qs) != 1 {
+			t.Fatalf("questions = %q, want one", qs)
+		}
+		return f, c, qs[0]
+	}
+	t.Run("asks", func(t *testing.T) {
+		f, c, q := stuck(t)
+		for _, want := range []string{"This goal is stuck: nothing is working and nothing can start.", "“Rename the module”", "“Rename the callers”",
+			"- Close “Rename the module” anyway", "- Send “Rename the module” back to its agent",
+			"- Start a task to fix the project's checks", "- Have the director look again"} {
+			if !strings.Contains(q, want) {
+				t.Fatalf("question = %q, want %q", q, want)
+			}
+		}
+		f.runOK(t, "answer", c.goal, "Close “Rename the module” anyway")
+		if got := stateOf(t, f, c.tasks[0]); got != core.StateDone {
+			t.Fatalf("%s after closing it anyway = %s, want done", c.tasks[0], got)
+		}
+		if sent := readFile(t, filepath.Join(c.state, "sent-"+c.supervisor)); !strings.Contains(sent, "Close “Rename the module” anyway") {
+			t.Fatalf("the supervisor was sent %q, want the person's answer", sent)
+		}
+	})
+	t.Run("sends back", func(t *testing.T) {
+		f, c, _ := stuck(t)
+		f.runOK(t, "answer", c.goal, "Send “Rename the module” back to its agent")
+		session := "overseer-s00001"
+		if sent := readFile(t, filepath.Join(c.state, "sent-"+session)); !strings.Contains(sent, "test ! -f broken.txt") {
+			t.Fatalf("the task's agent was sent %q, want the checks to make pass", sent)
+		}
+		if got := stateOf(t, f, c.tasks[0]); got != core.StateRunning {
+			t.Fatalf("%s sent back = %s, want running", c.tasks[0], got)
+		}
+	})
+	t.Run("fixes the checks", func(t *testing.T) {
+		f, c, _ := stuck(t)
+		f.runOK(t, "answer", c.goal, "Start a task to fix the project's checks")
+		var tasks []core.Work
+		if err := json.Unmarshal([]byte(f.runOK(t, "tasks", c.goal, "--json")), &tasks); err != nil {
+			t.Fatal(err)
+		}
+		fix := tasks[len(tasks)-1]
+		if len(tasks) != 3 || fix.State != core.StateRunning || !strings.Contains(fix.Title, "checks") {
+			t.Fatalf("tasks = %+v, want a task to fix the checks, started", tasks)
+		}
+	})
+}
+
+func TestAChoreIsNotStartedAgainWhileOneIsWorkingAndWhatItDidReachesTheNextLook(t *testing.T) {
+	f := newCLIFixture(t)
+	o := overseenGoal(t, f)
+	superviseOnce(t, f, o.goal)
+	o.say(t, supervisor, "ACTIONS:", "CHORE: file the two bug reports")
+	if s := superviseOnce(t, f, o.goal); len(s.Actions) != 1 {
+		t.Fatalf("first CHORE = %+v", s)
+	}
+	chore := "overseer-s00002"
+	o.busy(t, chore, true)
+	o.say(t, supervisor, "ACTIONS:", "CHORE: if not already done, file the two bug reports")
+	s := superviseOnce(t, f, o.goal)
+	if len(s.Refused) != 1 || !strings.Contains(s.Refused[0], "file the two bug reports") {
+		t.Fatalf("CHORE while one works = %+v, want it refused naming the one working", s)
+	}
+	if _, err := os.Stat(filepath.Join(o.state, "brief-overseer-s00003")); err == nil {
+		t.Fatal("a second chore session was started")
+	}
+	o.say(t, chore, "Filed both reports: #12 and #13.")
+	o.busy(t, chore, false)
+	if s := superviseOnce(t, f, o.goal); !s.Looked {
+		t.Fatalf("supervise after the chore finished = %+v, want a look", s)
+	}
+	if notes := f.bodies(t, o.goal, core.EventNote); !slices.Contains(notes, "chore finished: Filed both reports: #12 and #13.") {
+		t.Fatalf("notes = %q, want what the chore did", notes)
+	}
+	brief := o.lastBriefTo(t, supervisor)
+	for _, want := range []string{"file the two bug reports", "Filed both reports: #12 and #13."} {
+		if !strings.Contains(brief, want) {
+			t.Fatalf("brief lacks %q:\n%s", want, brief)
+		}
+	}
+	superviseOnce(t, f, o.goal)
+	if notes := f.bodies(t, o.goal, core.EventNote); strings.Count(strings.Join(notes, "\n"), "chore finished:") != 1 {
+		t.Fatalf("notes = %q, want what the chore did filed once", notes)
 	}
 }
 

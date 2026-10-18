@@ -62,6 +62,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Goal Serves Its Record", aGoalServesItsRecord)
 	t.Run("Sentences A Goal Serves Are Free Of Internal Terms", sentencesAGoalServesAreFreeOfInternalTerms)
 	t.Run("A Goal Serves Why Work Stopped Or Is Blocked", aGoalServesWhyWorkStoppedOrIsBlocked)
+	t.Run("A Goal Serves That The Project's Checks Fail On Main, With A Sub-Goal To Fix Them", aGoalServesThatTheProjectsChecksFailOnMainWithASubGoalToFixThem)
 	t.Run("A Running Session's Question Puts Its Work In Needs You", aRunningSessionsQuestionPutsItsWorkInNeedsYou)
 	t.Run("A Running Session's Report Moves Its Work On", aRunningSessionsReportMovesItsWorkOn)
 	t.Run("Work Reads As Working Only While An Agent Is Working", workReadsAsWorkingOnlyWhileAnAgentIsWorking)
@@ -77,6 +78,68 @@ func TestServe(t *testing.T) {
 	t.Run("Errors Return JSON", errorsReturnJSON)
 	t.Run("A Goal Serves The Files Attached Under It", aGoalServesTheFilesAttachedUnderIt)
 	t.Run("A Goal Serves What The Person Said That Still Waits For The Director", aGoalServesWhatThePersonSaidThatStillWaitsForTheDirector)
+}
+
+func aGoalServesThatTheProjectsChecksFailOnMainWithASubGoalToFixThem(t *testing.T) {
+	s := newTestServer(t)
+	l := s.ledger
+	top, err := l.Add("p", "Goal", ledger.AddOptions{Kind: core.WorkGoal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := l.Add("p", "Sub", ledger.AddOptions{Kind: core.WorkGoal, Parent: &top.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := httptest.NewServer(s.routes())
+	defer api.Close()
+	type fix struct {
+		Outcome  string `json:"outcome"`
+		DoneWhen string `json:"done_when"`
+	}
+	type checks struct {
+		Concern int    `json:"concern"`
+		Says    string `json:"says"`
+		Fix     *fix   `json:"fix"`
+	}
+	served := func(id string) *checks {
+		t.Helper()
+		var view struct {
+			Checks *checks `json:"checks_fail_on_main"`
+		}
+		getJSON(t, api.URL+"/api/goal/"+id, http.StatusOK, &view)
+		return view.Checks
+	}
+	if got := served(top.ID); got != nil {
+		t.Fatalf("checks_fail_on_main = %+v, want null with no concern", got)
+	}
+	if _, err := l.AddConcern(top.ID, "the planner wants a second look"); err != nil {
+		t.Fatal(err)
+	}
+	says := core.ChecksConcern([]string{"lint", "validate"})
+	cx, err := l.AddConcern(top.ID, says)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{top.ID, sub.ID} {
+		got := served(id)
+		if got == nil || got.Concern != cx.ID || got.Says != says || got.Fix == nil || got.Fix.Outcome != core.FixChecks || got.Fix.DoneWhen != core.FixChecksDoneWhen {
+			t.Fatalf("checks_fail_on_main on %s = %+v, want the concern with its fix", id, got)
+		}
+	}
+	fixing, err := l.Add("p", core.FixChecks, ledger.AddOptions{Parent: &top.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := served(top.ID); got == nil || got.Fix != nil {
+		t.Fatalf("checks_fail_on_main while %s is open = %+v, want no fix offered", fixing.ID, got)
+	}
+	if _, err := l.ResolveConcern(cx.ID, "the checks pass again"); err != nil {
+		t.Fatal(err)
+	}
+	if got := served(top.ID); got != nil {
+		t.Fatalf("checks_fail_on_main once resolved = %+v, want null", got)
+	}
 }
 
 func aGoalServesWhatThePersonSaidThatStillWaitsForTheDirector(t *testing.T) {

@@ -3,8 +3,10 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"wd/internal/coordinator"
 	"wd/internal/core"
@@ -73,6 +75,10 @@ func (c *Cli) supervise(goal core.Work) (supervision, error) {
 	if err != nil {
 		return out, err
 	}
+	choring, err := c.tendChores(goal, p)
+	if err != nil {
+		return out, err
+	}
 
 	sh, has, err := coordinator.Supervisor(c.Ledger, goal, p)
 	if err != nil {
@@ -111,6 +117,9 @@ func (c *Cli) supervise(goal core.Work) (supervision, error) {
 	why, decided, last, err := c.sinceLook(goal, tasks)
 	if err != nil {
 		return out, err
+	}
+	if len(why) == 0 && has && !working && choring == nil {
+		return out, c.askIfStuck(goal, p)
 	}
 	if len(why) == 0 || (working && !decided) {
 		return out, nil
@@ -324,6 +333,8 @@ func (c *Cli) sinceLook(goal core.Work, tasks []core.Work) ([]string, bool, int,
 			counts["the goal was decided on"]++
 		case isTask[e.Work] && moved[e.Kind] != "":
 			counts[moved[e.Kind]]++
+		case e.Work == goal.ID && e.Kind == core.EventNote && strings.HasPrefix(e.Body, choreDonePrefix):
+			counts["a chore finished"]++
 		}
 	}
 	// What the person wrote waits for a look however its events fall
@@ -388,6 +399,8 @@ func (c *Cli) picture(goal core.Work, p *project.Project) (coordinator.Picture, 
 		switch {
 		case e.Kind == core.EventDecision || e.Kind == core.EventAnswer:
 			pic.Decisions = append(pic.Decisions, e.Body)
+		case e.Kind == core.EventSupervised:
+			pic.Done, pic.Refused = coordinator.ReplyOutcome(e.Body)
 		case e.Kind == core.EventAttachment && e.Attachment != nil && len(pic.Decisions) == 0:
 			lead = append(lead, *e.Attachment)
 		case e.Kind == core.EventAttachment && e.Attachment != nil:
@@ -401,6 +414,17 @@ func (c *Cli) picture(goal core.Work, p *project.Project) (coordinator.Picture, 
 	pic.Goal.Detail = core.WithAttached(pic.Goal.Detail, lead)
 	if pic.Subs, err = c.subPictures(goal.ID, &pic.Superseded); err != nil {
 		return pic, err
+	}
+	chores, err := c.chores(goal, p)
+	if err != nil {
+		return pic, err
+	}
+	for _, ch := range chores {
+		cp := coordinator.ChorePicture{What: ch.what}
+		if ch.finished != nil {
+			cp.Finished = *ch.finished
+		}
+		pic.Chores = append(pic.Chores, cp)
 	}
 	tree, err := c.Ledger.Under(goal.ID)
 	if err != nil {
@@ -438,7 +462,9 @@ func (c *Cli) subPictures(parent string, superseded *[]coordinator.SubPicture) (
 		for _, e := range evs {
 			switch {
 			case e.Kind == core.EventReport:
-				sp.Report = e.Body
+				sp.Report, sp.Held = e.Body, ""
+			case e.Kind == core.EventNote && strings.HasPrefix(e.Body, stoppedAtNote) && w.State == core.StateReview:
+				sp.Held = strings.TrimPrefix(e.Body, stoppedAtNote)
 			case e.Kind == core.EventNote && strings.HasPrefix(e.Body, supersededPrefix):
 				sp.Superseded = strings.TrimPrefix(e.Body, supersededPrefix)
 			}
@@ -474,9 +500,19 @@ var planChange = []coordinator.ActionKind{coordinator.ActGoal, coordinator.ActSu
 // question for the person instead, with what an answer carries out.
 func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supervision, error) {
 	out := supervision{Applied: true, Actions: []string{}, Refused: []string{}}
+	tree, err := c.Ledger.Under(goal.ID)
+	if err != nil {
+		return out, err
+	}
+	// told is each refusal as the person reads it, filed with the reply.
+	told := []string{}
+	refuse := func(a coordinator.Action, line, why string) {
+		out.Refused = append(out.Refused, line+" — "+why)
+		told = append(told, couldNot(tree, a, line, why))
+	}
 	actions, unread := coordinator.ParseSupervision(reply)
 	for _, line := range unread {
-		out.Refused = append(out.Refused, line+" — not an action")
+		refuse(coordinator.Action{}, line, "not an action")
 	}
 	var asked, held []coordinator.Action
 	var done, proposed *coordinator.Action
@@ -498,7 +534,7 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 			continue
 		}
 		if err := c.applyAction(goal, p, a); err != nil {
-			out.Refused = append(out.Refused, a.Line()+" — "+err.Error())
+			refuse(a, a.Line(), err.Error())
 			continue
 		}
 		out.Actions = append(out.Actions, a.Line())
@@ -544,7 +580,7 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 			open = "a change waits for the person"
 		}
 		if open != "" {
-			out.Refused = append(out.Refused, done.Line()+" — "+open)
+			refuse(*done, done.Line(), open)
 			done = nil
 		}
 	}
@@ -555,8 +591,8 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 	if len(out.Actions) > 0 {
 		body += "\n\nDone:\n- " + strings.Join(out.Actions, "\n- ")
 	}
-	if len(out.Refused) > 0 {
-		body += "\n\nRefused:\n- " + strings.Join(out.Refused, "\n- ")
+	if len(told) > 0 {
+		body += "\n\nRefused:\n- " + strings.Join(told, "\n- ")
 	}
 	if _, err := c.Ledger.AddEvent(goal.ID, core.EventSupervised, body); err != nil {
 		return out, err
@@ -594,6 +630,53 @@ func (c *Cli) carryOut(goal core.Work, p *project.Project, reply []string) (supe
 		}
 	}
 	return out, nil
+}
+
+// couldNot is a supervisor's action that did not happen, said for the person:
+// what did not happen to which work, by its title, and why. line is the
+// action as written, for a line that is no action at all.
+func couldNot(tree []core.Work, a coordinator.Action, line, why string) string {
+	name := func(id string) string {
+		for _, w := range tree {
+			if w.ID == id {
+				return quoted(w)
+			}
+		}
+		return "a sub-goal this goal does not have"
+	}
+	for _, w := range tree {
+		why = strings.ReplaceAll(why, w.ID, quoted(w))
+	}
+	var did string
+	switch a.Kind {
+	case coordinator.ActSend:
+		did = "tell " + name(a.Work) + " what to do next"
+	case coordinator.ActGoal:
+		did = "add “" + a.Title + "”"
+	case coordinator.ActStart:
+		did = "start " + name(a.Work)
+	case coordinator.ActSupersede:
+		did = "drop " + name(a.Work)
+	case coordinator.ActPause:
+		did = "pause " + name(a.Work)
+	case coordinator.ActEdit:
+		did = "change " + name(a.Work)
+	case coordinator.ActAfter:
+		did = "change what " + name(a.Work) + " waits on"
+	case coordinator.ActMet:
+		did = "close " + name(a.Work)
+	case coordinator.ActMissed:
+		did = "send " + name(a.Work) + " back"
+	case coordinator.ActChore:
+		did = "start the chore “" + clipLine(a.Text, 80) + "”"
+	case coordinator.ActResolve:
+		did = fmt.Sprintf("settle concern %d", a.Concern)
+	case coordinator.ActDone:
+		did = "call the goal done"
+	default:
+		return fmt.Sprintf("Couldn't act on “%s”: it isn't something the director can do.", clipLine(line, 80))
+	}
+	return "Couldn't " + did + ": " + strings.TrimSuffix(why, ".") + "."
 }
 
 // The questions a supervisor's change is put to the person as, and their
@@ -712,11 +795,11 @@ func (c *Cli) applyAction(goal core.Work, p *project.Project, a coordinator.Acti
 		if err != nil {
 			return err
 		}
-		gate, err := c.closeOne(t)
+		gate, why, err := c.closeOne(t)
 		if err != nil || gate == "" {
 			return err
 		}
-		return fmt.Errorf("judged met, but its %s gate stopped it", gate)
+		return fmt.Errorf("%s, so it stays in review", why)
 	case coordinator.ActMissed:
 		t, err := c.judged(child, a)
 		if err != nil {
@@ -763,9 +846,106 @@ func (c *Cli) tellMissed(id, missing string) error {
 // chorePrefix opens the spawn event that records a chore's session on its goal.
 const chorePrefix = "chore:"
 
+// choreDonePrefix opens the note filing what a chore said when it finished.
+const choreDonePrefix = "chore finished: "
+
+// choreClip is how much of what a finished chore said its note keeps.
+const choreClip = 2000
+
+// goalChore is one chore started on a goal: its session, what it is for, and
+// what it said when it finished, nil while it works.
+type goalChore struct {
+	handle   runner.Handle
+	what     string
+	finished *string
+}
+
+// chores are the chores started on goal, oldest first. A chore's purpose is
+// the note filed right after its spawn, and what it said is the first
+// finished note after it: one chore runs at a time.
+func (c *Cli) chores(goal core.Work, p *project.Project) ([]goalChore, error) {
+	events, err := c.Ledger.Events(goal.ID, nil)
+	if err != nil {
+		return nil, err
+	}
+	cwd, err := coordinator.SharedWorktree(c.Ledger, goal.ID, p.Path)
+	if err != nil {
+		return nil, err
+	}
+	var out []goalChore
+	for _, e := range events {
+		switch {
+		case e.Kind == core.EventSpawn && strings.HasPrefix(e.Body, chorePrefix):
+			name, session, ok := strings.Cut(strings.TrimPrefix(e.Body, chorePrefix), ":")
+			if !ok {
+				return nil, fmt.Errorf("goal %s: chore spawn %q names no session", goal.ID, e.Body)
+			}
+			since, err := time.Parse(core.TimeLayout, e.At)
+			if err != nil {
+				return nil, fmt.Errorf("goal %s: chore spawn %d at %q: %w", goal.ID, e.ID, e.At, err)
+			}
+			out = append(out, goalChore{handle: runner.Handle{Runner: name, Session: session, Cwd: cwd, Since: since}})
+		case e.Kind == core.EventNote && len(out) > 0:
+			last := &out[len(out)-1]
+			if what, ok := strings.CutPrefix(e.Body, "chore: "); ok && last.what == "" {
+				last.what = what
+			} else if said, ok := strings.CutPrefix(e.Body, choreDonePrefix); ok && last.finished == nil {
+				last.finished = &said
+			}
+		}
+	}
+	return out, nil
+}
+
+// tendChores files what each of goal's chores said once its session has
+// finished, and returns the chore still working, if any.
+func (c *Cli) tendChores(goal core.Work, p *project.Project) (*goalChore, error) {
+	all, err := c.chores(goal, p)
+	if err != nil {
+		return nil, err
+	}
+	for i := range all {
+		ch := &all[i]
+		if ch.finished != nil {
+			continue
+		}
+		r, err := runner.RunnerNamed(ch.handle.Runner)
+		if err != nil {
+			return nil, err
+		}
+		status, err := r.Status(ch.handle)
+		if err != nil {
+			return nil, err
+		}
+		said, err := runner.Transcript(r, ch.handle)
+		if err != nil {
+			return nil, err
+		}
+		// A session that has said nothing yet has not finished: it has not
+		// started.
+		if status == runner.StatusRunning || len(said) == 0 {
+			return ch, nil
+		}
+		last := clipLine(said[len(said)-1], choreClip)
+		if _, err := c.Ledger.AddEvent(goal.ID, core.EventNote, choreDonePrefix+last); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
+}
+
 // chore starts a session in goal's worktree to do what, on the project's
-// runner, and files the session and what it is for on the goal.
+// runner, and files the session and what it is for on the goal. Chores run one
+// at a time: two asked for in different words are often the same chore, and
+// both would work in the same checkout.
 func (c *Cli) chore(goal core.Work, p *project.Project, what string) error {
+	working, err := c.tendChores(goal, p)
+	if err != nil {
+		return err
+	}
+	if working != nil {
+		return fmt.Errorf("the chore “%s” is still working, and what it did reaches you when it finishes", clipLine(working.what, 160))
+	}
 	name := p.Runner
 	if goal.Runner != nil {
 		name = *goal.Runner
@@ -1059,4 +1239,224 @@ func (c *Cli) keepCheckpoints(t core.Work, texts []string) error {
 		}
 	}
 	return nil
+}
+
+// The question a goal nothing can move puts to the person, and its choices
+// that the director carries out.
+const (
+	stuckQuestion  = "This goal is stuck: nothing is working and nothing can start."
+	fixChecksLabel = "Start a task to fix the project's checks"
+	lookAgainLabel = "Have the director look again"
+)
+
+var (
+	closeAnywayRe = regexp.MustCompile(`^Close “(.+)” anyway$`)
+	sendBackRe    = regexp.MustCompile(`^Send “(.+)” back to its agent$`)
+)
+
+// askIfStuck puts goal to the person when nothing under it can move: its
+// supervisor has replied to its last look, and no sub-goal is working,
+// waiting on the person, paused or able to start. Left alone such a goal
+// reads as working while nothing happens.
+func (c *Cli) askIfStuck(goal core.Work, p *project.Project) error {
+	events, err := c.Ledger.Events(goal.ID, nil)
+	if err != nil {
+		return err
+	}
+	look, reply := 0, 0
+	for _, e := range events {
+		switch e.Kind {
+		case core.EventLook:
+			look = e.ID
+		case core.EventSupervised:
+			reply = e.ID
+		}
+	}
+	if look == 0 || reply < look {
+		return nil
+	}
+	if held, err := c.proposed(goal.ID); err != nil || held {
+		return err
+	}
+	tree, err := c.Ledger.Under(goal.ID)
+	if err != nil {
+		return err
+	}
+	byID := map[string]core.Work{}
+	for _, w := range tree {
+		byID[w.ID] = w
+	}
+	var why, choices []string
+	checks := false
+	for _, w := range tree[1:] {
+		if w.Kind != core.WorkTask {
+			continue
+		}
+		switch w.State {
+		case core.StateRunning, core.StateNeedsInput, core.StateBlocked, core.StatePaused:
+			return nil
+		case core.StateQueued, core.StateBriefed:
+			on, err := c.waitsAbove(w, goal.ID, byID)
+			if err != nil || on == "" {
+				return err
+			}
+			why = append(why, quoted(w)+" waits on "+quoted(byID[on])+".")
+		case core.StateReview:
+			held, err := c.closeHeld(w.ID)
+			if err != nil {
+				return err
+			}
+			switch {
+			case held == "":
+				why = append(why, quoted(w)+" is finished and waits to be closed.")
+			case strings.HasPrefix(held, "verify"):
+				checks = true
+				why = append(why, quoted(w)+" is finished but can't close: its checks fail on its work.")
+			default:
+				gate, _, _ := strings.Cut(held, "\n")
+				why = append(why, quoted(w)+" is finished but can't close at its "+gate+" step.")
+			}
+			choices = append(choices, "Close "+quoted(w)+" anyway")
+			if w.Session != nil {
+				choices = append(choices, "Send "+quoted(w)+" back to its agent")
+			}
+		}
+	}
+	if len(why) == 0 {
+		why = []string{"Every sub-goal is settled, and the goal isn't called done yet."}
+	}
+	if checks {
+		choices = append(choices, fixChecksLabel)
+	}
+	choices = append(choices, lookAgainLabel)
+	lines := []string{stuckQuestion}
+	for _, w := range why {
+		lines = append(lines, "  "+w)
+	}
+	for _, ch := range choices {
+		lines = append(lines, "- "+ch)
+	}
+	if _, err := c.Ledger.AddEvent(goal.ID, core.EventQuestion, strings.Join(lines, "\n")); err != nil {
+		return err
+	}
+	_, err = c.Ledger.Transition(goal.ID, core.StateNeedsInput)
+	return err
+}
+
+// waitsAbove is the first unsettled work w, or a goal above it short of top,
+// waits on; "" when nothing holds it.
+func (c *Cli) waitsAbove(w core.Work, top string, byID map[string]core.Work) (string, error) {
+	for {
+		on, err := c.waitingOn(w)
+		if err != nil || on != "" || w.Parent == nil || *w.Parent == top {
+			return on, err
+		}
+		parent, ok := byID[*w.Parent]
+		if !ok {
+			return "", nil
+		}
+		w = parent
+	}
+}
+
+// closeHeld is the gate closing work stopped at, with what it found, when it
+// was tried since its latest report; else "".
+func (c *Cli) closeHeld(id string) (string, error) {
+	evs, err := c.Ledger.Events(id, nil)
+	if err != nil {
+		return "", err
+	}
+	held := ""
+	for _, e := range evs {
+		switch {
+		case e.Kind == core.EventReport:
+			held = ""
+		case e.Kind == core.EventNote && strings.HasPrefix(e.Body, stoppedAtNote):
+			held = strings.TrimPrefix(e.Body, stoppedAtNote)
+		}
+	}
+	return held, nil
+}
+
+// unstuck carries out the choice the person made on a stuck goal, and says
+// what it did; a choice it does not carry out reaches the supervisor alone.
+func (c *Cli) unstuck(goal core.Work, choice string) (string, error) {
+	tree, err := c.Ledger.Under(goal.ID)
+	if err != nil {
+		return "", err
+	}
+	named := func(title string) (core.Work, bool) {
+		for _, w := range tree[1:] {
+			if w.Title == title && w.Kind == core.WorkTask && w.State == core.StateReview {
+				return w, true
+			}
+		}
+		return core.Work{}, false
+	}
+	choice = strings.TrimSpace(strings.Replace(choice, "(recommended)", "", 1))
+	if m := closeAnywayRe.FindStringSubmatch(choice); m != nil {
+		t, ok := named(m[1])
+		if !ok {
+			return "", fail("“%s” is not finished work under %s waiting to close", m[1], goal.ID)
+		}
+		if _, err := c.Ledger.AddEvent(t.ID, core.EventNote, "closed without its checks: the person chose to"); err != nil {
+			return "", err
+		}
+		if _, err := c.Ledger.SoftDone(t.ID, false); err != nil {
+			return "", err
+		}
+		if _, err := c.Ledger.Transition(t.ID, core.StateDone); err != nil {
+			return "", err
+		}
+		return "Closed " + quoted(t) + " without its checks", nil
+	}
+	if m := sendBackRe.FindStringSubmatch(choice); m != nil {
+		t, ok := named(m[1])
+		if !ok {
+			return "", fail("“%s” is not finished work under %s waiting to close", m[1], goal.ID)
+		}
+		failing, err := c.failingChecks(t.ID)
+		if err != nil {
+			return "", err
+		}
+		text := "Closing your work stopped. Look at why, put it right, then report done again."
+		if len(failing) > 0 {
+			text = "Your work fails the project's checks: `" + strings.Join(failing, "`, `") + "`. Make them pass, then report done again."
+		}
+		if _, err := c.tellTask(t, text, core.SentByPerson); err != nil {
+			return "", err
+		}
+		return "Sent " + quoted(t) + " back to its agent", nil
+	}
+	if choice == fixChecksLabel {
+		p, err := c.project(goal.Project)
+		if err != nil {
+			return "", err
+		}
+		w, err := c.addSubGoal(goal, core.FixChecks, core.FixChecksDoneWhen, nil, false, core.AnsweredByPerson)
+		if err != nil {
+			return "", err
+		}
+		if err := c.startUnder(goal, p, w); err != nil {
+			return "", err
+		}
+		return "Started " + quoted(w), nil
+	}
+	return "", nil
+}
+
+// failingChecks are the checks the latest verify of work failed.
+func (c *Cli) failingChecks(id string) ([]string, error) {
+	kind := core.EventVerify
+	evs, err := c.Ledger.Events(id, &kind)
+	if err != nil || len(evs) == 0 {
+		return nil, err
+	}
+	var out []string
+	for _, line := range strings.Split(evs[len(evs)-1].Body, "\n") {
+		if cmd, code, ok := strings.Cut(line, " → "); ok && code != "0" {
+			out = append(out, cmd)
+		}
+	}
+	return out, nil
 }

@@ -405,6 +405,18 @@ func (c *Cli) answered(w core.Work, e core.Event, answers []string) ([]string, [
 		head, _, _ := strings.Cut(it.Question, "\n")
 		first := len(it.Options) > 0 && pickedFirst(answers[i], it.Options[0].Label)
 		switch {
+		case head == stuckQuestion:
+			done, err := c.unstuck(w, answers[i])
+			if err != nil {
+				return nil, nil, err
+			}
+			if done != "" {
+				if _, err := c.Ledger.AddEvent(w.ID, core.EventDecision, done); err != nil {
+					return nil, nil, err
+				}
+				did = append(did, done)
+				said = append(said, done)
+			}
 		case head == coordinator.FinishQuestion:
 			line, ok := coordinator.FinishChoice(answers[i])
 			if !ok {

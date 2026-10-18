@@ -154,6 +154,11 @@ JSON message per line to stdout:
 - Each tree node serves `stopped`, `{said, at}`, while its work is running or needs input and its latest session stopped without a report: what it last said and when that was noted. Otherwise `stopped` is null; a later report, message, question or answer clears it.
 - Each node serves `blocked_because` while its work is blocked: what its latest report said when that report is BLOCKED, else the text of its latest open concern, else null. Work that is not blocked serves null.
 
+## A Goal Serves That The Project's Checks Fail On Main, With A Sub-Goal To Fix Them
+- A goal under a top goal holding an open concern that the project's own checks fail on main serves `checks_fail_on_main`: `{concern, says, fix}`, `says` the concern's text.
+- `fix` is `{outcome, done_when}`, the sub-goal `wd goal add` files to fix them, while no unsettled sub-goal of that outcome is under the top goal; then null.
+- Without that concern it serves null.
+
 ## A Running Session's Question Puts Its Work In Needs You
 - While serving, a running work item whose session ends on a question has the question filed as a `question` event and moves to needs-input within seconds.
 - A question already filed at that point of the conversation is not filed again.

@@ -538,6 +538,34 @@ could not with their work, the bound that ran out, and the work still open.
 ## A Chore Runs As A Session On The Goal, Not As Work
 - `CHORE` starts a session hung off the goal and files it and what it is for on the goal, adding no work.
 
+## A Chore Is Not Started Again While One Is Working, And What It Did Reaches The Next Look
+- `CHORE` while another chore of the goal is still working is refused, naming what that chore is for.
+- A chore whose session finished files what it last said on the goal once, as `chore finished: <what it said>`; that has the supervisor look.
+- The supervisor's brief lists each chore: what it is for, and whether it is still working or what it said when it finished.
+
+## A Task That Changed Nothing Closes Without Running The Checks
+- A task spawned in a git checkout keeps the checkout's files as they were when it started.
+- Closing a task whose checkout's files are as they were when it started runs no checks and files the note `closed: no changes to check`.
+- A task whose files changed, or whose start was not kept, runs the project's checks before it closes.
+
+## A Check That Fails On Main Too Does Not Hold A Task
+- When a task's checks fail, the failing ones run again on the commit its checkout branched from main at, in a checkout of its own that is removed afterwards.
+- Every failing check failing there with the same exit code closes the task, with a note naming those checks.
+- The goal then holds one open concern, not one per task: `The project's own checks fail on main (<checks>), so they can't prove changes right now.`
+- A check that passes there, or a run there that cannot be made, holds the task at the verify gate, saying so.
+- A task's checks passing in full resolves that concern.
+
+## What The Director Could Not Do Is Told In Plain Words And At Its Next Look
+- Each of a supervisor's actions that did not happen is filed under `Refused:` on its `supervised` event as a sentence naming the work by its title, what did not happen and why.
+- A `MET` stopped at a gate says which gate and that the work stays in review.
+- The supervisor's next brief carries what its last reply did and did not do.
+- A task in review whose close was refused carries why in the brief.
+
+## A Goal Nothing Can Move Asks The Person What To Do
+- A running goal whose supervisor has replied to its last look, with no sub-goal running, waiting on the person or paused, none that can start, no chore working and nothing new for its supervisor, files a question on the goal and waits on the person.
+- The question opens `This goal is stuck: nothing is working and nothing can start.`, says why for each open sub-goal by its title, and offers for each finished one `Close “<title>” anyway` and `Send “<title>” back to its agent`, `Start a task to fix the project's checks` when a close stopped at the checks, and `Have the director look again`.
+- Answering `Close “<title>” anyway` closes it without its checks; `Send “<title>” back to its agent` tells its agent to make its checks pass; `Start a task to fix the project's checks` adds and starts that sub-goal. Every answer reaches the supervisor.
+
 ## A Plan Change Waits For The Person In Ask Mode
 - In ask mode a supervisor's GOAL, SUPERSEDE, EDIT and AFTER are filed as one question with the changes, not applied.
 - Answering it with Apply carries them out; any other answer leaves the plan as it is.

@@ -114,6 +114,52 @@ type goalView struct {
 	// person said that the supervisor has not been given yet: it reaches the
 	// supervisor once it is free.
 	WaitingForDirector []int `json:"waiting_for_director"`
+	// ChecksFailOnMain is the concern its top goal holds while the project's
+	// own checks fail on main, or nil.
+	ChecksFailOnMain *checksOnMain `json:"checks_fail_on_main"`
+}
+
+// checksOnMain is the concern that the project's own checks fail on main, and
+// the sub-goal that fixes them while none is open.
+type checksOnMain struct {
+	Concern int          `json:"concern"`
+	Says    string       `json:"says"`
+	Fix     *subGoalPlan `json:"fix"`
+}
+
+// subGoalPlan is a sub-goal a person can add: its outcome and done-when.
+type subGoalPlan struct {
+	Outcome  string `json:"outcome"`
+	DoneWhen string `json:"done_when"`
+}
+
+// checksOnMainOf is top's open concern that the project's checks fail on
+// main, with the fix while no unsettled sub-goal of top fixes them.
+func (s *Server) checksOnMainOf(top core.Work) (*checksOnMain, error) {
+	concerns, err := s.ledger.Concerns(&top.ID)
+	if err != nil {
+		return nil, err
+	}
+	var out *checksOnMain
+	for _, cx := range concerns {
+		if cx.Resolved == 0 && strings.HasPrefix(cx.Text, core.ChecksFailOnMain) {
+			out = &checksOnMain{Concern: cx.ID, Says: cx.Text}
+		}
+	}
+	if out == nil {
+		return nil, nil
+	}
+	under, err := s.ledger.Under(top.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range under {
+		if w.Title == core.FixChecks && !core.Settled(w.State) {
+			return out, nil
+		}
+	}
+	out.Fix = &subGoalPlan{Outcome: core.FixChecks, DoneWhen: core.FixChecksDoneWhen}
+	return out, nil
 }
 
 // attachment is one attachment event as a client shows it.
@@ -309,6 +355,9 @@ func (s *Server) goal(id string) (goalView, error) {
 		}
 	}
 	view.Course = courseOf(courses, chain[0].ID)
+	if view.ChecksFailOnMain, err = s.checksOnMainOf(chain[0]); err != nil {
+		return goalView{}, err
+	}
 	if dir := goalDir(goal, children); dir != "" {
 		d := s.delivered.of(dir, events, goal, children)
 		view.Delivery = &d

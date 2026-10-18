@@ -668,6 +668,20 @@ func JudgedMet(evs []Event) bool {
 	return false
 }
 
+// ChecksFailOnMain opens the concern a goal holds while the project's own
+// checks fail on main; FixChecks and FixChecksDoneWhen are the sub-goal that
+// fixes them.
+const (
+	ChecksFailOnMain  = "The project's own checks fail on main ("
+	FixChecks         = "The project's own checks pass again"
+	FixChecksDoneWhen = "every one of the project's checks passes in the goal's checkout"
+)
+
+// ChecksConcern is that concern's text for the checks named.
+func ChecksConcern(names []string) string {
+	return ChecksFailOnMain + strings.Join(names, ", ") + "), so they can't prove changes right now."
+}
+
 // ProposedPrefix opens the note a breakdown awaiting approval leaves on its
 // goal, and ApprovedPrefix the decision that approves it.
 const (
