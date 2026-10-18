@@ -19,7 +19,8 @@ arch=$(uname -m)
 app_id=dev.mkhanal.WorkDirector
 name="Work-Director-${version}-linux-${arch}"
 
-cargo build --release --manifest-path clients/linux/Cargo.toml -p work-director
+# The build a crash note names.
+WD_BUILD="$version ($commit)" cargo build --release --manifest-path clients/linux/Cargo.toml -p work-director
 bin=clients/linux/target/release/work-director
 
 # The installed tree, shared by the tarball and the .deb: the app and its wd

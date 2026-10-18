@@ -23,4 +23,5 @@ resolver = "2"
 
 [profile.release]
 lto = "thin"
-strip = true
+# Symbol names stay, so a panic's backtrace names its functions.
+strip = "debuginfo"

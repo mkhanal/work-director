@@ -276,3 +276,7 @@ hold only that product's work; with none, every product's.
 - Copied text reads as shown: words without their markdown marks, a table's cells separated by tabs, a folded step as its one line and an opened one with what it holds. Chevrons, icons and controls are not copied.
 - Clicking a step's line opens or folds it; folded or open, its text can be selected.
 - A refresh redraws only from the first turn that changed: what was shown before it keeps its place and its selection, and the reader stays where they scrolled.
+
+## A Panic Leaves A Note Of What Was On Screen
+- A panic first writes `$WD_HOME/crashes/<time>-linux-<pid>/note.json`: its message and where it was raised, its backtrace, the build, and the page last opened; then it reports as it would have.
+- `wd crashes` reads the note.

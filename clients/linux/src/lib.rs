@@ -6,6 +6,7 @@ pub mod attach;
 pub mod channel;
 pub mod conversation;
 pub mod copy;
+pub mod crash;
 pub mod escape;
 pub mod follow;
 pub mod ledger;

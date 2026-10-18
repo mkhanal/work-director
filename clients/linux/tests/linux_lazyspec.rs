@@ -2673,3 +2673,31 @@ fn a_message_waiting_for_the_director_says_so() {
         "the words say it waits for the director to finish the last one"
     );
 }
+
+/// A Panic Leaves A Note Of What Was On Screen
+#[test]
+fn a_panic_leaves_a_note_of_what_was_on_screen() {
+    let home = Home::new();
+    let screen = crash::Screen { work: Some("wd-7".into()), view: "its page; a goal opens on overview".into() };
+    crash::keep_panics(home.dir.clone(), "v1.1.0 (abc1234)".into(), move || screen.clone());
+    let caught = std::panic::catch_unwind(|| panic!("a probe panic"));
+    // Ours goes; any other test's panic reports as the harness does.
+    drop(std::panic::take_hook());
+    assert!(caught.is_err());
+
+    let notes: Vec<PathBuf> = fs::read_dir(home.dir.join("crashes"))
+        .expect("the crashes folder")
+        .map(|e| e.expect("an entry").path())
+        .filter(|p| fs::read_to_string(p.join("note.json")).is_ok_and(|n| n.contains("a probe panic")))
+        .collect();
+    assert_eq!(notes.len(), 1, "one note for the panic: {notes:?}");
+    let id = notes[0].file_name().expect("a name").to_string_lossy().to_string();
+    assert!(id.ends_with(&format!("-linux-{}", std::process::id())), "named for when and which process: {id}");
+
+    let shown = home.wd(&["crashes", &id]);
+    assert!(shown.contains("Work Director for Linux crashed"), "{shown}");
+    assert!(shown.contains("build v1.1.0 (abc1234)"), "{shown}");
+    assert!(shown.contains("Why: panic: a probe panic at tests/linux_lazyspec.rs:"), "{shown}");
+    assert!(shown.contains("On screen: wd-7, its page; a goal opens on overview"), "{shown}");
+    assert!(shown.contains("a_panic_leaves_a_note_of_what_was_on_screen"), "the backtrace names the test: {shown}");
+}

@@ -37,6 +37,9 @@ const APP_ID: &str = "dev.mkhanal.WorkDirector";
 const LOGIN_SHELL_WAIT: Duration = Duration::from_secs(5);
 
 fn main() -> glib::ExitCode {
+    if let Some(home) = kit::crash::wd_home() {
+        kit::crash::keep_panics(home, option_env!("WD_BUILD").unwrap_or("dev").to_string(), on_screen);
+    }
     // Asked while GTK starts; the first activation waits for the answer.
     let login = Login {
         asking: RefCell::new(Some(std::thread::spawn(|| {
@@ -52,6 +55,19 @@ fn main() -> glib::ExitCode {
     });
     application.connect_activate(move |application| activate(application, &login));
     application.run()
+}
+
+/// What a crash note says was on screen: the page last opened, read from the
+/// settings, which every page change writes.
+fn on_screen() -> kit::crash::Screen {
+    let (settings, _) = Settings::load();
+    match settings.last_work() {
+        None => kit::crash::Screen { work: None, view: "new goal".to_string() },
+        Some(work) => kit::crash::Screen {
+            work: Some(work),
+            view: settings.goal_tab().map_or("its page".to_string(), |tab| format!("its page; a goal opens on {tab}")),
+        },
+    }
 }
 
 /// The tokens, and over them the dark ones while the system is dark.
