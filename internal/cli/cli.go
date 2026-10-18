@@ -372,6 +372,7 @@ var commands = map[string]func(c *Cli, rest []string) error{
 	"distill":   (*Cli).distill,
 	"tui":       (*Cli).tui,
 	"serve":     (*Cli).serve,
+	"crashes":   (*Cli).crashes,
 	"doctor":    (*Cli).doctor,
 	"archive":   (*Cli).archive,
 	"stop":      (*Cli).stop,

@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -966,6 +967,7 @@ func TestEveryJsonCommandWritesOneDocument(t *testing.T) {
 		{"feedback", "add", "a note"}, {"feedback"}, {"feedback", "list"},
 		{"distill"},
 		{"doctor"},
+		{"crashes"},
 		{"cancel", t3, "census"},
 		{"answer", askingWork, "Red"},
 		{"completion", "zsh"},
@@ -6709,4 +6711,246 @@ func TestWhatPauseResumeCancelAndStopTellThePersonNamesWorkByItsTitle(t *testing
 	said(f.runOK(t, "pause", t3), "Paused “Wire the schema”; resume it to carry on")
 	said(f.runOK(t, "resume", t3), "Resumed “Wire the schema”")
 	said(f.runOK(t, "cancel", t3), "Cancelled “Wire the schema”; resume it to bring it back")
+}
+
+// writeCrash leaves a crash folder as an app does: note.json, and the system
+// crash report beside it when report is not empty.
+func (f *cliFixture) writeCrash(t *testing.T, id string, note map[string]any, report string) {
+	t.Helper()
+	dir := filepath.Join(f.wdHome, "crashes", id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if report != "" {
+		note["report"] = "WorkDirector-2026-10-18-204150.ips"
+		if err := os.WriteFile(filepath.Join(dir, "WorkDirector-2026-10-18-204150.ips"), []byte(report), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := json.Marshal(note)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "note.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ipsReport is a macOS crash report as the system writes it: a header line,
+// then the body, its crashing thread the second.
+func ipsReport(asi map[string][]string) string {
+	body := map[string]any{
+		"pid":            4242,
+		"exception":      map[string]any{"type": "EXC_BREAKPOINT", "signal": "SIGTRAP"},
+		"asiBacktraces":  []string{"0   CoreFoundation  0x1 __exceptionPreprocess + 176\n1   libobjc.A.dylib  0x2 objc_exception_throw + 88"},
+		"faultingThread": 1,
+		"threads": []any{
+			map[string]any{"frames": []any{map[string]any{"imageIndex": 0, "imageOffset": 1}}},
+			map[string]any{"triggered": true, "frames": []any{
+				map[string]any{"imageIndex": 0, "imageOffset": 8513088, "symbol": "+[NSApplication _crashOnException:]", "symbolLocation": 256},
+				map[string]any{"imageIndex": 1, "imageOffset": 4096, "symbol": "CardBlock.draw()", "symbolLocation": 12, "sourceFile": "TranscriptText.swift", "sourceLine": 321},
+				map[string]any{"imageIndex": 0, "imageOffset": 5416944},
+			}},
+		},
+		"usedImages": []any{map[string]any{"name": "AppKit"}, map[string]any{"name": "WorkDirector"}},
+	}
+	if asi != nil {
+		body["asi"] = asi
+	}
+	b, _ := json.Marshal(body)
+	return `{"app_name":"WorkDirector","bug_type":"309"}` + "\n" + string(b)
+}
+
+func TestCrashesListsWhatTheAppsAndWdServeLeftBehind(t *testing.T) {
+	f := newCLIFixture(t)
+	if out := f.runOK(t, "crashes"); !strings.Contains(out, "No crashes recorded.") {
+		t.Fatalf("wd crashes with none = %q", out)
+	}
+	if out := strings.TrimSpace(f.runOK(t, "crashes", "--json")); out != "[]" {
+		t.Fatalf("wd crashes --json with none = %q, want []", out)
+	}
+	f.writeCrash(t, "20261018-090000-macos-11", map[string]any{
+		"app": "macos", "at": "2026-10-18T09:00:00Z", "build": "v1.0.0 (abc1234)", "pid": 11,
+		"exception": map[string]any{"name": "NSInvalidArgumentException", "reason": "unrecognized selector", "stack": []string{}},
+		"screen":    map[string]any{"work": "wd-7", "view": "goal overview"}, "crumbs": []any{},
+	}, "")
+	f.writeCrash(t, "20261018-100000-linux-12", map[string]any{
+		"app": "linux", "at": "2026-10-18T10:00:00Z", "build": "v1.0.0", "pid": 12,
+		"exception": map[string]any{"name": "panic", "reason": "index out of bounds", "stack": []string{}},
+		"screen":    map[string]any{"work": nil, "view": "new goal"}, "crumbs": []any{},
+	}, "")
+	logs := filepath.Join(f.wdHome, "logs")
+	if err := os.MkdirAll(logs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	served := filepath.Join(logs, "serve-20261018-110000-13.log")
+	if err := os.WriteFile(served, []byte("wd v1.0.0 (abc1234)\npanic: runtime error: index out of range [3] with length 2\n\ngoroutine 1 [running]:\nmain.main()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 10, 18, 11, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(served, at, at); err != nil {
+		t.Fatal(err)
+	}
+	// A serve still running has written only its build.
+	if err := os.WriteFile(filepath.Join(logs, "serve-20261018-120000-14.log"), []byte("wd v1.0.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var list []map[string]any
+	if err := json.Unmarshal([]byte(f.runOK(t, "crashes", "--json")), &list); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, c := range list {
+		assertKeys(t, c, []string{"app", "at", "build", "id", "path", "reason"})
+		ids = append(ids, c["id"].(string))
+	}
+	want := []string{"serve-20261018-110000-13", "20261018-100000-linux-12", "20261018-090000-macos-11"}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("ids = %v, want newest first %v", ids, want)
+	}
+	if list[0]["reason"] != "panic: runtime error: index out of range [3] with length 2" || list[0]["build"] != "v1.0.0 (abc1234)" || list[0]["app"] != "wd serve" {
+		t.Errorf("serve crash = %v", list[0])
+	}
+	if list[2]["reason"] != "NSInvalidArgumentException: unrecognized selector" {
+		t.Errorf("macos reason = %v", list[2]["reason"])
+	}
+	text := f.runOK(t, "crashes")
+	for _, s := range []string{"20261018-090000-macos-11", "Work Director for macOS: NSInvalidArgumentException: unrecognized selector", "Work Director for Linux: panic: index out of bounds", "wd serve: panic: runtime error"} {
+		if !strings.Contains(text, s) {
+			t.Errorf("wd crashes lacks %q:\n%s", s, text)
+		}
+	}
+}
+
+func TestACrashShowsWhyWhatWasOnScreenAndWhereItFailed(t *testing.T) {
+	f := newCLIFixture(t)
+	f.writeCrash(t, "thrown", map[string]any{
+		"app": "macos", "at": "2026-10-18T09:00:00Z", "build": "v1.0.0 (abc1234)", "pid": 4242,
+		"exception": map[string]any{"name": "NSInvalidArgumentException", "reason": "-[WorkDirector.CardBlock table]: unrecognized selector",
+			"stack": []string{"0   CoreFoundation  __exceptionPreprocess + 176", "3   WorkDirector  CardBlock.draw() + 12"}},
+		"screen": map[string]any{"work": "wd-7", "view": "goal overview"},
+		"crumbs": []any{
+			map[string]any{"at": "2026-10-18T08:59:58Z", "what": "opened wd-7", "times": 1},
+			map[string]any{"at": "2026-10-18T08:59:59Z", "what": "asked wd: goal", "times": 3},
+		},
+	}, ipsReport(nil))
+	out := f.runOK(t, "crashes", "thrown")
+	for _, s := range []string{
+		"Work Director for macOS crashed", "build v1.0.0 (abc1234)",
+		"Why: NSInvalidArgumentException: -[WorkDirector.CardBlock table]: unrecognized selector",
+		"On screen: wd-7, goal overview",
+		"opened wd-7", "asked wd: goal (3 times)",
+		"3   WorkDirector  CardBlock.draw() + 12",
+		"EXC_BREAKPOINT (SIGTRAP)",
+		"AppKit  +[NSApplication _crashOnException:] + 256",
+		"WorkDirector  CardBlock.draw() + 12  (TranscriptText.swift:321)",
+		"AppKit  0x52a7f0",
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("wd crashes thrown lacks %q:\n%s", s, out)
+		}
+	}
+	var d map[string]any
+	if err := json.Unmarshal([]byte(f.runOK(t, "crashes", "thrown", "--json")), &d); err != nil {
+		t.Fatal(err)
+	}
+	assertKeys(t, d, []string{"app", "at", "build", "crumbs", "exception", "id", "path", "reason", "screen", "system"})
+	assertKeys(t, d["system"], []string{"messages", "signal", "thread", "thrown"})
+
+	// A Swift trap: no exception, the runtime's message in the report.
+	f.writeCrash(t, "trapped", map[string]any{
+		"app": "macos", "at": "2026-10-18T09:10:00Z", "build": "dev", "pid": 4243, "exception": nil,
+		"screen": map[string]any{"work": nil, "view": "new goal"}, "crumbs": []any{},
+	}, ipsReport(map[string][]string{"libswiftCore.dylib": {"Swift/ContiguousArrayBuffer.swift:600: Fatal error: Index out of range"}}))
+	out = f.runOK(t, "crashes", "trapped")
+	for _, s := range []string{"Why: Swift/ContiguousArrayBuffer.swift:600: Fatal error: Index out of range", "On screen: new goal", "objc_exception_throw"} {
+		if !strings.Contains(out, s) {
+			t.Errorf("wd crashes trapped lacks %q:\n%s", s, out)
+		}
+	}
+	f.writeCrash(t, "signalled", map[string]any{
+		"app": "macos", "at": "2026-10-18T09:20:00Z", "build": "dev", "pid": 4244, "exception": nil,
+		"screen": map[string]any{"work": nil, "view": "new goal"}, "crumbs": []any{},
+	}, ipsReport(nil))
+	if out := f.runOK(t, "crashes", "signalled"); !strings.Contains(out, "Why: EXC_BREAKPOINT (SIGTRAP)") {
+		t.Errorf("wd crashes signalled:\n%s", out)
+	}
+	f.writeCrash(t, "killed", map[string]any{
+		"app": "macos", "at": "2026-10-18T09:30:00Z", "build": "dev", "pid": 4245, "exception": nil,
+		"screen": map[string]any{"work": nil, "view": "new goal"}, "crumbs": []any{},
+	}, "")
+	if out := f.runOK(t, "crashes", "killed"); !strings.Contains(out, "Why: ended without a clean exit and left no crash report") {
+		t.Errorf("wd crashes killed:\n%s", out)
+	}
+	if errStr := f.runFail(t, "crashes", "nowhere"); !strings.Contains(errStr, `no crash "nowhere"`) {
+		t.Errorf("wd crashes nowhere: %q", errStr)
+	}
+}
+
+func TestAWdServeThatDiesLeavesWhatItPrintedForWdCrashes(t *testing.T) {
+	f := newCLIFixture(t)
+	logs := filepath.Join(f.wdHome, "logs")
+	serveLogs := func() []string {
+		found, err := filepath.Glob(filepath.Join(logs, "serve-*.log"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return found
+	}
+
+	cmd := exec.Command(f.goBin, "serve", "--stdio")
+	cmd.Env = f.env(t, f.bin)
+	cmd.Dir = f.dir
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for len(serveLogs()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	running := serveLogs()
+	if len(running) != 1 || !strings.HasSuffix(running[0], fmt.Sprintf("-%d.log", cmd.Process.Pid)) {
+		t.Fatalf("serve logs while running = %v", running)
+	}
+	if data, _ := os.ReadFile(running[0]); string(data) != "wd dev\n" {
+		t.Fatalf("a running serve's log = %q, want only its build", data)
+	}
+	// SIGQUIT makes the Go runtime die printing every goroutine, as a panic does.
+	if err := cmd.Process.Signal(syscall.SIGQUIT); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	in.Close()
+	data, err := os.ReadFile(running[0])
+	if err != nil {
+		t.Fatalf("the dead serve's log: %v", err)
+	}
+	if !strings.Contains(string(data), "SIGQUIT: quit") || !strings.Contains(stderr.String(), "SIGQUIT: quit") {
+		t.Fatalf("log %q, stderr %q: want what the runtime printed in both", data, stderr.String())
+	}
+	id := strings.TrimSuffix(filepath.Base(running[0]), ".log")
+	if out := f.runOK(t, "crashes"); !strings.Contains(out, id+"  ") || !strings.Contains(out, "wd serve: SIGQUIT: quit") {
+		t.Fatalf("wd crashes lacks the serve that died:\n%s", out)
+	}
+	if out := f.runOK(t, "crashes", id); !strings.Contains(out, "goroutine") {
+		t.Fatalf("wd crashes %s lacks the goroutines:\n%s", id, out)
+	}
+
+	clean := exec.Command(f.goBin, "serve", "--stdio")
+	clean.Env = f.env(t, f.bin)
+	clean.Dir = f.dir
+	clean.Stdin = strings.NewReader("")
+	if out, err := clean.CombinedOutput(); err != nil {
+		t.Fatalf("a serve whose input closes: %v\n%s", err, out)
+	}
+	if got := serveLogs(); !slices.Equal(got, running) {
+		t.Fatalf("serve logs after a clean return = %v, want only the dead one's %v", got, running)
+	}
 }

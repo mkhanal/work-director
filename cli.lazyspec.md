@@ -559,3 +559,17 @@ could not with their work, the bound that ran out, and the work still open.
 - A missing or unreadable file, or a directory, refuses the command naming it; nothing is sent, copied or recorded.
 - `--json` includes `attachments: [{name, path, size, media_type}]`, `[]` when none.
 - A goal whose supervisor cannot be started still keeps what was sent as a decision, with its files: `wd send` exits 0 saying the director couldn't be told now and reads it when it next starts, and `--json` carries `looked: false` and the reason as `not_told`.
+
+## Crashes Lists What The Apps And Wd Serve Left Behind
+- `wd crashes` lists each crash folder under `$WD_HOME/crashes` and each `wd serve --stdio` crash log under `$WD_HOME/logs`, newest first: id, app, time, build and a one-line reason.
+- With none it says `No crashes recorded.`; `--json` emits `[]`.
+
+## A Crash Shows Why, What Was On Screen And Where It Failed
+- `wd crashes <id>` shows the reason, the work and view on screen, the last things done with their times, and the stack the exception was thrown from.
+- A system crash report kept beside the note adds its signal, its messages and the crashing thread, each frame with image, symbol, and source file and line when the report has them.
+- With no exception the reason is the report's first message, else its signal; with no report either, that it ended without a clean exit and left no crash report.
+- An unknown id fails naming it.
+
+## A Wd Serve That Dies Leaves What It Printed For Wd Crashes
+- While `wd serve --stdio` runs, what the Go runtime prints as it dies also goes to `$WD_HOME/logs/serve-<time>-<pid>.log`, after a first line naming its build.
+- A serve that returns cleanly leaves no log.

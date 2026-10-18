@@ -65,6 +65,7 @@ var help = map[string]commandHelp{
 	"cancel":     {"wd cancel <id> [\"<why>\"]", "Stop and drop work; wd resume brings it back."},
 	"tui":        {"wd tui", "A terminal board of everything in flight."},
 	"serve":      {"wd serve [--port n | --stdio]", "Serve the ledger as JSON, over loopback HTTP or standard streams."},
+	"crashes":    {"wd crashes [<id>]", "List what the apps and wd serve left behind when they crashed, or show one: why, what was on screen, the backtrace."},
 	"doctor":     {"wd doctor", "Show which runner CLIs are on PATH and whether this is a repository."},
 	"completion": {"wd completion <bash|zsh|fish|powershell>", "Print a shell completion script."},
 }

@@ -3128,7 +3128,7 @@ func (c *Cli) sessionOf(w core.Work) (runner.Runner, runner.Handle, bool, error)
 	return r, h, true, nil
 }
 
-func (c *Cli) serve(rest []string) error {
+func (c *Cli) serve(rest []string) (err error) {
 	// Board actions run this same binary, so they can never drift from it.
 	cliPath, err := os.Executable()
 	if err != nil {
@@ -3145,6 +3145,13 @@ func (c *Cli) serve(rest []string) error {
 		if _, ok := c.Args.Values["port"]; ok {
 			return fail("wd serve --stdio listens on no port; drop --port")
 		}
+		// The apps hold this serve open and end it by closing its input, so
+		// it returns cleanly unless it crashes.
+		forget, err := c.keepCrashOutput()
+		if err != nil {
+			return err
+		}
+		defer func() { err = errors.Join(err, forget()) }()
 		return srv.ServeStdio(os.Stdin, os.Stdout)
 	}
 	port, err := positiveInt(c.Args, "port", serve.DefaultPort)
