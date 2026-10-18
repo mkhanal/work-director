@@ -20,8 +20,7 @@ swift build --package-path clients/macos -c release --product WorkDirector
 bin=$(swift build --package-path clients/macos -c release --show-bin-path)
 
 # The app is not stripped, so a crash report names its functions; their
-# source files and lines are in dist/WorkDirector.dSYM. macOS's crash reporter
-# finds a dSYM by its UUID through Spotlight, and atos reads one given.
+# source files and lines are in dist/WorkDirector.dSYM, which atos reads.
 rm -rf "$app" dist/WorkDirector.dSYM
 dsymutil "$bin/WorkDirector" -o dist/WorkDirector.dSYM
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"

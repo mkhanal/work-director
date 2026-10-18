@@ -111,6 +111,6 @@ to hand it to an agent.
   `~/.work-director/logs/serve-<time>-<pid>.log`.
 - Release builds of the macOS app keep their function names. Their source lines are in
   `WorkDirector.dSYM`: `dist/` beside a local build, a `-dSYM.zip` asset on each release.
-  With it anywhere Spotlight indexes, new crash reports carry file and line; for an older
-  one, `atos -o WorkDirector.dSYM/Contents/Resources/DWARF/WorkDirector -l <load address>
-  <addresses>`.
+  `atos -o WorkDirector.dSYM/Contents/Resources/DWARF/WorkDirector -l <load address>
+  <addresses>` turns a report's addresses into files and lines; the load address is the
+  `WorkDirector` image's `base` in the report.
