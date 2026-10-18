@@ -112,6 +112,16 @@ struct WorkDetail: View {
         Binding(get: { current[keyPath: path] }, set: { value in edit(id) { $0[keyPath: path] = value } })
     }
 
+    /// What a crash note says is on screen.
+    private var screen: Screen {
+        let view: String = switch loaded {
+        case nil: "loading"
+        case .goal: focus.map { "goal, conversation of \($0.id)" } ?? "goal \(goalView.rawValue)"
+        case .work: "task \(tab.rawValue)"
+        }
+        return Screen(work: id, view: view)
+    }
+
     enum Tab: String {
         case conversation, record
     }
@@ -266,6 +276,7 @@ struct WorkDetail: View {
             let id = id
             DispatchQueue.main.async { SwitchClock.mark(id, "shown") }
         }
+        .onChange(of: screen, initial: true) { CrashLog.current?.show(screen) }
         .task(id: "\(id) \(store.reads)") { await load() }
         .task(id: id) {
             // What a goal's tasks are doing lives in their sessions, which tell

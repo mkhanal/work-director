@@ -12,6 +12,19 @@ enum Place: Hashable {
     case review(String)
 }
 
+extension Place {
+    /// What a crash note says was on screen; work says it itself, once read.
+    var screen: Screen? {
+        switch self {
+        case .newGoal: Screen(work: nil, view: "new goal")
+        case .work: nil
+        case .archived: Screen(work: nil, view: "archive")
+        case .taste: Screen(work: nil, view: "taste")
+        case .review(let project): Screen(work: nil, view: "review of " + project)
+        }
+    }
+}
+
 /// Goals as threads on the left, the one chosen in the middle with its agents
 /// beside it: the shape a coding agent's own app has, over the director's ledger.
 struct RootView: View {
@@ -75,6 +88,9 @@ struct RootView: View {
         }
         .onAppear {
             if !lastWork.isEmpty { place = .work(lastWork) }
+        }
+        .onChange(of: place, initial: true) {
+            if let screen = place?.screen { CrashLog.current?.show(screen) }
         }
         .onChange(of: place) {
             if case .work(let id) = place { SwitchClock.start(id) }

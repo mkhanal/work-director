@@ -30,8 +30,12 @@ public actor Channel {
     public nonisolated let events: AsyncStream<Event>
     private let eventSink: AsyncStream<Event>.Continuation
 
+    /// Told each request's method as it is sent, and wd's exit: what a crash
+    /// note lists as the last things the app did.
+    private let trail: @Sendable (String) -> Void
+
     /// Starts `wd serve --stdio`. environment replaces the inherited one when given.
-    public init(wd: URL, environment: [String: String]? = nil) throws {
+    public init(wd: URL, environment: [String: String]? = nil, trail: @escaping @Sendable (String) -> Void = { _ in }) throws {
         let process = Process()
         process.executableURL = wd
         process.arguments = ["serve", "--stdio"]
@@ -42,6 +46,7 @@ public actor Channel {
         process.standardOutput = stdout
         process.standardError = FileHandle.standardError
         (events, eventSink) = AsyncStream.makeStream(of: Event.self)
+        self.trail = trail
         self.process = process
         self.input = stdin.fileHandleForWriting
 
@@ -184,6 +189,11 @@ public actor Channel {
     /// Writes one request and waits for the line that answers it.
     private func send(_ method: String, _ params: Params) async throws -> Data {
         if let exitStatus { throw ChannelError.exited(status: exitStatus) }
+        if case .argv(let argv) = params, let command = argv.first {
+            trail("asked wd: action " + command)
+        } else {
+            trail("asked wd: " + method)
+        }
         let id = nextID
         nextID += 1
         var line = try JSONEncoder().encode(Request(id: id, method: method, params: params))
@@ -218,6 +228,7 @@ public actor Channel {
     }
 
     private func exited(status: Int32) {
+        trail("wd exited (status \(status))")
         exitStatus = status
         failAll(ChannelError.exited(status: status))
         eventSink.finish()

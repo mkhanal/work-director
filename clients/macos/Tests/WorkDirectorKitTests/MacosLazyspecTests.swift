@@ -2034,4 +2034,78 @@ struct SeededTree {
         #expect(!text(goal(waiting: #","waiting_for_director":[]"#)).contains("Waiting for the director"), "once given, it no longer waits")
         #expect(!text(goal(waiting: "")).contains("Waiting for the director"), "a wd that does not say shows nothing waiting")
     }
+
+    @Test("A Crash Leaves A Note Of What Was On Screen")
+    func aCrashLeavesANote() throws {
+        let home = try Home()
+        let fm = FileManager.default
+        let crashes = home.dir.appendingPathComponent("crashes")
+        let reports = home.dir.appendingPathComponent("DiagnosticReports")
+        try fm.createDirectory(at: reports, withIntermediateDirectories: true)
+        func ips(pid: Int32, named name: String) throws {
+            let body = #"{"pid":\#(pid),"exception":{"type":"EXC_BREAKPOINT","signal":"SIGTRAP"},"asi":{"libswiftCore.dylib":["Fatal error: Index out of range"]},"faultingThread":0,"threads":[{"frames":[{"imageIndex":0,"imageOffset":64,"symbol":"WorkDetail.body.getter","symbolLocation":8}]}],"usedImages":[{"name":"WorkDirector"}]}"#
+            try (#"{"app_name":"WorkDirector"}"# + "\n" + body).write(to: reports.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        let started = Date(timeIntervalSinceNow: -60)
+        func running(_ pid: Int32) throws -> [String: Any] {
+            let data = try Data(contentsOf: crashes.appendingPathComponent("running-macos-\(pid).json"))
+            return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+
+        // An exception: its note at once, the system's report joined on the next launch.
+        let thrown = CrashLog(home: home.dir, build: "v1.1.0 (abc1234)", pid: 999_991, started: started)
+        thrown.show(Screen(work: "wd-7", view: "goal overview"))
+        thrown.did("asked wd: goal")
+        thrown.did("asked wd: goal")
+        for n in 0..<40 { thrown.did("asked wd: events \(n)") }
+        try thrown.write()
+        let kept = try running(999_991)
+        #expect(kept["build"] as? String == "v1.1.0 (abc1234)")
+        #expect((kept["screen"] as? [String: String]) == ["work": "wd-7", "view": "goal overview"])
+        #expect((kept["crumbs"] as? [Any])?.count == 30, "only the last 30 things done are kept")
+        let note = try thrown.died(of: Thrown(name: "NSInvalidArgumentException", reason: "-[CardBlock table]: unrecognized selector", stack: ["0 CoreFoundation __exceptionPreprocess"]))
+        try ips(pid: 999_991, named: "WorkDirector-2026-10-18-204150.ips")
+
+        // A trap: only the running file, then the report.
+        let trapped = CrashLog(home: home.dir, build: "dev", pid: 999_992, started: started)
+        trapped.show(Screen(work: nil, view: "new goal"))
+        trapped.did("asked wd: action goal")
+        trapped.did("asked wd: action goal")
+        try trapped.write()
+        try ips(pid: 999_992, named: "WorkDirector-2026-10-18-204151.ips")
+        try ips(pid: 4, named: "WorkDirector-2026-10-18-204152.ips")
+
+        // Still running, and quit cleanly: nothing to pair.
+        let alive = CrashLog(home: home.dir, build: "dev", pid: 999_993, started: started)
+        try alive.write()
+        let quit = CrashLog(home: home.dir, build: "dev", pid: 999_994, started: started)
+        try quit.write()
+        try quit.ended()
+
+        let gathered = try CrashLog.gather(home: home.dir, reports: reports, alive: { $0 == 999_993 })
+        #expect(Set(gathered.map(\.lastPathComponent)).count == 2)
+        #expect(gathered.map(\.lastPathComponent).contains(note.lastPathComponent))
+        let left = try fm.contentsOfDirectory(atPath: crashes.path).filter { $0.hasPrefix("running-") }
+        #expect(left == ["running-macos-999993.json"], "a crashed run's file goes once paired; a live one's stays")
+        #expect(fm.fileExists(atPath: note.appendingPathComponent("WorkDirector-2026-10-18-204150.ips").path))
+
+        let shown = try home.wd("crashes", note.lastPathComponent)
+        #expect(shown.contains("Work Director for macOS crashed"))
+        #expect(shown.contains("build v1.1.0 (abc1234)"))
+        #expect(shown.contains("Why: NSInvalidArgumentException: -[CardBlock table]: unrecognized selector"))
+        #expect(shown.contains("On screen: wd-7, goal overview"))
+        #expect(shown.contains("asked wd: events 39"))
+        #expect(!shown.contains("asked wd: events 9\n"), "the oldest were let go")
+        #expect(shown.contains("WorkDirector  WorkDetail.body.getter + 8"))
+
+        let trap = try #require(gathered.first { $0.lastPathComponent != note.lastPathComponent })
+        #expect(trap.lastPathComponent.hasSuffix("-macos-999992"))
+        let trapShown = try home.wd("crashes", trap.lastPathComponent)
+        #expect(trapShown.contains("Why: Fatal error: Index out of range"))
+        #expect(trapShown.contains("On screen: new goal"))
+        #expect(trapShown.contains("asked wd: action goal (2 times)"))
+
+        #expect(try CrashLog.gather(home: home.dir, reports: reports, alive: { $0 == 999_993 }).isEmpty, "each crash is paired once")
+        #expect(throws: Never.self) { try CrashLog.catchExceptions() }
+    }
 }

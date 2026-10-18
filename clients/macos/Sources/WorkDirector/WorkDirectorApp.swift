@@ -27,6 +27,40 @@ struct WorkDirectorApp: App {
         // A write to a wd that has exited must fail as an error the window can
         // show; the default SIGPIPE would end the app instead.
         signal(SIGPIPE, SIG_IGN)
+        Self.keepCrashNotes()
+    }
+
+    /// Crashes leave notes in $WD_HOME/crashes for `wd crashes`: what was on
+    /// screen and done is kept as the app runs, an exception writes its note
+    /// as it is thrown, and each launch pairs the last run's crash with the
+    /// system's report of it.
+    private static func keepCrashNotes() {
+        let home = CrashLog.home()
+        let log = CrashLog(home: home, build: CrashLog.build(of: .main))
+        CrashLog.current = log
+        do {
+            try CrashLog.catchExceptions()
+            try log.write()
+        } catch {
+            FileHandle.standardError.write(Data("crash notes: \(error)\n".utf8))
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { _ in
+            do {
+                try log.ended()
+            } catch {
+                FileHandle.standardError.write(Data("crash notes: \(error)\n".utf8))
+            }
+        }
+        let reports = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/DiagnosticReports")
+        Task.detached(priority: .utility) {
+            do {
+                for dir in try CrashLog.gather(home: home, reports: reports, alive: { kill($0, 0) == 0 || errno == EPERM }) {
+                    FileHandle.standardError.write(Data("the last run crashed: wd crashes \(dir.lastPathComponent)\n".utf8))
+                }
+            } catch {
+                FileHandle.standardError.write(Data("crash notes: pairing the last run's crash: \(error)\n".utf8))
+            }
+        }
     }
 
     var body: some Scene {
@@ -103,7 +137,7 @@ final class Launch {
         do {
             let wd = try locateWD()
             let environment = await Task.detached { LoginPath.resolve() }.value
-            let store = Store(channel: try Channel(wd: wd, environment: environment))
+            let store = Store(channel: try Channel(wd: wd, environment: environment, trail: { CrashLog.current?.did($0) }))
             Notifier.shared.start()
             store.told = { Notifier.shared.announce($0) }
             state = .running(store)

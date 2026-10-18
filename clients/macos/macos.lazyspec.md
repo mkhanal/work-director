@@ -302,3 +302,9 @@ hold only that product's work; with none, every product's.
 - Copied, each card's label and words read a line each, and each sub-goal its title, its line and its badge.
 - A sub-goal's title opens its page, folds its steps or shows its agent's conversation, as choosing its row does; its menu copies its title and id, and what makes it done.
 - A proposed breakdown is one selection too: each proposed sub-goal's title, done-when and chips; why the planner broke it down so is one beside it.
+
+## A Crash Leaves A Note Of What Was On Screen
+- While the app runs, `$WD_HOME/crashes/running-macos-<pid>.json` holds its build, the work and view on screen, and its last 30 things done: views shown and the names of requests to `wd`, never their content, a repeat counted.
+- An exception the app dies of, one AppKit crashes on included, first writes `$WD_HOME/crashes/<time>-macos-<pid>/note.json`: its name, reason and stack, what was on screen and what was done.
+- On the next launch a running file whose process is gone becomes such a note, or joins its exception's, and the system's `WorkDirector-*.ips` for that process is copied beside it; `wd crashes` reads the pair.
+- A clean quit leaves nothing behind.
