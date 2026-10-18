@@ -193,8 +193,30 @@ struct OutgoingBubble: View {
 
 /// A question asked of the person, laid out as it was asked: one part at a
 /// time, its choices as rows to pick, and words of their own always possible.
-/// Answered, it stays where it was asked, showing what was chosen.
+/// Answered, it stays where it was asked, showing what was chosen. What is
+/// picked belongs to the question it was picked for: a card shown another
+/// question in the same place starts it afresh.
 struct QuestionCard: View {
+    private let form: QuestionForm
+
+    init(store: Store, workID: String, question: Question, title: String? = nil, asker: String? = nil,
+         path: [PathPart] = [], at: String? = nil, change: PendingChange? = nil, product: String? = nil, answered: @escaping () -> Void) {
+        form = QuestionForm(store: store, workID: workID, question: question, title: title, asker: asker,
+                            path: path, at: at, change: change, product: product, answered: answered)
+    }
+
+    var body: some View {
+        form.id(Asked(id: form.question.id, items: form.question.items))
+    }
+
+    /// What a question asks, as against how it was answered.
+    private struct Asked: Hashable {
+        let id: String
+        let items: [QuestionItem]
+    }
+}
+
+private struct QuestionForm: View {
     let store: Store
     let workID: String
     let question: Question
