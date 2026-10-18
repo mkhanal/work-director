@@ -47,7 +47,8 @@ fn test_run() -> &'static Path {
         let prefix = "wd-linux-tests-";
         for entry in fs::read_dir(&temp).expect("read the temp dir") {
             let name = entry.expect("a temp dir entry").file_name();
-            let Some(pid) = name.to_str().and_then(|n| n.strip_prefix(prefix)).and_then(|p| p.parse::<u32>().ok()) else {
+            let Some(pid) = name.to_str().and_then(|n| n.strip_prefix(prefix)).and_then(|p| p.parse::<u32>().ok())
+            else {
                 continue;
             };
             if !Path::new(&format!("/proc/{pid}")).exists() {
@@ -1949,7 +1950,14 @@ fn a_notification_says_what_happened_and_where() {
         sighting(
             vec![row(goal("g", "Ship the export", "needs-input"), "needs-you", 1, 0, None, false)],
             vec![],
-            vec![("g", detail(goal("g", "Ship the export", "needs-input"), vec![x], vec![ask("event-9", "x", "Shall I add examples?", Value::Null)]))],
+            vec![(
+                "g",
+                detail(
+                    goal("g", "Ship the export", "needs-input"),
+                    vec![x],
+                    vec![ask("event-9", "x", "Shall I add examples?", Value::Null)],
+                ),
+            )],
         )
     };
     let was = sighting(
@@ -2056,8 +2064,9 @@ fn a_sub_goal_reads_as_working_only_while_an_agent_works_on_it() {
     let a = node_json("a", "task", "review", json!({"steps": [step(1), step(2)]}));
     let a: Node = serde_json::from_value(a).expect("a node");
     assert_eq!(a.row().badge.0, "To review", "steps are counted only while it is working");
-    let c: Node = serde_json::from_value(node_json("c", "task", "needs-input", json!({"needs_you": 1, "stopped": stop})))
-        .expect("a node");
+    let c: Node =
+        serde_json::from_value(node_json("c", "task", "needs-input", json!({"needs_you": 1, "stopped": stop})))
+            .expect("a node");
     let c = c.row();
     assert_eq!((c.badge.0.as_str(), c.mark), ("Needs you", Mark::NeedsYou));
     assert_eq!(c.meta, "Stopped without finishing: Only part of the suite has run.");

@@ -1357,7 +1357,9 @@ final class PillLayoutManager: NSLayoutManager {
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
         guard let storage = textStorage, let container = textContainers.first else { return }
         let chars = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
-        let selected = (container.textView?.selectedRanges ?? []).map(\.rangeValue)
+        // A text view draws on the main thread only.
+        nonisolated(unsafe) let view = container.textView
+        let selected = MainActor.assumeIsolated { (view?.selectedRanges ?? []).map(\.rangeValue) }
         storage.enumerateAttribute(.wdPill, in: chars) { value, range, _ in
             guard let look = value as? PillLook else { return }
             if selected.contains(where: { NSIntersectionRange($0, range).length > 0 }) { return }
