@@ -54,7 +54,7 @@ public enum CrashLogError: Error, CustomStringConvertible {
     case noCrashHook
 
     public var description: String {
-        "AppKit has no +[NSApplication _crashOnException:]; an exception AppKit crashes on leaves no note"
+        "AppKit has no _crashOnException:; an exception AppKit crashes on leaves no note"
     }
 }
 
@@ -194,10 +194,11 @@ public final class CrashLog: @unchecked Sendable {
         // on in whatever state it left; with it, AppKit crashes on it too.
         UserDefaults.standard.register(defaults: ["NSApplicationCrashOnExceptions": true])
         // AppKit crashes on an exception it catches (one thrown while drawing,
-        // always) by calling this, never the uncaught-exception handler.
+        // always) by calling this, never the uncaught-exception handler: a
+        // class method since macOS 26, an instance method before.
         let selector = NSSelectorFromString("_crashOnException:")
-        guard let meta = object_getClass(NSApplication.self),
-              let method = class_getInstanceMethod(meta, selector) else { throw CrashLogError.noCrashHook }
+        guard let method = object_getClass(NSApplication.self).flatMap({ class_getInstanceMethod($0, selector) })
+            ?? class_getInstanceMethod(NSApplication.self, selector) else { throw CrashLogError.noCrashHook }
         typealias Crash = @convention(c) (AnyObject, Selector, NSException) -> Void
         let original = unsafeBitCast(method_getImplementation(method), to: Crash.self)
         let hook: @convention(block) (AnyObject, NSException) -> Void = { app, exception in
