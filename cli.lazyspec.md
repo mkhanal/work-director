@@ -564,6 +564,7 @@ could not with their work, the bound that ran out, and the work still open.
 ## A Goal Nothing Can Move Asks The Person What To Do
 - A running goal whose supervisor has replied to its last look, with no sub-goal running, waiting on the person or paused, none that can start, no chore working and nothing new for its supervisor, files a question on the goal and waits on the person.
 - The question opens `This goal is stuck: nothing is working and nothing can start.`, says why for each open sub-goal by its title, and offers for each finished one `Close “<title>” anyway` and `Send “<title>” back to its agent`, `Start a task to fix the project's checks` when a close stopped at the checks, and `Have the director look again`.
+- A pass first starts each sub-goal that waited on siblings now all settled.
 - Answering `Close “<title>” anyway` closes it without its checks; `Send “<title>” back to its agent` tells its agent to make its checks pass; `Start a task to fix the project's checks` adds and starts that sub-goal. Every answer reaches the supervisor.
 
 ## A Plan Change Waits For The Person In Ask Mode

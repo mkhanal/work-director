@@ -5634,6 +5634,15 @@ func TestAGoalNothingCanMoveAsksThePersonWhatToDo(t *testing.T) {
 		if sent := readFile(t, filepath.Join(c.state, "sent-"+c.supervisor)); !strings.Contains(sent, "Close “Rename the module” anyway") {
 			t.Fatalf("the supervisor was sent %q, want the person's answer", sent)
 		}
+		var tasks []core.Work
+		if err := json.Unmarshal([]byte(f.runOK(t, "tasks", c.goal, "--json")), &tasks); err != nil {
+			t.Fatal(err)
+		}
+		waiting := tasks[len(tasks)-1].ID
+		superviseOnce(t, f, c.goal)
+		if got := stateOf(t, f, waiting); got != core.StateRunning {
+			t.Fatalf("the callers' task once the rename closed = %s, want started", got)
+		}
 	})
 	t.Run("sends back", func(t *testing.T) {
 		f, c, _ := stuck(t)

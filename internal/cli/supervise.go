@@ -75,6 +75,11 @@ func (c *Cli) supervise(goal core.Work) (supervision, error) {
 	if err != nil {
 		return out, err
 	}
+	released, err := c.startReleased(goal, p)
+	if err != nil {
+		return out, err
+	}
+	working = working || released
 	choring, err := c.tendChores(goal, p)
 	if err != nil {
 		return out, err
@@ -1341,6 +1346,50 @@ func (c *Cli) askIfStuck(goal core.Work, p *project.Project) error {
 	}
 	_, err = c.Ledger.Transition(goal.ID, core.StateNeedsInput)
 	return err
+}
+
+// startReleased starts each task under goal that waited on siblings now all
+// settled: the order was the plan's, so what it held back starts once it no
+// longer has to wait. It reports whether it started any.
+func (c *Cli) startReleased(goal core.Work, p *project.Project) (bool, error) {
+	tree, err := c.Ledger.Under(goal.ID)
+	if err != nil {
+		return false, err
+	}
+	byID := map[string]core.Work{}
+	for _, w := range tree {
+		byID[w.ID] = w
+	}
+	started := false
+	for _, w := range tree[1:] {
+		if w.Kind != core.WorkTask || (w.State != core.StateQueued && w.State != core.StateBriefed) {
+			continue
+		}
+		after, err := c.Ledger.After(w.ID)
+		if err != nil {
+			return false, err
+		}
+		if len(after) == 0 {
+			continue
+		}
+		if on, err := c.waitsAbove(w, goal.ID, byID); err != nil || on != "" {
+			if err != nil {
+				return false, err
+			}
+			continue
+		}
+		if held, err := c.proposed(*w.Parent); err != nil || held {
+			if err != nil {
+				return false, err
+			}
+			continue
+		}
+		if err := c.startUnder(goal, p, w); err != nil {
+			return false, err
+		}
+		started = true
+	}
+	return started, nil
 }
 
 // waitsAbove is the first unsettled work w, or a goal above it short of top,
