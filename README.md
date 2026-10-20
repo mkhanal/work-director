@@ -24,9 +24,9 @@ Pick the app or the command-line tool `wd`; the apps carry their own `wd`. Every
 
 | You have | Get | Needs |
 |---|---|---|
-| Mac with Apple silicon | the app, `Work-Director-<version>-macos-arm64.zip` | macOS 15 or later |
-| Ubuntu / Debian, x86_64 or ARM | the app, `Work-Director-<version>-linux-<x86_64\|aarch64>.deb` | Ubuntu 24.04 or later (GTK 4.14, libadwaita 1.5) |
-| Other Linux, x86_64 or ARM | the app, `Work-Director-<version>-linux-<x86_64\|aarch64>.tar.gz` | GTK 4.14 and libadwaita 1.5 |
+| Mac with Apple silicon | the app, `Work-Director-<version>-macos-arm64.dmg` (or `.zip`) | macOS 15 or later |
+| Ubuntu / Debian, x86_64 or ARM | the app and `wd`, `Work-Director-<version>-linux-<x86_64\|aarch64>.deb` | Ubuntu 24.04 or later (GTK 4.14, libadwaita 1.5) |
+| Other Linux, x86_64 or ARM | the app and `wd`, `Work-Director-<version>-linux-<x86_64\|aarch64>.tar.gz` | GTK 4.14 and libadwaita 1.5 |
 | Any Mac, Linux or Windows, terminal only | `wd`, with the one-line installer below | nothing else |
 
 Before you start, have **git** and at least one coding-agent CLI the director hands work to:
@@ -36,9 +36,10 @@ checks who built the download, and work that lands as a pull request is checked 
 
 **macOS app**
 
-1. Download `Work-Director-<version>-macos-arm64.zip` from the
-   [latest release](https://github.com/mkhanal/work-director/releases/latest) and double-click it.
-2. Move **Work Director.app** to Applications.
+1. Download `Work-Director-<version>-macos-arm64.dmg` from the
+   [latest release](https://github.com/mkhanal/work-director/releases/latest) and open it.
+2. Drag **Work Director** onto the Applications folder beside it. (The `.zip` holds the same app:
+   double-click it and move **Work Director.app** to Applications.)
 3. The app is not notarized yet, so macOS blocks the first open. Open it once, choose **Done**, then go
    to **System Settings → Privacy & Security**, scroll to Security and choose **Open Anyway** for
    Work Director. Or, in Terminal: `xattr -dr com.apple.quarantine "/Applications/Work Director.app"`.
@@ -49,10 +50,11 @@ checks who built the download, and work that lands as a pull request is checked 
 sudo apt install ./Work-Director-<version>-linux-x86_64.deb     # aarch64 on ARM; then open Work Director from your apps
 ```
 
-Elsewhere, unpack the `.tar.gz`, run `bin/work-director` inside it, and copy its `share/` into
+The `.deb` also puts `wd` on your PATH, the same build the app runs. Elsewhere, unpack the `.tar.gz`,
+run `bin/work-director` inside it (its `wd` is `bin/wd`, beside it), and copy its `share/` into
 `~/.local/share` for the launcher entry and icon.
 
-**`wd` alone** (also what you want for `wd` in a terminal next to either app)
+**`wd` alone** (also what you want for `wd` in a terminal next to the Mac app)
 
 | Platform | Command | Installs to |
 |---|---|---|

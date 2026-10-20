@@ -1,22 +1,17 @@
 #!/usr/bin/env bash
-# Package the host binary as a macOS disk image — the path a Mac user expects:
-# open the .dmg, drag wd to Applications, done. No Terminal, no PATH editing,
-# no curl-pipe-shell.
+# Package "Work Director.app" as a macOS disk image: open the .dmg, drag the app
+# onto Applications, done.
 #
-#   VERSION=v1.2.0 scripts/dmg.sh
+#   scripts/build-macos.sh && VERSION=v1.2.0 scripts/dmg.sh
 #
-# Produces dist/wd-<version>-<arch>.dmg. hdiutil only exists on macOS, so this
-# runs on a macos runner in CI; on other platforms it says so and exits
-# non-zero rather than leaving a half-made image behind.
+# Produces dist/Work-Director-<version>-macos-<arch>.dmg and its .sha256 from the
+# app scripts/build-macos.sh left in dist, so the image holds exactly the app the
+# zip holds, wd inside it included. hdiutil only exists on macOS; elsewhere this
+# says so and exits non-zero rather than leaving a half-made image behind.
 #
-# The image is laid out the way a double-clicked dmg should behave: the binary
-# and an Applications alias on the desktop.
-#
-# There is deliberately no hand-placed window layout. hdiutil's -layout flag is
-# rejected outright on current macOS ("Invalid argument"), so a plist that looks
-# like the right thing is a config that breaks the build on release day.
-# Finder's default window already shows both icons, which is the whole of what
-# the layout was for.
+# There is no hand-placed window layout: hdiutil's -layout flag is rejected on
+# current macOS, and Finder's default window already shows the app beside the
+# Applications drop target.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -24,64 +19,36 @@ cd "$(dirname "$0")/.."
   echo "dmg: only macOS can build a disk image (hdiutil); run this on a macos runner" >&2
   exit 1
 }
-command -v hdiutil >/dev/null || { echo "dmg: hdiutil not found" >&2; exit 1; }
 
 version=${VERSION:-dev}
-arch=$(go env GOARCH)
-os=$(go env GOOS)
-commit=${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}
+app="dist/Work Director.app"
+[ -d "$app" ] || { echo "dmg: $app is missing; run scripts/build-macos.sh first" >&2; exit 1; }
+arch=$(uname -m)
+name="Work-Director-$version-macos-$arch.dmg"
 
-mkdir -p dist
 stage=$(mktemp -d)
-trap 'rm -rf "$stage"' EXIT
+mnt=$(mktemp -d)
+trap 'hdiutil detach -quiet "$mnt" 2>/dev/null || true; rm -rf "$stage" "$mnt"' EXIT
 
-# The binary is the same self-contained one every other channel ships: pure Go,
-# pure-Go sqlite, nothing to install alongside it.
-CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
-  -ldflags "-s -w -X wd/internal/cli.Version=$version -X wd/internal/cli.Commit=$commit" \
-  -o "$stage/wd" ./cmd/wd
-
-# A staging volume with the app folder as a symlink, which is what makes the
-# window show an Applications drop target rather than a list of loose files.
+# The volume: the app and a symlink to /Applications, the drop target.
 vol="$stage/Volume"
 mkdir -p "$vol"
-cp "$stage/wd" "$vol/wd"
+ditto "$app" "$vol/Work Director.app"
 ln -s /Applications "$vol/Applications"
+cp assets/icon/wd.icns "$vol/.VolumeIcon.icns"
 
-# The volume gets the app icon, and so does the binary: macOS takes a file's icon
-# from an .icns of the same name sitting beside it, which is why wd.icns is
-# copied next to wd rather than only used as the volume's.
-icon="assets/icon/wd.icns"
-if [ -f "$icon" ]; then
-  cp "$icon" "$vol/wd.icns"
-  cp "$icon" "$stage/wd.icns"
-  # -a C is "use this file as the custom icon". Without it the volume shows the
-  # generic disk and the whole point of a dmg is the first thing someone sees.
-  SetFile -a C "$vol" 2>/dev/null || true
-else
-  echo "dmg: assets/icon/wd.icns is missing — run scripts/icons.sh (needs macOS) for the icon; shipping without it" >&2
-fi
-cat > "$vol/README.txt" <<TXT
-wd $version ($commit)
+# Built writable first, because the volume shows its icon only once the mounted
+# volume's root carries the custom-icon flag; then compressed read-only (UDZO).
+rw="$stage/rw.dmg"
+hdiutil create -quiet -volname "Work Director" -srcfolder "$vol" -fs HFS+ -format UDRW -ov "$rw"
+hdiutil attach -quiet -nobrowse -noautoopen -mountpoint "$mnt" "$rw"
+SetFile -a C "$mnt"
+hdiutil detach -quiet "$mnt"
 
-Drag wd to Applications, then open a Terminal and run:
-
-    wd doctor     # which runner CLIs are detected
-    wd serve      # the JSON API over loopback HTTP — open the address it prints
-    wd --help     # every command
-
-Your ledger lives in ~/.work-director. Nothing else is installed and nothing is
-uploaded: wd runs entirely on this machine.
-TXT
-
-dmg="dist/wd-$version-$arch.dmg"
-rm -f "$dmg"
-# UDZO is the compressed read-only format Finder mounts like a disk image.
-hdiutil create -volname "wd $version" -srcfolder "$vol" -ov -format UDZO "$dmg" >/dev/null
-
+mkdir -p dist
+rm -f "dist/$name"
+hdiutil convert -quiet "$rw" -format UDZO -o "dist/$name"
 # Named without its folder, so `shasum -c` checks it beside the download.
-name=$(basename "$dmg")
-if command -v shasum >/dev/null 2>&1; then (cd dist && shasum -a 256 "$name" > "$name.sha256")
-else (cd dist && sha256sum "$name" > "$name.sha256"); fi
+(cd dist && shasum -a 256 "$name" > "$name.sha256")
 
-echo "built $dmg"
+echo "built dist/$name"

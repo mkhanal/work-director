@@ -74,8 +74,17 @@ jobs:
           (cd dist && shasum -a 256 "$dsym" > "$dsym.sha256" && cat "$dsym.sha256" >> checksums.txt)
           "dist/Work Director.app/Contents/MacOS/wd" --version | grep -F "${GITHUB_REF_NAME}"
 
+      # The same app as a disk image: open it, drag the app onto Applications.
       - name: build the mac disk image
-        run: VERSION="${GITHUB_REF_NAME}" COMMIT="$(git rev-parse --short HEAD)" scripts/dmg.sh
+        run: |
+          VERSION="${GITHUB_REF_NAME}" scripts/dmg.sh
+          dmg="Work-Director-${GITHUB_REF_NAME}-macos-$(uname -m).dmg"
+          (cd dist && cat "$dmg.sha256" >> checksums.txt && shasum -a 256 -c "$dmg.sha256")
+          mnt=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "dist/$dmg"
+          "$mnt/Work Director.app/Contents/MacOS/wd" --version | grep -F "${GITHUB_REF_NAME}"
+          test -L "$mnt/Applications"
+          hdiutil detach "$mnt"
 
       - name: attest where every asset was built
         uses: actions/attest-build-provenance@v2
@@ -84,15 +93,20 @@ jobs:
             dist/Work-Director-*.zip
             dist/wd-*.tar.gz
             dist/wd-*.zip
-            dist/wd-*.dmg
+            dist/Work-Director-*.dmg
 
-      - name: generate the homebrew formula from what was just published
+      # The tap's formula for wd and cask for the app, from the checksums of
+      # what this release ships; scripts/tap.sh copies them into the tap.
+      - name: generate the homebrew formula and cask
         run: VERSION="${GITHUB_REF_NAME}" scripts/formula.sh
 
-      - name: the formula has no build dependency and names this release
+      - name: the formula has no build dependency and both name this release
         run: |
-          grep -F "${GITHUB_REF_NAME}" scripts/homebrew/wd.rb
-          ! grep -q 'depends_on' scripts/homebrew/wd.rb
+          v="${GITHUB_REF_NAME#v}"
+          grep -F "version \"$v\"" dist/homebrew/Formula/wd.rb
+          grep -F "version \"$v\"" dist/homebrew/Casks/work-director.rb
+          ! grep -q 'depends_on' dist/homebrew/Formula/wd.rb
+          ruby -c dist/homebrew/Formula/wd.rb dist/homebrew/Casks/work-director.rb
 
       - name: publish the release
         env:
@@ -109,7 +123,9 @@ jobs:
             dist/Work-Director-*.zip \
             dist/wd-*.tar.gz \
             dist/wd-*.zip \
-            dist/wd-*.dmg \
+            dist/Work-Director-*.dmg \
+            dist/homebrew/Formula/wd.rb \
+            dist/homebrew/Casks/work-director.rb \
             assets/icon/wd.icns \
             dist/*.sha256 \
             dist/checksums.txt \
