@@ -24,7 +24,8 @@ WD_BUILD="$version ($commit)" cargo build --release --manifest-path clients/linu
 bin=clients/linux/target/release/work-director
 
 # The installed tree, shared by the tarball and the .deb: the app and its wd
-# side by side, the desktop entry and the icons.
+# side by side, both on PATH, the desktop entry and the icons. One install gives
+# the app and the terminal command, and they are the same build.
 root=dist/linux-root
 rm -rf "$root"
 lib="$root/usr/lib/work-director"
@@ -34,6 +35,7 @@ CGO_ENABLED=0 go build -trimpath \
   -ldflags "-s -w -X wd/internal/cli.Version=$version -X wd/internal/cli.Commit=$commit" \
   -o "$lib/wd" ./cmd/wd
 ln -s ../lib/work-director/work-director "$root/usr/bin/work-director"
+ln -s ../lib/work-director/wd "$root/usr/bin/wd"
 install -m 644 "clients/linux/data/$app_id.desktop" "$root/usr/share/applications/$app_id.desktop"
 for size in 32 256 512; do
   dir="$root/usr/share/icons/hicolor/${size}x${size}/apps"
@@ -66,8 +68,8 @@ Section: devel
 Priority: optional
 Homepage: https://github.com/mkhanal/work-director
 Description: Work Director: goals, their agents and what waits on you
- A native GTK app over the wd ledger. It runs the wd installed with it,
- over wd serve --stdio; every write is a wd command.
+ A native GTK app over the wd ledger, and the wd command-line tool it runs,
+ over wd serve --stdio; every write is a wd command. Both go on PATH.
 CONTROL
 deb="$name.deb"
 dpkg-deb --build --root-owner-group "$root" "dist/$deb"

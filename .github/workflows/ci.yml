@@ -57,6 +57,7 @@ jobs:
         run: |
           scripts/build-linux.sh
           dpkg-deb -c dist/Work-Director-dev-linux-*.deb | grep 'usr/lib/work-director/wd$' > /dev/null
+          dpkg-deb -c dist/Work-Director-dev-linux-*.deb | grep -F './usr/bin/wd -> ../lib/work-director/wd' > /dev/null
           git clean -fdxq dist
       # The app itself, launched on a virtual display against a ledger with a
       # goal in it, on each of the goal's views and on a new goal: it must
