@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Single-command install for the director on macOS and Linux:
 #
 #   curl -fsSL https://raw.githubusercontent.com/mkhanal/work-director/main/scripts/install.sh | sh
@@ -14,7 +14,10 @@
 #
 # Windows uses scripts/install.ps1 instead; this script says so rather than
 # failing with a confusing tar error.
-set -euo pipefail
+#
+# POSIX sh: piped to `sh`, it runs under dash on Debian and Ubuntu. Every
+# pipe's result is checked for emptiness, so nothing relies on pipefail.
+set -eu
 
 repo=mkhanal/work-director
 version=${1:-latest}
