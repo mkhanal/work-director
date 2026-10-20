@@ -6,7 +6,7 @@ coding-agent CLI: Claude Code (`claude`), opencode or codex.
 ## 1. Install
 
 ```
-curl -fsSL https://raw.githubusercontent.com/mkhanal/work-director/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mkhanal/work-director/main/scripts/install.sh | bash
 wd doctor
 ```
 
@@ -16,12 +16,8 @@ Tab completion for your shell: `wd completion zsh > "${fpath[1]}/_wd"`, or
 `source <(wd completion bash)`, `wd completion fish | source`, or
 `wd completion powershell | Out-String | Invoke-Expression`.
 
-On a Mac, the app bundles its own `wd`. Build it from a checkout:
-
-```
-scripts/build-macos.sh        # dist/Work Director.app
-open "dist/Work Director.app"
-```
+For the macOS or Linux app, Windows, updating and uninstalling, see
+[Install](../README.md#install) in the README. The apps bundle their own `wd`.
 
 ## 2. Add a project
 

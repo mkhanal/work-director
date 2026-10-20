@@ -17,6 +17,64 @@ model for a run is chosen live from the provider's own CLI via `wd models`, neve
 **learning that injects direction** (global rules at runtime via the plugin, project-level
 rules into the project's own files as a PR it accepts).
 
+## Install
+
+Pick the app or the command-line tool `wd`; the apps carry their own `wd`. Every file is on the
+[latest release](https://github.com/mkhanal/work-director/releases/latest), with its sha256.
+
+| You have | Get | Needs |
+|---|---|---|
+| Mac with Apple silicon | the app, `Work-Director-<version>-macos-arm64.zip` | macOS 15 or later |
+| Ubuntu / Debian, x86_64 or ARM | the app, `Work-Director-<version>-linux-<x86_64\|aarch64>.deb` | Ubuntu 24.04 or later (GTK 4.14, libadwaita 1.5) |
+| Other Linux, x86_64 or ARM | the app, `Work-Director-<version>-linux-<x86_64\|aarch64>.tar.gz` | GTK 4.14 and libadwaita 1.5 |
+| Any Mac, Linux or Windows, terminal only | `wd`, with the one-line installer below | nothing else |
+
+Before you start, have **git** and at least one coding-agent CLI the director hands work to:
+[Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`), [opencode](https://opencode.ai) or
+[codex](https://github.com/openai/codex). The GitHub CLI `gh` is optional: with it, the installer also
+checks who built the download, and work that lands as a pull request is checked on GitHub.
+
+**macOS app**
+
+1. Download `Work-Director-<version>-macos-arm64.zip` from the
+   [latest release](https://github.com/mkhanal/work-director/releases/latest) and double-click it.
+2. Move **Work Director.app** to Applications.
+3. The app is not notarized yet, so macOS blocks the first open. Open it once, choose **Done**, then go
+   to **System Settings → Privacy & Security**, scroll to Security and choose **Open Anyway** for
+   Work Director. Or, in Terminal: `xattr -dr com.apple.quarantine "/Applications/Work Director.app"`.
+
+**Linux app**
+
+```
+sudo apt install ./Work-Director-<version>-linux-x86_64.deb     # aarch64 on ARM; then open Work Director from your apps
+```
+
+Elsewhere, unpack the `.tar.gz`, run `bin/work-director` inside it, and copy its `share/` into
+`~/.local/share` for the launcher entry and icon.
+
+**`wd` alone** (also what you want for `wd` in a terminal next to either app)
+
+| Platform | Command | Installs to |
+|---|---|---|
+| macOS, Linux | `curl -fsSL https://raw.githubusercontent.com/mkhanal/work-director/main/scripts/install.sh \| bash` | `~/.local/bin/wd` (set `WD_INSTALL_DIR` to change) |
+| Windows (PowerShell) | `irm https://raw.githubusercontent.com/mkhanal/work-director/main/scripts/install.ps1 \| iex` | `%LOCALAPPDATA%\Programs\wd\wd.exe`, added to your PATH |
+
+The installer picks your platform and chip, downloads the latest release, and refuses anything
+whose checksum does not match. A specific version: `... | bash -s -- v1.1.0`. If it says
+`~/.local/bin` is not on your PATH, add the line it prints to your shell profile.
+
+**Check it worked**
+
+```
+wd --version     # wd v1.1.0 (…)
+wd doctor        # which agent CLIs it found; one is enough
+```
+
+**Update**: run the same installer again, or install the newer app over the old one.
+**Uninstall**: delete the app (`sudo apt remove work-director` on Debian/Ubuntu) and the `wd`
+binary; your goals and settings live in `~/.work-director`, delete it too to remove everything.
+
+Next: **[docs/quickstart.md](docs/quickstart.md)** takes you from install to a goal being worked on in five minutes.
 
 ### The desktop app
 
@@ -29,11 +87,6 @@ they start, with model, tokens, tools and time, and each one's conversation a cl
 write is a `wd` command that runs at once and can be undone; the next gate (verify, land,
 soft-done, done) is one button.
 
-**Download:** each [release](https://github.com/mkhanal/work-director/releases) carries
-`Work-Director-<version>-macos-arm64.zip` (Apple silicon, macOS 15 or later). Unzip it and move
-**Work Director.app** to Applications. The app is not notarized yet, so the first time,
-right-click it and choose **Open** (or run `xattr -dr com.apple.quarantine "/Applications/Work Director.app"`).
-
 **Build it yourself:**
 
 ```
@@ -41,19 +94,8 @@ scripts/build-macos.sh            # dist/Work Director.app, with the matching wd
 ```
 
 **Work Director for Linux** is the same app in GTK4 and libadwaita (`clients/linux`, Rust),
-with its own `wd` installed beside it. Each release carries, for Ubuntu 24.04 or later
-(GTK 4.14, libadwaita 1.5):
-
-```
-sudo apt install ./Work-Director-<version>-linux-x86_64.deb    # then open Work Director from your apps
-```
-
-(`aarch64` in place of `x86_64` on ARM), or `Work-Director-<version>-linux-<arch>.tar.gz` for anywhere else with GTK 4.14 and
-libadwaita 1.5: unpack it and run `bin/work-director`; copy its `share/` into `~/.local/share`
-for the launcher entry and icon. To build it: `scripts/build-linux.sh` (needs cargo, go,
+with its own `wd` installed beside it (see [Install](#install)). To build it: `scripts/build-linux.sh` (needs cargo, go,
 `libgtk-4-dev` and `libadwaita-1-dev`).
-
-New here? **`docs/quickstart.md`** goes from install to a goal being worked on in five minutes.
 
 A Windows (WinUI 3) app is planned over the same stdio channel.
 
@@ -82,8 +124,8 @@ from the ledger after a crash, and enforces clash reporting. The `wd` CLI is the
 session drives — and the hands-off rail for scripted work.
 
 ```
-curl -fsSL https://raw.githubusercontent.com/mkhanal/work-director/main/scripts/install.sh | sh
-# a prerelease by name:  ... | sh -s v1.0.0-rc.1
+curl -fsSL https://raw.githubusercontent.com/mkhanal/work-director/main/scripts/install.sh | bash
+# a prerelease by name:  ... | bash -s -- v1.0.0-rc.1
 wd doctor                         # which runner CLIs are detected; repo state here
 cp projects/example.md ~/.work-director/projects/my-app.md   # edit path, runner, mode, verify
 claude                                                        # in this repo: the session is the director

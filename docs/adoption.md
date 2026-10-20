@@ -84,7 +84,7 @@ says it looked. Point the loop at your checkout with `WD_ROOT` so it has somewhe
 ## 2. Director — orchestrate many repos from the terminal
 
 ```
-curl -fsSL https://raw.githubusercontent.com/mkhanal/work-director/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mkhanal/work-director/main/scripts/install.sh | bash
 wd doctor                         # detected runner CLIs (claude, opencode, codex) + repo state
 cp projects/example.md ~/.work-director/projects/my-app.md   # edit path, runner, mode, stack, verify
 ```
