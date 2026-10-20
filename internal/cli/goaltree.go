@@ -296,6 +296,9 @@ func (c *Cli) supersedeSubGoal(w core.Work, why, by string) ([]core.Work, error)
 	if err != nil {
 		return nil, fail("%v", err)
 	}
+	if err := c.releaseFinished(gone...); err != nil {
+		return nil, err
+	}
 	return gone, c.reshaped(w, fmt.Sprintf("dropped %s: %s", w.ID, why), by)
 }
 
@@ -323,7 +326,9 @@ func (c *Cli) goalMerge(rest []string) error {
 	if err := c.stopUnder(other.ID); err != nil {
 		return err
 	}
-	if _, err := c.Ledger.Supersede(other.ID, "merged into "+keep.ID); err != nil {
+	if gone, err := c.Ledger.Supersede(other.ID, "merged into "+keep.ID); err != nil {
+		return err
+	} else if err := c.releaseFinished(gone...); err != nil {
 		return err
 	}
 	var parts []string

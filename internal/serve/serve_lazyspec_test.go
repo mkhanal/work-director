@@ -33,7 +33,7 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatalf("ledger: %v", err)
 	}
 	t.Cleanup(func() { l.Close() })
-	return New(l, "", nil, nil)
+	return New(l, "", nil, nil, nil)
 }
 
 func TestServe(t *testing.T) {
@@ -69,6 +69,7 @@ func TestServe(t *testing.T) {
 	t.Run("A Reply To The Person Reads As A Reply, Not A Stop", aReplyToThePersonReadsAsAReplyNotAStop)
 	t.Run("A Message To A Task Reaches It Whatever State Its Goal Is In", aMessageToATaskReachesItWhateverStateItsGoalIsIn)
 	t.Run("A Running Goal Is Supervised While Serving", aRunningGoalIsSupervisedWhileServing)
+	t.Run("Serving Releases Finished Work's Worktrees At Start And Hourly", servingReleasesFinishedWorksWorktreesAtStartAndHourly)
 	t.Run("Work Items Serve Over HTTP", workItemsServeOverHTTP)
 	t.Run("A Work Item Serves The Next Gate It Waits On", aWorkItemServesTheNextGateItWaitsOn)
 	t.Run("Actions Dispatch To The CLI", actionsDispatchToTheCLI)
@@ -611,7 +612,7 @@ func webSocketServesLiveEvents(t *testing.T) {
 	if _, err := l.AddEvent(w.ID, core.EventNote, "before serve"); err != nil {
 		t.Fatalf("event before serve: %v", err)
 	}
-	addr, _, err := New(l, "/bin/echo", nil, nil).Start(0)
+	addr, _, err := New(l, "/bin/echo", nil, nil, nil).Start(0)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -696,7 +697,7 @@ func aClientThatStopsReadingNeverDelaysTheOthers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	srv := New(l, "/bin/echo", nil, nil)
+	srv := New(l, "/bin/echo", nil, nil, nil)
 	addr, _, err := srv.Start(0)
 	if err != nil {
 		t.Fatalf("start: %v", err)
@@ -3338,5 +3339,35 @@ func aGoalServesWhyWorkStoppedOrIsBlocked(t *testing.T) {
 		case !blocked && n.BlockedBecause != nil:
 			t.Errorf("blocked_because of %s = %q, want null", n.Work.Title, *n.BlockedBecause)
 		}
+	}
+}
+
+func servingReleasesFinishedWorksWorktreesAtStartAndHourly(t *testing.T) {
+	s := newTestServer(t)
+	withSessions(s, &sessionRunner{})
+	var mu sync.Mutex
+	tidied := 0
+	s.tidy = func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		tidied++
+		return nil
+	}
+	stop := make(chan struct{})
+	ended := make(chan error, 1)
+	go func() { ended <- s.watchSessions(stop) }()
+	// Long enough for several watches.
+	time.Sleep(2*sessionWatch + time.Second)
+	close(stop)
+	if err := <-ended; err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if tidied != 1 {
+		t.Fatalf("worktrees released %d times over several watches, want once at start", tidied)
+	}
+	if tidyEvery != time.Hour {
+		t.Fatalf("worktrees are released every %s, want hourly", tidyEvery)
 	}
 }

@@ -2443,6 +2443,25 @@ func (l *Ledger) Worktrees(work string) ([]core.Worktree, error) {
 	return out, rows.Err()
 }
 
+// UnreleasedWorktrees is every worktree not yet removed, of any work, oldest
+// first.
+func (l *Ledger) UnreleasedWorktrees() ([]core.Worktree, error) {
+	rows, err := l.db.Query(`SELECT id, work, path, branch, kind, state, origin, created FROM worktree WHERE state != ? ORDER BY id`, string(core.WorktreeRemoved))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []core.Worktree{}
+	for rows.Next() {
+		w, err := scanWorktree(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
 func (l *Ledger) SetWorktreeState(id int, state core.WorktreeState) (core.Worktree, error) {
 	wt, err := scanWorktree(l.db.QueryRow(
 		`UPDATE worktree SET state = ? WHERE id = ?

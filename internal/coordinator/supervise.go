@@ -217,6 +217,7 @@ AFTER <id>: <id>,<id> | none
 MET <id>: <why its done-when holds>  (closes a sub-goal in review; nothing closes on its report alone)
 MISSED <id>: <what is missing>  (sends it back to its agent)
 CHORE: <what the director needs done that is no sub-goal, run as a session on the goal>
+SYNC: <why>  (brings the goal's branch up to date with main: merges main in, or starts it again from main when it holds no commits of its own; a conflict comes back to you. Use it when a check fails on the goal but passes on main)
 PROPOSE: <title> | done when: <done when> | finish: <discovery, research, local build, complete PR, merged or released> [| found: <what was found that calls for it>] — <why>  (a change to the top goal; it waits for the person)
 RESOLVE <concern number>: <decision>
 ASK: <a question only the person can answer>
@@ -356,6 +357,7 @@ const (
 	ActMet       ActionKind = "met"
 	ActMissed    ActionKind = "missed"
 	ActChore     ActionKind = "chore"
+	ActSync      ActionKind = "sync"
 	ActPropose   ActionKind = "propose"
 	ActResolve   ActionKind = "resolve"
 	ActAsk       ActionKind = "ask"
@@ -425,6 +427,8 @@ func (a Action) Line() string {
 		return fmt.Sprintf("MISSED %s: %s", a.Work, a.Text)
 	case ActChore:
 		return "CHORE: " + a.Text
+	case ActSync:
+		return "SYNC: " + a.Text
 	case ActPropose:
 		found := ""
 		if a.Found != "" {
@@ -456,6 +460,7 @@ var (
 	metRe        = regexp.MustCompile(`^MET\s+(\S+?):\s*(\S.*)$`)
 	missedRe     = regexp.MustCompile(`^MISSED\s+(\S+?):\s*(\S.*)$`)
 	choreRe      = regexp.MustCompile(`^CHORE:\s*(\S.*)$`)
+	syncRe       = regexp.MustCompile(`^SYNC:\s*(\S.*)$`)
 	proposeActRe = regexp.MustCompile(`^PROPOSE:\s*(\S.*?)\s+—\s+(\S.*)$`)
 	resolveRe    = regexp.MustCompile(`^RESOLVE\s+#?(\d+):\s*(\S.*)$`)
 	askActRe     = regexp.MustCompile(`^ASK:\s*(\S.*)$`)
@@ -619,6 +624,9 @@ func action(l string) (Action, bool) {
 	}
 	if m := choreRe.FindStringSubmatch(l); m != nil {
 		return Action{Kind: ActChore, Text: strings.TrimSpace(m[1])}, true
+	}
+	if m := syncRe.FindStringSubmatch(l); m != nil {
+		return Action{Kind: ActSync, Text: strings.TrimSpace(m[1])}, true
 	}
 	if m := proposeActRe.FindStringSubmatch(l); m != nil {
 		parts := strings.Split(m[1], "|")

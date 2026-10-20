@@ -172,6 +172,9 @@ const (
 	WorktreeMerged    WorktreeState = "merged"
 	WorktreeAbandoned WorktreeState = "abandoned"
 	WorktreeRemoved   WorktreeState = "removed"
+	// WorktreeGone is a worktree whose directory went from disk without wd
+	// removing it; its branch may still hold its work.
+	WorktreeGone WorktreeState = "gone"
 )
 
 // FinishSource says where a goal's finish line came from: the goal's own
@@ -272,8 +275,8 @@ type Step struct {
 	State StepState `json:"state"`
 }
 
-// WorktreeOrigin says who made a worktree. Only a director-made worktree is
-// ever removed by wd: an attached one belongs to whoever created it.
+// WorktreeOrigin says who made a worktree: the director, or an executor or
+// person who attached it to the work.
 type WorktreeOrigin string
 
 const (
@@ -786,7 +789,7 @@ var (
 	FeedbackSources = []FeedbackSource{FeedbackDirector, FeedbackNote, FeedbackAttached}
 	LandingKinds    = []LandingKind{LandingCommit, LandingPullRequest}
 	WorktreeKinds   = []WorktreeKind{WorktreeShared, WorktreePrivate}
-	WorktreeStates  = []WorktreeState{WorktreeActive, WorktreeMerged, WorktreeAbandoned, WorktreeRemoved}
+	WorktreeStates  = []WorktreeState{WorktreeActive, WorktreeMerged, WorktreeAbandoned, WorktreeRemoved, WorktreeGone}
 	WorktreeOrigins = []WorktreeOrigin{OriginDirector, OriginAttached}
 	GoalTypes       = []GoalType{GoalQuery, GoalBuild, GoalFix, GoalChange, GoalReview}
 	AbandonReasons  = []string{AbandonNoPR, AbandonUnmerged}

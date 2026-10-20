@@ -151,7 +151,7 @@ and directory still follow its goal.
 
 ## A Supervision Reply Parses Into Actions
 - `ParseSupervision(texts)` reads the lines after the last `ACTIONS:` line.
-- `SEND <id>: <text>`, `GOAL <parent>: …`, `START <id>`, `SUPERSEDE <id>: <why>`, `PAUSE <id>: <why>`, `EDIT <id>: …`, `AFTER <id>: …`, `MET <id>: <why>`, `MISSED <id>: <what>`, `CHORE: <what>`, `PROPOSE: …`, `RESOLVE <n>: <decision>`, `ASK: <question>`, `DONE: <summary>` and `WAIT` each parse into their action.
+- `SEND <id>: <text>`, `GOAL <parent>: …`, `START <id>`, `SUPERSEDE <id>: <why>`, `PAUSE <id>: <why>`, `EDIT <id>: …`, `AFTER <id>: …`, `MET <id>: <why>`, `MISSED <id>: <what>`, `CHORE: <what>`, `SYNC: <why>`, `PROPOSE: …`, `RESOLVE <n>: <decision>`, `ASK: <question>`, `DONE: <summary>` and `WAIT` each parse into their action.
 - `PROPOSE` reads an optional `| found: <what was found>` beside its done-when and finish.
 - Listed lines under an ASK are its choices; any other line is returned as not an action.
 - A reply with no `ACTIONS:` line has no actions and nothing refused.

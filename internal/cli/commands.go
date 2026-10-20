@@ -501,7 +501,7 @@ func (c *Cli) spawn(rest []string) error {
 			return err
 		}
 		if flag(a, "worktree") {
-			cwd, err = c.ensurePrivateWorktree(w, goal, p)
+			cwd, err = c.ensurePrivateWorktree(w, p)
 		} else {
 			cwd, err = c.ensureSharedWorktree(goal, p)
 		}
@@ -980,6 +980,9 @@ func (c *Cli) reopenWork(id, why string) error {
 	if err != nil {
 		return err
 	}
+	if err := c.reclaimWorktrees(w); err != nil {
+		return err
+	}
 	return c.out(w, fmt.Sprintf("%s reopened: %s", w.ID, why))
 }
 
@@ -1036,6 +1039,9 @@ func (c *Cli) abandonWork(id string, args []string) error {
 	}
 	out, err := c.Ledger.Abandon(w.ID, reason, strOr(c.Args, "reason", ""))
 	if err != nil {
+		return err
+	}
+	if err := c.releaseFinished(out); err != nil {
 		return err
 	}
 	return c.out(out, fmt.Sprintf("%s abandoned (%s): work that stopped without shipping", w.ID, reason))
@@ -2371,7 +2377,14 @@ func (c *Cli) set(rest []string) error {
 		}
 		return err
 	}
-	return c.out(after, to)
+	if !core.AtRest(after.State) {
+		return c.out(after, to)
+	}
+	r, err := c.releaseWorktrees(after, false)
+	if err != nil {
+		return err
+	}
+	return c.out(after, strings.Join(append([]string{to}, r.lines(false)...), "\n"))
 }
 
 func (c *Cli) done(rest []string) error {
@@ -2404,21 +2417,11 @@ func (c *Cli) done(rest []string) error {
 			return err
 		}
 	}
-	removed, kept, err := c.releaseWorktrees(after)
+	r, err := c.releaseWorktrees(after, false)
 	if err != nil {
 		return err
 	}
-	lines := []string{"done"}
-	for _, wt := range removed {
-		lines = append(lines, "removed worktree "+wt.Path)
-	}
-	for _, k := range kept {
-		if _, err := c.Ledger.AddConcern(id, fmt.Sprintf("%s. Run wd worktree remove %s once that is resolved.", k, id)); err != nil {
-			return err
-		}
-		lines = append(lines, k.String())
-	}
-	return c.out(after, strings.Join(lines, "\n"))
+	return c.out(after, strings.Join(append([]string{"done"}, r.lines(false)...), "\n"))
 }
 
 // statusRow is one wd status row: the work item and whether it is stale.
@@ -2751,36 +2754,60 @@ func (c *Cli) worktree(rest []string) error {
 		}
 		return c.out(wt, fmt.Sprintf("attached private worktree %d → %s", wt.ID, wt.Path))
 	}
+	if sub == "clean" {
+		dry := flag(a, "dry-run")
+		r, err := c.cleanWorktrees(dry)
+		if err != nil {
+			return err
+		}
+		lines := r.lines(dry)
+		if len(lines) == 0 {
+			lines = []string{"nothing to clean"}
+		}
+		return c.out(r, strings.Join(lines, "\n"))
+	}
 	if len(rest) < 2 {
-		return fail("usage: wd worktree (attach <id> <path> | list <id> | remove <id>)")
+		return fail("usage: wd worktree (attach <id> <path> | list <id> | remove <id> | sync <goal> | clean [--dry-run])")
 	}
 	id := rest[1]
+	if sub == "sync" {
+		goal, err := c.Ledger.Get(id)
+		if err != nil {
+			return err
+		}
+		if !core.IsGoal(goal.Kind) {
+			return fail("%s is a %s; only a goal's branch is brought up to date", id, goal.Kind)
+		}
+		p, err := c.project(goal.Project)
+		if err != nil {
+			return err
+		}
+		said, err := c.syncGoal(goal, p)
+		if err != nil {
+			return err
+		}
+		return c.out(map[string]string{"synced": said}, said)
+	}
 	if sub == "remove" {
 		w, err := c.Ledger.Get(id)
 		if err != nil {
 			return err
 		}
-		if w.State != core.StateDone {
-			return fail("work %s is %s; wd removes its worktrees only once it is done", id, w.State)
+		if !core.AtRest(w.State) {
+			return fail("work %s is %s; wd removes its worktrees only once it is finished", id, w.State)
 		}
-		removed, kept, err := c.releaseWorktrees(w)
+		r, err := c.releaseWorktrees(w, false)
 		if err != nil {
 			return err
 		}
-		var lines []string
-		for _, wt := range removed {
-			lines = append(lines, "removed worktree "+wt.Path)
-		}
-		if len(kept) > 0 {
-			for _, k := range kept {
-				lines = append(lines, k.String())
-			}
+		lines := r.lines(false)
+		if len(r.Kept) > 0 {
 			return fail("%s", strings.Join(lines, "\n"))
 		}
 		if len(lines) == 0 {
 			lines = append(lines, "no worktrees to remove")
 		}
-		return c.out(removed, strings.Join(lines, "\n"))
+		return c.out(r.Removed, strings.Join(lines, "\n"))
 	}
 	if sub == "list" {
 		if _, err := c.Ledger.Get(id); err != nil {
@@ -2800,7 +2827,7 @@ func (c *Cli) worktree(rest []string) error {
 		}
 		return c.out(wts, text)
 	}
-	return fail("usage: wd worktree <attach|list|remove>")
+	return fail("usage: wd worktree <attach|list|remove|sync|clean>")
 }
 
 func (c *Cli) merge(rest []string) error {
@@ -3171,7 +3198,7 @@ func (c *Cli) serve(rest []string) (err error) {
 	// A server reads every working session's status every few seconds; one
 	// claude listing a beat serves all of them.
 	runner.ShareAgentListing(1500 * time.Millisecond)
-	srv := serve.New(c.Ledger, cliPath, c.sessionOf, c.Supervise)
+	srv := serve.New(c.Ledger, cliPath, c.sessionOf, c.Supervise, c.tidyWorktrees)
 	if flag(c.Args, "stdio") {
 		if c.JSON {
 			return fail("wd serve --stdio speaks its own protocol on stdout and has no --json document")

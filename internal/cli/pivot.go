@@ -419,6 +419,9 @@ func (c *Cli) restore(w core.Work, message string) ([]string, error) {
 	restored := []string{}
 	for _, t := range back {
 		restored = append(restored, t.ID)
+		if err := c.reclaimWorktrees(t); err != nil {
+			return nil, err
+		}
 		if core.IsGoal(t.Kind) || (t.State != core.StateRunning && t.State != core.StateNeedsInput) {
 			continue
 		}
@@ -472,6 +475,9 @@ func (c *Cli) cancel(rest []string) error {
 	dropped, err := c.Ledger.Drop(rest[0], why)
 	if err != nil {
 		return fail("%v", err)
+	}
+	if err := c.releaseFinished(dropped...); err != nil {
+		return err
 	}
 	w, err := c.Ledger.Get(rest[0])
 	if err != nil {
@@ -563,6 +569,9 @@ func (c *Cli) goalContinue(goal core.Work, text string) error {
 		reopened, err := c.Ledger.Reopen(goal.ID, text)
 		if err != nil {
 			discard(atts)
+			return err
+		}
+		if err := c.reclaimWorktrees(reopened); err != nil {
 			return err
 		}
 		if _, err := c.Ledger.Attach(goal.ID, atts); err != nil {

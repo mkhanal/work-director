@@ -210,6 +210,27 @@ func firstLine(s string) string {
 // sessionWatch is how often running sessions are read for a question or a report.
 const sessionWatch = 3 * time.Second
 
+// tidyEvery is how often finished work's worktrees are released while
+// serving: a worktree costs disk, not attention, so the sweep is rare.
+const tidyEvery = time.Hour
+
+// tidyWorktrees releases finished work's worktrees now and then every
+// tidyEvery, until stop closes or a release fails.
+func (s *Server) tidyWorktrees(stop <-chan struct{}) error {
+	tick := time.NewTicker(tidyEvery)
+	defer tick.Stop()
+	for {
+		if err := s.tidy(); err != nil {
+			return err
+		}
+		select {
+		case <-stop:
+			return nil
+		case <-tick.C:
+		}
+	}
+}
+
 // Supervise is one supervise pass over a running goal.
 type Supervise func(goal core.Work) error
 
@@ -224,9 +245,16 @@ func (s *Server) watchSessions(stop <-chan struct{}) error {
 	if s.sessions == nil {
 		return nil
 	}
-	supervised := make(chan error, 1)
+	supervised := make(chan error, 2)
 	if s.supervise != nil {
 		go func() { supervised <- s.superviseGoals(stop) }()
+	}
+	if s.tidy != nil {
+		go func() {
+			if err := s.tidyWorktrees(stop); err != nil {
+				supervised <- err
+			}
+		}()
 	}
 	tick := time.NewTicker(sessionWatch)
 	defer tick.Stop()

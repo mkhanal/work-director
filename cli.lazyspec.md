@@ -263,24 +263,45 @@ These exit 1 naming the flag, never falling back to a default:
 - An install that fails removes the worktree it was made for and fails naming the command and what it printed; the next start makes it again.
 - Every brief says the dependencies are installed in the worktree, and never to link them from another checkout.
 
-## Done Removes A Worktree Wd Made Once Its Branch Has Landed
-- `wd done` and `wd set <id> done` remove each worktree wd made for the work, and its branch, when it is unlocked, clean, and its branch's content is already where it lands.
-- A task's private worktree lands on its goal's shared branch; a goal's shared worktree on the project's default branch, or its upstream fetched first.
+## A Goal's Branch Starts From Where It Lands
+- A goal's shared worktree is made on a new branch `wd-<goal>` started at the project's default branch, or its upstream fetched first, whatever the project's checkout has checked out.
+- A task's private worktree is made on a new branch started at its top goal's shared branch, making that first when the goal has none.
+
+## Finishing Work Releases Its Worktrees
+- `wd done`, `wd set <id> done|dropped`, `wd abandon`, `wd cancel`, a supersede and a close by the director release each worktree recorded on the work, whether wd made it or it was attached.
+- Releasing removes the worktree's directory when it is unlocked, holds no local changes (untracked files included) and no live agent session works in it; it then lists as removed.
+- Its branch is deleted when its content is already where it lands; otherwise the branch stays and the output says so, raising no concern.
+- A task's private worktree lands on its top goal's shared branch; a goal's shared worktree on the project's default branch, or its upstream fetched first.
 - A squash-merged branch has landed.
-- A removed worktree lists as removed.
 
-## Done Keeps A Worktree That Would Lose Work
-A worktree wd made that is locked, has local changes or holds unlanded work
-stays with its branch and state; `wd done` still closes the work, exits 0, and
-raises a concern naming the worktree, each reason and `wd worktree remove <id>`.
+## Finishing Work Keeps A Worktree That Would Lose Work
+- A worktree that is locked or has local changes stays with its branch and state; the work still finishes, exits 0, and raises one concern naming the worktree, each reason and `wd worktree remove <id>`.
+- A worktree a live agent session works in stays, raising no concern.
 
-## Done Leaves Worktrees Wd Did Not Make
-A worktree registered with `wd worktree attach`, or stored without an origin,
-is never removed.
+## Release Never Touches A Worktree Wd Has No Record Of
+A git worktree of the project that no work records is never removed, nor its branch.
 
-## Worktree Remove Retries The Worktrees Done Work Kept
-- `wd worktree remove <id>` on done work applies the same rule: exit 0 once nothing stays, else exit 1 naming each worktree that stays.
-- On work not done it exits 1 and removes nothing.
+## Worktree Remove Retries The Worktrees Finished Work Kept
+- `wd worktree remove <id>` on finished work applies the same rule: exit 0 once no directory stays, else exit 1 naming each worktree that stays.
+- On work not finished it exits 1 and removes nothing.
+
+## Worktree Clean Releases Every Finished Work's Worktrees
+- `wd worktree clean` releases the worktrees of all finished work, and prints each removed, each kept with why, and each branch kept with why.
+- A recorded worktree of unfinished work whose directory is gone, and that git no longer lists, is recorded as gone.
+- `--dry-run` prints the same and changes nothing on disk or in the ledger.
+- A concern for a kept worktree is raised once, however often it is cleaned.
+
+## A Worktree Gone From Disk Is Made Again From Its Branch
+- When work needs its gone worktree again, it is recorded as gone and made again at its path from its existing branch.
+- Work brought back by `wd resume` or reopened has the worktrees wd made for it, released when it finished, made again at their paths.
+- A branch that holds no commits of its own (every commit past where it lands is also held by another branch or remote) starts again where it lands first.
+
+## Sync Brings A Goal's Branch Up To Date With Main
+- `wd worktree sync <goal>` merges where the goal's shared branch lands into it, in its worktree, making the worktree again when it is gone.
+- A branch that holds no commits of its own starts again where it lands instead, and says so.
+- A merge that conflicts is undone, and says in plain words which files conflict.
+- It refuses, changing nothing, while the worktree has local changes, a live agent session works in it, or fetching the upstream fails.
+- `SYNC: <why>` in a supervisor's reply does the same for its goal.
 
 ## A Roadmap Holds Items And Turns Them Into Goals
 - `wd roadmap add <project> <title>` files a roadmap; `wd roadmap item <roadmap> <title>` files an item under it.

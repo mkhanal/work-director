@@ -674,6 +674,8 @@ func couldNot(tree []core.Work, a coordinator.Action, line, why string) string {
 		did = "send " + name(a.Work) + " back"
 	case coordinator.ActChore:
 		did = "start the chore “" + clipLine(a.Text, 80) + "”"
+	case coordinator.ActSync:
+		did = "bring the goal's branch up to date with main"
 	case coordinator.ActResolve:
 		did = fmt.Sprintf("settle concern %d", a.Concern)
 	case coordinator.ActDone:
@@ -813,6 +815,9 @@ func (c *Cli) applyAction(goal core.Work, p *project.Project, a coordinator.Acti
 		return c.tellMissed(t.ID, a.Text)
 	case coordinator.ActChore:
 		return c.chore(goal, p, a.Text)
+	case coordinator.ActSync:
+		_, err := c.syncGoal(goal, p)
+		return err
 	case coordinator.ActResolve:
 		cx, err := c.concernUnder(goal, tree[1:], a.Concern)
 		if err != nil {
@@ -967,7 +972,7 @@ func (c *Cli) chore(goal core.Work, p *project.Project, what string) error {
 	if err != nil {
 		return err
 	}
-	cwd, err := coordinator.SharedWorktree(c.Ledger, goal.ID, p.Path)
+	cwd, err := c.ensureSharedWorktree(goal, p)
 	if err != nil {
 		return err
 	}
@@ -1462,7 +1467,9 @@ func (c *Cli) unstuck(goal core.Work, choice string) (string, error) {
 		if _, err := c.Ledger.SoftDone(t.ID, false); err != nil {
 			return "", err
 		}
-		if _, err := c.Ledger.Transition(t.ID, core.StateDone); err != nil {
+		if closed, err := c.Ledger.Transition(t.ID, core.StateDone); err != nil {
+			return "", err
+		} else if err := c.releaseFinished(closed); err != nil {
 			return "", err
 		}
 		return "Closed " + quoted(t) + " without its checks", nil

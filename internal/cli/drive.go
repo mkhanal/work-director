@@ -164,10 +164,11 @@ func (c *Cli) closeOne(t core.Work) (gate, why string, err error) {
 		}
 		return "", "", err
 	}
-	if _, err := c.Ledger.Transition(t.ID, core.StateDone); err != nil {
+	closed, err := c.Ledger.Transition(t.ID, core.StateDone)
+	if err != nil {
 		return "", "", err
 	}
-	return "", "", nil
+	return "", "", c.releaseFinished(closed)
 }
 
 // tasteJudgeOnce asks about the taste, which needs its own brief and so its own
@@ -509,10 +510,11 @@ func (c *Cli) goalGates(goal core.Work, res driver.Result) ([]string, error) {
 	if _, err := c.Ledger.SoftDone(goal.ID, true); err != nil {
 		return stopped("soft-done")
 	}
-	if _, err := c.Ledger.Transition(goal.ID, core.StateDone); err != nil {
+	closed, err := c.Ledger.Transition(goal.ID, core.StateDone)
+	if err != nil {
 		return stopped("done")
 	}
-	return nil, nil
+	return nil, c.releaseFinished(closed)
 }
 
 // goalReport is the goal's own account of the run that finished it: the shape of

@@ -190,6 +190,9 @@ JSON message per line to stdout:
 - While serving, each running top goal (a goal with no goal above it) is supervised every few seconds, as `wd goal supervise` does.
 - A sub-goal is not supervised on its own: its top goal's supervisor looks after it.
 
+## Serving Releases Finished Work's Worktrees At Start And Hourly
+- While serving, finished work's worktrees are released as `wd worktree clean` does, once at start and then once an hour, not on every watch.
+
 ## Work Items Serve Over HTTP
 `GET /api/work` lists all work items. `GET /api/work/<id>` returns one
 work item; unknown ids return 404. `GET /api/work/<id>/events` returns

@@ -1960,7 +1960,80 @@ func (f *cliFixture) openConcerns(t *testing.T, work string) []string {
 	return out
 }
 
-func TestDoneRemovesAWorktreeWdMadeOnceItsBranchHasLanded(t *testing.T) {
+// withUpstream gives the sample repo an origin its main tracks, and returns a
+// second clone of origin to push to it from, as a reviewer merging would.
+func (f *cliFixture) withUpstream(t *testing.T) string {
+	t.Helper()
+	remote := filepath.Join(f.dir, "remote.git")
+	gitRun(t, f.dir, "clone", "-q", "--bare", f.sample, remote)
+	gitRun(t, f.sample, "remote", "add", "origin", remote)
+	gitRun(t, f.sample, "fetch", "-q", "origin")
+	gitRun(t, f.sample, "branch", "-q", "--set-upstream-to=origin/main", "main")
+	clone := filepath.Join(f.dir, "reviewer")
+	gitRun(t, f.dir, "clone", "-q", remote, clone)
+	gitRun(t, clone, "config", "user.email", "fixture@work-director")
+	gitRun(t, clone, "config", "user.name", "Fixture")
+	return clone
+}
+
+// revParse is the commit ref names in repo.
+func revParse(t *testing.T, repo, ref string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", repo, "rev-parse", ref).CombinedOutput()
+	if err != nil {
+		t.Fatalf("rev-parse %s: %v %s", ref, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// worktreeRows is every worktree recorded on work at path, oldest first.
+func (f *cliFixture) worktreeRows(t *testing.T, work, path string) []core.Worktree {
+	t.Helper()
+	var wts []core.Worktree
+	if err := json.Unmarshal([]byte(f.runOK(t, "worktree", "list", work, "--json")), &wts); err != nil {
+		t.Fatalf("worktree list: %v", err)
+	}
+	var out []core.Worktree
+	for _, wt := range wts {
+		if wt.Path == path {
+			out = append(out, wt)
+		}
+	}
+	return out
+}
+
+func TestAGoalsBranchStartsFromWhereItLands(t *testing.T) {
+	f := newCLIFixture(t)
+	clone := f.withUpstream(t)
+	commit(t, clone, "fix.txt", "a fix on main\n")
+	gitRun(t, clone, "push", "-q", "origin", "main")
+	// The person's checkout has a feature branch out.
+	gitRun(t, f.sample, "checkout", "-q", "-b", "feature")
+	commit(t, f.sample, "feature.txt", "unrelated work\n")
+
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Export to CSV", "--json"), "id")
+	task := jsonString(t, f.runOK(t, "add", "sample-app", "Write the exporter", "--goal", goal, "--json"), "id")
+	f.runOK(t, "spawn", task)
+	if got, want := revParse(t, f.sample, "wd-"+goal), revParse(t, f.sample, "origin/main"); got != want {
+		t.Fatalf("wd-%s starts at %s, want origin/main fetched (%s)", goal, got, want)
+	}
+
+	other := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Import from CSV", "--json"), "id")
+	own := jsonString(t, f.runOK(t, "add", "sample-app", "Write the importer", "--goal", other, "--json"), "id")
+	f.runOK(t, "spawn", own, "--worktree")
+	main := revParse(t, f.sample, "origin/main")
+	if got := revParse(t, f.sample, "wd-"+other); got != main {
+		t.Fatalf("a goal made for its task's private worktree starts at %s, want origin/main (%s)", got, main)
+	}
+	if got := revParse(t, f.sample, "wd-"+own); got != main {
+		t.Fatalf("wd-%s starts at %s, want its goal's shared branch (%s)", own, got, main)
+	}
+	if _, err := os.Stat(filepath.Join(f.wdHome, "worktrees", "sample-app-"+own, "feature.txt")); !os.IsNotExist(err) {
+		t.Fatalf("the private worktree holds the checkout's feature branch: %v", err)
+	}
+}
+
+func TestFinishingWorkReleasesItsWorktrees(t *testing.T) {
 	f := newWorktreeFixture(t)
 
 	// The task's work merged into the epic's shared branch.
@@ -1974,18 +2047,41 @@ func TestDoneRemovesAWorktreeWdMadeOnceItsBranchHasLanded(t *testing.T) {
 		t.Fatalf("private worktree state = %q, want removed", got)
 	}
 
+	// A worktree an executor attached, whose branch holds nothing unlanded.
+	standalone := f.ids["standalone"]
+	attached := filepath.Join(f.dir, "executor-worktree")
+	gitRun(t, f.sample, "worktree", "add", "-q", "-b", "executor", attached)
+	f.runOK(t, "worktree", "attach", standalone, attached, "--branch", "executor")
+	if out := f.runOK(t, "done", standalone, "--cancelled", "closed with an attached worktree"); !strings.Contains(out, "removed worktree "+attached) {
+		t.Fatalf("done said %q, want the attached worktree removed", out)
+	}
+	worktreeGone(t, f.sample, attached, "executor")
+
+	// A dropped task's branch holds work not landed: its directory goes, its
+	// branch stays.
+	t3 := f.ids["t3"]
+	unlanded := filepath.Join(f.dir, "unlanded-worktree")
+	gitRun(t, f.sample, "worktree", "add", "-q", "-b", "unlanded", unlanded, f.sharedBr)
+	commit(t, unlanded, "schema.txt", "never merged\n")
+	f.runOK(t, "worktree", "attach", t3, unlanded, "--branch", "unlanded")
+	out := f.runOK(t, "set", t3, "dropped")
+	if !strings.Contains(out, "removed worktree "+unlanded) || !strings.Contains(out, "kept branch unlanded: it holds work not landed in "+f.sharedBr) {
+		t.Fatalf("set dropped said %q, want the directory removed and the branch kept", out)
+	}
+	if _, err := os.Stat(unlanded); !os.IsNotExist(err) {
+		t.Fatalf("the dropped task's worktree is still on disk: %v", err)
+	}
+	worktreeStays(t, f.sample, f.shared, "unlanded")
+	if cs := f.openConcerns(t, t3); len(cs) != 0 {
+		t.Fatalf("a kept branch raised concerns %v", cs)
+	}
+
 	// The epic's pull request squash-merged upstream; the local main is stale.
-	remote := filepath.Join(f.dir, "remote.git")
-	gitRun(t, f.dir, "clone", "-q", "--bare", f.sample, remote)
-	gitRun(t, f.sample, "remote", "add", "origin", remote)
-	gitRun(t, f.sample, "fetch", "-q", "origin")
-	gitRun(t, f.sample, "branch", "-q", "--set-upstream-to=origin/main", "main")
-	clone := filepath.Join(f.dir, "reviewer")
-	gitRun(t, f.dir, "clone", "-q", remote, clone)
+	clone := f.withUpstream(t)
 	commit(t, clone, "dash.txt", "dashboards\n")
 	gitRun(t, clone, "push", "-q", "origin", "main")
 
-	out := f.runOK(t, "done", f.epic, "--cancelled", "the goal's pull request landed upstream", "--json")
+	out = f.runOK(t, "done", f.epic, "--cancelled", "the goal's pull request landed upstream", "--json")
 	assertHasKey(t, out, `"state": "done"`)
 	worktreeGone(t, f.sample, f.shared, f.sharedBr)
 	if got := f.worktreeStates(t, f.epic)[f.shared]; got != core.WorktreeRemoved {
@@ -1996,14 +2092,13 @@ func TestDoneRemovesAWorktreeWdMadeOnceItsBranchHasLanded(t *testing.T) {
 	}
 }
 
-func TestDoneKeepsAWorktreeThatWouldLoseWork(t *testing.T) {
+func TestFinishingWorkKeepsAWorktreeThatWouldLoseWork(t *testing.T) {
 	f := newWorktreeFixture(t)
 
-	commit(t, f.private, "ingest.txt", "unmerged\n")
 	if err := os.WriteFile(filepath.Join(f.private, "draft.txt"), []byte("uncommitted\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	f.runOK(t, "done", f.t2, "--cancelled", "abandoned with an unmerged draft")
+	f.runOK(t, "done", f.t2, "--cancelled", "abandoned with an uncommitted draft")
 	worktreeStays(t, f.sample, f.private, f.privBr)
 	if got := f.worktreeStates(t, f.t2)[f.private]; got != core.WorktreeActive {
 		t.Fatalf("private worktree state = %q, want active", got)
@@ -2012,7 +2107,7 @@ func TestDoneKeepsAWorktreeThatWouldLoseWork(t *testing.T) {
 	if len(cs) != 1 {
 		t.Fatalf("concerns = %v, want one", cs)
 	}
-	for _, want := range []string{f.private, "it has local changes", "holds work not landed in " + f.sharedBr, "wd worktree remove " + f.t2} {
+	for _, want := range []string{f.private, "it has local changes", "wd worktree remove " + f.t2} {
 		if !strings.Contains(cs[0], want) {
 			t.Fatalf("concern %q does not name %q", cs[0], want)
 		}
@@ -2024,44 +2119,239 @@ func TestDoneKeepsAWorktreeThatWouldLoseWork(t *testing.T) {
 	if cs := f.openConcerns(t, f.epic); len(cs) != 1 || !strings.Contains(cs[0], "it is locked: on a removable drive") {
 		t.Fatalf("concerns = %v, want one naming the lock", cs)
 	}
-}
 
-func TestDoneLeavesWorktreesWdDidNotMake(t *testing.T) {
-	f := newCLIFixture(t)
+	// An agent still working in a worktree keeps it, and needs no person.
+	state := filepath.Join(f.dir, "fake-state")
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"sid": "ses_000009", "bgid": "ab000009", "claude-busy": ""} {
+		if err := os.WriteFile(filepath.Join(state, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	standalone := f.ids["standalone"]
-	path := filepath.Join(f.dir, "own-worktree")
-	gitRun(t, f.sample, "worktree", "add", "-q", "-b", "own", path)
-	f.runOK(t, "worktree", "attach", standalone, path, "--branch", "own")
-	f.runOK(t, "done", standalone, "--cancelled", "closed with a worktree wd did not make")
-	worktreeStays(t, f.sample, path, "own")
-	if got := f.worktreeStates(t, standalone)[path]; got != core.WorktreeActive {
-		t.Fatalf("attached worktree state = %q, want active", got)
+	busy := filepath.Join(f.dir, "busy-worktree")
+	gitRun(t, f.sample, "worktree", "add", "-q", "-b", "busy", busy)
+	f.runOK(t, "worktree", "attach", standalone, busy, "--branch", "busy")
+	l, err := ledger.New(filepath.Join(f.wdHome, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	if err := l.SetSession(standalone, ledger.SessionInfo{Runner: "claude", Session: "ses_000009", Ref: strPtr("ab000009"), Cwd: busy}); err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	if out := f.runOK(t, "done", standalone, "--cancelled", "closed while its agent still works"); !strings.Contains(out, "agent session is still working in it") {
+		t.Fatalf("done said %q, want the worktree kept for the working session", out)
+	}
+	worktreeStays(t, f.sample, busy, "busy")
 	if cs := f.openConcerns(t, standalone); len(cs) != 0 {
-		t.Fatalf("concerns = %v, want none", cs)
+		t.Fatalf("a working session raised concerns %v", cs)
 	}
 }
 
-func TestWorktreeRemoveRetriesTheWorktreesDoneWorkKept(t *testing.T) {
+func TestReleaseNeverTouchesAWorktreeWdHasNoRecordOf(t *testing.T) {
+	f := newWorktreeFixture(t)
+	stray := filepath.Join(f.dir, "own-worktree")
+	gitRun(t, f.sample, "worktree", "add", "-q", "-b", "own", stray)
+	f.runOK(t, "done", f.ids["standalone"], "--cancelled", "closed beside a worktree nobody recorded")
+	f.runOK(t, "done", f.t2, "--cancelled", "closed beside a worktree nobody recorded")
+	if out := f.runOK(t, "worktree", "clean"); strings.Contains(out, stray) {
+		t.Fatalf("clean said %q, naming a worktree no work records", out)
+	}
+	worktreeStays(t, f.sample, stray, "own")
+}
+
+func TestWorktreeRemoveRetriesTheWorktreesFinishedWorkKept(t *testing.T) {
 	f := newWorktreeFixture(t)
 
-	if errStr := f.runFail(t, "worktree", "remove", f.t2); !strings.Contains(errStr, "only once it is done") {
+	if errStr := f.runFail(t, "worktree", "remove", f.t2); !strings.Contains(errStr, "only once it is finished") {
 		t.Fatalf("remove on blocked work said %q", errStr)
 	}
 	worktreeStays(t, f.sample, f.private, f.privBr)
 
-	commit(t, f.private, "ingest.txt", "unmerged\n")
-	f.runOK(t, "done", f.t2, "--cancelled", "abandoned holding an unmerged commit")
+	draft := filepath.Join(f.private, "draft.txt")
+	if err := os.WriteFile(draft, []byte("uncommitted\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.runOK(t, "done", f.t2, "--cancelled", "abandoned holding a draft")
 	if errStr := f.runFail(t, "worktree", "remove", f.t2); !strings.Contains(errStr, "kept worktree "+f.private) {
-		t.Fatalf("remove with unlanded work said %q", errStr)
+		t.Fatalf("remove with local changes said %q", errStr)
 	}
 	worktreeStays(t, f.sample, f.private, f.privBr)
 
-	gitRun(t, f.shared, "merge", "--no-edit", "-q", f.privBr)
+	if err := os.Remove(draft); err != nil {
+		t.Fatal(err)
+	}
 	if out := f.runOK(t, "worktree", "remove", f.t2); !strings.Contains(out, "removed worktree "+f.private) {
 		t.Fatalf("remove said %q, want the removed worktree", out)
 	}
 	worktreeGone(t, f.sample, f.private, f.privBr)
+}
+
+func TestWorktreeCleanReleasesEveryFinishedWorksWorktrees(t *testing.T) {
+	f := newWorktreeFixture(t)
+
+	draft := filepath.Join(f.private, "draft.txt")
+	if err := os.WriteFile(draft, []byte("uncommitted\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.runOK(t, "done", f.t2, "--cancelled", "closed holding a draft")
+	if out := f.runOK(t, "worktree", "clean"); !strings.Contains(out, "kept worktree "+f.private+": it has local changes") {
+		t.Fatalf("clean said %q, want the worktree kept with why", out)
+	}
+	if cs := f.openConcerns(t, f.t2); len(cs) != 1 {
+		t.Fatalf("concerns after cleaning twice = %v, want one", cs)
+	}
+	if err := os.Remove(draft); err != nil {
+		t.Fatal(err)
+	}
+
+	// The epic is not finished; its worktree went from disk.
+	if err := os.RemoveAll(f.shared); err != nil {
+		t.Fatal(err)
+	}
+	out := f.runOK(t, "worktree", "clean", "--dry-run")
+	for _, want := range []string{"would remove worktree " + f.private, "would record as gone: the worktree at " + f.shared} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("clean --dry-run said %q, want %q", out, want)
+		}
+	}
+	worktreeStays(t, f.sample, f.private, f.privBr)
+	if got := f.worktreeStates(t, f.epic)[f.shared]; got != core.WorktreeActive {
+		t.Fatalf("a dry run recorded the shared worktree as %q", got)
+	}
+
+	out = f.runOK(t, "worktree", "clean")
+	for _, want := range []string{"removed worktree " + f.private, "recorded as gone: the worktree at " + f.shared} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("clean said %q, want %q", out, want)
+		}
+	}
+	worktreeGone(t, f.sample, f.private, f.privBr)
+	if got := f.worktreeStates(t, f.epic)[f.shared]; got != core.WorktreeGone {
+		t.Fatalf("shared worktree state = %q, want gone", got)
+	}
+	if out := f.runOK(t, "worktree", "clean"); out != "nothing to clean\n" {
+		t.Fatalf("a second clean said %q", out)
+	}
+}
+
+func TestAWorktreeGoneFromDiskIsMadeAgainFromItsBranch(t *testing.T) {
+	f := newWorktreeFixture(t)
+
+	// The epic's branch holds work of its own.
+	commit(t, f.shared, "own.txt", "the goal's own work\n")
+	if err := os.RemoveAll(f.shared); err != nil {
+		t.Fatal(err)
+	}
+	f.runOK(t, "spawn", f.ids["t3"])
+	if _, err := os.Stat(filepath.Join(f.shared, "own.txt")); err != nil {
+		t.Fatalf("the worktree made again lacks its branch's work: %v", err)
+	}
+	rows := f.worktreeRows(t, f.epic, f.shared)
+	if len(rows) != 2 || rows[0].State != core.WorktreeGone || rows[1].State != core.WorktreeActive {
+		t.Fatalf("worktrees at %s = %+v, want one gone and one active", f.shared, rows)
+	}
+
+	// A goal's branch with nothing of its own starts again where it lands.
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Export to CSV", "--json"), "id")
+	first := jsonString(t, f.runOK(t, "add", "sample-app", "Write the exporter", "--goal", goal, "--json"), "id")
+	f.runOK(t, "spawn", first)
+	commit(t, f.sample, "later.txt", "landed on main since\n")
+	shared := filepath.Join(f.wdHome, "worktrees", "sample-app-goal-"+goal)
+	if err := os.RemoveAll(shared); err != nil {
+		t.Fatal(err)
+	}
+	second := jsonString(t, f.runOK(t, "add", "sample-app", "Test the exporter", "--goal", goal, "--json"), "id")
+	f.runOK(t, "spawn", second)
+	if got, want := revParse(t, f.sample, "wd-"+goal), revParse(t, f.sample, "main"); got != want {
+		t.Fatalf("wd-%s is at %s, want main (%s)", goal, got, want)
+	}
+	if notes := f.bodies(t, goal, core.EventNote); !slices.Contains(notes, "started branch wd-"+goal+" again at main: it held no commits of its own") {
+		t.Fatalf("notes = %q, want the branch started again", notes)
+	}
+	// Work brought back gets its released worktree again.
+	f.runOK(t, "cancel", f.t2)
+	if _, err := os.Stat(f.private); !os.IsNotExist(err) {
+		t.Fatalf("the cancelled task's worktree is still on disk: %v", err)
+	}
+	f.runOK(t, "resume", f.t2)
+	if _, err := os.Stat(f.private); err != nil {
+		t.Fatalf("the resumed task's worktree was not made again: %v", err)
+	}
+}
+
+func TestSyncBringsAGoalsBranchUpToDateWithMain(t *testing.T) {
+	f := newCLIFixture(t)
+	clone := f.withUpstream(t)
+	goal := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Export to CSV", "--json"), "id")
+	task := jsonString(t, f.runOK(t, "add", "sample-app", "Write the exporter", "--goal", goal, "--json"), "id")
+	f.runOK(t, "spawn", task)
+	shared := filepath.Join(f.wdHome, "worktrees", "sample-app-goal-"+goal)
+	commit(t, shared, "own.txt", "the goal's own work\n")
+	commit(t, clone, "fix.txt", "a fix on main\n")
+	gitRun(t, clone, "push", "-q", "origin", "main")
+
+	if out := f.runOK(t, "worktree", "sync", goal); !strings.Contains(out, "merged origin/main into wd-"+goal) {
+		t.Fatalf("sync said %q", out)
+	}
+	for _, name := range []string{"own.txt", "fix.txt"} {
+		if _, err := os.Stat(filepath.Join(shared, name)); err != nil {
+			t.Fatalf("after sync the worktree lacks %s: %v", name, err)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(shared, "draft.txt"), []byte("uncommitted\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if errStr := f.runFail(t, "worktree", "sync", goal); !strings.Contains(errStr, "changes not committed") {
+		t.Fatalf("sync with local changes said %q", errStr)
+	}
+	if err := os.Remove(filepath.Join(shared, "draft.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	commit(t, shared, "README.md", "the goal's readme\n")
+	commit(t, clone, "README.md", "main's readme\n")
+	gitRun(t, clone, "push", "-q", "origin", "main")
+	before := revParse(t, f.sample, "wd-"+goal)
+	if errStr := f.runFail(t, "worktree", "sync", goal); !strings.Contains(errStr, "conflicts in README.md") {
+		t.Fatalf("a conflicting sync said %q", errStr)
+	}
+	if out, err := exec.Command("git", "-C", shared, "status", "--porcelain").CombinedOutput(); err != nil || len(out) != 0 {
+		t.Fatalf("a conflicting sync left %q (%v)", out, err)
+	}
+	if got := revParse(t, f.sample, "wd-"+goal); got != before {
+		t.Fatalf("a conflicting sync moved the branch to %s", got)
+	}
+
+	// A goal branch carrying only another branch's commits starts again.
+	other := jsonString(t, f.runOK(t, "goal", "add", "sample-app", "Import from CSV", "--json"), "id")
+	importer := jsonString(t, f.runOK(t, "add", "sample-app", "Write the importer", "--goal", other, "--json"), "id")
+	f.runOK(t, "spawn", importer)
+	gitRun(t, f.sample, "checkout", "-q", "-b", "feature")
+	commit(t, f.sample, "feature.txt", "unrelated work\n")
+	otherShared := filepath.Join(f.wdHome, "worktrees", "sample-app-goal-"+other)
+	gitRun(t, otherShared, "reset", "-q", "--hard", "feature")
+	if out := f.runOK(t, "worktree", "sync", other); !strings.Contains(out, "started wd-"+other+" again at origin/main: it held no commits of its own") {
+		t.Fatalf("sync said %q", out)
+	}
+	if got, want := revParse(t, f.sample, "wd-"+other), revParse(t, f.sample, "origin/main"); got != want {
+		t.Fatalf("wd-%s is at %s, want origin/main (%s)", other, got, want)
+	}
+
+	// A supervisor's SYNC does the same.
+	o := overseenGoal(t, f)
+	superviseOnce(t, f, o.goal)
+	o.say(t, supervisor, "ACTIONS:", "SYNC: a check passes on main but not here")
+	if s := superviseOnce(t, f, o.goal); !slices.Equal(s.Actions, []string{"SYNC: a check passes on main but not here"}) {
+		t.Fatalf("SYNC = %+v", s)
+	}
+	if got, want := revParse(t, f.sample, "wd-"+o.goal), revParse(t, f.sample, "origin/main"); got != want {
+		t.Fatalf("after SYNC wd-%s is at %s, want origin/main (%s)", o.goal, got, want)
+	}
 }
 
 // reflectionFixture builds a fake runner whose sessions answer a reflection

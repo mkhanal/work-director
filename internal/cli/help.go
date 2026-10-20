@@ -45,7 +45,7 @@ var help = map[string]commandHelp{
 	"claim":      {"wd claim <id> [<who>] [--drop]", "Claim work for a session, so others see who has it."},
 	"impact":     {"wd impact <id> <+path|-path> [--clear]", "Record the paths work touches."},
 	"conflict":   {"wd conflict <goal>", "Show tasks under a goal whose claimed paths overlap."},
-	"worktree":   {"wd worktree (attach <id> <path> | list <id> | remove <id>)", "Manage the worktrees work runs in."},
+	"worktree":   {"wd worktree (attach <id> <path> | list <id> | remove <id> | sync <goal> | clean [--dry-run])", "Manage the worktrees work runs in: release finished work's, bring a goal's branch up to date with main."},
 	"merge":      {"wd merge <id>", "Fold a task's worktree back into its goal's branch."},
 	"concern":    {"wd concern (add <id> \"<text>\" | resolve <n> \"<decision>\" | list [<id>])", "Raise and settle concerns: the director's decision queue."},
 	"scan":       {"wd scan [--adopt <card>]", "List project rules that could become global ones."},

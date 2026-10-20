@@ -64,7 +64,7 @@ func BenchmarkGoalSwitch(b *testing.B) {
 			return nil, runner.Handle{}, false, nil
 		}
 		return r, runner.Handle{Runner: "claude", Session: *w.Session, Cwd: repo}, true, nil
-	}, nil)
+	}, nil, nil)
 
 	var goals []string
 	for g := range 3 {
